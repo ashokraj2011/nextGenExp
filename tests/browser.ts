@@ -41,6 +41,17 @@ try {
   assert.equal(new URL(page.url()).pathname, "/");
   await page.getByRole("link", { name: "Help", exact: true }).click();
   await page.getByRole("heading", { name: "How PZN Lab works", exact: true, level: 1 }).waitFor();
+  const sequence = page.getByRole("list", { name: "Chat interaction sequence" });
+  await sequence.getByText("Ranked eligible content IDs", { exact: true }).waitFor();
+  await sequence.getByText("Verified A2UI surface", { exact: true }).waitFor();
+  await page.getByRole("link", { name: "Proposal", exact: true }).click();
+  assert.equal(new URL(page.url()).hash, "#proposal");
+  const proposal = page.getByRole("region", { name: "Treatment Selector proposal" });
+  await proposal.getByText("Compare the current and proposed responses", { exact: true }).click();
+  const currentResponse = JSON.parse(await proposal.locator('pre[aria-label="Current response JSON"]').innerText());
+  const futureResponse = JSON.parse(await proposal.locator('pre[aria-label="Proposed response JSON"]').innerText());
+  assert.deepEqual(currentResponse, ["address_update_guide", "fund_account"]);
+  assert.deepEqual(futureResponse.recommendations.map(({ kind }: { kind: string }) => kind), ["content", "content", "action", "workflow"]);
   const walkthrough = page.getByRole("group", { name: "Demo walkthrough" });
   const flow = page.getByRole("list", { name: "Turn flow" });
   const stepDetails = page.locator("#step-details");
@@ -368,6 +379,9 @@ try {
   await mobileMessage.fill("");
   await mobile.getByRole("link", { name: "Help", exact: true }).click();
   await mobile.getByRole("heading", { name: "How PZN Lab works", exact: true }).waitFor();
+  assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await mobile.getByRole("link", { name: "Proposal", exact: true }).click();
+  await mobile.getByText("Compare the current and proposed responses", { exact: true }).click();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await mobile.getByLabel("Select a contract", { exact: true }).selectOption("render");
   await mobile.getByRole("heading", { name: "A2UI surfaces and actions", exact: true }).waitFor();

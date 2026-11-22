@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowUpRight, BookOpenText, Braces, Database, Download, GitBranch, House, LayoutGrid, ListFilter, MessageSquare, Sparkles } from "lucide-react";
+import { currentTreatmentExample, InteractionDiagram, proposedTreatmentExample, TreatmentProposalDiagram } from "./help-architecture";
 import { contractList, helpContracts, type ContractFile } from "./help-contracts";
 import { helpFlows, type FlowStep, type PayloadExample } from "./help-flow";
 import "./help.css";
@@ -16,15 +17,22 @@ const stepIcons = {
   render: LayoutGrid,
 };
 
-function PayloadPair({ input, output }: { input: PayloadExample; output: PayloadExample }) {
+function PayloadExamples({ examples }: { examples: { direction: string; label: string; source: string }[] }) {
   return <div className="help-payload-pair">
-    {[{ ...input, direction: "Input" }, { ...output, direction: "Output" }].map(({ direction, label, value }) => (
+    {examples.map(({ direction, label, source }) => (
       <section className="help-payload" key={direction} aria-label={direction}>
         <div className="help-payload-caption"><strong>{direction}</strong><span>{label}</span></div>
-        <pre tabIndex={0} aria-label={direction + " JSON"}><code>{JSON.stringify(value, null, 2)}</code></pre>
+        <pre tabIndex={0} aria-label={direction + " JSON"}><code>{source}</code></pre>
       </section>
     ))}
   </div>;
+}
+
+function PayloadPair({ input, output }: { input: PayloadExample; output: PayloadExample }) {
+  return <PayloadExamples examples={[
+    { direction: "Input", label: input.label, source: JSON.stringify(input.value, null, 2) },
+    { direction: "Output", label: output.label, source: JSON.stringify(output.value, null, 2) },
+  ]} />;
 }
 
 function downloadContract(file: ContractFile) {
@@ -65,6 +73,9 @@ export function Help() {
   const [flow, setFlow] = useState(helpFlows[0]);
   const [stepId, setStepId] = useState<FlowStep["id"]>("router");
   const [contractId, setContractId] = useState("router");
+  useEffect(() => {
+    document.getElementById(location.hash.slice(1))?.scrollIntoView();
+  }, []);
   const step = flow.steps.find(({ id }) => id === stepId)!;
   const contract = contractList.find(({ id }) => id === contractId)!;
   return <div className="help-page">
@@ -73,6 +84,8 @@ export function Help() {
         <a className="help-home" href="/">PZN Lab</a>
         <nav aria-label="Help sections">
           <a href="#architecture">Architecture</a>
+          <a href="#walkthroughs">Walkthroughs</a>
+          <a href="#proposal">Proposal</a>
           <a href="#contracts">Contracts</a>
         </nav>
         <a className="help-back" href="/"><ArrowLeft size={16} aria-hidden="true" /> Back to chat</a>
@@ -81,11 +94,18 @@ export function Help() {
     <main className="help-width help-main">
       <div className="help-intro">
         <h1>How PZN Lab works</h1>
-        <p>Follow a chat turn through sfield, Treatment Selector and A2UI. Choose a demo and select a step to see its inputs, outputs and contracts.</p>
+        <p>Follow a chat turn through sfield, Treatment Selector, and A2UI.</p>
       </div>
       <section id="architecture" className="help-section" aria-labelledby="architecture-title">
         <div className="help-section-heading">
-          <h2 id="architecture-title">Architecture</h2>
+          <h2 id="architecture-title">Chat turn architecture</h2>
+          <a className="help-section-link" href="#walkthroughs">Inspect a demo turn <ArrowUpRight size={14} aria-hidden="true" /></a>
+        </div>
+        <InteractionDiagram />
+      </section>
+      <section id="walkthroughs" className="help-section" aria-labelledby="walkthroughs-title">
+        <div className="help-section-heading">
+          <h2 id="walkthroughs-title">Demo walkthroughs</h2>
           <div className="help-flow-picker" role="group" aria-label="Demo walkthrough">
             {helpFlows.map((option) => (
               <button key={option.id} type="button" aria-pressed={option.id === flow.id} onClick={() => {
@@ -133,6 +153,24 @@ export function Help() {
           </section>
         </div>
         <p className="help-example-note">Payloads are demo examples. Open <strong>Logs</strong> in chat for the requests and responses recorded on an actual turn.</p>
+      </section>
+      <section id="proposal" className="help-section" aria-labelledby="proposal-title">
+        <div className="help-section-heading help-reference-heading">
+          <h2 id="proposal-title">Treatment Selector proposal</h2>
+          <p>Return ranked recommendations for content, registered actions, and workflows.</p>
+        </div>
+        <div className="help-proposal">
+          <TreatmentProposalDiagram />
+          <details className="help-tool-exchange">
+            <summary>Compare the current and proposed responses</summary>
+            <p>Both examples use the Treatment Selector adapter request for Marcus’s address update.</p>
+            <p><code>{JSON.stringify(currentTreatmentExample.request)}</code></p>
+            <PayloadExamples examples={[
+              { direction: "Current response", label: "Ranked content IDs", source: JSON.stringify(currentTreatmentExample.response, null, 2) },
+              { direction: "Proposed response", label: "Versioned ranked recommendations", source: proposedTreatmentExample },
+            ]} />
+          </details>
+        </div>
       </section>
       <section id="contracts" className="help-section" aria-labelledby="contracts-title">
         <div className="help-section-heading help-reference-heading">
