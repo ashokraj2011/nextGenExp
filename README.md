@@ -4,14 +4,14 @@ A local implementation of **PZN Intent to Experience POC v1.1**. The Word specif
 
 ## Run the app
 
-Use Node 22.13 or later and npm 10 or later. The build needs Git and access to the pinned sfield commit.
+Use Node 22.13 or later and npm 10 or later.
 
 ~~~sh
 npm ci
 npm run build
 ~~~
 
-The npm lockfile covers the app and the sfield workspace dependencies. The build fetches the pinned sfield source and compiles its runtime packages with the installed TypeScript compiler. Set `PZN_SFIELD_GIT_URL` to an internal Git mirror or a local repository that contains the pinned commit.
+This repository includes the sfield core, SQLite store, and test support source in `vendor/sfield`. npm links them as local workspaces and the build compiles them with the installed TypeScript compiler. All registry dependencies come from the configured npm registry.
 
 ### Install through Artifactory
 
@@ -86,5 +86,6 @@ The smoke run exercises structured comparison, the balance tool round trip, step
 - `apps/web` contains the responsive assistant-ui chat, registered A2UI components, and inspector.
 - `packages/contracts` and `packages/experience` contain the schemas, scoping verifiers, and compiler for approved content and disclosures.
 - `packages/ts-adapter`, `packages/propensity-adapter`, and `fixtures` provide the simulated placement catalog, scores, and ranked eligibility.
+- `vendor/sfield` contains the sfield workspace source, upstream commit reference, and license.
 
 The project pins dependencies in `package-lock.json` and records the runtime commit, A2UI baseline, and fixture versions in `build-baseline.json`. [sfield source](https://github.com/ashokraj2011/sfield/tree/1b0c942f9b7d317199201533027bfd451d45a072), [A2UI React package](https://www.npmjs.com/package/@a2ui/react/v/0.15.0), [assistant-ui external store runtime](https://www.assistant-ui.com/docs/runtimes/custom/external-store)

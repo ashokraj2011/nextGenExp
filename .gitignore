@@ -9,7 +9,4 @@ test-results/
 .DS_Store
 .npmrc.local
 /vendor/sfield/.source-commit
-/vendor/sfield/tsconfig.base.json
-/vendor/sfield/packages/*/src/
-/vendor/sfield/packages/*/tsconfig.json
 /vendor/sfield/packages/*/*.tsbuildinfo

@@ -17,7 +17,7 @@
     "test:browser": "node --import tsx tests/browser.ts",
     "test:preview": "node --import tsx tests/test-preview.ts",
     "eval:live": "node --env-file-if-exists=.env --import tsx tests/evaluate-live.ts",
-    "build:sfield": "node scripts/build-sfield.mjs",
+    "build:sfield": "tsc -b vendor/sfield/packages/store-sqlite",
     "pretest": "npm run build:sfield"
   },
   "dependencies": {
