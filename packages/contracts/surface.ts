@@ -54,7 +54,7 @@ export type DisplayExperience = {
   experienceId: string;
   messageId: string;
   status: "ready" | "clarify" | "no_match";
-  outcome: "ready" | "clarify" | "no_match" | "eligible_empty" | "create_rule";
+  outcome: "ready" | "clarify" | "reply" | "no_match" | "eligible_empty" | "create_rule";
   intro: string;
   question: string | null;
   partial: boolean;

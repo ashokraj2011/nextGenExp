@@ -52,12 +52,26 @@ function route(envelope: Envelope): ContextSelectionProposal {
   const text = request.toLowerCase().trim();
   const base = {
     schemaVersion: "1.1" as const, catalogSnapshotId: envelope.catalogSnapshotId!, catalogVersion: envelope.catalog!.catalogVersion,
-    summary: "Deterministic test intent.",
+    summary: "Deterministic test intent.", replyText: null,
   };
-  const noMatch: ContextSelectionProposal = { ...base, status: "no_match", intentId: null, clarificationQuestion: null };
+  const noMatch: ContextSelectionProposal = {
+    ...base, status: "no_match", intentId: null, clarificationQuestion: null,
+    replyText: "I can help with demo balances, portfolio summaries, transfers, or retirement planning. Which would you like to explore?",
+  };
+  const reply = (replyText: string): ContextSelectionProposal => (
+    { ...base, status: "reply", intentId: null, clarificationQuestion: null, replyText }
+  );
   const clarify = (clarificationQuestion = allowedQuestions[0], intentId: RoutingIntentId | null = null): ContextSelectionProposal => (
     { ...base, status: "clarify", intentId, clarificationQuestion }
   );
+  const previous = recent?.at(-1);
+  if (/^(?:hi|hello|hey|how are you)[!.?]*$/.test(text)) return reply("Hi! What would you like to talk about?");
+  if (/^(?:(?:that(?:['’]s|s| is) )?(?:nice|great|cool|helpful|interesting)|thanks|thank you|got it)[!.?]*$/.test(text)) {
+    return reply(previous?.contextId === "learning"
+      ? "Glad that helped. I’m here if more retirement questions come up."
+      : "Glad it helped. What else is on your mind?");
+  }
+  if (previous?.assistantReply && /^what did you (?:just )?say\??$/.test(text)) return reply(previous.assistantReply);
   if (/^(?:(?:please|i want to|can you|i'd like to) )?(?:create|add) (?:(?:a|new|a new) )?(?:ccre |treatment selector )?rule\b/.test(text)) {
     return intentCatalog.some(({ intentId }) => intentId === "create_rule")
       ? { ...base, status: "create_rule", intentId: "create_rule", clarificationQuestion: null }
@@ -92,7 +106,8 @@ function route(envelope: Envelope): ContextSelectionProposal {
   }
   if (contexts.size > 1) return clarify();
   if (!contexts.size) {
-    return /help|explain|show|learn|what/.test(text) && !/weather|recipe|stock price|bitcoin/.test(text) ? clarify() : noMatch;
+    if (/weather|recipe|stock price|bitcoin|rental car/.test(text)) return noMatch;
+    return /help|explain|show|learn|what/.test(text) ? clarify() : reply("I’m here. What would you like to talk about?");
   }
 
   const asksForPortfolioValues = /\b(my|show|summarize|display)\b/.test(text) || /^(?:portfolio|protfolio) summary\W*$/.test(text);

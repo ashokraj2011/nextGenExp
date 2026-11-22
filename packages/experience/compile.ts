@@ -82,6 +82,13 @@ export function compileRuleCreation(props: RuleCreationProps & { glossary: RuleG
   }, [{ component: ruleCreation.name, props }], []);
 }
 
+export function compileChatReply(text: string, outcome: "reply" | "no_match", expiresAt: number): CompiledExperience {
+  return buildSurface({
+    status: outcome === "reply" ? "ready" : "no_match",
+    outcome, intro: text, question: null, partial: false, expiresAt,
+  }, [], []);
+}
+
 function buildSurface(
   displayFields: Pick<DisplayExperience, "status" | "outcome" | "intro" | "question" | "partial" | "expiresAt">,
   blocks: DisplayBlock[],

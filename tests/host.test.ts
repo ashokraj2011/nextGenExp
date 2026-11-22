@@ -656,11 +656,48 @@ test("recent retirement clues prompt for clarification until the user confirms t
   assert.equal(otherGoal.trace.routeOutcome, "no_match");
   assert.equal(otherGoal.trace.tsScopeId, null);
   const newChat = await client.conversation();
-  await client.ask(newChat.id, "I'm looking for a new job.");
+  const outsideDemo = await client.ask(newChat.id, "I'm looking for a new job.");
   await client.ask(newChat.id, lastDay);
   assert.deepEqual(gateway.calls.at(-1)?.envelope.recent, [
-    { request: "I'm looking for a new job.", contextId: null, intentId: null, clarificationQuestion: null },
+    {
+      request: "I'm looking for a new job.", contextId: null, intentId: null, clarificationQuestion: null,
+      assistantReply: outsideDemo.turn.experience?.intro,
+    },
   ]);
+});
+
+test("the router's conversational reply is shown as chat text and carried into the next turn", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const { client, gateway } = f;
+  const chat = await client.conversation();
+  const clarification = await client.ask(chat.id, "i will be 62");
+  assert.equal(clarification.turn.experience?.outcome, "clarify");
+  const retirement = await client.ask(chat.id, "yes");
+  assert.equal(retirement.trace.intentId, "retirement_learning");
+  assert.deepEqual(retirement.trace.finalOrder, ["retirement_learning", "beneficiary_update"]);
+
+  const { turn, trace } = await client.ask(chat.id, "thats nice");
+  assert.equal(turn.experience?.outcome, "reply");
+  assert.equal(turn.experience?.status, "ready");
+  assert.deepEqual(turn.experience?.blocks, []);
+  assert.deepEqual(turn.experience?.actions, []);
+  assert.equal(trace.tsScopeId, null);
+  assert.equal(trace.composerRunId, null);
+  assert.deepEqual(gateway.calls.at(-1)?.envelope.recent?.at(-1)?.displayedContent, [
+    "Retirement planning basics", "Update your beneficiaries",
+  ]);
+  const logs = await client.request<TurnPayloads>("/api/debug/payloads/" + turn.id);
+  const output = logs.router?.attempts[0].exchange?.response?.data as { message: { content: string } };
+  const modelReply = JSON.parse(output.message.content).replyText;
+  assert.equal(turn.experience?.intro, modelReply);
+  assert.deepEqual(turn.experience?.messages[0].createSurface.dataModel, { intro: modelReply });
+  assert.equal(logs.treatment, null);
+  assert.equal(logs.composer, null);
+
+  const followUp = await client.ask(chat.id, "what did you just say?");
+  assert.equal(followUp.turn.experience?.intro, modelReply);
+  assert.equal(gateway.calls.at(-1)?.envelope.recent?.at(-1)?.assistantReply, modelReply);
 });
 
 test("retirement is inferred for age and job-transition follow-ups to an established retirement goal", async (t) => {
@@ -690,7 +727,7 @@ test("admission rejects invalid routing proposals, tampered input, duplicate pay
   const f = await fixture(({ envelope }) => envelope.inputType === "PznContextRoutingInput" ? {
     json: {
       schemaVersion: "1.1", catalogSnapshotId: envelope.catalogSnapshotId, catalogVersion: envelope.catalog?.catalogVersion,
-      status: "no_match", intentId: "explain_balance", clarificationQuestion: null, summary: "Invalid test route.",
+      status: "no_match", intentId: "explain_balance", clarificationQuestion: null, replyText: null, summary: "Invalid test route.",
     },
   } : undefined);
   t.after(() => f.close());

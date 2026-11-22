@@ -5,13 +5,14 @@ import { DECISION_TTL, TURN_DEADLINE, contextCatalogSchema, propensitySchema, ty
 import { isPortfolioSummary, portfolioSnapshotSchema } from "../../packages/contracts/portfolio";
 import { ruleGlossarySchema } from "../../packages/contracts/rule-glossary";
 import {
-  availableRoutingIntents, routingQuestions, ROUTING_HISTORY_TURNS, ROUTING_HISTORY_REQUEST_LENGTH, type RoutingHistoryEntry,
+  availableRoutingIntents, routingQuestions, ROUTING_HISTORY_TURNS, ROUTING_HISTORY_REQUEST_LENGTH, ROUTING_HISTORY_REPLY_LENGTH,
+  type RoutingHistoryEntry,
 } from "../../packages/contracts/routing-intents";
 import { FOLLOW_UP_EVENT, type DisplayExperience } from "../../packages/contracts/surface";
 import { normalizedIdsSchema, treatmentOverride } from "../../packages/contracts/tool-setup";
 import { activeContextCatalog, fixtureRejections, tsFixtures } from "../../packages/ts-adapter";
 import { contentCatalog, lookupContent, modelBundle, resolveCandidates } from "../../packages/experience/content";
-import { compileExperience, compileRuleCreation, makeId } from "../../packages/experience/compile";
+import { compileChatReply, compileExperience, compileRuleCreation, makeId } from "../../packages/experience/compile";
 import { verifyContextProposal, verifyRoute, requireCheck, Rejected } from "../../packages/experience/verify";
 import { ApiError, Store, type ConversationRecord, type Stage, type TurnRecord } from "./store";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
@@ -150,22 +151,31 @@ export class ExperienceService {
         const recent: RoutingHistoryEntry[] = this.store.conversationTurns(conversation.id)
           .filter((previous) => previous.public.status === "completed" && previous.ordinal < turn.ordinal)
           .slice(-ROUTING_HISTORY_TURNS)
-          .map((previous) => ({
-            request: previous.public.message.slice(0, ROUTING_HISTORY_REQUEST_LENGTH),
-            contextId: previous.route?.contextId ?? null,
-            intentId: previous.trace.intentId ?? null,
-            clarificationQuestion: previous.public.experience?.question ?? null,
-          }));
+          .map((previous) => {
+            const experience = previous.public.experience;
+            const titles = experience?.blocks.map(({ component, props }) => {
+              if ("title" in props) return props.title;
+              return component === "PznPortfolioSnapshot" ? "Portfolio snapshot" : "Rule editor";
+            }) ?? [];
+            return {
+              request: previous.public.message.slice(0, ROUTING_HISTORY_REQUEST_LENGTH),
+              contextId: previous.route?.contextId ?? null,
+              intentId: previous.trace.intentId ?? null,
+              clarificationQuestion: experience?.question ?? null,
+              assistantReply: experience && !experience.question ? experience.intro.slice(0, ROUTING_HISTORY_REPLY_LENGTH) : undefined,
+              displayedContent: titles.length ? titles : undefined,
+            };
+          });
         const result = await runtime.model("route", turn, conversation, catalog.snapshotId, {
           inputType: "PznContextRoutingInput",
-          request: turn.public.message,
-          recent,
           catalogSnapshotId: catalog.snapshotId,
           catalog: catalog.catalog,
           intentCatalog: availableRoutingIntents(catalog.catalog, this.canCreateRule),
           propensity: turn.propensity,
           allowedQuestions: routingQuestions,
           canCreateRule: this.canCreateRule,
+          recent,
+          request: turn.public.message,
         }, signal, recovering);
         current();
         this.store.update(id, (row) => { row.trace.routeRun = traceFor(result); });
@@ -200,7 +210,17 @@ export class ExperienceService {
           this.store.finish(id, { type: "completed", result: editor }, now);
           return;
         }
-        if (proposal.status !== "selected") {
+        if (proposal.status === "reply" || proposal.status === "no_match") {
+          if (proposal.replyText) {
+            const now = this.now();
+            const result = compileChatReply(proposal.replyText, proposal.status, now);
+            this.store.finish(id, { type: "completed", result }, now);
+          } else {
+            done("no_match", "no_match", null);
+          }
+          return;
+        }
+        if (proposal.status === "clarify") {
           done(proposal.status, proposal.status, proposal.clarificationQuestion);
           return;
         }

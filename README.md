@@ -48,7 +48,9 @@ Try **Compare two terms** for the A2UI comparison. **Guide me through a task** o
 
 ### Intent routing and clarification
 
-sfield sends the latest message, up to four recent user turns and any associated clarification questions, and the available intent catalog to the Context Router. The LLM selects an intent ID from the catalog. The host verifies the choice and maps it to a task and Treatment Selector context.
+sfield sends the latest message, up to four recent turns, and the available intent catalog to the Context Router. History includes clarification questions, assistant reply text, and titles of previously displayed cards. For demo content requests, the LLM selects an intent ID. The host verifies the choice and maps it to a task and Treatment Selector context.
+
+For greetings, acknowledgments, or general questions that need no demo tools, the LLM returns `replyText` and sfield displays it directly in chat. For unsupported actions, the model can explain its capabilities in the same field. Open **Logs** to view the model response and any Treatment Selector call for that turn.
 
 When the goal is unclear, the router selects a focused question from the approved list and chat displays it. In a new chat, try “i will be 62” followed by “last day of job is next week.” Confirm that you want retirement planning information to route to `retirement_learning`. In a chat that already established retirement as the goal, the same messages can continue that topic directly. Use **Logs → Context Router** to see the input and decision.
 

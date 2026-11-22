@@ -12,9 +12,10 @@ export type ContextSelectionProposal = {
   schemaVersion: "1.1";
   catalogSnapshotId: string;
   catalogVersion: string;
-  status: "selected" | "create_rule" | "clarify" | "no_match";
+  status: "selected" | "create_rule" | "clarify" | "reply" | "no_match";
   intentId: RoutingIntentId | null;
   clarificationQuestion: string | null;
+  replyText?: string | null;
   summary: string;
 };
 export type ProposalBlock = { blockId: string; component: ComponentName; candidateIds: string[]; variant: Variant };

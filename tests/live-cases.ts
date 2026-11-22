@@ -3,7 +3,7 @@ import type { DisplayBlock } from "../packages/contracts/surface";
 export type LiveCase = {
   id: string;
   message: string;
-  route: "balance" | "portsum" | "learning" | "app-home" | "clarify" | "no_match";
+  route: "balance" | "portsum" | "learning" | "app-home" | "clarify" | "reply" | "no_match";
   outcome: string;
   component?: DisplayBlock["component"];
   relevant?: string[];
@@ -50,6 +50,7 @@ export const liveCases: LiveCase[] = [
   { id: "retirement-beneficiary-on-file", message: "I'd like to learn about retirement.", route: "learning", outcome: ready, component: card, relevant: ["retirement_learning"], exclude: ["beneficiary_update"], persona: "demo-returning" },
   { id: "retirement-unclear", message: "last day of job is next week", prior: "i will be 62", route: "clarify", outcome: "clarify" },
   { id: "retirement-confirmed", message: "yes", prior: ["i will be 62", "last day of job is next week"], route: "learning", outcome: ready, component: card, relevant: ["beneficiary_update"] },
+  { id: "retirement-acknowledgment", message: "thats nice", prior: ["i will be 62", "yes"], route: "reply", outcome: "reply" },
   { id: "retirement-inferred-follow-up", message: "last day of job is next week", prior: ["i want to know about retierment", "am old", "i am going to loose my job", "i will be 62"], route: "learning", outcome: ready, component: card, relevant: ["beneficiary_update"] },
   { id: "beneficiary-update-steps", message: "Show me the demo steps to update my beneficiaries.", route: "learning", outcome: ready, component: guide, relevant: ["beneficiary_update"] },
   { id: "transfer-overview", message: "Explain the fictional transfer flow.", route: home, outcome: ready, component: card, relevant: [transferIntro] },

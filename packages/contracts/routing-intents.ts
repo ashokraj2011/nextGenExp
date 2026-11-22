@@ -32,9 +32,12 @@ export const leavingWorkQuestion = "Would you like general retirement planning i
 export const routingQuestions = [...host.clarificationQuestions, retirementQuestion, leavingWorkQuestion];
 export const ROUTING_HISTORY_TURNS = 4;
 export const ROUTING_HISTORY_REQUEST_LENGTH = 350;
+export const ROUTING_HISTORY_REPLY_LENGTH = 1600;
 export type RoutingHistoryEntry = {
   request: string;
   contextId: string | null;
   intentId: RoutingIntentId | null;
   clarificationQuestion: string | null;
+  assistantReply?: string;
+  displayedContent?: string[];
 };

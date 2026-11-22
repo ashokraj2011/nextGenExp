@@ -33,6 +33,12 @@ export function verifyContextProposal(value: unknown, catalog: CatalogSnapshot, 
     value.catalogSnapshotId === catalog.snapshotId && value.catalogVersion === catalog.catalog.catalogVersion,
     "CATALOG_MISMATCH",
   );
+  const replyText = value.replyText?.trim();
+  if (value.status === "reply") {
+    requireCheck(value.clarificationQuestion === null, "ROUTE_STATUS_SHAPE_INVALID");
+    requireCheck(replyText, "CHAT_REPLY_REQUIRED");
+    return { status: "reply" as const, intentId: null, replyText };
+  }
   requireCheck((value.intentId === "create_rule") === (value.status === "create_rule"), "ROUTE_INTENT_MISMATCH");
   if (value.status === "create_rule") {
     requireCheck(canCreateRule, "RULE_CREATION_UNAVAILABLE");
@@ -41,7 +47,7 @@ export function verifyContextProposal(value: unknown, catalog: CatalogSnapshot, 
   }
   if (value.status === "no_match") {
     requireCheck(value.intentId === null && value.clarificationQuestion === null, "ROUTE_STATUS_SHAPE_INVALID");
-    return { status: "no_match" as const, intentId: null, clarificationQuestion: null };
+    return { status: "no_match" as const, intentId: null, replyText };
   }
   const definition = availableRoutingIntents(catalog.catalog, canCreateRule).find(({ intentId }) => intentId === value.intentId);
   if (value.intentId) requireCheck(definition && definition.contextId !== null, "CONTEXT_NOT_ACTIVE");

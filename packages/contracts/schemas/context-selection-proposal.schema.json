@@ -27,6 +27,7 @@
       "enum": [
         "selected",
         "clarify",
+        "reply",
         "no_match",
         "create_rule"
       ]
@@ -52,6 +53,14 @@
       ],
       "minLength": 1,
       "maxLength": 400
+    },
+    "replyText": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 1600
     }
   },
   "required": [

@@ -67,6 +67,14 @@ test("an approved clarification keeps a possible intent from authorizing a route
     /CLARIFICATION_NOT_ALLOWED/);
 });
 
+test("a conversational reply requires text and cannot select an intent", () => {
+  const reply = { ...contextProposal, status: "reply", intentId: null, replyText: "Glad that helped." };
+  const expected = { status: "reply", intentId: null, replyText: reply.replyText };
+  assert.deepEqual(verifyContextProposal(reply, catalog, scope, now), expected);
+  assert.deepEqual(verifyContextProposal({ ...reply, intentId: "show_balance" }, catalog, scope, now), expected);
+  assert.throws(() => verifyContextProposal({ ...reply, replyText: "  " }, catalog, scope, now), /CHAT_REPLY_REQUIRED/);
+});
+
 test("selection mode controls order and canonical compiler publishes mandatory evidence", () => {
   const run = "composer_run";
   const verified = verifyExperience(proposal, decision, route, scope, run, null, now);
