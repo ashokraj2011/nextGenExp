@@ -4,7 +4,8 @@ import type {
 } from "../contracts/domain";
 import { isContextProposal, isExperienceProposal } from "../contracts/model";
 import { isPortfolioSummary, type PortfolioSnapshot } from "../contracts/portfolio";
-import { contentCatalog, lookupContent } from "./content";
+import { availableRoutingIntents, routingQuestions } from "../contracts/routing-intents";
+import { contentCatalog, lookupContent, retirementReminderCandidate } from "./content";
 
 export class Rejected extends Error {
   constructor(readonly code: string) {
@@ -32,19 +33,30 @@ export function verifyContextProposal(value: unknown, catalog: CatalogSnapshot, 
     value.catalogSnapshotId === catalog.snapshotId && value.catalogVersion === catalog.catalog.catalogVersion,
     "CATALOG_MISMATCH",
   );
-  requireCheck((value.intent.task === "create_rule") === (value.status === "create_rule"), "ROUTE_INTENT_MISMATCH");
+  requireCheck((value.intentId === "create_rule") === (value.status === "create_rule"), "ROUTE_INTENT_MISMATCH");
   if (value.status === "create_rule") {
     requireCheck(canCreateRule, "RULE_CREATION_UNAVAILABLE");
-    requireCheck(value.contextId === null && value.clarificationQuestion === null, "ROUTE_STATUS_SHAPE_INVALID");
-  } else if (value.status === "selected") {
-    requireCheck(value.clarificationQuestion === null && value.contextId, "ROUTE_STATUS_SHAPE_INVALID");
-    requireCheck(catalog.catalog.contexts.some((context) => context.active && context.contextId === value.contextId), "CONTEXT_NOT_ACTIVE");
-  } else {
-    requireCheck(value.contextId === null, "ROUTE_STATUS_SHAPE_INVALID");
-    requireCheck(value.status === "no_match" ? value.clarificationQuestion === null
-      : value.clarificationQuestion && host.clarificationQuestions.includes(value.clarificationQuestion), "CLARIFICATION_NOT_ALLOWED");
+    requireCheck(value.clarificationQuestion === null, "ROUTE_STATUS_SHAPE_INVALID");
+    return { status: "create_rule" as const, intentId: "create_rule" as const };
   }
-  return value;
+  if (value.status === "no_match") {
+    requireCheck(value.intentId === null && value.clarificationQuestion === null, "ROUTE_STATUS_SHAPE_INVALID");
+    return { status: "no_match" as const, intentId: null, clarificationQuestion: null };
+  }
+  const definition = availableRoutingIntents(catalog.catalog, canCreateRule).find(({ intentId }) => intentId === value.intentId);
+  if (value.intentId) requireCheck(definition && definition.contextId !== null, "CONTEXT_NOT_ACTIVE");
+  if (value.status === "clarify" || value.clarificationQuestion !== null) {
+    const question = value.clarificationQuestion;
+    requireCheck(question && routingQuestions.includes(question), "CLARIFICATION_NOT_ALLOWED");
+    return { status: "clarify" as const, intentId: null, possibleIntentId: definition?.intentId, clarificationQuestion: question };
+  }
+  requireCheck(definition && definition.contextId !== null, "ROUTE_STATUS_SHAPE_INVALID");
+  return {
+    status: "selected" as const,
+    intentId: definition.intentId,
+    contextId: definition.contextId,
+    intent: { topic: definition.label, task: definition.task, summary: value.summary },
+  };
 }
 
 export function verifyRoute(route: RouteDecision, catalog: CatalogSnapshot, scope: Scope, routerRunId: string | null, now: number) {
@@ -150,9 +162,8 @@ export function verifyExperience(
     return followUp;
   }).filter(({ followUpId }) => !showsBeneficiaryGuide || followUpId !== "fu_beneficiary_steps");
 
-  const showsRetirementLesson = route.contextId === "learning" && route.intent.task === "explain"
-    && resolved.some(({ content }) => content.some(({ contentId }) => contentId === "retirement_learning"));
-  const reminder = showsRetirementLesson ? decision.candidates.find(({ contentId }) => contentId === "beneficiary_update") : undefined;
+  const showsRetirementLesson = resolved.some(({ content }) => content.some(({ contentId }) => contentId === "retirement_learning"));
+  const reminder = showsRetirementLesson ? retirementReminderCandidate(decision, route) : undefined;
   if (reminder) {
     const entry = lookupContent(reminder);
     requireCheck(entry && entry.allowedComponents.includes("PznContentCard"), "BENEFICIARY_REMINDER_UNAVAILABLE");

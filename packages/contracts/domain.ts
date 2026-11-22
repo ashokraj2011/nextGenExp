@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { RoutingIntentId } from "./routing-intents";
 
 export const componentNames = ["PznContentCard", "PznComparison", "PznStepList", "PznMetricSummary"] as const;
 export type ComponentName = typeof componentNames[number];
@@ -8,13 +9,14 @@ export type IntroKey = "explanation" | "comparison" | "steps" | "summary" | "cla
 
 export type Intent = { topic: string; task: "explain" | "compare" | "guide" | "show" | "unknown"; summary: string };
 export type ContextSelectionProposal = {
-  schemaVersion: "1.0";
+  schemaVersion: "1.1";
   catalogSnapshotId: string;
   catalogVersion: string;
-} & (
-  | { status: "selected" | "clarify" | "no_match"; contextId: string | null; intent: Intent; clarificationQuestion: string | null }
-  | { status: "create_rule"; contextId: null; intent: Omit<Intent, "task"> & { task: "create_rule" }; clarificationQuestion: null }
-);
+  status: "selected" | "create_rule" | "clarify" | "no_match";
+  intentId: RoutingIntentId | null;
+  clarificationQuestion: string | null;
+  summary: string;
+};
 export type ProposalBlock = { blockId: string; component: ComponentName; candidateIds: string[]; variant: Variant };
 export type ExperienceProposal = {
   schemaVersion: "1.0";

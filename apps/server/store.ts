@@ -5,6 +5,7 @@ import type { CatalogSnapshot, ContentDecision, PropensityResult, RouteDecision,
 import type { Conversation, FailureCode, Progress, PublicEvent, PublicEventType, TurnView } from "../../packages/contracts/api";
 import type { GatewayExchange } from "../../packages/contracts/inspector";
 import type { PortfolioSnapshot } from "../../packages/contracts/portfolio";
+import type { RoutingIntentId } from "../../packages/contracts/routing-intents";
 import { defaultToolSetup, type MockCcreEvaluation, type ToolSetup, type TreatmentSource } from "../../packages/contracts/tool-setup";
 import type { CompiledExperience, IssuedAction } from "../../packages/experience/compile";
 import { makeId } from "../../packages/experience/compile";
@@ -32,6 +33,8 @@ export type TurnTrace = {
   finalOrder?: string[];
   components?: string[];
   routeOutcome?: string;
+  intentId?: RoutingIntentId | null;
+  possibleIntentId?: RoutingIntentId;
   glossaryVersion?: string;
   selectionMode: SelectionMode;
   failures: { stage: string; code: string }[];

@@ -2,6 +2,7 @@ import { createServer, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { GatewaySettings } from "../apps/server/gateway";
 import type { ComponentName, ContextSelectionProposal, ExperienceProposal, Intent } from "../packages/contracts/domain";
+import { leavingWorkQuestion, retirementQuestion, type RoutingHistoryEntry, type RoutingIntent, type RoutingIntentId } from "../packages/contracts/routing-intents";
 import type { modelBundle } from "../packages/experience/content";
 
 type Envelope = {
@@ -10,8 +11,10 @@ type Envelope = {
   catalogSnapshotId?: string;
   catalog?: { catalogVersion: string; contexts: { contextId: string }[] };
   propensity?: unknown;
-  recent?: { request: string; contextId: string }[];
+  recent?: RoutingHistoryEntry[];
+  intentCatalog?: RoutingIntent[];
   selectedContextId?: string;
+  selectedIntentId?: RoutingIntentId;
   intent?: Intent;
   eligible?: ReturnType<typeof modelBundle>;
   allowedQuestions: string[];
@@ -45,34 +48,64 @@ function fromMessage(body: RequestBody): Envelope | undefined {
 }
 
 function route(envelope: Envelope): ContextSelectionProposal {
-  const { request, recent, allowedQuestions } = envelope;
+  const { request, recent, allowedQuestions, intentCatalog = [] } = envelope;
   const text = request.toLowerCase().trim();
-  const catalog = { schemaVersion: "1.0" as const, catalogSnapshotId: envelope.catalogSnapshotId!, catalogVersion: envelope.catalog!.catalogVersion };
+  const base = {
+    schemaVersion: "1.1" as const, catalogSnapshotId: envelope.catalogSnapshotId!, catalogVersion: envelope.catalog!.catalogVersion,
+    summary: "Deterministic test intent.",
+  };
+  const noMatch: ContextSelectionProposal = { ...base, status: "no_match", intentId: null, clarificationQuestion: null };
+  const clarify = (clarificationQuestion = allowedQuestions[0], intentId: RoutingIntentId | null = null): ContextSelectionProposal => (
+    { ...base, status: "clarify", intentId, clarificationQuestion }
+  );
   if (/^(?:(?:please|i want to|can you|i'd like to) )?(?:create|add) (?:(?:a|new|a new) )?(?:ccre |treatment selector )?rule\b/.test(text)) {
-    const intent = { topic: "Treatment Selector rules", summary: "Create a Treatment Selector eligibility rule." };
-    return envelope.canCreateRule
-      ? { ...catalog, status: "create_rule", contextId: null, clarificationQuestion: null, intent: { ...intent, task: "create_rule" } }
-      : { ...catalog, status: "no_match", contextId: null, clarificationQuestion: null, intent: { ...intent, task: "unknown" } };
+    return intentCatalog.some(({ intentId }) => intentId === "create_rule")
+      ? { ...base, status: "create_rule", intentId: "create_rule", clarificationQuestion: null }
+      : noMatch;
   }
+  if (/\b(?:job search|unemployment|layoff assistance|(?:find|look(?:ing)? for) (?:a )?new job)\b/.test(text)) return noMatch;
+
   const contexts = new Set<string>();
+  const retirementTopic = /\b(?:retire|retiring|retirement|retierment|retieremtn)\b/;
   if (/balance|ledger|available term/.test(text)) contexts.add("balance");
   if (/portfolio|protfolio|holdings|allocation/.test(text)) contexts.add("portsum");
   if (/transfer|app home|demo profile|app help|demo app/.test(text)) contexts.add("app-home");
-  if (/retirement|beneficiar|\b(?:retierment|retieremtn)\b/.test(text)) contexts.add("learning");
-  if (!contexts.size && /\b(that|those|again|more)\b/.test(text) && recent?.length) contexts.add(recent.at(-1)!.contextId);
-  const ambiguous = contexts.size > 1 || (!contexts.size && /help|explain|show|learn|what/.test(text) && !/weather|recipe|stock price|bitcoin/.test(text));
-  const status = ambiguous ? "clarify" : contexts.size === 1 ? "selected" : "no_match";
+  if (retirementTopic.test(text) || /beneficiar/.test(text)) contexts.add("learning");
+
+  if (!contexts.size) {
+    const previousTopic = recent?.findLast(({ contextId }) => contextId !== null);
+    const establishedRetirement = previousTopic?.intentId === "retirement_learning"
+      || (previousTopic?.contextId === "learning" && retirementTopic.test(previousTopic.request.toLowerCase()));
+    const priorQuestion = recent?.at(-1)?.clarificationQuestion;
+    const askedAboutRetirement = priorQuestion === retirementQuestion || priorQuestion === leavingWorkQuestion;
+    const confirmedRetirement = askedAboutRetirement && /^(?:yes\b|sure\b|correct\b|that'?s right\b)/.test(text);
+    const leavingWork = /\blast day (?:at|of) (?:(?:my|the) )?(?:job|work)\b/.test(text);
+    const losingJob = /\b(?:lose|loose|lost|losing) (?:my|the) job\b/.test(text);
+    const ageClue = /\b(?:(?:will be|turning|turn|i am|i'm) [5-8]\d|am old|getting older)\b/.test(text);
+    if (confirmedRetirement || (establishedRetirement && (ageClue || leavingWork))) contexts.add("learning");
+    else if (ageClue || leavingWork || losingJob) {
+      const possibleIntent = intentCatalog.find(({ intentId }) => intentId === "retirement_learning");
+      return clarify(leavingWork || losingJob ? leavingWorkQuestion : retirementQuestion, possibleIntent?.intentId ?? null);
+    }
+    else if (askedAboutRetirement && /^(?:no|not really)[.!]*$/.test(text)) return clarify();
+    else if (previousTopic?.contextId && /\b(that|those|again|more)\b/.test(text)) contexts.add(previousTopic.contextId);
+  }
+  if (contexts.size > 1) return clarify();
+  if (!contexts.size) {
+    return /help|explain|show|learn|what/.test(text) && !/weather|recipe|stock price|bitcoin/.test(text) ? clarify() : noMatch;
+  }
+
   const asksForPortfolioValues = /\b(my|show|summarize|display)\b/.test(text) || /^(?:portfolio|protfolio) summary\W*$/.test(text);
   const showPortfolio = asksForPortfolioValues && !/\b(explain|terms|labels)\b/.test(text) && !/^what(?: is|'s) (?:a|the)\b/.test(text);
   const task = /compare|difference|versus/.test(text) ? "compare"
     : /guide|steps|checklist|how do|walk/.test(text) ? "guide"
     : (contexts.has("portsum") ? showPortfolio : /summary|how much|amount|show my/.test(text)) ? "show" : "explain";
-  const contextId = status === "selected" ? [...contexts][0] : null;
-  return {
-    ...catalog,
-    status, contextId, clarificationQuestion: status === "clarify" ? allowedQuestions[0] : null,
-    intent: { task, topic: contextId ?? "demo topics", summary: "Deterministic test intent." },
-  };
+  const contextId = [...contexts][0];
+  const choice = intentCatalog.find((item) => item.contextId === contextId && item.task === task)
+    ?? intentCatalog.find((item) => item.contextId === contextId && item.task === "explain");
+  return choice && choice.contextId !== null
+    ? { ...base, status: "selected", intentId: choice.intentId, clarificationQuestion: null }
+    : noMatch;
 }
 
 function compose({ body, envelope }: GatewayCall): ExperienceProposal | ToolCall {

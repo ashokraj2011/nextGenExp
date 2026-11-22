@@ -33,7 +33,8 @@ for (const selectionMode of modes) {
     const client = await testClient(app.url);
     async function evaluate(entry: LiveCase) {
       const conversation = await client.conversation(entry.scenario, entry.persona);
-      if (entry.prior) await client.ask(conversation.id, entry.prior);
+      const prior = typeof entry.prior === "string" ? [entry.prior] : entry.prior ?? [];
+      for (const message of prior) await client.ask(conversation.id, message);
       const start = performance.now();
       const accepted = await client.submit(conversation.id, entry.message);
       const stream = await client.response(accepted.eventsUrl);

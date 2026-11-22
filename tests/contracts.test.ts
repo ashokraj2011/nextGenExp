@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { BalanceProof, CatalogSnapshot, ContentDecision, ContextSelectionProposal, ExperienceProposal, RouteDecision, Scope } from "../packages/contracts/domain";
+import { leavingWorkQuestion } from "../packages/contracts/routing-intents";
 import { validatePznSurface } from "../packages/contracts/surface";
 import { contentCatalog, resolveCandidates } from "../packages/experience/content";
 import { compileExperience } from "../packages/experience/compile";
@@ -23,7 +24,8 @@ const decision: ContentDecision = {
 };
 
 const contextProposal: ContextSelectionProposal = {
-  schemaVersion: "1.0", status: "selected", contextId: "balance", catalogSnapshotId: catalog.snapshotId, catalogVersion: activeContextCatalog.catalogVersion, intent,
+  schemaVersion: "1.1", status: "selected", intentId: "compare_balances", catalogSnapshotId: catalog.snapshotId,
+  catalogVersion: activeContextCatalog.catalogVersion, summary: intent.summary,
   clarificationQuestion: null,
 };
 const proposal: ExperienceProposal = {
@@ -33,9 +35,13 @@ const proposal: ExperienceProposal = {
 };
 
 test("routing rejects foreign, stale and inactive catalog decisions and run substitutions", () => {
-  assert.equal(verifyContextProposal(contextProposal, catalog, scope, now).contextId, "balance");
-  assert.throws(() => verifyContextProposal({ ...contextProposal, contextId: "archived-help" }, catalog, scope, now), /CONTEXT_NOT_ACTIVE/);
-  assert.throws(() => verifyContextProposal({ ...contextProposal, contextId: "unknown-demo-context" }, catalog, scope, now), /CONTEXT_NOT_ACTIVE/);
+  const verified = verifyContextProposal(contextProposal, catalog, scope, now);
+  assert.equal(verified.status, "selected");
+  assert.equal(verified.contextId, "balance");
+  assert.equal(verified.intent.task, "compare");
+  const inactive = { ...catalog, catalog: { ...catalog.catalog, contexts: catalog.catalog.contexts.filter(({ contextId }) => contextId !== "balance") } };
+  assert.throws(() => verifyContextProposal(contextProposal, inactive, scope, now), /CONTEXT_NOT_ACTIVE/);
+  assert.throws(() => verifyContextProposal({ ...contextProposal, intentId: "unlisted_intent" }, catalog, scope, now), /ROUTE_SCHEMA_INVALID/);
   assert.throws(() => verifyContextProposal({ ...contextProposal, catalogVersion: "old" }, catalog, scope, now), /CATALOG_MISMATCH/);
   assert.throws(() => verifyContextProposal(contextProposal, catalog, { ...scope, conversationId: "foreign" }, now), /SCOPE_MISMATCH/);
   assert.throws(() => verifyContextProposal(contextProposal, { ...catalog, expiresAt: now }, scope, now), /DECISION_EXPIRED/);
@@ -43,11 +49,22 @@ test("routing rejects foreign, stale and inactive catalog decisions and run subs
 });
 
 test("rule creation requires the enabled host capability and a matching router intent", () => {
-  const create = { ...contextProposal, status: "create_rule", contextId: null, intent: { ...intent, task: "create_rule" } };
+  const create = { ...contextProposal, status: "create_rule", intentId: "create_rule" };
   assert.equal(verifyContextProposal(create, catalog, scope, now, true).status, "create_rule");
   assert.throws(() => verifyContextProposal(create, catalog, scope, now), /RULE_CREATION_UNAVAILABLE/);
-  assert.throws(() => verifyContextProposal({ ...create, contextId: "balance" }, catalog, scope, now, true), /ROUTE_STATUS_SHAPE_INVALID/);
+  assert.throws(() => verifyContextProposal({ ...create, clarificationQuestion: "Which rule?" }, catalog, scope, now, true), /ROUTE_STATUS_SHAPE_INVALID/);
   assert.throws(() => verifyContextProposal({ ...create, status: "no_match" }, catalog, scope, now, true), /ROUTE_INTENT_MISMATCH/);
+});
+
+test("an approved clarification keeps a possible intent from authorizing a route", () => {
+  const uncertain = { ...contextProposal, intentId: "retirement_learning", clarificationQuestion: leavingWorkQuestion };
+  for (const status of ["selected", "clarify"]) {
+    assert.deepEqual(verifyContextProposal({ ...uncertain, status }, catalog, scope, now), {
+      status: "clarify", intentId: null, possibleIntentId: "retirement_learning", clarificationQuestion: leavingWorkQuestion,
+    });
+  }
+  assert.throws(() => verifyContextProposal({ ...uncertain, clarificationQuestion: "An unapproved question?" }, catalog, scope, now),
+    /CLARIFICATION_NOT_ALLOWED/);
 });
 
 test("selection mode controls order and canonical compiler publishes mandatory evidence", () => {

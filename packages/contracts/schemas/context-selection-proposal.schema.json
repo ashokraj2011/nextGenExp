@@ -7,7 +7,7 @@
     "schemaVersion": {
       "type": "string",
       "enum": [
-        "1.0"
+        "1.1"
       ]
     },
     "catalogSnapshotId": {
@@ -31,46 +31,19 @@
         "create_rule"
       ]
     },
-    "contextId": {
+    "intentId": {
       "type": [
         "string",
         "null"
       ],
       "minLength": 1,
       "maxLength": 128,
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+      "pattern": "^[a-z][a-z0-9_]*$"
     },
-    "intent": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "topic": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 120
-        },
-        "task": {
-          "type": "string",
-          "enum": [
-            "explain",
-            "compare",
-            "guide",
-            "show",
-            "unknown",
-            "create_rule"
-          ]
-        },
-        "summary": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 500
-        }
-      },
-      "required": [
-        "topic",
-        "task",
-        "summary"
-      ]
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
     },
     "clarificationQuestion": {
       "type": [
@@ -86,8 +59,8 @@
     "catalogSnapshotId",
     "catalogVersion",
     "status",
-    "contextId",
-    "intent",
+    "intentId",
+    "summary",
     "clarificationQuestion"
   ]
 }

@@ -12,6 +12,7 @@ import { startApp } from "../apps/server/http";
 import type { TurnAccepted, TurnView, ConversationView } from "../packages/contracts/api";
 import type { TurnPayloads } from "../packages/contracts/inspector";
 import type { GlossaryCondition } from "../packages/contracts/rule-glossary";
+import { leavingWorkQuestion, retirementQuestion } from "../packages/contracts/routing-intents";
 import {
   defaultToolSetup, type MockCcreRule, type ToolSetup, type ToolSetupView, type TreatmentPreview, type TreatmentPreviewInput,
 } from "../packages/contracts/tool-setup";
@@ -620,12 +621,76 @@ test("a misspelled retirement request reaches Learning and shows the beneficiary
   }
 });
 
-test("admission rejects unknown contexts, tampered input, duplicate payload changes, and foreign principals", async (t) => {
+test("recent retirement clues prompt for clarification until the user confirms the goal", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const { client, gateway } = f;
+  const chat = await client.conversation();
+  const age = "i will be 62";
+  const lastDay = "last day of job is next week";
+
+  for (const [message, question] of [[age, retirementQuestion], [lastDay, leavingWorkQuestion]]) {
+    const { turn, trace } = await client.ask(chat.id, message);
+    assert.equal(turn.experience?.outcome, "clarify");
+    assert.equal(turn.experience?.question, question);
+    assert.equal(trace.intentId, null);
+    assert.equal(trace.possibleIntentId, "retirement_learning");
+    assert.equal(trace.tsScopeId, null);
+    assert.equal(trace.composerRunId, null);
+  }
+  const { turn, trace } = await client.ask(chat.id, "yes");
+  assert.equal(turn.experience?.outcome, "ready");
+  assert.equal(trace.intentId, "retirement_learning");
+  assert.equal(trace.selectedContextId, "learning");
+  assert.deepEqual(trace.finalOrder, ["retirement_learning", "beneficiary_update"]);
+  const routing = gateway.calls.find(({ envelope }) => envelope.inputType === "PznContextRoutingInput" && envelope.request === "yes")!.envelope;
+  assert.deepEqual(routing.recent, [
+    { request: age, contextId: null, intentId: null, clarificationQuestion: retirementQuestion },
+    { request: lastDay, contextId: null, intentId: null, clarificationQuestion: leavingWorkQuestion },
+  ]);
+  assert.ok(routing.intentCatalog?.some(({ intentId, contextId }) => intentId === "retirement_learning" && contextId === "learning"));
+  assert.equal(gateway.calls.at(-1)?.envelope.selectedIntentId, "retirement_learning");
+  assert.deepEqual(gateway.calls.at(-1)?.envelope.eligible?.candidates.map(({ title }) => title), ["Retirement planning basics"]);
+
+  const otherGoal = await client.ask(chat.id, "No, I'm looking for a new job.");
+  assert.equal(otherGoal.trace.routeOutcome, "no_match");
+  assert.equal(otherGoal.trace.tsScopeId, null);
+  const newChat = await client.conversation();
+  await client.ask(newChat.id, "I'm looking for a new job.");
+  await client.ask(newChat.id, lastDay);
+  assert.deepEqual(gateway.calls.at(-1)?.envelope.recent, [
+    { request: "I'm looking for a new job.", contextId: null, intentId: null, clarificationQuestion: null },
+  ]);
+});
+
+test("retirement is inferred for age and job-transition follow-ups to an established retirement goal", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const { client, gateway } = f;
+  const chat = await client.conversation();
+  const messages = ["i want to know about retierment", "am old", "i am going to loose my job", "i will be 62", "last day of job is next week"];
+  for (const message of messages) {
+    const { turn, trace } = await client.ask(chat.id, message);
+    if (message === "i am going to loose my job") {
+      assert.equal(turn.experience?.question, leavingWorkQuestion);
+      assert.equal(trace.tsScopeId, null);
+      continue;
+    }
+    assert.equal(turn.experience?.outcome, "ready");
+    assert.equal(trace.intentId, "retirement_learning");
+    assert.equal(trace.selectedContextId, "learning");
+  }
+  assert.deepEqual(gateway.calls.at(-2)?.envelope.recent?.map(({ request }) => request), messages.slice(0, -1));
+  const change = await client.ask(chat.id, "Show my synthetic demo balance summary.");
+  assert.equal(change.trace.intentId, "show_balance");
+  assert.equal(change.trace.selectedContextId, "balance");
+});
+
+test("admission rejects invalid routing proposals, tampered input, duplicate payload changes, and foreign principals", async (t) => {
   const f = await fixture(({ envelope }) => envelope.inputType === "PznContextRoutingInput" ? {
     json: {
-      schemaVersion: "1.0", catalogSnapshotId: envelope.catalogSnapshotId, catalogVersion: envelope.catalog?.catalogVersion,
-      status: "selected", contextId: "archived-help", clarificationQuestion: null,
-      intent: { task: "explain", topic: "demo", summary: "Invalid test route." },
+      schemaVersion: "1.1", catalogSnapshotId: envelope.catalogSnapshotId, catalogVersion: envelope.catalog?.catalogVersion,
+      status: "no_match", intentId: "explain_balance", clarificationQuestion: null, summary: "Invalid test route.",
     },
   } : undefined);
   t.after(() => f.close());
@@ -642,7 +707,7 @@ test("admission rejects unknown contexts, tampered input, duplicate payload chan
   const result = await client.wait(accepted);
   assert.equal(result.turn.failureCode, "route_rejected");
   assert.equal(result.trace.tsScopeId, null);
-  assert.equal(result.trace.failures[0].code, "CONTEXT_NOT_ACTIVE");
+  assert.equal(result.trace.failures[0].code, "ROUTE_STATUS_SHAPE_INVALID");
   assert.equal(f.gateway.calls.length, 2);
   const foreign = await client.response("/api/turns/" + accepted.turnId, undefined, { Cookie: "" });
   assert.equal(foreign.status, 404);

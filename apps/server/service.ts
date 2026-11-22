@@ -4,6 +4,9 @@ import { type FailureCode } from "../../packages/contracts/api";
 import { DECISION_TTL, TURN_DEADLINE, contextCatalogSchema, propensitySchema, type SelectionMode, type PropensityResult } from "../../packages/contracts/domain";
 import { isPortfolioSummary, portfolioSnapshotSchema } from "../../packages/contracts/portfolio";
 import { ruleGlossarySchema } from "../../packages/contracts/rule-glossary";
+import {
+  availableRoutingIntents, routingQuestions, ROUTING_HISTORY_TURNS, ROUTING_HISTORY_REQUEST_LENGTH, type RoutingHistoryEntry,
+} from "../../packages/contracts/routing-intents";
 import { FOLLOW_UP_EVENT, type DisplayExperience } from "../../packages/contracts/surface";
 import { normalizedIdsSchema, treatmentOverride } from "../../packages/contracts/tool-setup";
 import { activeContextCatalog, fixtureRejections, tsFixtures } from "../../packages/ts-adapter";
@@ -144,24 +147,36 @@ export class ExperienceService {
       if (!current().route) {
         this.store.progress(id, "routing", this.now());
         const turn = current();
-        const recent = this.store.conversationTurns(conversation.id)
-          .filter((previous) => previous.public.status === "completed" && previous.route)
-          .slice(-3).map((previous) => ({ request: previous.public.message.slice(0, 350), contextId: previous.route!.contextId }));
+        const recent: RoutingHistoryEntry[] = this.store.conversationTurns(conversation.id)
+          .filter((previous) => previous.public.status === "completed" && previous.ordinal < turn.ordinal)
+          .slice(-ROUTING_HISTORY_TURNS)
+          .map((previous) => ({
+            request: previous.public.message.slice(0, ROUTING_HISTORY_REQUEST_LENGTH),
+            contextId: previous.route?.contextId ?? null,
+            intentId: previous.trace.intentId ?? null,
+            clarificationQuestion: previous.public.experience?.question ?? null,
+          }));
         const result = await runtime.model("route", turn, conversation, catalog.snapshotId, {
           inputType: "PznContextRoutingInput",
           request: turn.public.message,
           recent,
           catalogSnapshotId: catalog.snapshotId,
           catalog: catalog.catalog,
+          intentCatalog: availableRoutingIntents(catalog.catalog, this.canCreateRule),
           propensity: turn.propensity,
-          allowedQuestions: demo.clarificationQuestions,
+          allowedQuestions: routingQuestions,
           canCreateRule: this.canCreateRule,
         }, signal, recovering);
         current();
         this.store.update(id, (row) => { row.trace.routeRun = traceFor(result); });
         completed(result, "route");
         const proposal = verifyContextProposal(result.output, catalog, turn.scope, this.now(), this.canCreateRule);
-        this.store.update(id, (row) => { row.trace.routeOutcome = proposal.status; row.trace.markers.routeValidated = this.now(); });
+        this.store.update(id, (row) => {
+          row.trace.routeOutcome = proposal.status;
+          row.trace.intentId = proposal.intentId;
+          if (proposal.status === "clarify") row.trace.possibleIntentId = proposal.possibleIntentId;
+          row.trace.markers.routeValidated = this.now();
+        });
         if (proposal.status === "create_rule") {
           stage = "glossary";
           this.store.progress(id, "glossary", this.now());
@@ -193,7 +208,7 @@ export class ExperienceService {
         this.store.update(id, (row) => {
           row.route = {
             routeDecisionId: makeId("route"), scope: row.scope, catalogSnapshotId: catalog.snapshotId, catalogVersion: catalog.catalog.catalogVersion,
-            contextId: proposal.contextId!, routerRunId: result.runId, intent: proposal.intent, issuedAt: now, expiresAt: now + DECISION_TTL,
+            contextId: proposal.contextId, routerRunId: result.runId, intent: proposal.intent, issuedAt: now, expiresAt: now + DECISION_TTL,
           };
         });
       }
@@ -279,7 +294,7 @@ export class ExperienceService {
       const result = await runtime.model("compose", turn, conversation, decision.decisionId, {
         inputType: "PznExperienceCompositionInput",
         request: turn.public.message, intent: route.intent,
-        selectedContextId: route.contextId, eligible: modelBundle(decision),
+        selectedIntentId: turn.trace.intentId ?? undefined, selectedContextId: route.contextId, eligible: modelBundle(decision, route),
         ...(portfolio && { portfolioSnapshotIncluded: true }),
         allowedQuestions: demo.clarificationQuestions,
       }, signal, recovering);

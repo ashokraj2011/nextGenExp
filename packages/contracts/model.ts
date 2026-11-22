@@ -2,16 +2,23 @@ import Ajv2020 from "ajv/dist/2020.js";
 import type { JsonObject } from "@sfield/core";
 import type { ContextSelectionProposal, ExperienceProposal } from "./domain";
 import { glossaryOperators, glossaryValueTypes } from "./rule-glossary";
+import { routingIntents } from "./routing-intents";
 import contextSchema from "./schemas/context-selection-proposal.schema.json";
 import experienceSchema from "./schemas/experience-proposal.schema.json";
 
 const ajv = new Ajv2020({ strict: true, validateFormats: false });
-export const isContextProposal = ajv.compile<ContextSelectionProposal>(contextSchema);
+export const routingOutputSchema = {
+  ...contextSchema,
+  properties: {
+    ...contextSchema.properties,
+    intentId: { ...contextSchema.properties.intentId, enum: [...routingIntents.map(({ intentId }) => intentId), null] },
+  },
+} as JsonObject;
+export const isContextProposal = ajv.compile<ContextSelectionProposal>(routingOutputSchema);
 export const isExperienceProposal = ajv.compile<ExperienceProposal>(experienceSchema);
 
 // The runtime schema subset disallows the standalone contract's URI identifier.
 const { $id: _experienceSchemaId, ...runtimeExperienceSchema } = experienceSchema;
-export const routingOutputSchema = contextSchema as JsonObject;
 export const compositionOutputSchema = runtimeExperienceSchema as JsonObject;
 
 const string = { type: "string" } as const;

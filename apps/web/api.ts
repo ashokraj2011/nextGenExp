@@ -44,6 +44,8 @@ export type Trace = {
   propensity: PropensityResult | null;
   selectionMode: SelectionMode;
   routeOutcome?: string;
+  intentId?: string | null;
+  possibleIntentId?: string;
   glossaryVersion?: string;
   finalOrder?: string[];
   components?: string[];

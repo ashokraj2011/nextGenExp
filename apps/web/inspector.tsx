@@ -28,9 +28,11 @@ function TraceView({ trace }: { trace: Trace }) {
     <section>
       <h3>Routing</h3>
       <dl className="trace-dl">
-        {creatingRule
-          ? <Detail label="Router intent"><code>create_rule</code></Detail>
-          : <Detail label="Selected TS context">{selectedContextId ?? trace.routeOutcome ?? "Pending"}</Detail>}
+        {(trace.intentId || creatingRule) && <Detail label="Router intent"><code>{trace.intentId ?? "create_rule"}</code></Detail>}
+        {trace.possibleIntentId && <Detail label="Possible intent"><code>{trace.possibleIntentId}</code></Detail>}
+        {!creatingRule && <Detail label={selectedContextId ? "Selected TS context" : "Routing outcome"}>
+          {selectedContextId ?? trace.routeOutcome ?? "Pending"}
+        </Detail>}
         <Detail label="Delivery surface">{surface}</Detail>
         <Detail label="Source page">{sourcePageContext ?? "No source page"}</Detail>
         <Detail label="Catalog version">{catalog?.catalogVersion ?? "Pending"}</Detail>

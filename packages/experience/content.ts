@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import rawContent from "../../fixtures/content-catalog.json";
 import rawReads from "../../fixtures/demo-balance-reads.json";
-import { contentEntrySchema, metricValueSchema, type Candidate, type ContentEntry, type ContentDecision } from "../contracts/domain";
+import { contentEntrySchema, metricValueSchema, type Candidate, type ContentEntry, type ContentDecision, type RouteDecision } from "../contracts/domain";
 
 export const contentCatalog = z.object({
   schemaVersion: z.literal("1.0"),
@@ -47,12 +47,21 @@ export function lookupContent(candidate: Candidate): ContentEntry | undefined {
   return content?.publicationStatus === "published" && content.version === candidate.contentVersion ? content : undefined;
 }
 
-export function modelBundle(decision: ContentDecision) {
+export function retirementReminderCandidate(decision: ContentDecision, route: RouteDecision) {
+  if (route.contextId === "learning" && route.intent.task === "explain"
+    && decision.candidates.some(({ contentId }) => contentId === "retirement_learning")) {
+    return decision.candidates.find(({ contentId }) => contentId === "beneficiary_update");
+  }
+  return undefined;
+}
+
+export function modelBundle(decision: ContentDecision, route?: RouteDecision) {
+  const reminder = route && retirementReminderCandidate(decision, route);
   return {
     decisionId: decision.decisionId,
     partial: decision.partial,
     selectionMode: decision.selectionMode,
-    candidates: decision.candidates.map((candidate) => {
+    candidates: decision.candidates.filter((candidate) => candidate !== reminder).map((candidate) => {
       const content = lookupContent(candidate);
       if (!content) throw new Error("CONTENT_UNAVAILABLE");
       return {

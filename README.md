@@ -46,9 +46,15 @@ Open [PZN Lab test preview](http://127.0.0.1:4174). The **Test mode** badge iden
 
 Try **Compare two terms** for the A2UI comparison. **Guide me through a task** opens the canonical transfer checklist and a portfolio follow-up. To see the eligible set and route decisions, open **Inspector**. Its persona and scenario settings create a new conversation. Type “Show my synthetic demo balance summary” for the read-only metric example.
 
+### Intent routing and clarification
+
+sfield sends the latest message, up to four recent user turns and any associated clarification questions, and the available intent catalog to the Context Router. The LLM selects an intent ID from the catalog. The host verifies the choice and maps it to a task and Treatment Selector context.
+
+When the goal is unclear, the router selects a focused question from the approved list and chat displays it. In a new chat, try “i will be 62” followed by “last day of job is next week.” Confirm that you want retirement planning information to route to `retirement_learning`. In a chat that already established retirement as the goal, the same messages can continue that topic directly. Use **Logs → Context Router** to see the input and decision.
+
 ### Portfolio Snapshot demo
 
-Ask **Let me know my portfolio summary** in **Normal eligibility**. The Context Router returns `portsum` with the `show` intent. sfield calls Treatment Selector with `{ context, mid }`. In this mock, its built-in CCRE rule adds **Explore investing options** to the eligible set when **Portfolio → Cash balance (USD) → Greater than → 10000** matches. A saved rule for the same scenario, context and treatment replaces that fixture rule.
+Ask **Let me know my portfolio summary** in **Normal eligibility**. The Context Router selects `show_portfolio`, which maps to the `portsum` context. sfield calls Treatment Selector with `{ context, mid }`. In this mock, its built-in CCRE rule adds **Explore investing options** to the eligible set when **Portfolio → Cash balance (USD) → Greater than → 10000** matches. A saved rule for the same scenario, context and treatment replaces that fixture rule.
 
 The **Portfolio Snapshot** provider supplies cash, equities, fixed income and the valuation date. sfield reads it through the scoped `portfolio.snapshot.read` tool and renders the values as an A2UI snapshot. The Experience Composer receives eligible portfolio suggestions for this requested summary. The host displays the cash amount from the same snapshot used in eligibility.
 
@@ -58,7 +64,7 @@ The POC uses synthetic accounts and a fixture implementation of `PortfolioSnapsh
 
 ### Retirement learning demo
 
-Choose **Learn about retirement** in a new chat with **Normal eligibility**. The Context Router selects `learning`. sfield sends that context and the demo member ID to Treatment Selector. The mock CCRE rule **Customer → Beneficiary status → Equals → Missing** controls whether Treatment Selector returns `beneficiary_update` alongside `retirement_learning`. The Composer selects the lesson, and sfield adds the eligible reminder when it renders the lesson.
+Choose **Learn about retirement** in a new chat with **Normal eligibility**. The Context Router selects the `retirement_learning` intent, which maps to the `learning` context. sfield sends that context and the demo member ID to Treatment Selector. The mock CCRE rule **Customer → Beneficiary status → Equals → Missing** controls whether Treatment Selector returns `beneficiary_update` alongside `retirement_learning`. The Composer selects the lesson, and sfield adds the eligible reminder when it renders the lesson.
 
 - **Demo learner** has missing beneficiary details. Chat shows **Retirement planning basics** and **Update your beneficiaries**. Click **See beneficiary update steps** for the A2UI demo guide.
 - **Demo returning visitor** has details on file. Chat shows **Retirement planning basics**.

@@ -94,8 +94,7 @@ function ContentBlock({ block }: { block: DisplayBlock }) {
 
 function Introduction({ intro, question, partial }: { intro: string; question: string | null; partial: boolean }) {
   return <>
-    <p className="experience-intro">{intro}</p>
-    {question && <p className="clarification">{question}</p>}
+    {question ? <p className="clarification">{question}</p> : <p className="experience-intro">{intro}</p>}
     {partial && <p className="partial-result">Some eligible items were unavailable in the demo catalog.</p>}
   </>;
 }

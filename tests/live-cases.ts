@@ -10,7 +10,7 @@ export type LiveCase = {
   exclude?: string[];
   scenario?: string;
   persona?: string;
-  prior?: string;
+  prior?: string | string[];
 };
 const ready = "ready";
 const balance = "balance";
@@ -48,6 +48,9 @@ export const liveCases: LiveCase[] = [
   { id: "portfolio-summary-threshold", message: "Let me know my portfolio summary.", route: portfolio, outcome: ready, component: "PznPortfolioSnapshot", exclude: ["portfolio_cash_investing", portfolioItem], persona: "demo-returning" },
   { id: "retirement-missing-beneficiary", message: "I'd like to learn about retirement.", route: "learning", outcome: ready, component: card, relevant: ["beneficiary_update"] },
   { id: "retirement-beneficiary-on-file", message: "I'd like to learn about retirement.", route: "learning", outcome: ready, component: card, relevant: ["retirement_learning"], exclude: ["beneficiary_update"], persona: "demo-returning" },
+  { id: "retirement-unclear", message: "last day of job is next week", prior: "i will be 62", route: "clarify", outcome: "clarify" },
+  { id: "retirement-confirmed", message: "yes", prior: ["i will be 62", "last day of job is next week"], route: "learning", outcome: ready, component: card, relevant: ["beneficiary_update"] },
+  { id: "retirement-inferred-follow-up", message: "last day of job is next week", prior: ["i want to know about retierment", "am old", "i am going to loose my job", "i will be 62"], route: "learning", outcome: ready, component: card, relevant: ["beneficiary_update"] },
   { id: "beneficiary-update-steps", message: "Show me the demo steps to update my beneficiaries.", route: "learning", outcome: ready, component: guide, relevant: ["beneficiary_update"] },
   { id: "transfer-overview", message: "Explain the fictional transfer flow.", route: home, outcome: ready, component: card, relevant: [transferIntro] },
   { id: "transfer-steps", message: "Walk me through the demo transfer steps.", route: home, outcome: ready, component: guide, relevant: [transferGuide] },
