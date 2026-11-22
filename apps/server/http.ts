@@ -9,7 +9,8 @@ import demo from "../../fixtures/host.json";
 import { type Bootstrap } from "../../packages/contracts/api";
 import { MAX_MESSAGE_LENGTH, type SelectionMode } from "../../packages/contracts/domain";
 import { tsFixtures } from "../../packages/ts-adapter";
-import { Runtime, type GatewaySettings } from "./runtime";
+import type { GatewaySettings } from "./gateway";
+import { Runtime } from "./runtime";
 import { ApiError, Store, presentConversation } from "./store";
 import { ExperienceService } from "./service";
 

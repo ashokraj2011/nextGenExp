@@ -4,14 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startApp } from "../apps/server/http";
-import { gatewayFromEnv } from "../apps/server/runtime";
+import { gatewayFromEnv } from "../apps/server/gateway";
 import type { SelectionMode } from "../packages/contracts/domain";
 import type { TurnView } from "../packages/contracts/api";
 import { testClient, testProject } from "./client";
 import { liveCases, type LiveCase } from "./live-cases";
 
 const gateway = gatewayFromEnv();
-if (!gateway) throw new Error("Set LLM_BASE_URL, LLM_MODEL and LLM_API_KEY before running gateway verification.");
+if (!gateway) throw new Error("Set LLM_BASE_URL, LLM_MODEL, and LLM_API_KEY or LLM_GATEWAY_HEADERS_JSON before running gateway verification.");
 const smoke = process.argv.includes("--smoke");
 const modes: SelectionMode[] = smoke ? ["semantic_rerank"] : ["semantic_rerank", "preserve_ts_rank"];
 const chosen = smoke ? liveCases.filter(({ id }) => ["balance-compare", "metric-summary", "transfer-steps"].includes(id)) : liveCases;

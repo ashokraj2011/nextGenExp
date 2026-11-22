@@ -1,5 +1,5 @@
 import { defineTool, estimateJsonTokens, estimateTokens, SField, ToolError } from "@sfield/core";
-import type { ConfigDocument, DefineToolInput, JsonObject, OpenAIQuirk, Principal, RunRecord, RunResult, ToolHandlerContext, Verifier } from "@sfield/core";
+import type { ConfigDocument, DefineToolInput, JsonObject, Principal, RunRecord, RunResult, ToolHandlerContext, Verifier } from "@sfield/core";
 import { SqlitePersistence } from "@sfield/store-sqlite";
 import host from "../../fixtures/host.json";
 import { MAX_MESSAGE_LENGTH, metricReadingSchema, TURN_DEADLINE, type BalanceProof } from "../../packages/contracts/domain";
@@ -12,6 +12,7 @@ import { scoreContexts } from "../../packages/propensity-adapter";
 import { contentCatalog, lookupContent, modelBundle, readDemoBalance, resolveCandidates } from "../../packages/experience/content";
 import { checkFresh, Rejected, requireCheck, verifyContextProposal, verifyExperience, verifyRoute } from "../../packages/experience/verify";
 import { makeId } from "../../packages/experience/compile";
+import { configureGateway, type GatewaySettings } from "./gateway";
 import { stageAgent, type ConversationRecord, type Stage, type StageAttempt, type Store, type TurnRecord } from "./store";
 
 export const toolIds = {
@@ -25,38 +26,6 @@ export function principalFor(id: string): Principal {
   return { tenantId: "pzn-local", subjectId: id, roles: ["pzn-demo", "pzn-developer"], attributes: {} };
 }
 const actions = new Set<string>(Object.values(toolIds));
-export type GatewaySettings = {
-  baseUrl: string;
-  model: string;
-  apiKey: string;
-  contextWindow: number;
-  maxOutputTokens: number;
-  quirks?: OpenAIQuirk[];
-};
-
-export function gatewayFromEnv(env: NodeJS.ProcessEnv = process.env): GatewaySettings | null {
-  const { LLM_BASE_URL: baseUrl, LLM_MODEL: model, LLM_API_KEY: apiKey } = env;
-  if (!baseUrl?.trim() || !model?.trim() || !apiKey?.trim()) return null;
-  let url: URL;
-  try { url = new URL(baseUrl); } catch { throw new Error("LLM_BASE_URL must be a valid Chat Completions prefix."); }
-  if (url.username || url.password || url.search || url.hash
-    || (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)))) {
-    throw new Error("LLM_BASE_URL must use HTTPS or a loopback HTTP gateway, with a path prefix only.");
-  }
-  const contextWindow = Number(env.LLM_CONTEXT_WINDOW || 16_384);
-  const maxOutputTokens = Number(env.LLM_MAX_OUTPUT_TOKENS || 1_500);
-  if (!Number.isSafeInteger(contextWindow) || !Number.isSafeInteger(maxOutputTokens)
-    || maxOutputTokens < 512 || contextWindow - maxOutputTokens < 2_048) {
-    throw new Error("The configured model limits leave insufficient space for routing and composition.");
-  }
-
-  const quirks = (env.LLM_QUIRKS || "").split(",").map((quirk) => quirk.trim()).filter(Boolean) as OpenAIQuirk[];
-  const supported: OpenAIQuirk[] = ["system_as_user", "no_stream_usage", "no_strict", "json_mode_only", "tool_choice_unsupported"];
-  if (new Set(quirks).size !== quirks.length || quirks.some((quirk) => !supported.includes(quirk))) {
-    throw new Error("LLM_QUIRKS contains an unsupported or repeated adapter option.");
-  }
-  return { baseUrl: baseUrl.trim().replace(/\/+$/, ""), model: model.trim(), apiKey, contextWindow, maxOutputTokens, quirks };
-}
 
 const routeInstructions = [
   "You are the PZN demo Context Router. Return only the ContextSelectionProposal JSON.",
@@ -101,21 +70,14 @@ function checkModelCapacity(settings: GatewaySettings) {
   }
 }
 
-function runtimeConfig(settings: GatewaySettings): ConfigDocument {
+function runtimeConfig(settings: GatewaySettings, model: JsonObject): ConfigDocument {
   checkModelCapacity(settings);
   const readOnly = { preset: "read_only" };
   const context = { output_reserve_tokens: settings.maxOutputTokens };
   const memory = { conversation: false, preferences: "off", facts: "off" };
   return {
     version: 1,
-    models: {
-      default: {
-        provider: "openai_compatible", model: settings.model, base_url: settings.baseUrl,
-        credential: { env: "LLM_API_KEY" },
-        limits: { context_window: settings.contextWindow, max_output_tokens: settings.maxOutputTokens },
-        quirks: settings.quirks ?? [],
-      },
-    },
+    models: { default: model },
     agents: {
       "context-router": {
         instructions: routeInstructions,
@@ -139,11 +101,12 @@ export class Runtime {
 
   static async open(store: Store, path: string, settings: GatewaySettings, now: () => number) {
     const runtime = new Runtime(store, now);
+    const gateway = configureGateway(settings);
     runtime.sf = await SField.create({
-      deployment: "durable_single", config: runtimeConfig(settings),
+      deployment: "durable_single", config: runtimeConfig(settings, gateway.model),
       persistence: new SqlitePersistence({ path }),
       namespace: "pzn-experience-runtime",
-      env: { LLM_API_KEY: settings.apiKey },
+      ...gateway.options,
       authorizer: {
         async authorize({ principal, action, effect }) {
           return principal.tenantId === "pzn-local" && principal.roles.includes("pzn-demo") && actions.has(action) && effect === "read"

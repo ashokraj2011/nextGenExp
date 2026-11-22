@@ -48,7 +48,16 @@ Try **Compare two terms** for the A2UI comparison. **Guide me through a task** o
 
 ### Live gateway
 
-Copy `.env.example` to `.env` or set the same values in the server environment. Supply `LLM_BASE_URL`, `LLM_MODEL`, and `LLM_API_KEY`. The URL is the gateway prefix before `/chat/completions`. Set `LLM_CONTEXT_WINDOW`, `LLM_MAX_OUTPUT_TOKENS`, and any `LLM_QUIRKS` from the gateway’s tested capabilities.
+Copy `.env.example` to `.env` or set the same values in the server environment. Set `LLM_BASE_URL` to the gateway prefix before `/chat/completions` and `LLM_MODEL` to the gateway model alias. Set `LLM_API_KEY` for Bearer authentication. Set `LLM_CONTEXT_WINDOW`, `LLM_MAX_OUTPUT_TOKENS`, and any `LLM_QUIRKS` from the gateway’s tested capabilities.
+
+If your gateway requires additional headers or request metadata, add JSON objects to your server environment.
+
+~~~dotenv
+LLM_GATEWAY_HEADERS_JSON='{"X-Client-Id":"pzn-lab","X-Gateway-Context":{"environment":"demo"}}'
+LLM_GATEWAY_BODY_JSON='{"metadata":{"application":"pzn-lab"}}'
+~~~
+
+The app sends header strings as written and serializes object or array values as JSON. For gateways that authenticate with a custom header, provide that header in `LLM_GATEWAY_HEADERS_JSON` and leave `LLM_API_KEY` empty. Use one source for the Authorization header. Keep credentials in the server environment or the ignored local `.env`. Extra body fields apply to both agents and their tool-call requests. The adapter manages the model, messages, tools, streaming, and response format.
 
 ~~~sh
 npm start
@@ -56,7 +65,7 @@ npm start
 
 Open [PZN Lab](http://127.0.0.1:4173). `npm run dev` runs the same local service with Vite development middleware. The application uses a loopback-only server, a per-browser local session, and SQLite files under `.pzn-data`. `PZN_PORT`, `PZN_DATA_DIR`, and `PZN_INSPECTOR=off` are optional server settings. For the alternate ranking mode, set `PZN_SELECTION_MODE=preserve_ts_rank`.
 
-The live adapter expects streamed Chat Completions, bearer credentials, function calls, and structured output. Other gateway protocols or authentication schemes require the corresponding sfield provider or credential resolver. Enterprise gateway verification is pending the gateway configuration. A shared deployment also needs the intended authentication and access configuration.
+The live adapter expects streamed Chat Completions, function calls, and structured output. Gateways with a different protocol or dynamic authentication require a provider or credential resolver that implements that contract. Enterprise gateway verification is pending the gateway configuration. A shared deployment also needs the intended authentication and access configuration.
 
 ## Verify the implementation
 

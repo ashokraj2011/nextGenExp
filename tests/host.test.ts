@@ -6,22 +6,33 @@ import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gatewayFromEnv } from "../apps/server/gateway";
+import type { IncomingHttpHeaders } from "node:http";
 import { startApp } from "../apps/server/http";
 import type { TurnAccepted, TurnView, ConversationView } from "../packages/contracts/api";
 import { actionFor, testClient, testProject } from "./client";
 import { startFixtureGateway, type TestInterceptor } from "./gateway-fixture";
 
-async function fixture(intercept?: TestInterceptor, opts: { noGateway?: boolean; preserve?: boolean } = {}) {
+async function fixture(intercept?: TestInterceptor, opts: {
+  noGateway?: boolean;
+  preserve?: boolean;
+  gatewayEnv?: NodeJS.ProcessEnv;
+  authorize?: (headers: IncomingHttpHeaders) => boolean;
+} = {}) {
   const dir = await mkdtemp(join(tmpdir(), "pzn-host-test-"));
-  const gateway = await startFixtureGateway(intercept);
+  const gateway = await startFixtureGateway(intercept, opts.authorize);
+  const settings = opts.gatewayEnv ? gatewayFromEnv({
+    LLM_BASE_URL: gateway.settings.baseUrl, LLM_MODEL: gateway.settings.model,
+    LLM_API_KEY: gateway.settings.apiKey, ...opts.gatewayEnv,
+  }) : gateway.settings;
   const options = {
-    projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: opts.noGateway ? null : gateway.settings, mode: "test",
+    projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: opts.noGateway ? null : settings, mode: "test",
     selectionMode: opts.preserve ? "preserve_ts_rank" : "semantic_rerank",
   } as const;
   let app = await startApp(options);
   const client = await testClient(app.url);
   return {
-    gateway, client,
+    gateway, client, dataDir: dir,
     async restart(prepare?: (dir: string) => void) {
       await app.close();
       prepare?.(dir);
@@ -321,4 +332,73 @@ test("stop after route commitment prevents treatment dispatch and composer admis
   assert.equal(state.tsScopeId, undefined);
   assert.equal(state.attempts.compose, undefined);
   assert.equal(gateway.calls.length, 1);
+});
+
+test("custom gateway headers and body fields reach every request, including tool calls", async (t) => {
+  const key = "pzn-header-only-test-key";
+  const context = { client: "pzn-lab", tier: "demo" };
+  const fields = { metadata: { purpose: "pzn-lab" }, region: "demo-east" };
+  const f = await fixture(undefined, {
+    gatewayEnv: {
+      LLM_API_KEY: "",
+      LLM_GATEWAY_HEADERS_JSON: JSON.stringify({ "X-Api-Key": key, "X-Gateway-Context": context }),
+      LLM_GATEWAY_BODY_JSON: JSON.stringify(fields),
+    },
+    authorize: (headers) => headers["x-api-key"] === key && headers.authorization === undefined,
+  });
+  t.after(() => f.close());
+  const conversation = await f.client.conversation();
+  const result = await f.client.ask(conversation.id, "Show my synthetic demo balance summary.");
+  assert.equal(result.turn.status, "completed", JSON.stringify(result.trace));
+  assert.equal(result.trace.metricReadSucceeded, true);
+  assert.equal(f.gateway.calls.length, 3);
+  for (const call of f.gateway.calls) {
+    assert.equal(call.headers["x-gateway-context"], JSON.stringify(context));
+    assert.equal(call.headers["content-type"], "application/json");
+    assert.equal(call.body.stream, true);
+    assert.equal(call.body.response_format.type, "json_schema");
+    assert.deepEqual(Object.fromEntries(Object.keys(fields).map((key) => [key, Reflect.get(call.body, key)])), fields);
+  }
+  assert.ok(!result.events.includes(key));
+});
+
+test("gateway configuration rejects ambiguous auth and attempts to replace adapter fields", () => {
+  const env = {
+    LLM_BASE_URL: "https://gateway.example.com/v1",
+    LLM_MODEL: "pzn-demo-model",
+    LLM_API_KEY: "gateway-test-bearer-token",
+  };
+  assert.throws(() => gatewayFromEnv({ ...env, LLM_GATEWAY_HEADERS_JSON: "[]" }), /must be a JSON object/);
+  assert.throws(() => gatewayFromEnv({
+    ...env, LLM_GATEWAY_HEADERS_JSON: JSON.stringify({ Authorization: "Basic example" }),
+  }), /Set Authorization/);
+  assert.throws(() => gatewayFromEnv({
+    ...env, LLM_GATEWAY_HEADERS_JSON: JSON.stringify({ "X-Client": "a\r\nX-Extra: b" }),
+  }), /invalid or duplicate header/);
+  assert.throws(() => gatewayFromEnv({
+    ...env, LLM_GATEWAY_BODY_JSON: JSON.stringify({ tools: [] }),
+  }), /cannot set fields controlled/);
+});
+
+test("gateway error reflection redacts credentials from a JSON-valued header", async (t) => {
+  const reflected = "pzn-json-token-never-persist";
+  const f = await fixture(
+    () => ({ status: 401, errorMessage: "Unknown credential " + reflected }),
+    { gatewayEnv: { LLM_GATEWAY_HEADERS_JSON: JSON.stringify({ "X-Gateway-Context": { token: reflected } }) } },
+  );
+  t.after(() => f.close());
+  const conversation = await f.client.conversation();
+  const result = await f.client.ask(conversation.id, "Explain demo balances.");
+  assert.equal(result.turn.failureCode, "gateway_unavailable");
+  assert.ok(!result.events.includes(reflected));
+  const database = new DatabaseSync(join(f.dataDir, "sfield.sqlite"), { readOnly: true });
+  try {
+    const attempts = database.prepare("SELECT body FROM model_attempts WHERE run_id = ?").all(result.trace.routerRunId!);
+    assert.ok(attempts.length);
+    const stored = JSON.stringify(attempts);
+    assert.ok(stored.includes("[REDACTED]"));
+    assert.ok(!stored.includes(reflected));
+  } finally {
+    database.close();
+  }
 });

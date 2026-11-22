@@ -1,6 +1,6 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { GatewaySettings } from "../apps/server/runtime";
+import type { GatewaySettings } from "../apps/server/gateway";
 import type { ComponentName, ContextSelectionProposal, ExperienceProposal, Intent } from "../packages/contracts/domain";
 import type { modelBundle } from "../packages/experience/content";
 
@@ -24,10 +24,10 @@ type RequestBody = {
   response_format: { type: string; json_schema?: { strict: boolean } };
   tools?: { function: { name: string } }[];
 };
-type GatewayCall = { envelope: Envelope; body: RequestBody };
+type GatewayCall = { envelope: Envelope; body: RequestBody; headers: IncomingHttpHeaders };
 type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string } };
 type ResponseData = ContextSelectionProposal | ExperienceProposal | Record<string, unknown>;
-export type TestResponse = { status?: number; json?: ResponseData; delayMs?: number; draft?: string; omitUsage?: boolean };
+export type TestResponse = { status?: number; json?: ResponseData; delayMs?: number; draft?: string; omitUsage?: boolean; errorMessage?: string };
 export type TestInterceptor = (call: GatewayCall) => TestResponse | void;
 const testKey = "pzn-test-gateway-key";
 
@@ -101,13 +101,16 @@ function compose({ body, envelope }: GatewayCall): ExperienceProposal | ToolCall
   return choose("PznContentCard", [get("Understanding the demo balance")], "explanation");
 }
 
-export async function startFixtureGateway(intercept?: TestInterceptor) {
+export async function startFixtureGateway(
+  intercept?: TestInterceptor,
+  authorize = (headers: IncomingHttpHeaders) => headers.authorization === "Bearer " + testKey,
+) {
   const calls: GatewayCall[] = [];
   const server = createServer((request, response) => {
     void (async () => {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(chunk);
-      if (request.url !== "/v1/chat/completions" || request.headers.authorization !== "Bearer " + testKey) {
+      if (request.url !== "/v1/chat/completions" || !authorize(request.headers)) {
         response.writeHead(401).end(JSON.stringify({ error: { message: "Test gateway authorization failed" } }));
         return;
       }
@@ -117,11 +120,11 @@ export async function startFixtureGateway(intercept?: TestInterceptor) {
         response.writeHead(400).end(JSON.stringify({ error: { message: "Unknown test gateway request" } }));
         return;
       }
-      const call = { envelope, body };
+      const call = { envelope, body, headers: request.headers };
       calls.push(call);
       const override = intercept?.(call);
       if (override?.status) {
-        response.writeHead(override.status, { "Content-Type": "application/json" }).end(JSON.stringify({ error: { message: "A controlled test failure" } }));
+        response.writeHead(override.status, { "Content-Type": "application/json" }).end(JSON.stringify({ error: { message: override.errorMessage ?? "A controlled test failure" } }));
         return;
       }
       if (override?.delayMs) {
