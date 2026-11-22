@@ -4,10 +4,10 @@ import { join, resolve, extname, sep } from "node:path";
 import type { AddressInfo } from "node:net";
 import type { ViteDevServer } from "vite";
 import { z } from "zod";
-import { ActionMessageSchema } from "@a2ui/web_core/v1_0";
 import demo from "../../fixtures/host.json";
 import { type Bootstrap } from "../../packages/contracts/api";
-import { MAX_MESSAGE_LENGTH, type SelectionMode } from "../../packages/contracts/domain";
+import type { SelectionMode } from "../../packages/contracts/domain";
+import { actionBody, createBody, eventBody, idPattern, messageBody, retryBody } from "../../packages/contracts/http-inputs";
 import { mockCcreRuleSchema, toolSetupSchema, treatmentPreviewSchema } from "../../packages/contracts/tool-setup";
 import { tsFixtures } from "../../packages/ts-adapter";
 import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
@@ -28,20 +28,12 @@ type Options = {
   inspectorEnabled?: boolean;
   portfolioSnapshots?: PortfolioSnapshotProvider;
 };
-const idPattern = /^[a-zA-Z0-9_-]{1,128}$/;
-const requestId = z.string().regex(idPattern);
-const messageBody = z.object({ message: z.string().trim().min(1).max(MAX_MESSAGE_LENGTH), clientRequestId: requestId }).strict();
-const createBody = z.object({ personaId: requestId, scenarioId: requestId }).strict();
 const beneficiaryStatusSchema = z.enum(["missing", "on_file"]);
-const retryBody = z.object({ clientRequestId: requestId }).strict();
-const actionBody = z.object({ clientRequestId: requestId, envelope: ActionMessageSchema }).strict();
-const eventBody = z.object({
-  eventId: requestId, experienceId: requestId, type: z.enum(["rendered", "render_fallback", "helpful", "unhelpful"]),
-}).strict();
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
-  ".woff2": "font/woff2", ".woff": "font/woff", ".json": "application/json", ".png": "image/png", ".svg": "image/svg+xml",
+  ".woff2": "font/woff2", ".woff": "font/woff", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml",
 };
+const pagePaths = new Set(["/", "/chat", "/help", "/planning", "/admin", "/__test/a2ui"]);
 
 function json(res: ServerResponse, body: unknown, status = 200) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
@@ -75,7 +67,7 @@ async function body<T>(req: IncomingMessage, schema: z.ZodType<T>, limit = 12 * 
 }
 
 async function serveAsset(pathname: string, root: string, res: ServerResponse) {
-  if (pathname !== "/" && pathname !== "/chat" && pathname !== "/admin" && pathname !== "/__test/a2ui" && !pathname.startsWith("/assets/")) {
+  if (!pagePaths.has(pathname) && !pathname.startsWith("/assets/")) {
     throw new ApiError(404, "not_found", "This page is unavailable.");
   }
   const path = resolve(root, "." + (pathname.startsWith("/assets/") ? decodeURIComponent(pathname) : "/index.html"));

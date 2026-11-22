@@ -2,6 +2,7 @@ import type { RunResult } from "@sfield/core";
 import demo from "../../fixtures/host.json";
 import { type FailureCode } from "../../packages/contracts/api";
 import { DECISION_TTL, TURN_DEADLINE, contextCatalogSchema, propensitySchema, type SelectionMode, type PropensityResult } from "../../packages/contracts/domain";
+import type { ContextRoutingInput, ExperienceCompositionInput } from "../../packages/contracts/model-inputs";
 import { isPortfolioSummary, portfolioSnapshotSchema } from "../../packages/contracts/portfolio";
 import { ruleGlossarySchema } from "../../packages/contracts/rule-glossary";
 import {
@@ -180,7 +181,7 @@ export class ExperienceService {
           recent,
           summaryFollowUpIntentId: summaryFollowUp?.intentId,
           request: turn.public.message,
-        }, signal, recovering);
+        } satisfies ContextRoutingInput, signal, recovering);
         current();
         this.store.update(id, (row) => { row.trace.routeRun = traceFor(result); });
         completed(result, "route");
@@ -329,7 +330,7 @@ export class ExperienceService {
         selectedIntentId: turn.trace.intentId ?? undefined, selectedContextId: route.contextId, eligible: modelBundle(decision, route),
         ...(portfolio && { portfolioSnapshotIncluded: true }),
         allowedQuestions: demo.clarificationQuestions,
-      }, signal, recovering);
+      } satisfies ExperienceCompositionInput, signal, recovering);
 
       const latest = current();
       this.store.update(id, (row) => { row.trace.composeRun = traceFor(result); });

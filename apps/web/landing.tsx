@@ -7,7 +7,7 @@ export function Landing() {
   return <div className="planning-home">
     <header className="planning-header">
       <div className="planning-width planning-header-inner">
-        <a className="planning-home-link" href="/" aria-current="page">Financial planning</a>
+        <a className="planning-home-link" href="/planning" aria-current="page">Financial planning</a>
         <nav className="planning-nav" aria-label="Planning topics">
           {planningTopics.map(({ id, name }) => <a key={id} href={"/chat?topic=" + id}>{name}</a>)}
         </nav>

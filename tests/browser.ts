@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { chromium } from "playwright";
 import { startTestPreview } from "./preview";
@@ -28,7 +28,7 @@ try {
   assert.equal(smoke.action.context.actionId, "smoke-issued-action-001");
   assert.equal(smoke.action.surfaceId, "integration-smoke-001");
   assert.equal(smoke.action.sourceComponentId, "open");
-  await page.goto(preview.url);
+  await page.goto(preview.url + "/planning");
   await page.getByRole("heading", { name: "Plan for what’s next.", level: 1 }).waitFor();
   const heroPhoto = page.getByRole("img", { name: "Two women walking together along a coastal path", exact: true });
   assert.equal(await heroPhoto.evaluate(async (image: HTMLImageElement) => {
@@ -37,7 +37,33 @@ try {
   }), true);
   await page.getByRole("link", { name: "Start a conversation", exact: true }).click();
   await page.getByText("Test mode", { exact: true }).waitFor();
-  assert.equal(await page.getByRole("link", { name: "Planning home", exact: true }).getAttribute("href"), "/");
+  await page.getByRole("link", { name: "PZN Lab", exact: true }).click();
+  assert.equal(new URL(page.url()).pathname, "/");
+  await page.getByRole("link", { name: "Help", exact: true }).click();
+  await page.getByRole("heading", { name: "How PZN Lab works", exact: true, level: 1 }).waitFor();
+  const walkthrough = page.getByRole("group", { name: "Demo walkthrough" });
+  const flow = page.getByRole("list", { name: "Turn flow" });
+  const stepDetails = page.locator("#step-details");
+  const stepInput = stepDetails.locator('pre[aria-label="Input JSON"]').first();
+  assert.equal(JSON.parse(await stepInput.innerText()).summaryFollowUpIntentId, "show_balance");
+  await flow.getByRole("button", { name: /Experience Composer/ }).click();
+  await stepDetails.getByText("Balance read and composer continuation", { exact: true }).click();
+  await stepDetails.getByText("Tool result sent back to the composer", { exact: true }).waitFor();
+  await walkthrough.getByRole("button", { name: "Portfolio summary", exact: true }).click();
+  await flow.getByRole("button", { name: /Portfolio Snapshot/ }).click();
+  assert.equal(JSON.parse(await stepDetails.locator('pre[aria-label="Output JSON"]').innerText()).cashCents, 1_250_000);
+  await walkthrough.getByRole("button", { name: "Create rule", exact: true }).click();
+  await flow.getByRole("button", { name: /CCRE glossary/ }).click();
+  await stepDetails.getByRole("link", { name: "CCRE glossary", exact: true }).click();
+  assert.equal(new URL(page.url()).hash, "#contracts");
+  await page.getByRole("heading", { name: "CCRE glossary", exact: true }).last().waitFor();
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download ccre-glossary.tool.json", exact: true }).click();
+  const glossarySchema = await download;
+  assert.equal(glossarySchema.suggestedFilename(), "ccre-glossary.tool.json");
+  assert.deepEqual(JSON.parse(await readFile(await glossarySchema.path(), "utf8")).input.required, ["turnRef", "routerRunId"]);
+  await page.getByRole("link", { name: "Back to chat", exact: true }).click();
+  assert.equal(new URL(page.url()).pathname, "/");
   await page.getByRole("heading", { name: "What would you like to explore?" }).waitFor();
   const logs = page.getByRole("dialog", { name: "Call logs" });
   const logsButton = page.getByRole("button", { name: "Open call logs", exact: true });
@@ -240,7 +266,7 @@ try {
   const portfolioPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   portfolioPage.setDefaultTimeout(12_000);
   portfolioPage.on("pageerror", (error) => pageErrors.push(error.message));
-  await portfolioPage.goto(preview.url);
+  await portfolioPage.goto(preview.url + "/planning");
   await portfolioPage.getByRole("link", { name: "Compare demo profiles", exact: true }).click();
   const aliceProfileTrigger = portfolioPage.getByRole("button", { name: "Demo profiles, current profile Alice Morgan", exact: true });
   const jordanProfileTrigger = portfolioPage.getByRole("button", { name: "Demo profiles, current profile Jordan Lee", exact: true });
@@ -293,7 +319,7 @@ try {
 
   const mobile = await browser.newPage({ viewport: { width: 360, height: 780 }, isMobile: true, deviceScaleFactor: 1, reducedMotion: "reduce", hasTouch: true });
   mobile.setDefaultTimeout(12_000);
-  await mobile.goto(preview.url);
+  await mobile.goto(preview.url + "/planning");
   const retirementLink = mobile.getByRole("navigation", { name: "Planning topics" }).getByRole("link", { name: "Retirement", exact: true });
   await retirementLink.waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -302,6 +328,12 @@ try {
   const mobileMessage = mobile.getByLabel("Your question");
   assert.equal(await mobileMessage.inputValue(), "I'd like to learn about retirement.");
   await mobileMessage.fill("");
+  await mobile.getByRole("link", { name: "Help", exact: true }).click();
+  await mobile.getByRole("heading", { name: "How PZN Lab works", exact: true }).waitFor();
+  assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await mobile.getByLabel("Select a contract", { exact: true }).selectOption("render");
+  await mobile.getByRole("heading", { name: "A2UI surfaces and actions", exact: true }).waitFor();
+  await mobile.getByRole("link", { name: "Back to chat", exact: true }).click();
   await mobile.getByRole("button", { name: "Demo profiles, current profile Alice Morgan", exact: true }).click();
   const mobileProfiles = mobile.getByRole("dialog", { name: "Demo profiles", exact: true });
   await mobileProfiles.getByRole("heading", { name: "Jordan Lee", exact: true }).waitFor();
@@ -354,7 +386,7 @@ try {
   await fallback.locator('[data-renderer="fallback"]').waitFor();
   await fallback.getByRole("heading", { name: "Compare demo definitions" }).waitFor();
   await fallback.getByText("Fictional demonstration only.", { exact: false }).waitFor();
-  console.log("Browser checks passed for the planning homepage, profile and topic links, A2UI, portfolio snapshots and CCRE eligibility, chat controls, logs, tool setup, 360 px layout, and renderer fallback.");
+  console.log("Browser checks passed for the chat homepage, Help walkthrough and contract downloads, planning overview, personalization, chat controls, logs, tool setup, and renderer fallback.");
 } finally {
   await browser?.close();
   await preview.close();

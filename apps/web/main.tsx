@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useAui, useAuiState, useExternalStoreRuntime, type ThreadMessageLike } from "@assistant-ui/react";
 import { CreateSurfaceMessageSchema, type ActionMessage } from "@a2ui/web_core/v1_0";
-import { ArrowLeft, BookOpenText, ChevronDown, Columns2, FileText, GraduationCap, ListChecks, Menu, MessageSquare, PanelRight, Plus, RotateCcw, Settings2, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { BookOpenText, ChevronDown, CircleHelp, Columns2, FileText, GraduationCap, ListChecks, Menu, MessageSquare, PanelRight, Plus, RotateCcw, Settings2, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { failureCopy, progressLabels, type Bootstrap, type Conversation, type ConversationView, type TurnView, type TurnAccepted, type Progress } from "../../packages/contracts/api";
 import { MAX_MESSAGE_LENGTH } from "../../packages/contracts/domain";
 import { api } from "./api";
@@ -370,7 +370,7 @@ function App() {
     {railOpen && <button className="rail-scrim" aria-label="Close conversations" onClick={() => setRailOpen(false)} />}
     <aside className={"rail" + (railOpen ? " rail-open" : "")} id="conversation-rail" aria-label="Conversation navigation">
       <div className="rail-header">
-        <a className="rail-home" href="/"><ArrowLeft size={18} aria-hidden="true" /> Planning home</a>
+        <a className="rail-home" href="/"><LabMark /> PZN Lab</a>
         <button className="icon-button rail-close" ref={railClose} aria-label="Close conversation navigation" onClick={() => setRailOpen(false)}><X size={20} /></button>
       </div>
       <button className="new-conversation" disabled={pending || !configuration} onClick={() => {
@@ -417,6 +417,9 @@ function App() {
             aria-haspopup="dialog" onClick={() => setPanel({ kind: "inspector" })}><PanelRight size={18} aria-hidden="true" /><span>Inspector</span></button>}
           {configuration?.inspectorEnabled && <button className="inspector-trigger call-logs-trigger icon-button" ref={logsTrigger} type="button"
             aria-label="Open call logs" aria-haspopup="dialog" title="Call logs" onClick={() => openLogs()}><FileText size={18} aria-hidden="true" /><span>Logs</span></button>}
+          <a className="inspector-trigger icon-button help-trigger" href="/help" aria-label="Help" title="Help">
+            <CircleHelp size={18} aria-hidden="true" /><span>Help</span>
+          </a>
         </div>
       </header>
       <Chat key={conversation?.id ?? "new"} conversation={conversation} configuration={configuration} pending={pending}
@@ -454,6 +457,6 @@ if (location.pathname === "/__test/a2ui") {
 } else if (location.pathname === "/admin") {
   void import("./admin").then(({ AdminPage }) => root.render(<AdminPage />));
 } else {
-  document.title = "Assistant · Financial planning";
+  document.title = "Assistant · PZN Lab";
   root.render(<App />);
 }

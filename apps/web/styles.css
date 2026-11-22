@@ -57,7 +57,7 @@ button { color: inherit; }
 .rail-header { display: flex; align-items: center; gap: 8px; margin: 0 5px 23px; }
 .rail-home {
   display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 4px 6px;
-  color: #f1f7ed; text-decoration: none; white-space: nowrap; font-size: .87rem; font-weight: 620;
+  color: #f1f7ed; text-decoration: none; white-space: nowrap; font-size: 1rem; font-weight: 700; letter-spacing: -.025em;
 }
 .rail-home:hover { text-decoration: underline; text-underline-offset: 4px; }
 .lab-mark {
@@ -125,7 +125,7 @@ button { color: inherit; }
 }
 .icon-button:hover:not(:disabled) { background: #eef3f5; color: var(--ink); }
 .inspector-trigger { min-height: 35px; border: 1px solid var(--line); font-size: .82rem; font-weight: 600; padding: 6px 9px; }
-.tool-setup-trigger { text-decoration: none; }
+.tool-setup-trigger, .help-trigger { text-decoration: none; }
 .rail .icon-button { color: #d5e1e7; }
 .rail .icon-button:hover { color: white; background: #325244; }
 
@@ -407,6 +407,8 @@ button { color: inherit; }
 }
 
 @media (max-width: 480px) {
+  .topbar { height: auto; min-height: 57px; flex-wrap: wrap; padding-block: 6px; }
+  .topbar-actions { margin-left: auto; }
   .call-logs-trigger span { display: none; }
   .profile-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
 }

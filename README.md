@@ -1,4 +1,4 @@
-# Financial planning demo
+# PZN Lab
 
 A local implementation of **PZN Intent to Experience POC v1.1**. The Word specification drives the routed design. The supplied contract pack provides the approved content, fictional balance reads, and composition proposal schema. This project adds routed context, propensity, and eligibility fixtures.
 
@@ -42,13 +42,15 @@ The same npm commands use any existing registry and authentication settings in y
 npm run test:preview
 ~~~
 
-Open the [test preview](http://127.0.0.1:4174) and click **Start a conversation**. The **Test mode** badge in chat identifies deterministic gateway responses. The preview runs those responses through real sfield, the host verifiers, SQLite, assistant-ui, and the A2UI renderer. It uses temporary data for each server launch.
+Open the [test preview](http://127.0.0.1:4174) to start in chat. The **Test mode** badge identifies deterministic gateway responses. The preview runs those responses through real sfield, the host verifiers, SQLite, assistant-ui, and the A2UI renderer. It uses temporary data for each server launch.
 
 Try **Compare two terms** for the A2UI comparison. **Guide me through a task** opens the canonical transfer checklist and a portfolio follow-up. To see the eligible set and route decisions, open **Inspector**. Its persona and scenario settings create a new conversation. Type “Show my synthetic demo balance summary” for the read-only metric example.
 
-### Planning homepage
+### Help and planning overview
 
-The homepage is at `/`. **Portfolio**, **Retirement**, and **Balances** open `/chat` with a question you can edit before sending. **Compare demo profiles** opens the profile picker in chat.
+Chat opens at `/` and `/chat`. The **PZN Lab** link returns to the homepage. Open **Help** at `/help` for interactive turn walkthroughs, sample payloads and downloadable runtime contracts.
+
+The planning overview is at `/planning`. **Portfolio**, **Retirement**, and **Balances** open chat with a question you can edit before sending. **Compare demo profiles** opens the profile picker in chat.
 
 The original hero photograph in `apps/web/assets/coastal-planning.jpg` was generated with ImageGen using this prompt.
 
