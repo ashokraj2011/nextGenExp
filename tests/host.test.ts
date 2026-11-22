@@ -568,11 +568,11 @@ test("portfolio summaries combine the scoped snapshot with the cash treatment on
   assert.equal(missing.turn.experience, undefined);
 });
 
-test("retirement education includes the update card and action only when beneficiary details are missing", async (t) => {
+test("a misspelled retirement request reaches Learning and shows the beneficiary action only when eligible", async (t) => {
   const f = await fixture();
   t.after(() => f.close());
   const { client } = f;
-  const question = "I'd like to learn about retirement.";
+  const question = "i want to know about retierment";
 
   for (const [personaId, mid, missing] of [
     ["demo-learner", "DEMO-MID-1001", true],
