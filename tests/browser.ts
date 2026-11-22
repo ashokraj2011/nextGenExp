@@ -124,6 +124,33 @@ try {
   await chatWithMock.fill("Explain the fictional portfolio view.");
   await chatWithMock.press("Enter");
   await page.getByText("There is no eligible demo content available for this request.", { exact: true }).waitFor();
+
+  await page.getByRole("link", { name: "Tool setup" }).click();
+  await page.getByRole("button", { name: "Create rule", exact: true }).click();
+  await page.getByLabel("Rule name", { exact: true }).fill("Available definition for learners");
+  await page.getByLabel("Target treatment", { exact: true }).selectOption("balance_available_definition");
+  await page.getByLabel("Mock condition", { exact: true }).selectOption("persona_is");
+  await page.getByLabel("Matching persona", { exact: true }).selectOption("demo-learner");
+  await page.getByLabel("CCRE source (optional)", { exact: true }).fill("Sample source retained for the CCRE integration.");
+  await page.screenshot({ path: resolve(screenshots, "ccre-rule-editor.png"), fullPage: true });
+  await page.getByRole("button", { name: "Add rule", exact: true }).click();
+  await page.getByRole("button", { name: "Run preview", exact: true }).click();
+  await page.getByText("Matched", { exact: true }).waitFor();
+  await page.getByLabel("Demo persona", { exact: true }).selectOption("demo-returning");
+  await page.getByRole("button", { name: "Run preview", exact: true }).click();
+  await page.getByText("Excluded", { exact: true }).waitFor();
+  assert.deepEqual(await page.getByRole("list", { name: "Eligible content in rank order" }).locator("code").allTextContents(), [
+    "balance_current_definition",
+  ]);
+  await page.screenshot({ path: resolve(screenshots, "ccre-rule-preview.png"), fullPage: true });
+  await page.getByRole("button", { name: "Save and test in chat", exact: true }).click();
+  await page.getByRole("button", { name: /Compare two terms/ }).click();
+  await page.getByText("No suitable eligible demo content was selected for this request.", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Open developer inspector", exact: true }).click();
+  await page.getByText("Request and response payloads", { exact: true }).click();
+  await page.getByText("Treatment Selector · succeeded", { exact: true }).click();
+  await page.getByText("Mock CCRE evaluation", { exact: true }).click();
+  assert.match(await page.locator('pre[aria-label="Mock CCRE evaluation"]').innerText(), /"outcome": "excluded"/);
   assert.deepEqual(pageErrors, []);
 
   const mobile = await browser.newPage({ viewport: { width: 360, height: 780 }, isMobile: true, deviceScaleFactor: 1, reducedMotion: "reduce", hasTouch: true });
@@ -144,6 +171,9 @@ try {
   await mobile.getByRole("link", { name: "Tool setup" }).click();
   await mobile.getByRole("heading", { name: "Treatment Selector mock" }).waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await mobile.getByRole("button", { name: "Create rule", exact: true }).click();
+  assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await mobile.getByRole("button", { name: "Cancel", exact: true }).click();
   await mobile.getByRole("button", { name: "Run preview" }).click();
   await mobile.getByText("Ranked eligible content", { exact: true }).waitFor();
   await mobile.screenshot({ path: resolve(screenshots, "tool-setup-mobile.png"), fullPage: true });
@@ -159,7 +189,7 @@ try {
   await fallback.locator('[data-renderer="fallback"]').waitFor();
   await fallback.getByRole("heading", { name: "Compare demo definitions" }).waitFor();
   await fallback.getByText("Fictional demonstration only.", { exact: false }).waitFor();
-  console.log("Browser checks passed for A2UI actions, comparison, sources, follow-up, refresh, inspector, stop, retry UI, draft retention, steps, 360 px layout, tool setup, and canonical renderer fallback.");
+  console.log("Browser checks passed for A2UI actions, comparison, sources, follow-up, refresh, inspector, stop, retry UI, draft retention, steps, 360 px layout, tool setup, CCRE rules, and canonical renderer fallback.");
 } finally {
   await browser?.close();
   await preview.close();

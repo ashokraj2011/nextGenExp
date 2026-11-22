@@ -4,7 +4,7 @@ import type { UsageSummary } from "@sfield/core";
 import type { CatalogSnapshot, ContentDecision, PropensityResult, RouteDecision, BalanceProof, Scope, SelectionMode } from "../../packages/contracts/domain";
 import type { Conversation, FailureCode, Progress, PublicEvent, PublicEventType, TurnView } from "../../packages/contracts/api";
 import type { GatewayExchange } from "../../packages/contracts/inspector";
-import { defaultToolSetup, type ToolSetup, type TreatmentSource } from "../../packages/contracts/tool-setup";
+import { defaultToolSetup, type MockCcreEvaluation, type ToolSetup, type TreatmentSource } from "../../packages/contracts/tool-setup";
 import type { CompiledExperience, IssuedAction } from "../../packages/experience/compile";
 import { makeId } from "../../packages/experience/compile";
 import type { Rejection } from "../../packages/ts-adapter";
@@ -54,6 +54,7 @@ export type TurnRecord = {
   catalogScopeId?: string;
   tsScopeId?: string;
   treatmentMockInput?: { mid: string; context: string };
+  treatmentCcre?: MockCcreEvaluation;
   catalog?: CatalogSnapshot;
   propensity?: PropensityResult;
   route?: RouteDecision;

@@ -58,6 +58,15 @@ Open **Tool setup** from the chat header. Turn the four registered read-only too
 
 **Run preview** uses the current settings, selected demo persona and turn number. The local Treatment Selector adapter responds directly, so the preview works without LLM gateway credentials. **Save settings** stores the configuration in SQLite for this browser session. New chat requests, including explicit retries, pick up the saved settings. Use **Inspector** after a chat turn to see its Treatment Selector result. Set `PZN_INSPECTOR=off` to hide the tool setup page and disable its API.
 
+#### Create and test a CCRE mock rule
+
+1. In **Tool setup**, select **Normal eligibility** and **Balances**, then click **Create rule** under **CCRE rules**.
+2. Target **Available balance: demo definition**, use **Demo persona is**, select **Demo learner**, and click **Add rule**. The optional CCRE source is stored for future integration. The mock evaluates the condition controls.
+3. Click **Run preview** for **Demo learner**, then change the preview persona to **Demo returning visitor** and run it again. The evaluation shows whether the rule matched and the ranked IDs before and after filtering.
+4. Click **Save and test in chat** and choose **Compare two terms**. This starts a new conversation with the selected persona and scenario. Open **Inspector → Request and response payloads → Treatment Selector → Mock CCRE evaluation** to see the result on the chat turn.
+
+Rules apply to the selected scenario, context and treatment. They filter its fixture or configured ranked list and keep the order of surviving IDs. **From turn number** includes that turn and later turns. **Test in chat** starts at turn 1. Save rule edits or removals to apply them to subsequent chat requests.
+
 ### Live gateway
 
 Copy `.env.example` to `.env` or set the same values in the server environment. Set `LLM_BASE_URL` to the gateway prefix before `/chat/completions` and `LLM_MODEL` to the gateway model alias. Set `LLM_API_KEY` for Bearer authentication. Set `LLM_CONTEXT_WINDOW`, `LLM_MAX_OUTPUT_TOKENS`, and any `LLM_QUIRKS` from the gateway’s tested capabilities.

@@ -29,6 +29,7 @@ export type TreatmentPayloads = {
   status: string;
   registryInput: InspectorPayload;
   mockInput?: InspectorPayload;
+  ccre?: InspectorPayload;
   result?: InspectorPayload;
   error?: InspectorPayload;
 };

@@ -11,7 +11,9 @@ import type { IncomingHttpHeaders } from "node:http";
 import { startApp } from "../apps/server/http";
 import type { TurnAccepted, TurnView, ConversationView } from "../packages/contracts/api";
 import type { TurnPayloads } from "../packages/contracts/inspector";
-import { defaultToolSetup, type ToolSetup, type ToolSetupView, type TreatmentPreviewInput } from "../packages/contracts/tool-setup";
+import {
+  defaultToolSetup, type MockCcreRule, type ToolSetup, type ToolSetupView, type TreatmentPreview, type TreatmentPreviewInput,
+} from "../packages/contracts/tool-setup";
 import { actionFor, testClient, testProject } from "./client";
 import { startFixtureGateway, type TestInterceptor } from "./gateway-fixture";
 
@@ -142,6 +144,79 @@ test("saved tool settings are isolated by browser and take effect on subsequent 
   await restored.request(path, { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, catalog: false } });
   const missing = await restored.ask(conversation.id, message);
   assert.equal(missing.turn.failureCode, "catalog_unavailable");
+});
+
+test("CCRE mock rules filter ranked treatments the same way in preview and chat", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const { client } = f;
+  const contentIds = ["balance_current_definition", "balance_available_definition"];
+  const rule: MockCcreRule = {
+    scenarioId: "normal", contextId: "balance", contentId: contentIds[1], name: "Available definition for learners",
+    source: "Opaque CCRE source kept for integration.",
+    condition: { kind: "persona_is", personaId: "demo-learner" },
+  };
+  const output = { mode: "ranked", contentIds } as const;
+  const input: TreatmentPreviewInput = {
+    scenarioId: "normal", contextId: "balance", personaId: "demo-learner", ordinal: 1, enabled: true, output, ccreRules: [rule],
+  };
+  const preview = "/api/admin/treatment-preview";
+  const matched = await client.request<TreatmentPreview>(preview, input);
+  assert.ok(matched.status === "ranked");
+  assert.deepEqual(matched.contentIds, contentIds);
+  assert.equal(matched.ccre?.results[0].outcome, "matched");
+
+  const excluded = await client.request<TreatmentPreview>(preview, { ...input, personaId: "demo-returning" });
+  assert.ok(excluded.status === "ranked");
+  assert.deepEqual(excluded.contentIds, [contentIds[0]]);
+  assert.deepEqual(excluded.ccre, {
+    beforeRules: contentIds,
+    results: [{ contentId: rule.contentId, name: rule.name, outcome: "excluded" }],
+  });
+  const outsideList = await client.request<TreatmentPreview>(preview, {
+    ...input, output: { mode: "ranked", contentIds: [contentIds[0]] },
+  });
+  assert.ok(outsideList.status === "ranked");
+  assert.deepEqual(outsideList.contentIds, [contentIds[0]]);
+  assert.equal(outsideList.ccre?.results[0].outcome, "outside_list");
+
+  const secondTurnRule: MockCcreRule = { ...rule, condition: { kind: "from_turn", ordinal: 2 } };
+  for (const ordinal of [1, 2]) {
+    const response = await client.request<TreatmentPreview>(preview, { ...input, ordinal, ccreRules: [secondTurnRule] });
+    assert.ok(response.status === "ranked");
+    assert.equal(response.contentIds.includes(rule.contentId), ordinal === 2);
+  }
+
+  const path = "/api/admin/tools";
+  const setup: ToolSetup = { ...defaultToolSetup, treatmentOverrides: [{ scenarioId: "normal", contextId: "balance", output }], ccreRules: [rule] };
+  await client.request(path, { ...setup, ccreRules: [rule, rule] }, 400);
+  await client.request(path, { ...setup, ccreRules: [{ ...rule, contentId: "promotion_blocked" }] }, 400);
+  await client.request(path, { ...setup, ccreRules: [{ ...rule, scenarioId: "cross-turn-change" }] }, 400);
+  await client.request(preview, { ...input, ccreRules: [{ ...rule, contextId: "portsum" }] }, 400);
+  assert.deepEqual(await client.request<ToolSetup>(path, setup), setup);
+
+  const message = "Compare available and current balance.";
+  const learner = await client.conversation("normal", "demo-learner");
+  const passing = await client.ask(learner.id, message);
+  assert.equal(passing.turn.experience?.blocks[0].component, "PznComparison");
+  assert.deepEqual(passing.trace.ts?.baseline, contentIds);
+
+  const returning = await client.conversation("normal", "demo-returning");
+  const failing = await client.ask(returning.id, message);
+  assert.equal(failing.turn.experience?.outcome, "no_match");
+  assert.deepEqual(failing.trace.ts?.baseline, excluded.contentIds);
+  assert.ok(failing.trace.ts?.rejections.some(({ contentId, reasonCode }) => contentId === rule.contentId && reasonCode === "RULE_FALSE"));
+  const payloads = await client.request<TurnPayloads>("/api/debug/payloads/" + failing.turn.id);
+  assert.deepEqual(payloads.treatment?.result?.data, excluded.contentIds);
+  assert.deepEqual(payloads.treatment?.ccre?.data, excluded.ccre);
+  assert.ok(!JSON.stringify(payloads).includes(rule.source!));
+  const composer = f.gateway.calls.at(-1)?.envelope.eligible;
+  assert.deepEqual(composer?.candidates.map(({ title }) => title), ["Current balance: demo definition"]);
+
+  const restarted = await f.restart();
+  assert.deepEqual((await restarted.request<ToolSetupView>(path)).setup.ccreRules, [rule]);
+  const restored = await restarted.request<TurnPayloads>("/api/debug/payloads/" + failing.turn.id);
+  assert.deepEqual(restored.treatment?.ccre?.data, excluded.ccre);
 });
 
 test("the inspector setting also closes the tool setup page and API", async (t) => {

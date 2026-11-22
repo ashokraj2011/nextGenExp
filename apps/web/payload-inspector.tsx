@@ -65,6 +65,7 @@ function TreatmentStage({ stage }: { stage: TreatmentPayloads | null }) {
       <p><code>{stage.tool}</code></p>
       <JsonBlock title="sfield tool request" value={stage.registryInput} />
       {stage.mockInput && <JsonBlock title="Mock request" value={stage.mockInput} open />}
+      {stage.ccre && <JsonBlock title="Mock CCRE evaluation" value={stage.ccre} />}
       <JsonBlock title={stage.error ? "Tool error" : "Tool response"} value={stage.error ?? stage.result} open />
     </> : <p>No Treatment Selector call recorded for this turn.</p>}
   </details>;

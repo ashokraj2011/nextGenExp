@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { contextCatalogSchema, type ContextCatalog } from "../contracts/domain";
-import { normalizedIdsSchema, treatmentOverride, type MockOutput, type TreatmentOverride } from "../contracts/tool-setup";
+import { normalizedIdsSchema, treatmentOverride, type MockCcreRule, type TreatmentOverride } from "../contracts/tool-setup";
 import rawCatalog from "../../fixtures/contexts.json";
 import rawScenarios from "../../fixtures/treatment-scenarios.json";
 import host from "../../fixtures/host.json";
+import { applyMockCcreRules } from "./mock-ccre";
 
 const rejectionSchema = z.object({
   contentId: z.string(), stage: z.enum(["simulated_ccre", "catalog_resolution"]), reasonCode: z.string(),
@@ -37,9 +38,10 @@ if (new Set(catalog.contexts.map((entry) => entry.contextId)).size !== catalog.c
 }
 
 export type FixtureState = Readonly<{ scenarioId: string; ordinal: number }>;
+type TreatmentRequest = { mid: string; context: string };
 export interface TsAdapter {
   listContexts(signal?: AbortSignal): Promise<ContextCatalog>;
-  getRankedEligibleIds(request: { mid: string; context: string }, signal?: AbortSignal): Promise<string[]>;
+  getRankedEligibleIds(request: TreatmentRequest, signal?: AbortSignal): Promise<string[]>;
 }
 
 function fixtureRuleFor(state: FixtureState, context: string) {
@@ -59,7 +61,11 @@ export class TreatmentSelectorTimeout extends Error {
 }
 
 export class FixtureTsAdapter implements TsAdapter {
-  constructor(private readonly state: FixtureState, private readonly overrides: readonly TreatmentOverride[] = []) {}
+  constructor(
+    private readonly state: FixtureState,
+    private readonly overrides: readonly TreatmentOverride[] = [],
+    private readonly ccreRules: readonly MockCcreRule[] = [],
+  ) {}
 
   async listContexts(signal?: AbortSignal): Promise<ContextCatalog> {
     signal?.throwIfAborted();
@@ -67,22 +73,23 @@ export class FixtureTsAdapter implements TsAdapter {
     return activeContextCatalog;
   }
 
-  async getRankedEligibleIds({ mid, context }: { mid: string; context: string }, signal?: AbortSignal): Promise<string[]> {
+  async getRankedEligibleIds(request: TreatmentRequest, signal?: AbortSignal): Promise<string[]> {
+    return this.selectEligibleContent(request, signal).contentIds;
+  }
+
+  selectEligibleContent({ mid, context }: TreatmentRequest, signal?: AbortSignal) {
     signal?.throwIfAborted();
-    const authorized = host.personas.some((persona) => (
+    const persona = host.personas.find((persona) => (
       persona.syntheticMid === mid && persona.allowedScenarios.includes(this.state.scenarioId)
     ));
-    if (!authorized || !activeContexts.some((entry) => entry.contextId === context)) {
+    if (!persona || !activeContexts.some((entry) => entry.contextId === context)) {
       throw new Error("UNCONFIGURED_TS_SCOPE");
     }
 
-    const override: MockOutput | undefined = treatmentOverride(this.overrides, this.state.scenarioId, context)?.output;
-    if (override) {
-      if (override.mode === "timeout") throw new TreatmentSelectorTimeout();
-      return override.mode === "empty" ? [] : [...override.contentIds];
-    }
-    const rule = fixtureRuleFor(this.state, context);
-    if (rule?.error) throw new TreatmentSelectorTimeout();
-    return [...(rule?.eligible ?? tsFixtures.base[context])];
+    const override = treatmentOverride(this.overrides, this.state.scenarioId, context)?.output;
+    const fixture = override ? undefined : fixtureRuleFor(this.state, context);
+    if (override?.mode === "timeout" || fixture?.error) throw new TreatmentSelectorTimeout();
+    const ids = override?.mode === "empty" ? [] : (override?.contentIds ?? fixture?.eligible ?? tsFixtures.base[context]);
+    return applyMockCcreRules([...ids], this.ccreRules, { ...this.state, contextId: context, personaId: persona.personaId });
   }
 }

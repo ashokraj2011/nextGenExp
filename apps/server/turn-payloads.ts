@@ -79,6 +79,7 @@ async function treatmentPayloads(sf: SField, inspection: Inspection, turn: TurnR
     tool, status: call.result?.status ?? call.state,
     registryInput: inspection.payload(call.invocation?.normalizedInputs ?? call.proposedArguments),
     mockInput: mockInput ? inspection.payload(mockInput) : undefined,
+    ccre: turn.treatmentCcre ? inspection.payload(turn.treatmentCcre) : undefined,
     result: call.result?.output === undefined ? undefined : inspection.payload(call.result.output),
     error: call.result?.error ? inspection.payload({ ...call.result.error }) : undefined,
   };

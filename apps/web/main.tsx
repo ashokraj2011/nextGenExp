@@ -6,6 +6,7 @@ import { BookOpenText, Columns2, ListChecks, Menu, MessageSquare, PanelRight, Pl
 import { failureCopy, progressLabels, type Bootstrap, type Conversation, type ConversationView, type TurnView, type TurnAccepted, type Progress } from "../../packages/contracts/api";
 import { MAX_MESSAGE_LENGTH } from "../../packages/contracts/domain";
 import { api } from "./api";
+import { readActiveConversation, rememberActiveConversation } from "./conversation-storage";
 import { Inspector } from "./inspector";
 import { BasicSmoke, ExperienceControls, ExperienceDataUI, installA2uiStyles } from "./surface";
 import "@fontsource-variable/inter/wght.css";
@@ -186,12 +187,6 @@ function Chat({ conversation, configuration, pending, draft, onDraft, onSend, on
   </AssistantRuntimeProvider>;
 }
 
-function localRead() {
-  try { return localStorage.getItem("pzn-active-conversation"); } catch { return null; }
-}
-function localWrite(id: string) {
-  try { localStorage.setItem("pzn-active-conversation", id); } catch { /* Storage may be restricted. */ }
-}
 function messageFor(error: unknown) {
   return error instanceof Error && error.name !== "TypeError" ? error.message : "Couldn’t reach the demo. Your draft is still here.";
 }
@@ -219,7 +214,7 @@ function App() {
   const choose = (row: ConversationView) => {
     setConversation(row);
     remember(row);
-    localWrite(row.id);
+    rememberActiveConversation(row.id);
     setRailOpen(false);
   };
 
@@ -228,7 +223,7 @@ function App() {
     void api.bootstrap().then(async (data) => {
       if (!mounted) return;
       setConversations(data.conversations);
-      const preferred = data.conversations.find((row) => row.id === localRead()) ?? data.conversations[0];
+      const preferred = data.conversations.find((row) => row.id === readActiveConversation()) ?? data.conversations[0];
       if (preferred) {
         const restored = await api.conversation(preferred.id);
         if (mounted) choose(restored);

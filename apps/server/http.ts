@@ -45,12 +45,11 @@ function json(res: ServerResponse, body: unknown, status = 200) {
   res.end(JSON.stringify(body));
 }
 
-async function body<T>(req: IncomingMessage, schema: z.ZodType<T>): Promise<T> {
+async function body<T>(req: IncomingMessage, schema: z.ZodType<T>, limit = 12 * 1024): Promise<T> {
   if (!/^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] ?? "")) {
     throw new ApiError(415, "unsupported_content_type", "Send an application/json request.");
   }
 
-  const limit = 12 * 1024;
   if (Number(req.headers["content-length"]) > limit) throw new ApiError(413, "request_too_large", "This request is too large.");
   const chunks: Buffer[] = [];
   let size = 0;
@@ -158,15 +157,16 @@ export async function startApp(options: Options) {
       return json(res, state);
     }
     if (resource === "admin" && inspectorEnabled && !operation) {
+      const toolSetupLimit = 768 * 1024;
       if (id === "tools" && method === "GET") return json(res, toolSetupView(store.toolSetup(principalId)));
       if (id === "tools" && method === "POST") {
-        const setup = await body(req, toolSetupSchema);
+        const setup = await body(req, toolSetupSchema, toolSetupLimit);
         validateToolSetup(setup);
         store.saveToolSetup(principalId, setup);
         return json(res, setup);
       }
       if (id === "treatment-preview" && method === "POST") {
-        return json(res, await previewTreatmentSelector(await body(req, treatmentPreviewSchema)));
+        return json(res, await previewTreatmentSelector(await body(req, treatmentPreviewSchema, toolSetupLimit)));
       }
     }
     if (resource === "conversations") {

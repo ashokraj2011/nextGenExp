@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowLeft, ArrowUp, FlaskConical, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, FlaskConical, MessageSquare, Trash2 } from "lucide-react";
 import {
-  sfieldTools, toolKeys, toolVersion, treatmentOverride,
-  type MockOutput, type ToolSetup, type ToolSetupView, type TreatmentPreview, type TreatmentPreviewInput,
+  MAX_CCRE_RULES, sfieldTools, toolKeys, toolVersion, treatmentOverride,
+  type MockCcreRule, type MockOutput, type ToolSetup, type ToolSetupView, type TreatmentPreview, type TreatmentPreviewInput,
 } from "../../packages/contracts/tool-setup";
 import { api, RequestError } from "./api";
+import { CcreRuleEditor } from "./ccre-rule-editor";
+import { rememberActiveConversation } from "./conversation-storage";
 import "./admin.css";
 
 function messageFor(error: unknown) {
@@ -51,7 +53,21 @@ function PreviewResult({ result }: { result: TreatmentPreview }) {
   return <>
     <strong>{result.status === "timeout" ? "Simulated timeout" : result.status === "empty" ? "No eligible content" : "Ranked eligible content"}</strong>
     <p>{source}</p>
-    {result.status === "ranked" && <ol>{result.contentIds.map((id) => <li key={id}><code>{id}</code></li>)}</ol>}
+    {result.status === "ranked" && <ol aria-label="Eligible content in rank order">{result.contentIds.map((id) => <li key={id}><code>{id}</code></li>)}</ol>}
+    {result.status !== "timeout" && result.ccre && <div className="admin-ccre-result">
+      <h4>Mock CCRE evaluation</h4>
+      <ul>
+        {result.ccre.results.map(({ name, contentId, outcome }) => <li key={contentId}>
+          <strong>{name}</strong>
+          <code>{contentId}</code>
+          <span>{outcome === "matched" ? "Matched" : outcome === "excluded" ? "Excluded" : "Outside the ranked list"}</span>
+        </li>)}
+      </ul>
+      <details>
+        <summary>Ranked content before rules</summary>
+        {result.ccre.beforeRules.length ? <ol>{result.ccre.beforeRules.map((id) => <li key={id}><code>{id}</code></li>)}</ol> : <p>Empty list</p>}
+      </details>
+    </div>}
   </>;
 }
 
@@ -64,17 +80,22 @@ function ToolSetupForm({ data }: { data: ToolSetupView }) {
   const [ordinal, setOrdinal] = useState("1");
   const [saving, setSaving] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  const [startingChat, setStartingChat] = useState(false);
   const [saveNotice, setSaveNotice] = useState("");
   const [saveError, setSaveError] = useState("");
+  const [chatError, setChatError] = useState("");
   const [preview, setPreview] = useState<{ key: string; result: TreatmentPreview } | { key: string; error: string }>();
   const personas = data.personas.filter((persona) => persona.allowedScenarios.includes(scenarioId));
   const personaId = personas.some((entry) => entry.personaId === previewPersona) ? previewPersona : personas[0]?.personaId;
   const rule = treatmentOverride(setup.treatmentOverrides, scenarioId, contextId);
   const output = rule?.output ?? null;
+  const allCcreRules = setup.ccreRules ?? [];
+  const inSelectedScope = (entry: MockCcreRule) => entry.scenarioId === scenarioId && entry.contextId === contextId;
+  const ccreRules = allCcreRules.filter(inSelectedScope);
   const dirty = JSON.stringify(saved) !== JSON.stringify(setup);
-  const incompleteRule = setup.treatmentOverrides.some(({ output }) => output.mode === "ranked" && !output.contentIds.length);
+  const incompleteRankedResponse = setup.treatmentOverrides.some(({ output }) => output.mode === "ranked" && !output.contentIds.length);
   const previewInput: TreatmentPreviewInput = {
-    personaId, scenarioId, contextId, ordinal: Number(ordinal), enabled: setup.enabled.selection, output,
+    personaId, scenarioId, contextId, ordinal: Number(ordinal), enabled: setup.enabled.selection, output, ccreRules,
   };
   const previewKey = JSON.stringify(previewInput);
   const previewResult = preview?.key === previewKey ? preview : undefined;
@@ -85,13 +106,15 @@ function ToolSetupForm({ data }: { data: ToolSetupView }) {
     setSetup(next);
     setSaveNotice("");
     setSaveError("");
+    setChatError("");
   }
   function changeOutput(next: MockOutput | null) {
     const remaining = setup.treatmentOverrides.filter((entry) => entry !== rule);
     edit({ ...setup, treatmentOverrides: next ? [...remaining, { scenarioId, contextId, output: next }] : remaining });
   }
   async function save() {
-    if (!dirty || incompleteRule || saving) return;
+    if (incompleteRankedResponse || saving) return false;
+    if (!dirty) return true;
     setSaving(true);
     setSaveError("");
     try {
@@ -99,10 +122,30 @@ function ToolSetupForm({ data }: { data: ToolSetupView }) {
       setSaved(persisted);
       setSetup(persisted);
       setSaveNotice("Tool settings saved.");
+      return true;
     } catch (error) {
       setSaveError(messageFor(error));
+      return false;
     } finally {
       setSaving(false);
+    }
+  }
+  async function testInChat() {
+    if (!personaId || startingChat) return;
+    setStartingChat(true);
+    setChatError("");
+    try {
+      if (!await save()) {
+        setChatError("Save the settings before starting a test chat.");
+        return;
+      }
+      const conversation = await api.newConversation(personaId, scenarioId);
+      rememberActiveConversation(conversation.id);
+      location.assign("/");
+    } catch (error) {
+      setChatError(messageFor(error));
+    } finally {
+      setStartingChat(false);
     }
   }
   async function runPreview() {
@@ -125,12 +168,12 @@ function ToolSetupForm({ data }: { data: ToolSetupView }) {
         <p>Saved settings apply to new chat requests in this browser.</p>
       </div>
       <div className="admin-save">
-        <p role="status">{saveNotice || (incompleteRule ? "Add content to each ranked response before saving." : dirty ? "Unsaved changes" : "")}</p>
-        <button className="send-button" type="submit" disabled={!dirty || incompleteRule || saving}>{saving ? "Saving…" : "Save settings"}</button>
+        <p role="status">{saveNotice || (incompleteRankedResponse ? "Add content to each ranked response before saving." : dirty ? "Unsaved changes" : "")}</p>
+        <button className="send-button" type="submit" disabled={!dirty || incompleteRankedResponse || saving || startingChat}>{saving ? "Saving…" : "Save settings"}</button>
       </div>
       {saveError && <p className="admin-error" role="alert">{saveError}</p>}
     </div>
-    <fieldset className="admin-layout" disabled={saving}>
+    <fieldset className="admin-layout" disabled={saving || startingChat}>
       <section className="admin-card" aria-labelledby="sfield-tools-title">
         <h2 id="sfield-tools-title">sfield tools</h2>
         <p>Control which registered tools can run.</p>
@@ -182,6 +225,10 @@ function ToolSetupForm({ data }: { data: ToolSetupView }) {
         {output?.mode === "ranked" && <RankedContent ids={output.contentIds} content={data.content}
           change={(contentIds) => changeOutput({ mode: "ranked", contentIds })} />}
 
+        <CcreRuleEditor key={scenarioId + "/" + contextId} scope={{ scenarioId, contextId }}
+          rules={ccreRules} personas={personas} content={data.content} limitReached={allCcreRules.length >= MAX_CCRE_RULES}
+          change={(next) => edit({ ...setup, ccreRules: [...allCcreRules.filter((entry) => !inSelectedScope(entry)), ...next] })} />
+
         <div className="admin-preview">
           <h3>Preview response</h3>
           <p>Test the current settings without an LLM gateway.</p>
@@ -196,10 +243,18 @@ function ToolSetupForm({ data }: { data: ToolSetupView }) {
               <label htmlFor="mock-turn">Turn number</label>
               <input id="mock-turn" type="number" min={1} step={1} value={ordinal} onChange={(event) => setOrdinal(event.target.value)} />
             </div>
+          </div>
+          <div className="admin-preview-actions">
             <button type="button" className="secondary-button" disabled={!canPreview || previewing} onClick={() => void runPreview()}>
               <FlaskConical size={16} aria-hidden="true" />{previewing ? "Testing…" : "Run preview"}
             </button>
+            <button type="button" className="secondary-button" disabled={!personaId || incompleteRankedResponse || startingChat}
+              aria-describedby="test-chat-note" onClick={() => void testInChat()}>
+              <MessageSquare size={16} aria-hidden="true" />{startingChat ? "Opening chat…" : dirty ? "Save and test in chat" : "Test in chat"}
+            </button>
           </div>
+          <p id="test-chat-note" className="admin-test-note">Test in chat starts a new conversation at turn 1 with the selected persona and scenario.</p>
+          {chatError && <p className="admin-error" role="alert">{chatError}</p>}
           {previewResult && ("error" in previewResult
             ? <p className="admin-error" role="alert">{previewResult.error}</p>
             : <div className="admin-result" role="status"><PreviewResult result={previewResult.result} /></div>)}

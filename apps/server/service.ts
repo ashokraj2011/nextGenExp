@@ -193,9 +193,11 @@ export class ExperienceService {
         this.store.update(id, (row) => {
           const override = treatmentOverride(row.toolSetup?.treatmentOverrides ?? [], conversation.scenarioId, route.contextId);
           const simulatedRejections = override ? [] : fixtureRejections({ scenarioId: conversation.scenarioId, ordinal: row.ordinal }, route.contextId);
+          const mockRuleRejections = row.treatmentCcre?.results.flatMap(({ contentId, outcome }) => outcome === "excluded"
+            ? [{ contentId, stage: "simulated_ccre" as const, reasonCode: "RULE_FALSE" }] : []) ?? [];
           row.trace.ts = {
             contextId: route.contextId, fixtureVersion: tsFixtures.fixtureVersion, baseline: ids,
-            source: override ? "override" : "fixture", rejections: [...simulatedRejections, ...rejections],
+            source: override ? "override" : "fixture", rejections: [...simulatedRejections, ...mockRuleRejections, ...rejections],
             partial,
           };
           row.trace.markers.tsResolved = now;

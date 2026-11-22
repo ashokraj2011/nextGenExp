@@ -7,7 +7,7 @@ import {
   balanceInputSchema, balanceResultSchema, compositionOutputSchema, contextResultSchema,
   propensityInputSchema, propensityResultSchema, routingOutputSchema, treatmentInputSchema, treatmentResultSchema, turnInputSchema,
 } from "../../packages/contracts/model";
-import { sfieldTools, toolKeys, toolVersion, type ToolKey } from "../../packages/contracts/tool-setup";
+import { sfieldTools, toolKeys, toolVersion, type MockCcreEvaluation, type ToolKey } from "../../packages/contracts/tool-setup";
 import { activeContextCatalog, fixtureEligibleSets, FixtureTsAdapter } from "../../packages/ts-adapter";
 import { scoreContexts } from "../../packages/propensity-adapter";
 import { contentCatalog, lookupContent, modelBundle, readDemoBalance, resolveCandidates } from "../../packages/experience/content";
@@ -153,7 +153,7 @@ export class Runtime {
     requireCheck(persona && persona.allowedScenarios.includes(conversation.scenarioId), "PERSONA_MISMATCH");
     requireToolEnabled(turn, key);
     const adapter = new FixtureTsAdapter(
-      { scenarioId: conversation.scenarioId, ordinal: turn.ordinal }, turn.toolSetup?.treatmentOverrides,
+      { scenarioId: conversation.scenarioId, ordinal: turn.ordinal }, turn.toolSetup?.treatmentOverrides, turn.toolSetup?.ccreRules,
     );
     return { turn, conversation, persona, adapter };
   }
@@ -190,11 +190,21 @@ export class Runtime {
           requireCheck(turn.route?.routeDecisionId === routeDecisionId && turn.route && turn.catalog && turn.attempts.route, "ROUTE_REQUIRED");
           verifyRoute(turn.route, turn.catalog, turn.scope, turn.attempts.route.runId, this.now());
           const input = { mid: persona.syntheticMid, context: turn.route.contextId };
-          if (this.inspection) {
-            try { this.store.update(turn.public.id, (row) => { row.treatmentMockInput = input; }); }
-            catch { /* The mock call still runs when diagnostic storage is unavailable. */ }
+          let ccre: MockCcreEvaluation | undefined;
+          try {
+            const result = adapter.selectEligibleContent(input, ctx.signal);
+            ccre = result.ccre;
+            return result.contentIds;
+          } finally {
+            if (this.inspection) {
+              try {
+                this.store.update(turn.public.id, (row) => {
+                  row.treatmentMockInput = input;
+                  row.treatmentCcre = ccre;
+                });
+              } catch { /* Diagnostic storage cannot change the tool result. */ }
+            }
           }
-          return adapter.getRankedEligibleIds(input, ctx.signal);
         },
       }),
       read("balances", {
