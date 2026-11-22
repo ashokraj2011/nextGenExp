@@ -70,6 +70,8 @@ When the goal is unclear, the router selects a focused question from the approve
 
 After a greeting, “Show me the summary” asks “Did you mean your portfolio summary?” Reply “yes” to see the portfolio snapshot. If the conversation already establishes the portfolio as the subject, the same request opens the snapshot directly.
 
+After comparing available and current balance, “Show me the summary” displays both synthetic balance amounts. The Context Router receives the established subject as `summaryFollowUpIntentId`, which you can see in **Logs → Context Router → Decoded chat input**.
+
 ### Portfolio Snapshot demo
 
 Ask **Let me know my portfolio summary** in **Normal eligibility**. The Context Router selects `show_portfolio`, which maps to the `portsum` context. sfield calls Treatment Selector with `{ context, mid }`. In this mock, its built-in CCRE rule adds **Explore investing options** to the eligible set when **Portfolio → Cash balance (USD) → Greater than → 10000** matches. A saved rule for the same scenario, context and treatment replaces that fixture rule.

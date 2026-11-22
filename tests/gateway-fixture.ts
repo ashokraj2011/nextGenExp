@@ -2,7 +2,7 @@ import { createServer, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { GatewaySettings } from "../apps/server/gateway";
 import type { ComponentName, ContextSelectionProposal, ExperienceProposal, Intent } from "../packages/contracts/domain";
-import { leavingWorkQuestion, portfolioSummaryQuestion, retirementQuestion, type RoutingHistoryEntry, type RoutingIntent, type RoutingIntentId } from "../packages/contracts/routing-intents";
+import { isSubjectlessSummaryRequest, leavingWorkQuestion, portfolioSummaryQuestion, retirementQuestion, type RoutingHistoryEntry, type RoutingIntent, type RoutingIntentId } from "../packages/contracts/routing-intents";
 import type { modelBundle } from "../packages/experience/content";
 
 type Envelope = {
@@ -13,6 +13,7 @@ type Envelope = {
   propensity?: unknown;
   recent?: RoutingHistoryEntry[];
   intentCatalog?: RoutingIntent[];
+  summaryFollowUpIntentId?: RoutingIntentId;
   selectedContextId?: string;
   selectedIntentId?: RoutingIntentId;
   intent?: Intent;
@@ -48,7 +49,7 @@ function fromMessage(body: RequestBody): Envelope | undefined {
 }
 
 function route(envelope: Envelope): ContextSelectionProposal {
-  const { request, recent, allowedQuestions, intentCatalog = [] } = envelope;
+  const { request, recent, allowedQuestions, summaryFollowUpIntentId, intentCatalog = [] } = envelope;
   const text = request.toLowerCase().trim();
   const base = {
     schemaVersion: "1.1" as const, catalogSnapshotId: envelope.catalogSnapshotId!, catalogVersion: envelope.catalog!.catalogVersion,
@@ -67,6 +68,7 @@ function route(envelope: Envelope): ContextSelectionProposal {
   const select = (intentId: RoutingIntentId): ContextSelectionProposal => (
     { ...base, status: "selected", intentId, clarificationQuestion: null }
   );
+  if (summaryFollowUpIntentId) return select(summaryFollowUpIntentId);
   const previous = recent?.at(-1);
   if (/^(?:hi|hello|hey|how are you)[!.?]*$/.test(text)) return reply("Hi! What would you like to talk about?");
   if (/^(?:(?:that(?:['’]s|s| is) )?(?:nice|great|cool|helpful|interesting)|thanks|thank you|got it)[!.?]*$/.test(text)) {
@@ -96,12 +98,8 @@ function route(envelope: Envelope): ContextSelectionProposal {
     const askedAboutPortfolioSummary = priorQuestion === portfolioSummaryQuestion;
     const portfolioIntent = intentCatalog.find(({ intentId }) => intentId === "show_portfolio");
     if (askedAboutPortfolioSummary && confirms && portfolioIntent) return select(portfolioIntent.intentId);
-    const summaryText = text.replace(/^(?:please |can you |could you |can i )/, "");
-    const asksForSummary = /^(?:(?:show|see|give|view|display|get|pull up)(?: me)? )?(?:(?:the|my|a) )?summary[.!?]*$/.test(summaryText);
-    if (portfolioIntent && asksForSummary) {
-      return previousTopic?.contextId === portfolioIntent.contextId
-        ? select(portfolioIntent.intentId)
-        : clarify(portfolioSummaryQuestion, portfolioIntent.intentId);
+    if (portfolioIntent && isSubjectlessSummaryRequest(request)) {
+      return clarify(portfolioSummaryQuestion, portfolioIntent.intentId);
     }
 
     const establishedRetirement = previousTopic?.intentId === "retirement_learning"

@@ -42,3 +42,20 @@ export type RoutingHistoryEntry = {
   assistantReply?: string;
   displayedContent?: string[];
 };
+
+export function isSubjectlessSummaryRequest(request: string) {
+  const text = request.toLowerCase().trim().replace(/\s+/g, " ").replace(/[.!?]+$/, "")
+    .replace(/^(?:please,? |(?:can|could|would) (?:you|i) )/, "").replace(/,? please$/, "");
+  return /^(?:(?:show|see|give|view|display|get|pull up)(?: me)? )?(?:(?:the|my|a|that) )?summary$/.test(text);
+}
+
+export function resolveSummaryFollowUp(request: string, recent: RoutingHistoryEntry[], intents: readonly RoutingIntent[]) {
+  if (!isSubjectlessSummaryRequest(request)) return;
+  const previousTopic = recent.findLast(({ contextId, clarificationQuestion, intentId }) => (
+    contextId !== null || clarificationQuestion !== null || intentId === "create_rule"
+  ));
+  if (!previousTopic?.contextId || previousTopic.clarificationQuestion) return;
+  return intents.find((intent): intent is Extract<RoutingIntent, { task: "show" }> => (
+    intent.task === "show" && intent.contextId === previousTopic.contextId
+  ));
+}

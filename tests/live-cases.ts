@@ -39,6 +39,7 @@ export const liveCases: LiveCase[] = [
   { id: "balance-difference", message: "What's the difference between the ready-to-use and ledger balance amounts?", route: balance, outcome: ready, component: compare, relevant: [available, current] },
   { id: "balance-reverse-order", message: "Compare current balance first and then available balance.", route: balance, outcome: ready, component: compare, relevant: [current, available] },
   { id: "metric-summary", message: "Show my synthetic demo balance summary.", route: balance, outcome: ready, component: metric, relevant: [metricTemplate] },
+  { id: "balance-summary-follow-up", message: "show me the summary", prior: "Compare available and current balance.", route: balance, outcome: ready, component: metric, relevant: [metricTemplate] },
   { id: "metric-values", message: "Show both fictional balance amounts in demo units.", route: balance, outcome: ready, component: metric, relevant: [metricTemplate], persona: "demo-returning" },
   { id: "portfolio-overview", message: "Explain the fictional portfolio view.", route: portfolio, outcome: ready, component: card, relevant: [portfolioItem] },
   { id: "portfolio-labels", message: "What do the labels in the demo portfolio overview mean?", route: portfolio, outcome: ready, component: card, relevant: [portfolioItem] },

@@ -663,6 +663,52 @@ test("a summary request uses the established portfolio topic or asks for confirm
   assert.equal(balances.turn.experience?.blocks[0]?.component, "PznMetricSummary");
 });
 
+test("a balance summary follow-up keeps the verified topic when the model asks about the portfolio", async (t) => {
+  const message = "show me the summary";
+  const f = await fixture(({ envelope }) => {
+    if (envelope.inputType !== "PznContextRoutingInput" || envelope.request !== message) return;
+    return { json: {
+      schemaVersion: "1.1", catalogSnapshotId: envelope.catalogSnapshotId!, catalogVersion: envelope.catalog!.catalogVersion,
+      status: "clarify", intentId: "show_portfolio", clarificationQuestion: portfolioSummaryQuestion,
+      replyText: null, summary: "The model proposed a portfolio clarification.",
+    } };
+  });
+  t.after(() => f.close());
+  const { client, gateway } = f;
+  const chat = await client.conversation();
+  const comparison = await client.ask(chat.id, "Compare available and current balance.");
+  assert.equal(comparison.trace.intentId, "compare_balances");
+  assert.equal(comparison.turn.experience?.blocks[0]?.component, "PznComparison");
+
+  const summary = await client.ask(chat.id, message);
+  assert.equal(summary.trace.intentId, "show_balance");
+  assert.equal(summary.trace.selectedContextId, "balance");
+  assert.ok(summary.trace.markers.summaryReferenceApplied !== undefined);
+  assert.equal(summary.trace.metricReadSucceeded, true);
+  const block = summary.turn.experience?.blocks[0];
+  assert.equal(block?.component, "PznMetricSummary");
+  assert.deepEqual(block.props.values.map(({ displayValue }) => displayValue), ["1250.00", "1500.00"]);
+  const routing = gateway.calls.find(({ envelope }) => envelope.inputType === "PznContextRoutingInput" && envelope.request === message)?.envelope;
+  assert.equal(routing?.recent?.at(-1)?.intentId, "compare_balances");
+  assert.equal(routing?.summaryFollowUpIntentId, "show_balance");
+  assert.equal(gateway.calls.at(-1)?.envelope.selectedIntentId, "show_balance");
+
+  const paraphrase = await client.ask(chat.id, "Could I see that summary, please?");
+  assert.equal(paraphrase.trace.intentId, "show_balance");
+  assert.equal(paraphrase.trace.metricReadSucceeded, true);
+
+  const portfolio = await client.ask(chat.id, "Show me my portfolio summary.");
+  assert.equal(portfolio.trace.intentId, "show_portfolio");
+  assert.equal(portfolio.turn.experience?.blocks[0]?.component, "PznPortfolioSnapshot");
+
+  const ambiguous = await client.ask(chat.id, "Show my balance and walk me through a transfer.");
+  assert.equal(ambiguous.trace.routeOutcome, "clarify");
+  const clarification = await client.ask(chat.id, message);
+  assert.equal(clarification.trace.routeOutcome, "clarify");
+  assert.equal(clarification.trace.tsScopeId, null);
+  assert.equal(gateway.calls.at(-1)?.envelope.summaryFollowUpIntentId, undefined);
+});
+
 test("recent retirement clues prompt for clarification until the user confirms the goal", async (t) => {
   const f = await fixture();
   t.after(() => f.close());

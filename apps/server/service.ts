@@ -5,7 +5,8 @@ import { DECISION_TTL, TURN_DEADLINE, contextCatalogSchema, propensitySchema, ty
 import { isPortfolioSummary, portfolioSnapshotSchema } from "../../packages/contracts/portfolio";
 import { ruleGlossarySchema } from "../../packages/contracts/rule-glossary";
 import {
-  availableRoutingIntents, routingQuestions, ROUTING_HISTORY_TURNS, ROUTING_HISTORY_REQUEST_LENGTH, ROUTING_HISTORY_REPLY_LENGTH,
+  availableRoutingIntents, resolveSummaryFollowUp, routingQuestions,
+  ROUTING_HISTORY_TURNS, ROUTING_HISTORY_REQUEST_LENGTH, ROUTING_HISTORY_REPLY_LENGTH,
   type RoutingHistoryEntry,
 } from "../../packages/contracts/routing-intents";
 import { FOLLOW_UP_EVENT, type DisplayExperience } from "../../packages/contracts/surface";
@@ -166,25 +167,36 @@ export class ExperienceService {
               displayedContent: titles.length ? titles : undefined,
             };
           });
+        const intentCatalog = availableRoutingIntents(catalog.catalog, this.canCreateRule);
+        const summaryFollowUp = resolveSummaryFollowUp(turn.public.message, recent, intentCatalog);
         const result = await runtime.model("route", turn, conversation, catalog.snapshotId, {
           inputType: "PznContextRoutingInput",
           catalogSnapshotId: catalog.snapshotId,
           catalog: catalog.catalog,
-          intentCatalog: availableRoutingIntents(catalog.catalog, this.canCreateRule),
+          intentCatalog,
           propensity: turn.propensity,
           allowedQuestions: routingQuestions,
           canCreateRule: this.canCreateRule,
           recent,
+          summaryFollowUpIntentId: summaryFollowUp?.intentId,
           request: turn.public.message,
         }, signal, recovering);
         current();
         this.store.update(id, (row) => { row.trace.routeRun = traceFor(result); });
         completed(result, "route");
-        const proposal = verifyContextProposal(result.output, catalog, turn.scope, this.now(), this.canCreateRule);
+        const modelProposal = verifyContextProposal(result.output, catalog, turn.scope, this.now(), this.canCreateRule);
+        const useSummaryReference = summaryFollowUp && modelProposal.intentId !== summaryFollowUp.intentId;
+        const proposal = useSummaryReference ? {
+          status: "selected" as const,
+          intentId: summaryFollowUp.intentId,
+          contextId: summaryFollowUp.contextId,
+          intent: { topic: summaryFollowUp.label, task: summaryFollowUp.task, summary: "Show the summary of the established conversation topic." },
+        } : modelProposal;
         this.store.update(id, (row) => {
           row.trace.routeOutcome = proposal.status;
           row.trace.intentId = proposal.intentId;
           if (proposal.status === "clarify") row.trace.possibleIntentId = proposal.possibleIntentId;
+          if (useSummaryReference) row.trace.markers.summaryReferenceApplied = this.now();
           row.trace.markers.routeValidated = this.now();
         });
         if (proposal.status === "create_rule") {
