@@ -75,7 +75,7 @@ async function body<T>(req: IncomingMessage, schema: z.ZodType<T>, limit = 12 * 
 }
 
 async function serveAsset(pathname: string, root: string, res: ServerResponse) {
-  if (pathname !== "/" && pathname !== "/admin" && pathname !== "/__test/a2ui" && !pathname.startsWith("/assets/")) {
+  if (pathname !== "/" && pathname !== "/chat" && pathname !== "/admin" && pathname !== "/__test/a2ui" && !pathname.startsWith("/assets/")) {
     throw new ApiError(404, "not_found", "This page is unavailable.");
   }
   const path = resolve(root, "." + (pathname.startsWith("/assets/") ? decodeURIComponent(pathname) : "/index.html"));

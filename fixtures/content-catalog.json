@@ -32,7 +32,7 @@
         }
       ],
       "sourceRef": "fixture:balance_education",
-      "sourceLabel": "Fictional PZN demo catalog",
+      "sourceLabel": "Demo content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
@@ -75,7 +75,7 @@
         }
       ],
       "sourceRef": "fixture:balance_available_definition",
-      "sourceLabel": "Fictional PZN demo catalog",
+      "sourceLabel": "Demo content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
@@ -118,7 +118,7 @@
         }
       ],
       "sourceRef": "fixture:balance_current_definition",
-      "sourceLabel": "Fictional PZN demo catalog",
+      "sourceLabel": "Demo content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
@@ -149,7 +149,7 @@
         }
       ],
       "sourceRef": "fixture:transfer_learning",
-      "sourceLabel": "Fictional PZN demo catalog",
+      "sourceLabel": "Demo content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
@@ -197,7 +197,7 @@
         }
       ],
       "sourceRef": "fixture:transfer_checklist",
-      "sourceLabel": "Fictional PZN demo catalog",
+      "sourceLabel": "Demo content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
@@ -228,7 +228,7 @@
         }
       ],
       "sourceRef": "fixture:promotion_general",
-      "sourceLabel": "Fictional PZN demo catalog",
+      "sourceLabel": "Demo content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
@@ -271,7 +271,7 @@
         }
       ],
       "sourceRef": "fixture:portfolio_explanation",
-      "sourceLabel": "Fictional PZN demo catalog",
+      "sourceLabel": "Demo content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
@@ -295,7 +295,7 @@
       "portfolioData": "cash",
       "followUps": [],
       "sourceRef": "fixture:portfolio_cash_investing",
-      "sourceLabel": "Fictional PZN demo catalog",
+      "sourceLabel": "Demo content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
@@ -318,7 +318,7 @@
       "metricSpec": null,
       "followUps": [],
       "sourceRef": "fixture:retirement_learning",
-      "sourceLabel": "Fictional PZN demo catalog",
+      "sourceLabel": "Demo content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
@@ -363,7 +363,7 @@
         }
       ],
       "sourceRef": "fixture:beneficiary_update",
-      "sourceLabel": "Fictional PZN demo catalog",
+      "sourceLabel": "Demo content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
@@ -400,7 +400,7 @@
         }
       ],
       "sourceRef": "fixture:balance_metric_template",
-      "sourceLabel": "Fictional PZN demo catalog",
+      "sourceLabel": "Demo content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
@@ -425,7 +425,7 @@
       "metricSpec": null,
       "followUps": [],
       "sourceRef": "fixture:promotion_blocked",
-      "sourceLabel": "Fictional PZN demo catalog",
+      "sourceLabel": "Demo content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
@@ -450,7 +450,7 @@
       "metricSpec": null,
       "followUps": [],
       "sourceRef": "fixture:withdrawn_education",
-      "sourceLabel": "Fictional PZN demo catalog",
+      "sourceLabel": "Demo content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",

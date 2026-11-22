@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useAui, useAuiState, useExternalStoreRuntime, type ThreadMessageLike } from "@assistant-ui/react";
 import { CreateSurfaceMessageSchema, type ActionMessage } from "@a2ui/web_core/v1_0";
-import { BookOpenText, ChevronDown, Columns2, FileText, GraduationCap, ListChecks, Menu, MessageSquare, PanelRight, Plus, RotateCcw, Settings2, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { ArrowLeft, BookOpenText, ChevronDown, Columns2, FileText, GraduationCap, ListChecks, Menu, MessageSquare, PanelRight, Plus, RotateCcw, Settings2, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { failureCopy, progressLabels, type Bootstrap, type Conversation, type ConversationView, type TurnView, type TurnAccepted, type Progress } from "../../packages/contracts/api";
 import { MAX_MESSAGE_LENGTH } from "../../packages/contracts/domain";
 import { api } from "./api";
@@ -10,9 +10,8 @@ import { readActiveConversation, rememberActiveConversation } from "./conversati
 import { Inspector } from "./inspector";
 import { CallLogs } from "./call-logs";
 import { DemoProfiles, ProfileAvatar } from "./demo-profiles";
+import { planningTopics } from "./planning-topics";
 import { BasicSmoke, ExperienceControls, ExperienceDataUI, installA2uiStyles } from "./surface";
-import "@fontsource-variable/inter/wght.css";
-import "./styles.css";
 
 const starters = [
   { Icon: BookOpenText, label: "Explain a concept", message: "Explain the demo balance labels." },
@@ -197,6 +196,13 @@ function messageFor(error: unknown) {
 type Panel = { kind: "profiles" } | { kind: "inspector" } | { kind: "logs"; turnId?: string };
 
 function App() {
+  const [entry] = useState(() => {
+    const query = new URLSearchParams(location.search);
+    return {
+      topic: planningTopics.find(({ id }) => id === query.get("topic")),
+      showProfiles: query.get("view") === "profiles",
+    };
+  });
   const [configuration, setConfiguration] = useState<Bootstrap>();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversation, setConversation] = useState<ConversationView>();
@@ -204,7 +210,7 @@ function App() {
   const [notice, setNotice] = useState("");
   const [pending, setPending] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
-  const [panel, setPanel] = useState<Panel>();
+  const [panel, setPanel] = useState<Panel | undefined>(entry.showProfiles ? { kind: "profiles" } : undefined);
   const inFlight = useRef(false);
   const previousAttempt = useRef<{ fingerprint: string; id: string } | null>(null);
   const inspectorTrigger = useRef<HTMLButtonElement>(null);
@@ -235,12 +241,19 @@ function App() {
       const preferred = data.conversations.find((row) => row.id === readActiveConversation()) ?? data.conversations[0];
       if (preferred) {
         const restored = await api.conversation(preferred.id);
-        if (mounted) choose(restored);
+        if (!mounted) return;
+        choose(restored);
       }
-      if (mounted) setConfiguration(data);
+      const prompt = entry.topic?.prompt;
+      if (prompt) {
+        const key = preferred?.id ?? "new";
+        setDrafts((all) => ({ ...all, [key]: all[key] ?? prompt }));
+      }
+      if (entry.topic || entry.showProfiles) history.replaceState(history.state, "", location.pathname + location.hash);
+      setConfiguration(data);
     }).catch((error: unknown) => { if (mounted) setNotice(messageFor(error)); });
     return () => { mounted = false; };
-  }, []);
+  }, [entry]);
 
   useEffect(() => {
     if (!railOpen) return;
@@ -356,7 +369,8 @@ function App() {
   return <div className="app-layout">
     {railOpen && <button className="rail-scrim" aria-label="Close conversations" onClick={() => setRailOpen(false)} />}
     <aside className={"rail" + (railOpen ? " rail-open" : "")} id="conversation-rail" aria-label="Conversation navigation">
-      <div className="brand"><LabMark /><span><strong>PZN Lab</strong><small>Intent to experience</small></span>
+      <div className="rail-header">
+        <a className="rail-home" href="/"><ArrowLeft size={18} aria-hidden="true" /> Planning home</a>
         <button className="icon-button rail-close" ref={railClose} aria-label="Close conversation navigation" onClick={() => setRailOpen(false)}><X size={20} /></button>
       </div>
       <button className="new-conversation" disabled={pending || !configuration} onClick={() => {
@@ -396,7 +410,7 @@ function App() {
         </div>
         <div className="topbar-actions">
           {configuration?.mode === "test" && <span className="test-label" title="Deterministic automated test gateway">Test mode</span>}
-          {configuration?.openAiModel && <span className="test-label" title={configuration.openAiModel}>OpenAI API</span>}
+          {configuration?.openAiModel && <span className="test-label" title={configuration.openAiModel}>Live model</span>}
           {configuration?.inspectorEnabled && <a className="tool-setup-trigger inspector-trigger icon-button" aria-label="Tool setup" href="/admin">
             <Settings2 size={18} aria-hidden="true" /><span>Tool setup</span></a>}
           {configuration?.inspectorEnabled && <button className="inspector-trigger icon-button" ref={inspectorTrigger} type="button" aria-label="Open developer inspector"
@@ -440,5 +454,6 @@ if (location.pathname === "/__test/a2ui") {
 } else if (location.pathname === "/admin") {
   void import("./admin").then(({ AdminPage }) => root.render(<AdminPage />));
 } else {
+  document.title = "Assistant · Financial planning";
   root.render(<App />);
 }

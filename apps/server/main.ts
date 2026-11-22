@@ -14,7 +14,7 @@ const app = await startApp({
   projectRoot, dataDir: resolve(projectRoot, process.env.PZN_DATA_DIR ?? (useOpenAi ? ".pzn-data/openai" : ".pzn-data")), gateway,
   selectionMode: mode, port, dev: process.argv.includes("--dev"), inspectorEnabled: process.env.PZN_INSPECTOR !== "off",
 });
-console.log("PZN Lab  " + app.url);
+console.log("Financial planning demo  " + app.url);
 if (useOpenAi && gateway) console.log("OpenAI API model " + gateway.model);
 if (!gateway) console.log("Gateway setup required. Set LLM_BASE_URL, LLM_MODEL, and LLM_API_KEY or LLM_GATEWAY_HEADERS_JSON in the server environment.");
 let closing = false;

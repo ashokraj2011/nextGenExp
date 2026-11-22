@@ -114,7 +114,7 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
       }
       const conversation = await api.newConversation(personaId, scenarioId);
       rememberActiveConversation(conversation.id);
-      location.assign("/");
+      location.assign("/chat");
     } catch (error) {
       setChatError(messageFor(error));
     } finally {
@@ -241,7 +241,7 @@ export function AdminPage() {
   const [loaded, setLoaded] = useState<Awaited<ReturnType<typeof api.toolSetup>>>();
   const [error, setError] = useState("");
   useEffect(() => {
-    document.title = "Tool setup · PZN Lab";
+    document.title = "Tool setup · Financial planning";
     let mounted = true;
     void api.toolSetup().then((setup) => { if (mounted) setLoaded(setup); })
       .catch((error: unknown) => { if (mounted) setError(messageFor(error)); });
@@ -250,8 +250,8 @@ export function AdminPage() {
 
   return <div className="admin-page">
     <header className="admin-bar"><div>
-      <span>PZN Lab</span>
-      <a className="icon-button" href="/"><ArrowLeft size={16} aria-hidden="true" />Back to chat</a>
+      <span>Financial planning</span>
+      <a className="icon-button" href="/chat"><ArrowLeft size={16} aria-hidden="true" />Back to chat</a>
     </div></header>
     <main className="admin-main">
       {loaded ? <ToolSetupForm {...loaded} /> : <div className="admin-heading">

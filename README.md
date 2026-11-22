@@ -1,4 +1,4 @@
-# PZN Lab
+# Financial planning demo
 
 A local implementation of **PZN Intent to Experience POC v1.1**. The Word specification drives the routed design. The supplied contract pack provides the approved content, fictional balance reads, and composition proposal schema. This project adds routed context, propensity, and eligibility fixtures.
 
@@ -42,9 +42,17 @@ The same npm commands use any existing registry and authentication settings in y
 npm run test:preview
 ~~~
 
-Open [PZN Lab test preview](http://127.0.0.1:4174). The **Test mode** badge identifies deterministic gateway responses. The preview runs those responses through real sfield, the host verifiers, SQLite, assistant-ui, and the A2UI renderer. It uses temporary data for each server launch.
+Open the [test preview](http://127.0.0.1:4174) and click **Start a conversation**. The **Test mode** badge in chat identifies deterministic gateway responses. The preview runs those responses through real sfield, the host verifiers, SQLite, assistant-ui, and the A2UI renderer. It uses temporary data for each server launch.
 
 Try **Compare two terms** for the A2UI comparison. **Guide me through a task** opens the canonical transfer checklist and a portfolio follow-up. To see the eligible set and route decisions, open **Inspector**. Its persona and scenario settings create a new conversation. Type “Show my synthetic demo balance summary” for the read-only metric example.
+
+### Planning homepage
+
+The homepage is at `/`. **Portfolio**, **Retirement**, and **Balances** open `/chat` with a question you can edit before sending. **Compare demo profiles** opens the profile picker in chat.
+
+The original hero photograph in `apps/web/assets/coastal-planning.jpg` was generated with ImageGen using this prompt.
+
+> Wide 3:2 candid editorial photograph for a financial-planning homepage. A silver-haired woman around 60 and her adult daughter stroll together on a bluff path overlooking the sea. Frame them waist-up near the center with generous headroom and space around both faces for a modest crop. Windswept grasses, a quiet ocean horizon, sage and cream clothing, soft late-afternoon light, natural smiles and realistic skin and fabric textures. No text, logos, or watermark.
 
 ### Demo profiles
 
@@ -115,7 +123,7 @@ npm run build
 npm run start:openai
 ~~~
 
-Open the local preview and check the **OpenAI API** label in chat. Treatment Selector, CCRE, and portfolio reads use the demo fixtures. The preview defaults to port **4175** and stores its local state in `.pzn-data/openai`. Use `npm run eval:openai` to run the live API smoke cases. [Open the OpenAI preview](http://127.0.0.1:4175/)
+Open the assistant and check for the **Live model** badge. Treatment Selector, CCRE, and portfolio reads use the demo fixtures. The preview defaults to port **4175** and stores its local state in `.pzn-data/openai`. Use `npm run eval:openai` to run the live API smoke cases. [Open the live preview](http://127.0.0.1:4175/)
 
 ### Office gateway
 
@@ -134,7 +142,7 @@ The app sends header strings as written and serializes object or array values as
 npm start
 ~~~
 
-Open [PZN Lab](http://127.0.0.1:4173). `npm run dev` runs the same local service with Vite development middleware. The application uses a loopback-only server, a per-browser local session, and SQLite files under `.pzn-data`. `PZN_PORT`, `PZN_DATA_DIR`, and `PZN_INSPECTOR=off` are optional server settings. For the alternate ranking mode, set `PZN_SELECTION_MODE=preserve_ts_rank`.
+Open the [financial planning demo](http://127.0.0.1:4173). `npm run dev` runs the same local service with Vite development middleware. The application uses a loopback-only server, a per-browser local session, and SQLite files under `.pzn-data`. `PZN_PORT`, `PZN_DATA_DIR`, and `PZN_INSPECTOR=off` are optional server settings. For the alternate ranking mode, set `PZN_SELECTION_MODE=preserve_ts_rank`.
 
 The live adapter expects streamed Chat Completions, function calls, and structured output. Gateways with a different protocol or dynamic authentication require a provider or credential resolver that implements that contract. Enterprise gateway verification is pending the gateway configuration. A shared deployment also needs the intended authentication and access configuration.
 
