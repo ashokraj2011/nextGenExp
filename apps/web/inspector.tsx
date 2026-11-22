@@ -8,12 +8,12 @@ function Detail({ label, children }: { label: string; children: ReactNode }) {
   return <div><dt>{label}</dt><dd>{children}</dd></div>;
 }
 
-function StageDetails({ title, run }: { title: string; run: Trace["routeRun"] }) {
+function StageDetails({ title, run, skipped }: { title: string; run: Trace["routeRun"]; skipped?: boolean }) {
   return <section className="trace-stage">
     <h4>{title}</h4>
     {run ? <p>{run.state} · {run.elapsedMs} ms · {run.modelCalls} model {run.modelCalls === 1 ? "call" : "calls"}<br />
       {run.totalTokens.toLocaleString()} tokens ({run.tokensReported ? "reported" : "estimated"}){run.errorCode && <><br /><code>{run.errorCode}</code></>}</p>
-      : <p>Awaiting run</p>}
+      : <p>{skipped ? "Skipped for rule creation" : "Awaiting run"}</p>}
   </section>;
 }
 
@@ -22,16 +22,19 @@ function TraceView({ trace }: { trace: Trace }) {
     catalog, propensity, selectedContextId, surface, sourcePageContext, routeDecisionId, contentDecisionId,
     catalogScopeId, tsScopeId, routerRunId, composerRunId, ts, finalOrder, components, failures,
   } = trace;
+  const creatingRule = trace.routeOutcome === "create_rule";
   const elapsed = trace.markers.terminal === undefined ? null : trace.markers.terminal - trace.markers.accepted;
   return <div className="trace-view">
     <section>
       <h3>Routing</h3>
       <dl className="trace-dl">
-        <Detail label="Selected TS context">{selectedContextId ?? trace.routeOutcome ?? "Pending"}</Detail>
+        {creatingRule
+          ? <Detail label="Router intent"><code>create_rule</code></Detail>
+          : <Detail label="Selected TS context">{selectedContextId ?? trace.routeOutcome ?? "Pending"}</Detail>}
         <Detail label="Delivery surface">{surface}</Detail>
         <Detail label="Source page">{sourcePageContext ?? "No source page"}</Detail>
         <Detail label="Catalog version">{catalog?.catalogVersion ?? "Pending"}</Detail>
-        <Detail label="Route decision"><code>{routeDecisionId ?? "Pending"}</code></Detail>
+        {!creatingRule && <Detail label="Route decision"><code>{routeDecisionId ?? "Pending"}</code></Detail>}
       </dl>
       {catalog && <details className="trace-details">
         <summary>Context catalog · {catalog.contexts.length} active</summary>
@@ -47,12 +50,14 @@ function TraceView({ trace }: { trace: Trace }) {
       </details>}
     </section>
     <section>
-      <h3>Selection and composition</h3>
+      <h3>{creatingRule ? "Rule creation" : "Selection and composition"}</h3>
       <dl className="trace-dl">
-        <Detail label="Selection mode">{trace.selectionMode}</Detail>
-        <Detail label="Content decision"><code>{contentDecisionId ?? "Pending"}</code></Detail>
+        {!creatingRule && <>
+          <Detail label="Selection mode">{trace.selectionMode}</Detail>
+          <Detail label="Content decision"><code>{contentDecisionId ?? "Pending"}</code></Detail>
+        </>}
         <Detail label="Components">{components?.join(", ") || "None"}</Detail>
-        <Detail label="Synthetic balance read">{trace.metricReadSucceeded ? "Succeeded" : "No successful read"}</Detail>
+        {!creatingRule && <Detail label="Synthetic balance read">{trace.metricReadSucceeded ? "Succeeded" : "No successful read"}</Detail>}
       </dl>
       {ts && <>
         <dl className="trace-dl"><Detail label="TS response">{ts.source === "override" ? "Configured mock" : "Built-in fixture"}</Detail></dl>
@@ -74,14 +79,14 @@ function TraceView({ trace }: { trace: Trace }) {
     </section>
     <section>
       <h3>Execution {elapsed === null ? "" : "· " + elapsed + " ms"}</h3>
-      <div className="trace-stages"><StageDetails title="Router" run={trace.routeRun} /><StageDetails title="Composer" run={trace.composeRun} /></div>
+      <div className="trace-stages"><StageDetails title="Router" run={trace.routeRun} /><StageDetails title="Composer" run={trace.composeRun} skipped={creatingRule} /></div>
       <details className="trace-details">
         <summary>Execution and run IDs</summary>
         <dl className="trace-dl">
           <Detail label="Catalog scope"><code>{catalogScopeId ?? "Pending"}</code></Detail>
-          <Detail label="Selection scope"><code>{tsScopeId ?? "Pending"}</code></Detail>
+          {!creatingRule && <Detail label="Selection scope"><code>{tsScopeId ?? "Pending"}</code></Detail>}
           <Detail label="Router run"><code>{routerRunId ?? "Pending"}</code></Detail>
-          <Detail label="Composer run"><code>{composerRunId ?? "Pending"}</code></Detail>
+          {!creatingRule && <Detail label="Composer run"><code>{composerRunId ?? "Pending"}</code></Detail>}
         </dl>
       </details>
       {failures.length > 0 && <details className="trace-details" open>

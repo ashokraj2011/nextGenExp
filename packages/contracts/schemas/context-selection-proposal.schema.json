@@ -27,7 +27,8 @@
       "enum": [
         "selected",
         "clarify",
-        "no_match"
+        "no_match",
+        "create_rule"
       ]
     },
     "contextId": {
@@ -55,7 +56,8 @@
             "compare",
             "guide",
             "show",
-            "unknown"
+            "unknown",
+            "create_rule"
           ]
         },
         "summary": {

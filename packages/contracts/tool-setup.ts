@@ -50,7 +50,7 @@ const mockCcreConditionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("persona_is"), personaId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("from_turn"), ordinal: ordinalSchema }).strict(),
 ]);
-const mockCcreRuleSchema = mockScopeSchema.extend({
+export const mockCcreRuleSchema = mockScopeSchema.extend({
   name: z.string().trim().min(1).max(MAX_CCRE_RULE_NAME),
   contentId: z.string().min(1),
   source: z.string().max(MAX_CCRE_SOURCE_LENGTH).optional(),

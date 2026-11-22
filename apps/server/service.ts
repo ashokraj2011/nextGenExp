@@ -6,7 +6,7 @@ import { FOLLOW_UP_EVENT, type DisplayExperience } from "../../packages/contract
 import { normalizedIdsSchema, treatmentOverride } from "../../packages/contracts/tool-setup";
 import { activeContextCatalog, fixtureRejections, tsFixtures } from "../../packages/ts-adapter";
 import { contentCatalog, modelBundle, resolveCandidates } from "../../packages/experience/content";
-import { compileExperience, makeId } from "../../packages/experience/compile";
+import { compileExperience, compileRuleCreation, makeId } from "../../packages/experience/compile";
 import { verifyContextProposal, verifyRoute, requireCheck, Rejected } from "../../packages/experience/verify";
 import { ApiError, Store, type ConversationRecord, type Stage, type TurnRecord } from "./store";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
@@ -34,6 +34,7 @@ export class ExperienceService {
 
   constructor(
     readonly store: Store, private readonly runtime: Runtime | null, readonly selectionMode: SelectionMode, private readonly now: () => number,
+    private readonly canCreateRule: boolean,
   ) {}
 
   createConversation(principalId: string, personaId: string, scenarioId: string) {
@@ -152,12 +153,21 @@ export class ExperienceService {
           catalog: catalog.catalog,
           propensity: turn.propensity,
           allowedQuestions: demo.clarificationQuestions,
+          canCreateRule: this.canCreateRule,
         }, signal, recovering);
         current();
         this.store.update(id, (row) => { row.trace.routeRun = traceFor(result); });
         completed(result, "route");
-        const proposal = verifyContextProposal(result.output, catalog, turn.scope, this.now());
+        const proposal = verifyContextProposal(result.output, catalog, turn.scope, this.now(), this.canCreateRule);
         this.store.update(id, (row) => { row.trace.routeOutcome = proposal.status; row.trace.markers.routeValidated = this.now(); });
+        if (proposal.status === "create_rule") {
+          const { personaId, scenarioId } = conversation;
+          const now = this.now();
+          const result = compileRuleCreation({ personaId, scenarioId }, now + DECISION_TTL);
+          this.store.update(id, (row) => { row.trace.components = result.display.blocks.map((block) => block.component); });
+          this.store.finish(id, { type: "completed", result }, now);
+          return;
+        }
         if (proposal.status !== "selected") {
           done(proposal.status, proposal.status, proposal.clarificationQuestion);
           return;

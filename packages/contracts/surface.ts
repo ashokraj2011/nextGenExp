@@ -36,17 +36,20 @@ export const experienceRoot = { name: "PznExperience", schema: z.object({
   partial: z.boolean(),
 }).strict() } as const;
 export const followUpButton = { name: "PznFollowUp", schema: z.object({ actionId: id, label: limitedText }).strict() } as const;
+const demoKey = z.string().regex(/^[a-z][a-z0-9-]*$/).max(128);
+export const ruleCreation = { name: "PznRuleCreation", schema: z.object({ scenarioId: demoKey, personaId: demoKey }).strict() } as const;
+export type RuleCreationProps = z.infer<typeof ruleCreation.schema>;
 
-export const catalogApis = [experienceRoot, contentCard, comparison, stepList, metricSummary, followUpButton] as const;
+export const catalogApis = [experienceRoot, contentCard, comparison, stepList, metricSummary, followUpButton, ruleCreation] as const;
 type BlockApi = typeof contentCard | typeof comparison | typeof stepList | typeof metricSummary;
 type ShapeFor<T extends BlockApi> = T extends BlockApi ? { component: T["name"]; props: z.infer<T["schema"]> } : never;
-export type DisplayBlock = ShapeFor<BlockApi>;
+export type DisplayBlock = ShapeFor<BlockApi> | { component: typeof ruleCreation.name; props: RuleCreationProps };
 export type DisplayAction = { actionId: string; componentId: string; label: string };
 export type DisplayExperience = {
   experienceId: string;
   messageId: string;
   status: "ready" | "clarify" | "no_match";
-  outcome: "ready" | "clarify" | "no_match" | "eligible_empty";
+  outcome: "ready" | "clarify" | "no_match" | "eligible_empty" | "create_rule";
   intro: string;
   question: string | null;
   partial: boolean;

@@ -46,35 +46,17 @@
   display: grid; grid-template-columns: minmax(0, 1.22fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px; margin-top: 17px;
 }
-.admin-field { display: grid; gap: 6px; min-width: 0; color: var(--ink); font-size: .83rem; font-weight: 625; }
-.admin-field select, .admin-field input, .admin-field textarea {
-  width: 100%; min-width: 0; height: 39px; padding: 5px 8px;
-  border: 1px solid var(--line-strong); border-radius: 8px; background: var(--white);
-  color: var(--ink); font: inherit; font-weight: 450;
-}
-.admin-field textarea { height: auto; min-height: 86px; resize: vertical; font-family: ui-monospace, monospace; }
 .admin-rules, .admin-preview { margin-top: 21px; padding-top: 18px; border-top: 1px solid var(--line); }
 .admin-rules-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
 .admin-rules-heading button { flex-shrink: 0; }
 .admin-rule-list { margin-top: 8px; }
 .admin-rule-list small { display: block; margin-top: 4px; color: var(--muted); }
 .admin-rule-draft { display: grid; gap: 12px; margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); }
-.admin-rule-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.admin-rule-actions, .admin-preview-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .admin-preview-fields { grid-template-columns: minmax(0, 1fr) minmax(80px, .45fr); align-items: end; margin-top: 12px; }
-.admin-preview-actions { margin-top: 10px; }
+.admin-preview-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
 .admin-preview-actions button { min-height: 39px; }
 .admin-test-note { margin-top: 7px; }
-.admin-preview .admin-error, .admin-result { margin-top: 12px; }
-.admin-result {
-  padding: 12px 14px; border: 1px solid #cfe7de; border-radius: 9px;
-  background: #f1f8f5; color: #18584e; font-size: .86rem; line-height: 1.55;
-}
-.admin-result ol { margin: 6px 0 0; padding-left: 21px; }
-.admin-ccre-result { margin-top: 12px; padding-top: 10px; border-top: 1px solid #cfe7de; }
-.admin-ccre-result ul { display: grid; gap: 5px; margin: 6px 0; padding-left: 18px; }
-.admin-ccre-result li :is(code, span) { margin-left: 7px; }
-.admin-ccre-result summary { margin-top: 8px; cursor: pointer; }
+.admin-preview .admin-error { margin-top: 12px; }
 .rank-editor { display: grid; gap: 10px; margin-top: 16px; }
 .rank-list { padding: 0; margin: 0; list-style: none; }
 .rank-list li {
@@ -106,7 +88,6 @@
   .admin-save p:empty { display: none; }
   .admin-fields { grid-template-columns: minmax(0, 1fr); }
   .admin-rules-heading { flex-wrap: wrap; }
-  .admin-rule-fields { grid-template-columns: minmax(0, 1fr); }
   .admin-preview-fields { grid-template-columns: minmax(0, 1fr) 85px; }
 }
 @media (forced-colors: active) {

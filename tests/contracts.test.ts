@@ -42,6 +42,14 @@ test("routing rejects foreign, stale and inactive catalog decisions and run subs
   assert.throws(() => verifyRoute(route, catalog, scope, "compose_run", now), /ROUTER_RUN_MISMATCH/);
 });
 
+test("rule creation requires the enabled host capability and a matching router intent", () => {
+  const create = { ...contextProposal, status: "create_rule", contextId: null, intent: { ...intent, task: "create_rule" } };
+  assert.equal(verifyContextProposal(create, catalog, scope, now, true).status, "create_rule");
+  assert.throws(() => verifyContextProposal(create, catalog, scope, now), /RULE_CREATION_UNAVAILABLE/);
+  assert.throws(() => verifyContextProposal({ ...create, contextId: "balance" }, catalog, scope, now, true), /ROUTE_STATUS_SHAPE_INVALID/);
+  assert.throws(() => verifyContextProposal({ ...create, status: "no_match" }, catalog, scope, now, true), /ROUTE_INTENT_MISMATCH/);
+});
+
 test("selection mode controls order and canonical compiler publishes mandatory evidence", () => {
   const run = "composer_run";
   const verified = verifyExperience(proposal, decision, route, scope, run, null, now);
@@ -58,8 +66,10 @@ test("selection mode controls order and canonical compiler publishes mandatory e
   const compiled = compileExperience({
     status: "ready", outcome: "ready", introKey: "comparison", question: null, partial: false, expiresAt: life.expiresAt, approved: verified,
   }).display;
-  assert.equal(compiled.blocks[0].props.sources.length, 2);
-  assert.ok(compiled.blocks[0].props.disclosures.length);
+  const [comparison] = compiled.blocks;
+  assert.equal(comparison.component, "PznComparison");
+  assert.equal(comparison.props.sources.length, 2);
+  assert.ok(comparison.props.disclosures.length);
   assert.doesNotMatch(JSON.stringify(compiled), /Diagnostic intent/);
   const surface = structuredClone(compiled.messages[0]);
   surface.createSurface.components![0].children.push("dangling");

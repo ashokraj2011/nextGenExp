@@ -8,13 +8,13 @@ import { ActionMessageSchema } from "@a2ui/web_core/v1_0";
 import demo from "../../fixtures/host.json";
 import { type Bootstrap } from "../../packages/contracts/api";
 import { MAX_MESSAGE_LENGTH, type SelectionMode } from "../../packages/contracts/domain";
-import { toolSetupSchema, treatmentPreviewSchema } from "../../packages/contracts/tool-setup";
+import { mockCcreRuleSchema, toolSetupSchema, treatmentPreviewSchema } from "../../packages/contracts/tool-setup";
 import { tsFixtures } from "../../packages/ts-adapter";
 import type { GatewaySettings } from "./gateway";
 import { Runtime } from "./runtime";
 import { ApiError, Store, presentConversation } from "./store";
 import { ExperienceService } from "./service";
-import { previewTreatmentSelector, toolSetupView, validateToolSetup } from "./tool-setup";
+import { addCcreRule, previewTreatmentSelector, toolSetupTag, toolSetupView, validateToolSetup } from "./tool-setup";
 
 type Options = {
   dataDir: string;
@@ -100,7 +100,7 @@ export async function startApp(options: Options) {
     store.close();
     throw error;
   }
-  const experience = new ExperienceService(store, runtime, selectionMode, now);
+  const experience = new ExperienceService(store, runtime, selectionMode, now, inspectorEnabled);
   const mode = options.mode ?? "live";
   let vite: ViteDevServer | undefined;
   const streams = new Set<ServerResponse>();
@@ -158,15 +158,35 @@ export async function startApp(options: Options) {
     }
     if (resource === "admin" && inspectorEnabled && !operation) {
       const toolSetupLimit = 768 * 1024;
-      if (id === "tools" && method === "GET") return json(res, toolSetupView(store.toolSetup(principalId)));
+      if (id === "tools" && method === "GET") {
+        const setup = store.toolSetup(principalId);
+        res.setHeader("ETag", toolSetupTag(setup));
+        return json(res, toolSetupView(setup));
+      }
       if (id === "tools" && method === "POST") {
         const setup = await body(req, toolSetupSchema, toolSetupLimit);
         validateToolSetup(setup);
+        const tag = toolSetupTag(setup);
+        const expected = req.headers["if-match"];
+        if (expected !== undefined) {
+          const current = toolSetupTag(store.toolSetup(principalId));
+          if (expected !== current && tag !== current) {
+            throw new ApiError(412, "tool_setup_changed", "Tool settings changed. Reload Tool setup to review the latest settings.");
+          }
+        }
         store.saveToolSetup(principalId, setup);
+        res.setHeader("ETag", tag);
         return json(res, setup);
       }
       if (id === "treatment-preview" && method === "POST") {
         return json(res, await previewTreatmentSelector(await body(req, treatmentPreviewSchema, toolSetupLimit)));
+      }
+      if (id === "ccre-rules" && method === "POST") {
+        const rule = await body(req, mockCcreRuleSchema, toolSetupLimit);
+        const current = store.toolSetup(principalId);
+        const updated = addCcreRule(current, rule);
+        if (updated !== current) store.saveToolSetup(principalId, updated);
+        return json(res, rule);
       }
     }
     if (resource === "conversations") {

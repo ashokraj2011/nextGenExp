@@ -1,0 +1,36 @@
+.setup-field { display: grid; gap: 6px; min-width: 0; color: var(--ink); font-size: .83rem; font-weight: 625; }
+.setup-field select, .setup-field input, .setup-field textarea {
+  width: 100%; min-width: 0; height: 39px; padding: 5px 8px;
+  border: 1px solid var(--line-strong); border-radius: 8px; background: var(--white);
+  color: var(--ink); font: inherit; font-weight: 450;
+}
+.setup-field textarea { height: auto; min-height: 86px; resize: vertical; font-family: ui-monospace, monospace; }
+.rule-draft-fields { display: grid; min-width: 0; gap: 12px; margin: 0; padding: 0; border: 0; }
+.rule-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.rule-field-note { color: var(--muted); font-size: .8rem; font-weight: 450; line-height: 1.45; }
+.rule-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.treatment-preview-result {
+  margin-top: 12px; padding: 12px 14px; border: 1px solid #cfe7de; border-radius: 9px;
+  background: #f1f8f5; color: #18584e; font-size: .86rem; line-height: 1.55; overflow-wrap: anywhere;
+}
+.treatment-preview-result ol { margin: 6px 0 0; padding-left: 21px; }
+.ccre-evaluation { margin-top: 12px; padding-top: 10px; border-top: 1px solid #cfe7de; }
+.ccre-evaluation ul { display: grid; gap: 5px; margin: 6px 0; padding-left: 18px; }
+.ccre-evaluation li :is(code, span) { margin-left: 7px; }
+.ccre-evaluation summary { margin-top: 8px; cursor: pointer; }
+.rule-creation-body, .rule-load-error { display: grid; gap: 12px; margin-top: 10px; }
+.rule-load-error button { justify-self: start; }
+.rule-scenario { display: flex; gap: 8px; color: var(--muted); font-size: .83rem; }
+.rule-scenario strong { color: var(--ink); font-weight: 625; }
+.rule-creation-preview {
+  min-width: 0; margin: 0; padding: 0; border: 0; border-top: 1px solid var(--line);
+}
+.rule-creation-preview legend { margin-bottom: 6px; padding: 0 9px 0 0; font-size: .88rem; font-weight: 650; color: var(--ink); }
+.rule-creation a { color: var(--teal-dark); font-size: .86rem; }
+.rule-creation .treatment-preview-result { margin-top: 0; }
+.rule-error { color: #a4322b; font-size: .86rem; }
+.rule-saved { color: var(--teal-dark); font-size: .86rem; }
+
+@media (max-width: 460px) {
+  .rule-fields { grid-template-columns: minmax(0, 1fr); }
+}

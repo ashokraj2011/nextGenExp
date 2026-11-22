@@ -4,14 +4,11 @@ import {
   MAX_CCRE_RULES, sfieldTools, toolKeys, toolVersion, treatmentOverride,
   type MockCcreRule, type MockOutput, type ToolSetup, type ToolSetupView, type TreatmentPreview, type TreatmentPreviewInput,
 } from "../../packages/contracts/tool-setup";
-import { api, RequestError } from "./api";
+import { api, toolSetupErrorMessage as messageFor } from "./api";
 import { CcreRuleEditor } from "./ccre-rule-editor";
 import { rememberActiveConversation } from "./conversation-storage";
+import { TreatmentPreviewResult } from "./treatment-preview";
 import "./admin.css";
-
-function messageFor(error: unknown) {
-  return error instanceof RequestError ? error.message : "Couldn’t reach the local server. Try again.";
-}
 
 function RankedContent({ ids, content, change }: {
   ids: string[]; content: ToolSetupView["content"]; change: (ids: string[]) => void;
@@ -24,7 +21,7 @@ function RankedContent({ ids, content, change }: {
   }
 
   return <div className="rank-editor">
-    <div className="admin-field">
+    <div className="setup-field">
       <label htmlFor="mock-content">Add eligible content</label>
       <select id="mock-content" value="" disabled={!choices.length} onChange={(event) => change([...ids, event.target.value])}>
         <option value="" disabled>{choices.length ? "Choose a demo item" : "All demo items added"}</option>
@@ -47,32 +44,8 @@ function RankedContent({ ids, content, change }: {
   </div>;
 }
 
-function PreviewResult({ result }: { result: TreatmentPreview }) {
-  if (result.status === "disabled") return <p>Treatment Selector is disabled in this setup.</p>;
-  const source = result.source === "override" ? "Configured response" : "Built-in fixture";
-  return <>
-    <strong>{result.status === "timeout" ? "Simulated timeout" : result.status === "empty" ? "No eligible content" : "Ranked eligible content"}</strong>
-    <p>{source}</p>
-    {result.status === "ranked" && <ol aria-label="Eligible content in rank order">{result.contentIds.map((id) => <li key={id}><code>{id}</code></li>)}</ol>}
-    {result.status !== "timeout" && result.ccre && <div className="admin-ccre-result">
-      <h4>Mock CCRE evaluation</h4>
-      <ul>
-        {result.ccre.results.map(({ name, contentId, outcome }) => <li key={contentId}>
-          <strong>{name}</strong>
-          <code>{contentId}</code>
-          <span>{outcome === "matched" ? "Matched" : outcome === "excluded" ? "Excluded" : "Outside the ranked list"}</span>
-        </li>)}
-      </ul>
-      <details>
-        <summary>Ranked content before rules</summary>
-        {result.ccre.beforeRules.length ? <ol>{result.ccre.beforeRules.map((id) => <li key={id}><code>{id}</code></li>)}</ol> : <p>Empty list</p>}
-      </details>
-    </div>}
-  </>;
-}
-
-function ToolSetupForm({ data }: { data: ToolSetupView }) {
-  const [saved, setSaved] = useState(data.setup);
+function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: string }) {
+  const [saved, setSaved] = useState({ setup: data.setup, revision });
   const [setup, setSetup] = useState(data.setup);
   const [scenarioId, setScenario] = useState(data.defaultScenarioId);
   const [contextId, setContext] = useState(data.contexts[0].contextId);
@@ -92,7 +65,7 @@ function ToolSetupForm({ data }: { data: ToolSetupView }) {
   const allCcreRules = setup.ccreRules ?? [];
   const inSelectedScope = (entry: MockCcreRule) => entry.scenarioId === scenarioId && entry.contextId === contextId;
   const ccreRules = allCcreRules.filter(inSelectedScope);
-  const dirty = JSON.stringify(saved) !== JSON.stringify(setup);
+  const dirty = JSON.stringify(saved.setup) !== JSON.stringify(setup);
   const incompleteRankedResponse = setup.treatmentOverrides.some(({ output }) => output.mode === "ranked" && !output.contentIds.length);
   const previewInput: TreatmentPreviewInput = {
     personaId, scenarioId, contextId, ordinal: Number(ordinal), enabled: setup.enabled.selection, output, ccreRules,
@@ -118,8 +91,8 @@ function ToolSetupForm({ data }: { data: ToolSetupView }) {
     setSaving(true);
     setSaveError("");
     try {
-      const persisted = await api.saveToolSetup(setup);
-      setSaved(persisted);
+      const { data: persisted, revision: updatedRevision } = await api.saveToolSetup(setup, saved.revision);
+      setSaved({ setup: persisted, revision: updatedRevision });
       setSetup(persisted);
       setSaveNotice("Tool settings saved.");
       return true;
@@ -195,19 +168,19 @@ function ToolSetupForm({ data }: { data: ToolSetupView }) {
         <h2 id="treatment-mock-title">Treatment Selector mock</h2>
         <p>Set the eligible response for a scenario and context.</p>
         <div className="admin-fields">
-          <div className="admin-field">
+          <div className="setup-field">
             <label htmlFor="mock-scenario">Scenario</label>
             <select id="mock-scenario" value={scenarioId} onChange={(event) => setScenario(event.target.value)}>
               {data.scenarios.map(({ scenarioId, label }) => <option key={scenarioId} value={scenarioId}>{label}</option>)}
             </select>
           </div>
-          <div className="admin-field">
+          <div className="setup-field">
             <label htmlFor="mock-context">Context</label>
             <select id="mock-context" value={contextId} onChange={(event) => setContext(event.target.value)}>
               {data.contexts.map(({ contextId, displayName }) => <option key={contextId} value={contextId}>{displayName}</option>)}
             </select>
           </div>
-          <div className="admin-field">
+          <div className="setup-field">
             <label htmlFor="mock-response">Response</label>
             <select id="mock-response" value={output?.mode ?? "fixture"} onChange={(event) => {
               const mode = event.target.value;
@@ -233,13 +206,13 @@ function ToolSetupForm({ data }: { data: ToolSetupView }) {
           <h3>Preview response</h3>
           <p>Test the current settings without an LLM gateway.</p>
           <div className="admin-preview-fields">
-            <div className="admin-field">
+            <div className="setup-field">
               <label htmlFor="mock-persona">Demo persona</label>
               <select id="mock-persona" value={personaId ?? ""} onChange={(event) => setPreviewPersona(event.target.value)}>
                 {personas.map((persona) => <option key={persona.personaId} value={persona.personaId}>{persona.displayName}</option>)}
               </select>
             </div>
-            <div className="admin-field">
+            <div className="setup-field">
               <label htmlFor="mock-turn">Turn number</label>
               <input id="mock-turn" type="number" min={1} step={1} value={ordinal} onChange={(event) => setOrdinal(event.target.value)} />
             </div>
@@ -257,7 +230,7 @@ function ToolSetupForm({ data }: { data: ToolSetupView }) {
           {chatError && <p className="admin-error" role="alert">{chatError}</p>}
           {previewResult && ("error" in previewResult
             ? <p className="admin-error" role="alert">{previewResult.error}</p>
-            : <div className="admin-result" role="status"><PreviewResult result={previewResult.result} /></div>)}
+            : <TreatmentPreviewResult result={previewResult.result} />)}
         </div>
       </section>
     </fieldset>
@@ -265,12 +238,12 @@ function ToolSetupForm({ data }: { data: ToolSetupView }) {
 }
 
 export function AdminPage() {
-  const [data, setData] = useState<ToolSetupView>();
+  const [loaded, setLoaded] = useState<Awaited<ReturnType<typeof api.toolSetup>>>();
   const [error, setError] = useState("");
   useEffect(() => {
     document.title = "Tool setup · PZN Lab";
     let mounted = true;
-    void api.toolSetup().then((setup) => { if (mounted) setData(setup); })
+    void api.toolSetup().then((setup) => { if (mounted) setLoaded(setup); })
       .catch((error: unknown) => { if (mounted) setError(messageFor(error)); });
     return () => { mounted = false; };
   }, []);
@@ -281,7 +254,7 @@ export function AdminPage() {
       <a className="icon-button" href="/"><ArrowLeft size={16} aria-hidden="true" />Back to chat</a>
     </div></header>
     <main className="admin-main">
-      {data ? <ToolSetupForm data={data} /> : <div className="admin-heading">
+      {loaded ? <ToolSetupForm {...loaded} /> : <div className="admin-heading">
         <h1>Tool setup</h1>
         {error ? <p role="alert">{error}</p> : <p role="status">Loading tool settings…</p>}
       </div>}

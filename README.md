@@ -60,6 +60,10 @@ Open **Tool setup** from the chat header. Turn the four registered read-only too
 
 #### Create and test a CCRE mock rule
 
+Type **Create rule** in chat to open the CCRE editor as an A2UI block. The Context Router returns the `create_rule` intent and the app opens the editor in the conversation's demo scenario. Choose a context, treatment and mock condition. **Preview rule** evaluates the draft for the selected persona and turn. **Save rule** adds it to Tool setup for subsequent chat turns. You can edit or remove the saved rule in Tool setup.
+
+You can also create a rule directly in Tool setup.
+
 1. In **Tool setup**, select **Normal eligibility** and **Balances**, then click **Create rule** under **CCRE rules**.
 2. Target **Available balance: demo definition**, use **Demo persona is**, select **Demo learner**, and click **Add rule**. The optional CCRE source is stored for future integration. The mock evaluates the condition controls.
 3. Click **Run preview** for **Demo learner**, then change the preview persona to **Demo returning visitor** and run it again. The evaluation shows whether the rule matched and the ranked IDs before and after filtering.

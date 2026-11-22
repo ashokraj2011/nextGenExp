@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import host from "../../fixtures/host.json";
 import type { BalanceProof, IntroKey } from "../contracts/domain";
 import {
-  MAX_SURFACE_BYTES, PZN_CATALOG_ID, validatePznSurface, type DisplayBlock, type DisplayExperience,
+  MAX_SURFACE_BYTES, PZN_CATALOG_ID, ruleCreation, validatePznSurface, type DisplayBlock, type DisplayExperience, type RuleCreationProps,
 } from "../contracts/surface";
 import type { VerifiedExperience } from "./verify";
 
@@ -21,7 +21,6 @@ type ExperienceInput = {
 };
 
 export function compileExperience(input: ExperienceInput): CompiledExperience {
-  const experienceId = makeId("exp");
   const intro = input.outcome === "eligible_empty"
     ? "There is no eligible demo content available for this request."
     : host.introCopy[input.introKey];
@@ -60,6 +59,23 @@ export function compileExperience(input: ExperienceInput): CompiledExperience {
   const issued = (input.approved?.followUps ?? []).map((followUp, index) => ({
     ...followUp, actionId: makeId("action"), componentId: "follow_up_" + (index + 1),
   }));
+  return buildSurface({ status: input.status, outcome: input.outcome, intro, question: input.question, partial: input.partial, expiresAt: input.expiresAt }, blocks, issued);
+}
+
+export function compileRuleCreation(props: RuleCreationProps, expiresAt: number): CompiledExperience {
+  return buildSurface({
+    status: "ready", outcome: "create_rule", intro: "Choose a treatment and preview its mock eligibility rule.",
+    question: null, partial: false, expiresAt,
+  }, [{ component: ruleCreation.name, props }], []);
+}
+
+function buildSurface(
+  displayFields: Pick<DisplayExperience, "status" | "outcome" | "intro" | "question" | "partial" | "expiresAt">,
+  blocks: DisplayBlock[],
+  issued: IssuedAction[],
+): CompiledExperience {
+  const experienceId = makeId("exp");
+  const { intro, question, partial } = displayFields;
   const actions = issued.map(({ actionId, componentId, label }) => ({ actionId, componentId, label }));
   const nodes = [
     ...blocks.map((block, index) => ({ id: "block_" + (index + 1), component: block.component, ...block.props })),
@@ -71,14 +87,13 @@ export function compileExperience(input: ExperienceInput): CompiledExperience {
       surfaceId: experienceId, catalogId: PZN_CATALOG_ID, dataModel: { intro },
       components: [{
         id: "root", component: "PznExperience", intro: { "@path": "/intro" },
-        children: nodes.map((node) => node.id), actionCount: actions.length, question: input.question, partial: input.partial,
+        children: nodes.map((node) => node.id), actionCount: actions.length, question, partial,
       }, ...nodes],
     },
   }, experienceId);
   const display: DisplayExperience = {
-    experienceId, messageId: makeId("msg"), status: input.status, outcome: input.outcome,
-    intro, question: input.question, partial: input.partial, blocks, actions,
-    expiresAt: input.expiresAt, a2uiVersion: "1.0", messages: [message],
+    ...displayFields, experienceId, messageId: makeId("msg"), blocks, actions,
+    a2uiVersion: "1.0", messages: [message],
   };
   if (Buffer.byteLength(JSON.stringify(display)) > MAX_SURFACE_BYTES) throw new Error("Display payload exceeds limit");
   return { display, issued };

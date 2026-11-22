@@ -11,11 +11,10 @@ export type ContextSelectionProposal = {
   schemaVersion: "1.0";
   catalogSnapshotId: string;
   catalogVersion: string;
-  status: "selected" | "clarify" | "no_match";
-  contextId: string | null;
-  intent: Intent;
-  clarificationQuestion: string | null;
-};
+} & (
+  | { status: "selected" | "clarify" | "no_match"; contextId: string | null; intent: Intent; clarificationQuestion: string | null }
+  | { status: "create_rule"; contextId: null; intent: Omit<Intent, "task"> & { task: "create_rule" }; clarificationQuestion: null }
+);
 export type ProposalBlock = { blockId: string; component: ComponentName; candidateIds: string[]; variant: Variant };
 export type ExperienceProposal = {
   schemaVersion: "1.0";

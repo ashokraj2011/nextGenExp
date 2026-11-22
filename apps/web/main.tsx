@@ -69,7 +69,7 @@ function AssistantMessage() {
       {(turn.status === "failed" || turn.status === "cancelled") && latest?.id === turn.id && (
         <button type="button" disabled={pending} className="secondary-button retry" onClick={() => retry(turn.id)}><RotateCcw size={15} />Retry</button>
       )}
-      {experience?.status === "ready" && <div className="feedback-controls" aria-label="Response feedback">
+      {experience?.status === "ready" && experience.outcome !== "create_rule" && <div className="feedback-controls" aria-label="Response feedback">
         <span>Was this helpful?</span>
         <button className="icon-button" type="button" aria-label="Helpful" aria-pressed={turn.feedback === "helpful"}
           onClick={() => feedback(turn.id, experience.experienceId, "helpful")}><ThumbsUp size={16} /></button>

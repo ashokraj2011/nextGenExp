@@ -219,13 +219,70 @@ test("CCRE mock rules filter ranked treatments the same way in preview and chat"
   assert.deepEqual(restored.treatment?.ccre?.data, excluded.ccre);
 });
 
-test("the inspector setting also closes the tool setup page and API", async (t) => {
-  const f = await fixture(undefined, { noGateway: true, inspectorEnabled: false });
+test("the inspector setting also closes the tool setup page, API, and chat editor", async (t) => {
+  const f = await fixture(undefined, { inspectorEnabled: false });
   t.after(() => f.close());
-  assert.equal((await f.client.response("/admin")).status, 404);
-  assert.equal((await f.client.response("/api/admin/tools")).status, 404);
-  assert.equal((await f.client.response("/api/admin/tools", defaultToolSetup)).status, 404);
-  assert.equal((await f.client.response("/api/admin/treatment-preview", {})).status, 404);
+  const { client, gateway } = f;
+  assert.equal((await client.response("/admin")).status, 404);
+  assert.equal((await client.response("/api/admin/tools")).status, 404);
+  assert.equal((await client.response("/api/admin/tools", defaultToolSetup)).status, 404);
+  assert.equal((await client.response("/api/admin/treatment-preview", {})).status, 404);
+  assert.equal((await client.response("/api/admin/ccre-rules", {})).status, 404);
+  const conversation = await client.conversation();
+  const accepted = await client.submit(conversation.id, "Create rule");
+  await (await client.response(accepted.eventsUrl)).text();
+  assert.equal((await client.turn(accepted.turnId)).experience?.outcome, "no_match");
+  assert.equal(gateway.calls[0].envelope.canCreateRule, false);
+});
+
+test("chat routes create rule to an A2UI editor and saving appends a scoped mock rule", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const { client, gateway } = f;
+  const conversation = await client.conversation("normal", "demo-returning");
+  const toolsPath = "/api/admin/tools";
+  const output = { mode: "ranked" as const, contentIds: ["balance_current_definition", "balance_available_definition"] };
+  const setup: ToolSetup = { ...defaultToolSetup, treatmentOverrides: [{ scenarioId: "normal", contextId: "balance", output }] };
+  await client.request(toolsPath, setup);
+
+  const { turn, trace, events } = await client.ask(conversation.id, "Create rule");
+  assert.equal(turn.experience?.outcome, "create_rule");
+  const block = { component: "PznRuleCreation", props: { scenarioId: "normal", personaId: "demo-returning" } };
+  assert.deepEqual(turn.experience?.blocks, [block]);
+  assert.deepEqual(turn.experience?.messages[0].createSurface.components?.[1], {
+    id: "block_1", component: block.component, ...block.props,
+  });
+  assert.match(events, /event: experience\.ready/);
+  assert.equal(trace.routeOutcome, "create_rule");
+  assert.deepEqual(trace.components, ["PznRuleCreation"]);
+  assert.equal(trace.tsScopeId, null);
+  assert.equal(trace.composerRunId, null);
+  assert.equal(gateway.calls.length, 1);
+  assert.equal(gateway.calls[0].envelope.canCreateRule, true);
+  const payloads = await client.request<TurnPayloads>("/api/debug/payloads/" + turn.id);
+  assert.match(JSON.stringify(payloads.router?.attempts[0].exchange?.response?.data), /create_rule/);
+  assert.equal(payloads.treatment, null);
+  assert.equal(payloads.composer, null);
+
+  const before = await client.response(toolsPath);
+  const revision = before.headers.get("etag");
+  assert.ok(revision);
+  assert.deepEqual((await before.json()).setup, setup);
+  const rulesPath = "/api/admin/ccre-rules";
+  const rule: MockCcreRule = {
+    scenarioId: "normal", contextId: "balance", contentId: output.contentIds[1], name: "Available balance for learners",
+    condition: { kind: "persona_is", personaId: "demo-learner" },
+  };
+  await client.request(rulesPath, { ...rule, contextId: "archived-help" }, 400);
+  assert.deepEqual(await client.request(rulesPath, rule), rule);
+  assert.deepEqual(await client.request(rulesPath, rule), rule);
+  await client.request(rulesPath, { ...rule, name: "Overwriting the rule" }, 409);
+  assert.equal((await client.response(toolsPath, { ...setup, treatmentOverrides: [] }, { "If-Match": revision })).status, 412);
+  assert.deepEqual((await client.request<ToolSetupView>(toolsPath)).setup, { ...setup, ccreRules: [rule] });
+
+  const after = await client.ask(conversation.id, "Compare available and current balance.");
+  assert.deepEqual(after.trace.ts?.baseline, ["balance_current_definition"]);
+  assert.equal(after.turn.experience?.outcome, "no_match");
 });
 
 test("two-stage completion persists source-rich comparison, scopes, SSE replay, and a rerouted follow-up", async (t) => {
@@ -521,7 +578,7 @@ test("stop after route commitment prevents treatment dispatch and composer admis
   const gateway = await startFixtureGateway();
   const store = new Store(join(dir, "app.sqlite"));
   const runtime = await Runtime.open(store, join(dir, "sfield.sqlite"), gateway.settings, Date.now);
-  const service = new ExperienceService(store, runtime, "semantic_rerank", Date.now);
+  const service = new ExperienceService(store, runtime, "semantic_rerank", Date.now, true);
   t.after(async () => {
     await service.close();
     await gateway.close();

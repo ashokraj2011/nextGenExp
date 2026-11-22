@@ -2,20 +2,27 @@ import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import type { Bootstrap, ConversationView, TurnAccepted, TurnView } from "../../packages/contracts/api";
 import type { TurnPayloads } from "../../packages/contracts/inspector";
 import type { ContextCatalog, PropensityResult, SelectionMode } from "../../packages/contracts/domain";
-import type { ToolSetup, ToolSetupView, TreatmentPreview, TreatmentPreviewInput, TreatmentSource } from "../../packages/contracts/tool-setup";
+import type { MockCcreRule, ToolSetup, ToolSetupView, TreatmentPreview, TreatmentPreviewInput, TreatmentSource } from "../../packages/contracts/tool-setup";
 
 export class RequestError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
 }
-async function request<T>(path: string, payload?: unknown): Promise<T> {
+export function toolSetupErrorMessage(error: unknown) {
+  return error instanceof RequestError ? error.message : "Couldn’t reach the local server. Try again.";
+}
+async function requestJson<T>(path: string, payload?: unknown, revision?: string) {
   const response = await fetch(path, payload === undefined ? undefined : {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    method: "POST", headers: { "Content-Type": "application/json", ...(revision && { "If-Match": revision }) },
+    body: JSON.stringify(payload),
   });
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new RequestError(response.status, error.code ?? "request_failed", error.message ?? "This request couldn’t be completed.");
   }
-  return response.json() as Promise<T>;
+  return { data: await response.json() as T, revision: response.headers.get("ETag") ?? undefined };
+}
+async function request<T>(path: string, payload?: unknown) {
+  return (await requestJson<T>(path, payload)).data;
 }
 
 type Stage = { state: string; elapsedMs: number; modelCalls: number; totalTokens: number; tokensReported: boolean; errorCode?: string };
@@ -46,8 +53,9 @@ export type Trace = {
 };
 export const api = {
   bootstrap: () => request<Bootstrap>("/api/bootstrap"),
-  toolSetup: () => request<ToolSetupView>("/api/admin/tools"),
-  saveToolSetup: (setup: ToolSetup) => request<ToolSetup>("/api/admin/tools", setup),
+  toolSetup: () => requestJson<ToolSetupView>("/api/admin/tools"),
+  saveToolSetup: (setup: ToolSetup, revision?: string) => requestJson<ToolSetup>("/api/admin/tools", setup, revision),
+  createCcreRule: (rule: MockCcreRule) => request<MockCcreRule>("/api/admin/ccre-rules", rule),
   previewTreatmentSelector: (input: TreatmentPreviewInput) => request<TreatmentPreview>("/api/admin/treatment-preview", input),
   conversation: (id: string) => request<ConversationView>("/api/conversations/" + id),
   newConversation: (personaId: string, scenarioId: string) => request<ConversationView>("/api/conversations", { personaId, scenarioId }),

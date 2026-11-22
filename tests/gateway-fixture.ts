@@ -15,6 +15,7 @@ type Envelope = {
   intent?: Intent;
   eligible?: ReturnType<typeof modelBundle>;
   allowedQuestions: string[];
+  canCreateRule?: boolean;
 };
 type RequestBody = {
   model: string;
@@ -44,7 +45,14 @@ function fromMessage(body: RequestBody): Envelope | undefined {
 
 function route(envelope: Envelope): ContextSelectionProposal {
   const { request, recent, allowedQuestions } = envelope;
-  const text = request.toLowerCase();
+  const text = request.toLowerCase().trim();
+  const catalog = { schemaVersion: "1.0" as const, catalogSnapshotId: envelope.catalogSnapshotId!, catalogVersion: envelope.catalog!.catalogVersion };
+  if (/^(?:(?:please|i want to|can you|i'd like to) )?(?:create|add) (?:(?:a|new|a new) )?(?:ccre |treatment selector )?rule\b/.test(text)) {
+    const intent = { topic: "Treatment Selector rules", summary: "Create a Treatment Selector eligibility rule." };
+    return envelope.canCreateRule
+      ? { ...catalog, status: "create_rule", contextId: null, clarificationQuestion: null, intent: { ...intent, task: "create_rule" } }
+      : { ...catalog, status: "no_match", contextId: null, clarificationQuestion: null, intent: { ...intent, task: "unknown" } };
+  }
   const contexts = new Set<string>();
   if (/balance|ledger|available term/.test(text)) contexts.add("balance");
   if (/portfolio|holdings|allocation/.test(text)) contexts.add("portsum");
@@ -57,7 +65,7 @@ function route(envelope: Envelope): ContextSelectionProposal {
     : /summary|how much|amount|show my/.test(text) ? "show" : "explain";
   const contextId = status === "selected" ? [...contexts][0] : null;
   return {
-    schemaVersion: "1.0", catalogSnapshotId: envelope.catalogSnapshotId!, catalogVersion: envelope.catalog!.catalogVersion,
+    ...catalog,
     status, contextId, clarificationQuestion: status === "clarify" ? allowedQuestions[0] : null,
     intent: { task, topic: contextId ?? "demo topics", summary: "Deterministic test intent." },
   };

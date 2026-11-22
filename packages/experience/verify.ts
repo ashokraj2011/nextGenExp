@@ -24,14 +24,18 @@ export function checkFresh(value: Dated & { scope: Scope }, scope: Scope, now: n
   requireCheck(value.issuedAt <= now && value.expiresAt > now, "DECISION_EXPIRED");
 }
 
-export function verifyContextProposal(value: unknown, catalog: CatalogSnapshot, scope: Scope, now: number) {
+export function verifyContextProposal(value: unknown, catalog: CatalogSnapshot, scope: Scope, now: number, canCreateRule = false) {
   requireCheck(isContextProposal(value), "ROUTE_SCHEMA_INVALID");
   checkFresh(catalog, scope, now);
   requireCheck(
     value.catalogSnapshotId === catalog.snapshotId && value.catalogVersion === catalog.catalog.catalogVersion,
     "CATALOG_MISMATCH",
   );
-  if (value.status === "selected") {
+  requireCheck((value.intent.task === "create_rule") === (value.status === "create_rule"), "ROUTE_INTENT_MISMATCH");
+  if (value.status === "create_rule") {
+    requireCheck(canCreateRule, "RULE_CREATION_UNAVAILABLE");
+    requireCheck(value.contextId === null && value.clarificationQuestion === null, "ROUTE_STATUS_SHAPE_INVALID");
+  } else if (value.status === "selected") {
     requireCheck(value.clarificationQuestion === null && value.contextId, "ROUTE_STATUS_SHAPE_INVALID");
     requireCheck(catalog.catalog.contexts.some((context) => context.active && context.contextId === value.contextId), "CONTEXT_NOT_ACTIVE");
   } else {

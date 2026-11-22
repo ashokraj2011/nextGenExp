@@ -7,9 +7,10 @@ import {
 import { ArrowUpRight, BookOpenText, ChartNoAxesColumnIncreasing, ChevronDown, Columns2, FileText, ListChecks } from "lucide-react";
 import { makeAssistantDataUI } from "@assistant-ui/react";
 import {
-  PZN_CATALOG_ID, FOLLOW_UP_EVENT, contentCard, comparison, stepList, metricSummary, experienceRoot, followUpButton,
+  PZN_CATALOG_ID, FOLLOW_UP_EVENT, contentCard, comparison, stepList, metricSummary, experienceRoot, followUpButton, ruleCreation,
   validatePznSurface, type DisplayBlock, type DisplayExperience,
 } from "../../packages/contracts/surface";
+import { RuleCreationBlock } from "./rule-creation-block";
 
 const icons = {
   PznContentCard: BookOpenText,
@@ -25,6 +26,7 @@ const blockLabels = {
 };
 
 function ContentBlock({ block }: { block: DisplayBlock }) {
+  if (block.component === ruleCreation.name) return <RuleCreationBlock {...block.props} />;
   const { component, props } = block;
   const Icon = icons[component];
   return (
@@ -116,6 +118,7 @@ const pznCatalog = new Catalog<ReactCatalogComponent>(PZN_CATALOG_ID, "1.0", [
   createComponentImplementation(comparison, ({ props }) => <ContentBlock block={{ component: comparison.name, props }} />),
   createComponentImplementation(stepList, ({ props }) => <ContentBlock block={{ component: stepList.name, props }} />),
   createComponentImplementation(metricSummary, ({ props }) => <ContentBlock block={{ component: metricSummary.name, props }} />),
+  createComponentImplementation(ruleCreation, ({ props }) => <RuleCreationBlock {...props} />),
   createComponentImplementation(followUpButton, ({ props, context }) => {
     const { enabled } = useContext(SurfaceActions);
     return <button className="follow-up" type="button" disabled={!enabled} onClick={() => {

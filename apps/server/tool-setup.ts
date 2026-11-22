@@ -1,5 +1,9 @@
+import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import host from "../../fixtures/host.json";
-import type { MockCcreRule, MockOutput, ToolSetup, ToolSetupView, TreatmentPreview, TreatmentPreviewInput } from "../../packages/contracts/tool-setup";
+import {
+  MAX_CCRE_RULES, type MockCcreRule, type MockOutput, type ToolSetup, type ToolSetupView, type TreatmentPreview, type TreatmentPreviewInput,
+} from "../../packages/contracts/tool-setup";
 import { contentCatalog } from "../../packages/experience/content";
 import { activeContexts, fixtureEligibleSets, FixtureTsAdapter, scenariosById, TreatmentSelectorTimeout, tsFixtures } from "../../packages/ts-adapter";
 import { ApiError } from "./store";
@@ -10,6 +14,10 @@ const content = contentCatalog.entries
   .map(({ contentId, title }) => ({ contentId, title }));
 const contentIds = new Set(content.map(({ contentId }) => contentId));
 const contexts = activeContexts.map(({ contextId, displayName }) => ({ contextId, displayName }));
+
+export function toolSetupTag(setup: ToolSetup) {
+  return '"' + createHash("sha256").update(JSON.stringify(setup)).digest("hex") + '"';
+}
 
 export function toolSetupView(setup: ToolSetup): ToolSetupView {
   return {
@@ -50,6 +58,22 @@ function validateCcreRule(rule: MockCcreRule) {
 export function validateToolSetup(setup: ToolSetup) {
   for (const { scenarioId, contextId, output } of setup.treatmentOverrides) validateMock(scenarioId, contextId, output);
   for (const rule of setup.ccreRules ?? []) validateCcreRule(rule);
+}
+
+export function addCcreRule(setup: ToolSetup, rule: MockCcreRule): ToolSetup {
+  validateCcreRule(rule);
+  const rules = setup.ccreRules ?? [];
+  const existing = rules.find(({ scenarioId, contextId, contentId }) => (
+    scenarioId === rule.scenarioId && contextId === rule.contextId && contentId === rule.contentId
+  ));
+  if (existing) {
+    if (isDeepStrictEqual(existing, rule)) return setup;
+    throw new ApiError(409, "ccre_rule_exists", "This treatment already has a rule in this scenario and context. You can edit it in Tool setup.");
+  }
+  if (rules.length >= MAX_CCRE_RULES) {
+    throw new ApiError(409, "ccre_rule_limit", "The setup has reached its rule limit.");
+  }
+  return { ...setup, ccreRules: [...rules, rule] };
 }
 
 export async function previewTreatmentSelector(input: TreatmentPreviewInput): Promise<TreatmentPreview> {

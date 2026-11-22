@@ -151,6 +151,35 @@ try {
   await page.getByText("Treatment Selector · succeeded", { exact: true }).click();
   await page.getByText("Mock CCRE evaluation", { exact: true }).click();
   assert.match(await page.locator('pre[aria-label="Mock CCRE evaluation"]').innerText(), /"outcome": "excluded"/);
+
+  const author = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  author.setDefaultTimeout(12_000);
+  author.on("pageerror", (error) => pageErrors.push(error.message));
+  await author.goto(preview.url);
+  await author.getByText("Test mode", { exact: true }).waitFor();
+  const authorMessage = author.getByLabel("Your question");
+  await authorMessage.fill("Create rule");
+  await authorMessage.press("Enter");
+  const ruleBlock = author.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Create a CCRE rule" });
+  await ruleBlock.getByLabel("Rule name", { exact: true }).fill("Available balance for learners");
+  await ruleBlock.getByLabel("Target treatment", { exact: true }).selectOption("balance_available_definition");
+  assert.equal(await ruleBlock.getByLabel("Matching persona", { exact: true }).inputValue(), "demo-learner");
+  await ruleBlock.getByRole("button", { name: "Preview rule", exact: true }).click();
+  await ruleBlock.getByText("Matched", { exact: true }).waitFor();
+  await ruleBlock.getByLabel("Preview persona", { exact: true }).selectOption("demo-returning");
+  await ruleBlock.getByRole("button", { name: "Preview rule", exact: true }).click();
+  await ruleBlock.getByText("Excluded", { exact: true }).waitFor();
+  const rankedAfterRule = ruleBlock.getByRole("list", { name: "Eligible content in rank order" });
+  assert.ok(!(await rankedAfterRule.locator("code").allTextContents()).includes("balance_available_definition"));
+  const beforeRuleSave = await author.request.get(preview.url + "/api/admin/tools");
+  assert.deepEqual((await beforeRuleSave.json()).setup.ccreRules ?? [], []);
+  await ruleBlock.getByRole("button", { name: "Save rule", exact: true }).click();
+  await ruleBlock.getByRole("button", { name: "Saved", exact: true, disabled: true }).waitFor();
+  await authorMessage.fill("Compare available and current balance.");
+  await authorMessage.press("Enter");
+  await author.getByRole("heading", { name: "Compare demo definitions" }).waitFor();
+  await ruleBlock.getByRole("link", { name: "Open Tool setup" }).click();
+  await author.getByRole("list", { name: "CCRE rules for this context" }).getByText("Available balance for learners", { exact: true }).waitFor();
   assert.deepEqual(pageErrors, []);
 
   const mobile = await browser.newPage({ viewport: { width: 360, height: 780 }, isMobile: true, deviceScaleFactor: 1, reducedMotion: "reduce", hasTouch: true });
@@ -168,6 +197,13 @@ try {
   const visibility = await mobile.getByRole("heading", { name: "Compare demo definitions" }).boundingBox();
   assert.ok(visibility && visibility.y >= 57, "The new mobile response starts in view");
   await mobile.screenshot({ path: resolve(screenshots, "comparison-mobile.png") });
+  const mobileMessage = mobile.getByLabel("Your question");
+  await mobileMessage.fill("Create a rule");
+  await mobileMessage.press("Enter");
+  const mobileRule = mobile.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Create a CCRE rule" });
+  await mobileRule.getByLabel("Rule name", { exact: true }).waitFor();
+  const mobileCard = await mobileRule.boundingBox();
+  assert.ok(mobileCard && mobileCard.x >= 0 && mobileCard.x + mobileCard.width <= 360, "The rule editor fits the mobile conversation");
   await mobile.getByRole("link", { name: "Tool setup" }).click();
   await mobile.getByRole("heading", { name: "Treatment Selector mock" }).waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -189,7 +225,7 @@ try {
   await fallback.locator('[data-renderer="fallback"]').waitFor();
   await fallback.getByRole("heading", { name: "Compare demo definitions" }).waitFor();
   await fallback.getByText("Fictional demonstration only.", { exact: false }).waitFor();
-  console.log("Browser checks passed for A2UI actions, comparison, sources, follow-up, refresh, inspector, stop, retry UI, draft retention, steps, 360 px layout, tool setup, CCRE rules, and canonical renderer fallback.");
+  console.log("Browser checks passed for A2UI actions, comparison, sources, follow-up, refresh, inspector, stop, retry UI, draft retention, steps, 360 px layout, tool setup, CCRE rules in chat and admin, and canonical renderer fallback.");
 } finally {
   await browser?.close();
   await preview.close();
