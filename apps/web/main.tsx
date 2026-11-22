@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useAui, useAuiState, useExternalStoreRuntime, type ThreadMessageLike } from "@assistant-ui/react";
 import { CreateSurfaceMessageSchema, type ActionMessage } from "@a2ui/web_core/v1_0";
-import { BookOpenText, Columns2, ListChecks, Menu, MessageSquare, PanelRight, Plus, RotateCcw, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { BookOpenText, Columns2, ListChecks, Menu, MessageSquare, PanelRight, Plus, RotateCcw, Settings2, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { failureCopy, progressLabels, type Bootstrap, type Conversation, type ConversationView, type TurnView, type TurnAccepted, type Progress } from "../../packages/contracts/api";
 import { MAX_MESSAGE_LENGTH } from "../../packages/contracts/domain";
 import { api } from "./api";
@@ -378,6 +378,8 @@ function App() {
         <div className="topbar-actions">
           {configuration?.mode === "test" && <span className="test-label" title="Deterministic automated test gateway">Test mode</span>}
           <span className="demo-badge"><span className="demo-dot" />Demo data</span>
+          {configuration?.inspectorEnabled && <a className="tool-setup-trigger inspector-trigger icon-button" aria-label="Tool setup" href="/admin">
+            <Settings2 size={18} aria-hidden="true" /><span>Tool setup</span></a>}
           {configuration?.inspectorEnabled && <button className="inspector-trigger icon-button" ref={inspectorTrigger} type="button" aria-label="Open developer inspector"
             onClick={() => setInspector(true)}><PanelRight size={18} /><span>Inspector</span></button>}
         </div>
@@ -409,6 +411,8 @@ if (location.pathname === "/__test/a2ui") {
     const { default: message } = await import("../../fixtures/a2ui-v1-basic-smoke.json");
     root.render(<BasicSmoke input={CreateSurfaceMessageSchema.parse(message)} />);
   });
+} else if (location.pathname === "/admin") {
+  void import("./admin").then(({ AdminPage }) => root.render(<AdminPage />));
 } else {
   root.render(<App />);
 }

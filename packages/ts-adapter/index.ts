@@ -1,13 +1,10 @@
 import { z } from "zod";
 import { contextCatalogSchema, type ContextCatalog } from "../contracts/domain";
+import { normalizedIdsSchema, treatmentOverride, type MockOutput, type TreatmentOverride } from "../contracts/tool-setup";
 import rawCatalog from "../../fixtures/contexts.json";
 import rawScenarios from "../../fixtures/treatment-scenarios.json";
 import host from "../../fixtures/host.json";
 
-export const normalizedIdsSchema = z.array(z.string().min(1)).max(12).refine(
-  (ids) => new Set(ids).size === ids.length,
-  "Repeated eligible ID",
-);
 const rejectionSchema = z.object({
   contentId: z.string(), stage: z.enum(["simulated_ccre", "catalog_resolution"]), reasonCode: z.string(),
 }).strict();
@@ -26,6 +23,10 @@ export const tsFixtures = z.object({
   scenarios: z.array(z.object({ scenarioId: z.string(), label: z.string(), rules: z.array(fixtureRule) }).strict()),
 }).strict().parse(rawScenarios);
 export const scenariosById = new Map(tsFixtures.scenarios.map((scenario) => [scenario.scenarioId, scenario]));
+export const fixtureEligibleSets = [
+  ...Object.values(tsFixtures.base),
+  ...tsFixtures.scenarios.flatMap(({ rules }) => rules.flatMap((rule) => rule.eligible ? [rule.eligible] : [])),
+];
 export const activeContexts = catalog.contexts.filter((context) => context.active);
 export const activeContextCatalog: ContextCatalog = { ...catalog, contexts: activeContexts };
 if (new Set(catalog.contexts.map((entry) => entry.contextId)).size !== catalog.contexts.length
@@ -53,8 +54,12 @@ export function fixtureRejections(state: FixtureState, context: string): Rejecti
   return fixtureRuleFor(state, context)?.rejections ?? [];
 }
 
+export class TreatmentSelectorTimeout extends Error {
+  constructor() { super("TS_TIMEOUT"); }
+}
+
 export class FixtureTsAdapter implements TsAdapter {
-  constructor(private readonly state: FixtureState) {}
+  constructor(private readonly state: FixtureState, private readonly overrides: readonly TreatmentOverride[] = []) {}
 
   async listContexts(signal?: AbortSignal): Promise<ContextCatalog> {
     signal?.throwIfAborted();
@@ -71,8 +76,13 @@ export class FixtureTsAdapter implements TsAdapter {
       throw new Error("UNCONFIGURED_TS_SCOPE");
     }
 
+    const override: MockOutput | undefined = treatmentOverride(this.overrides, this.state.scenarioId, context)?.output;
+    if (override) {
+      if (override.mode === "timeout") throw new TreatmentSelectorTimeout();
+      return override.mode === "empty" ? [] : [...override.contentIds];
+    }
     const rule = fixtureRuleFor(this.state, context);
-    if (rule?.error) throw new Error(rule.error);
+    if (rule?.error) throw new TreatmentSelectorTimeout();
     return [...(rule?.eligible ?? tsFixtures.base[context])];
   }
 }

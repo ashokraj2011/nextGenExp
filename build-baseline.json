@@ -1,6 +1,5 @@
 {
   "specification": "PZN Intent to Experience POC v1.1",
-  "sfieldRepository": "https://github.com/ashokraj2011/sfield.git",
   "sfieldCommit": "1b0c942f9b7d317199201533027bfd451d45a072",
   "a2uiRepository": "https://github.com/a2ui-project/a2ui",
   "a2uiCommit": "4fdc4c632cf761af64fa474530df8211483fa282",

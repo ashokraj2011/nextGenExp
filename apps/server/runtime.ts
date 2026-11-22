@@ -7,7 +7,8 @@ import {
   balanceInputSchema, balanceResultSchema, compositionOutputSchema, contextResultSchema,
   propensityInputSchema, propensityResultSchema, routingOutputSchema, treatmentInputSchema, treatmentResultSchema, turnInputSchema,
 } from "../../packages/contracts/model";
-import { activeContextCatalog, FixtureTsAdapter, tsFixtures } from "../../packages/ts-adapter";
+import { sfieldTools, toolKeys, toolVersion, type ToolKey } from "../../packages/contracts/tool-setup";
+import { activeContextCatalog, fixtureEligibleSets, FixtureTsAdapter } from "../../packages/ts-adapter";
 import { scoreContexts } from "../../packages/propensity-adapter";
 import { contentCatalog, lookupContent, modelBundle, readDemoBalance, resolveCandidates } from "../../packages/experience/content";
 import { checkFresh, Rejected, requireCheck, verifyContextProposal, verifyExperience, verifyRoute } from "../../packages/experience/verify";
@@ -15,17 +16,20 @@ import { makeId } from "../../packages/experience/compile";
 import { configureGateway, type GatewaySettings } from "./gateway";
 import { stageAgent, type ConversationRecord, type Stage, type StageAttempt, type Store, type TurnRecord } from "./store";
 
-export const toolIds = {
-  catalog: "contexts.list", propensity: "propensity.context.score", selection: "treatments.eligible", balances: "demo.balance.read",
-} as const;
 const toolRefs = {
-  catalog: "contexts.list@1.0.0", propensity: "propensity.context.score@1.0.0",
-  selection: "treatments.eligible@1.0.0", balances: "demo.balance.read@1.0.0",
+  catalog: `${sfieldTools.catalog.id}@${toolVersion}`,
+  propensity: `${sfieldTools.propensity.id}@${toolVersion}`,
+  selection: `${sfieldTools.selection.id}@${toolVersion}`,
+  balances: `${sfieldTools.balances.id}@${toolVersion}`,
 } as const;
 export function principalFor(id: string): Principal {
   return { tenantId: "pzn-local", subjectId: id, roles: ["pzn-demo", "pzn-developer"], attributes: {} };
 }
-const actions = new Set<string>(Object.values(toolIds));
+const actions = new Set<string>(toolKeys.map((key) => sfieldTools[key].id));
+
+function requireToolEnabled(turn: TurnRecord, key: ToolKey) {
+  if (turn.toolSetup?.enabled[key] === false) throw new ToolError("TOOL_DISABLED");
+}
 
 const routeInstructions = [
   "You are the PZN demo Context Router. Return only the ContextSelectionProposal JSON.",
@@ -53,11 +57,7 @@ function checkModelCapacity(settings: GatewaySettings) {
   const message = estimateTokens("X".repeat(MAX_MESSAGE_LENGTH));
   const routing = estimateTokens(routeInstructions) + estimateJsonTokens(activeContextCatalog) + estimateJsonTokens(routingOutputSchema)
     + questions + message + 850;
-  const eligibleSets = [
-    ...Object.values(tsFixtures.base),
-    ...tsFixtures.scenarios.flatMap(({ rules }) => rules.flatMap((rule) => rule.eligible ? [rule.eligible] : [])),
-  ];
-  const largestBundle = Math.max(...eligibleSets.map((ids) => estimateJsonTokens(modelBundle({
+  const largestBundle = Math.max(...fixtureEligibleSets.map((ids) => estimateJsonTokens(modelBundle({
     decisionId: "decision_capacity_check", scope: { principalId: "", personaId: "", conversationId: "", turnId: "" },
     routeDecisionId: "", contextId: "", catalogVersion: contentCatalog.catalogVersion,
     issuedAt: 0, expiresAt: 0, selectionMode: "preserve_ts_rank", partial: false, composerRunId: null,
@@ -131,64 +131,69 @@ export class Runtime {
     return turn;
   }
 
-  private scopedRegistryTurn(ref: unknown, ctx: ToolHandlerContext, boundary: "catalogScopeId" | "tsScopeId") {
+  private scopedRegistryTurn(ref: unknown, ctx: ToolHandlerContext, key: Exclude<ToolKey, "balances">) {
     ctx.signal.throwIfAborted();
     requireCheck(typeof ref === "string", "TURN_REF_REQUIRED");
     const turn = this.current(ref);
+    const boundary = key === "selection" ? "tsScopeId" : "catalogScopeId";
     requireCheck(turn[boundary] === ctx.runId && ctx.principal.tenantId === "pzn-local"
       && turn.scope.principalId === ctx.principal.subjectId && !ctx.agentId, "REGISTRY_SCOPE_MISMATCH");
     const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
     requireCheck(conversation.personaId === turn.scope.personaId, "PERSONA_MISMATCH");
     const persona = host.personas.find((entry) => entry.personaId === conversation.personaId);
     requireCheck(persona && persona.allowedScenarios.includes(conversation.scenarioId), "PERSONA_MISMATCH");
-    return { turn, conversation, persona, adapter: new FixtureTsAdapter({ scenarioId: conversation.scenarioId, ordinal: turn.ordinal }) };
+    requireToolEnabled(turn, key);
+    const adapter = new FixtureTsAdapter(
+      { scenarioId: conversation.scenarioId, ordinal: turn.ordinal }, turn.toolSetup?.treatmentOverrides,
+    );
+    return { turn, conversation, persona, adapter };
   }
 
   private tools() {
-    const read = (definition: Omit<DefineToolInput, "version" | "policy">) => defineTool({
-      ...definition, version: "1.0.0",
-      policy: {
-        action: definition.id, effect: "read", requiresApproval: false, maxAttempts: 1, timeoutMs: 5_000,
-        classification: "public", maxOutputBytes: 48_000,
-      },
-    });
+    const read = (key: ToolKey, definition: Omit<DefineToolInput, "id" | "description" | "version" | "policy">) => {
+      const { id, description } = sfieldTools[key];
+      return defineTool({
+        ...definition, id, description, version: toolVersion,
+        policy: {
+          action: id, effect: "read", requiresApproval: false, maxAttempts: 1, timeoutMs: 5_000,
+          classification: "public", maxOutputBytes: 48_000,
+        },
+      });
+    };
     return [
-      read({
-        id: toolIds.catalog, description: "Read the available demo placements for the current host turn.",
+      read("catalog", {
         inputs: turnInputSchema, outputs: contextResultSchema,
-        handler: ({ turnRef }, ctx) => this.scopedRegistryTurn(turnRef, ctx, "catalogScopeId").adapter.listContexts(ctx.signal),
+        handler: ({ turnRef }, ctx) => this.scopedRegistryTurn(turnRef, ctx, "catalog").adapter.listContexts(ctx.signal),
       }),
-      read({
-        id: toolIds.propensity, description: "Read advisory synthetic context scores for the current host catalog.",
+      read("propensity", {
         inputs: propensityInputSchema, outputs: propensityResultSchema,
         handler: ({ turnRef, catalogSnapshotId }, ctx) => {
-          const { turn, conversation } = this.scopedRegistryTurn(turnRef, ctx, "catalogScopeId");
+          const { turn, conversation } = this.scopedRegistryTurn(turnRef, ctx, "propensity");
           requireCheck(turn.catalog?.snapshotId === catalogSnapshotId && turn.catalog, "CATALOG_MISMATCH");
           checkFresh(turn.catalog, turn.scope, this.now());
           return scoreContexts(conversation.personaId, conversation.scenarioId, turn.catalog.catalog.contexts.map(({ contextId }) => contextId));
         },
       }),
-      read({
-        id: toolIds.selection, description: "Retrieve ranked synthetic eligible content IDs for a committed route.",
+      read("selection", {
         inputs: treatmentInputSchema, outputs: treatmentResultSchema,
         handler: ({ turnRef, routeDecisionId }, ctx) => {
-          const { turn, persona, adapter } = this.scopedRegistryTurn(turnRef, ctx, "tsScopeId");
+          const { turn, persona, adapter } = this.scopedRegistryTurn(turnRef, ctx, "selection");
           requireCheck(turn.route?.routeDecisionId === routeDecisionId && turn.route && turn.catalog && turn.attempts.route, "ROUTE_REQUIRED");
           verifyRoute(turn.route, turn.catalog, turn.scope, turn.attempts.route.runId, this.now());
           return adapter.getRankedEligibleIds({ mid: persona.syntheticMid, context: turn.route.contextId }, ctx.signal);
         },
       }),
-      read({
-        id: toolIds.balances, description: "Read the current fictional available and current balance values for an eligible synthetic balance summary.",
+      read("balances", {
         inputs: balanceInputSchema, outputs: balanceResultSchema,
         handler: async (_inputs, ctx) => {
           ctx.signal.throwIfAborted();
           const turn = await this.stageTurn(ctx.runId, ctx.principal, "compose");
+          requireToolEnabled(turn, "balances");
           requireCheck(turn.decision && turn.route && turn.catalog && turn.attempts.route, "ROUTE_REQUIRED");
           verifyRoute(turn.route, turn.catalog, turn.scope, turn.attempts.route.runId, this.now());
           checkFresh(turn.decision, turn.scope, this.now());
           requireCheck(turn.decision.routeDecisionId === turn.route.routeDecisionId && turn.decision.contextId === "balance"
-            && turn.decision.candidates.some((candidate) => lookupContent(candidate)?.metricSpec?.toolId === toolIds.balances), "METRIC_NOT_ELIGIBLE");
+            && turn.decision.candidates.some((candidate) => lookupContent(candidate)?.metricSpec?.toolId === sfieldTools.balances.id), "METRIC_NOT_ELIGIBLE");
           const persona = host.personas.find((entry) => entry.personaId === turn.scope.personaId);
           if (!persona) throw new ToolError("DEMO_BALANCE_UNAVAILABLE");
           ctx.signal.throwIfAborted();
@@ -232,7 +237,7 @@ export class Runtime {
       && call.invocation.principalIdentity.tenantId === "pzn-local" && call.invocation.runId === runId);
     const reading = metricReadingSchema.safeParse(read?.result?.output);
     const proof: BalanceProof | null = read && reading.success ? {
-      ...reading.data, toolId: toolIds.balances, callId: read.callId, scope: turn.scope,
+      ...reading.data, toolId: sfieldTools.balances.id, callId: read.callId, scope: turn.scope,
       decisionId: turn.decision.decisionId, routeDecisionId: turn.route.routeDecisionId,
       contextId: turn.route.contextId, composerRunId: runId, expiresAt: turn.decision.expiresAt,
     } : null;

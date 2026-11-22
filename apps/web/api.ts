@@ -1,6 +1,7 @@
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import type { Bootstrap, ConversationView, TurnAccepted, TurnView } from "../../packages/contracts/api";
 import type { ContextCatalog, PropensityResult, SelectionMode } from "../../packages/contracts/domain";
+import type { ToolSetup, ToolSetupView, TreatmentPreview, TreatmentPreviewInput, TreatmentSource } from "../../packages/contracts/tool-setup";
 
 export class RequestError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
@@ -36,7 +37,7 @@ export type Trace = {
   finalOrder?: string[];
   components?: string[];
   metricReadSucceeded: boolean;
-  ts?: { baseline: string[]; fixtureVersion: string; partial: boolean; rejections: { contentId: string; stage: string; reasonCode: string }[] };
+  ts?: { baseline: string[]; fixtureVersion: string; partial: boolean; source?: TreatmentSource; rejections: { contentId: string; stage: string; reasonCode: string }[] };
   routeRun?: Stage;
   composeRun?: Stage;
   markers: Record<string, number>;
@@ -44,6 +45,9 @@ export type Trace = {
 };
 export const api = {
   bootstrap: () => request<Bootstrap>("/api/bootstrap"),
+  toolSetup: () => request<ToolSetupView>("/api/admin/tools"),
+  saveToolSetup: (setup: ToolSetup) => request<ToolSetup>("/api/admin/tools", setup),
+  previewTreatmentSelector: (input: TreatmentPreviewInput) => request<TreatmentPreview>("/api/admin/treatment-preview", input),
   conversation: (id: string) => request<ConversationView>("/api/conversations/" + id),
   newConversation: (personaId: string, scenarioId: string) => request<ConversationView>("/api/conversations", { personaId, scenarioId }),
   turn: (id: string) => request<TurnView>("/api/turns/" + id),

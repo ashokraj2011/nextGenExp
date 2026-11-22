@@ -54,6 +54,7 @@ function TraceView({ trace }: { trace: Trace }) {
         <Detail label="Synthetic balance read">{trace.metricReadSucceeded ? "Succeeded" : "No successful read"}</Detail>
       </dl>
       {ts && <>
+        <dl className="trace-dl"><Detail label="TS response">{ts.source === "override" ? "Configured mock" : "Built-in fixture"}</Detail></dl>
         <details className="trace-details" open>
           <summary>TS eligibility order</summary>
           {ts.baseline.length ? <ol>{ts.baseline.map((id) => <li key={id}><code>{id}</code></li>)}</ol> : <p>Empty eligible list</p>}

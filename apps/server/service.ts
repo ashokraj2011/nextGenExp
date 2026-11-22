@@ -3,7 +3,8 @@ import demo from "../../fixtures/host.json";
 import { type FailureCode } from "../../packages/contracts/api";
 import { DECISION_TTL, TURN_DEADLINE, contextCatalogSchema, propensitySchema, type SelectionMode, type PropensityResult } from "../../packages/contracts/domain";
 import { FOLLOW_UP_EVENT, type DisplayExperience } from "../../packages/contracts/surface";
-import { activeContextCatalog, normalizedIdsSchema, fixtureRejections, tsFixtures } from "../../packages/ts-adapter";
+import { normalizedIdsSchema, treatmentOverride } from "../../packages/contracts/tool-setup";
+import { activeContextCatalog, fixtureRejections, tsFixtures } from "../../packages/ts-adapter";
 import { contentCatalog, modelBundle, resolveCandidates } from "../../packages/experience/content";
 import { compileExperience, makeId } from "../../packages/experience/compile";
 import { verifyContextProposal, verifyRoute, requireCheck, Rejected } from "../../packages/experience/verify";
@@ -190,9 +191,11 @@ export class ExperienceService {
         const partial = Boolean(candidates.length && rejections.length);
         const now = this.now();
         this.store.update(id, (row) => {
+          const override = treatmentOverride(row.toolSetup?.treatmentOverrides ?? [], conversation.scenarioId, route.contextId);
+          const simulatedRejections = override ? [] : fixtureRejections({ scenarioId: conversation.scenarioId, ordinal: row.ordinal }, route.contextId);
           row.trace.ts = {
             contextId: route.contextId, fixtureVersion: tsFixtures.fixtureVersion, baseline: ids,
-            rejections: [...fixtureRejections({ scenarioId: conversation.scenarioId, ordinal: row.ordinal }, route.contextId), ...rejections],
+            source: override ? "override" : "fixture", rejections: [...simulatedRejections, ...rejections],
             partial,
           };
           row.trace.markers.tsResolved = now;

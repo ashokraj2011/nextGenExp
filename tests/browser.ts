@@ -83,6 +83,35 @@ try {
   ]);
   await page.getByRole("button", { name: "Explain portfolio terms", exact: true }).click();
   await page.getByRole("heading", { name: "Understanding the fictional portfolio view" }).waitFor();
+
+  await page.getByRole("link", { name: "Tool setup" }).click();
+  await page.getByRole("heading", { name: "Tool setup", level: 1 }).waitFor();
+  assert.equal(await page.getByRole("switch", { name: "Treatment Selector", exact: true }).isChecked(), true);
+  await page.getByLabel("Response", { exact: true }).selectOption("ranked");
+  await page.getByLabel("Add eligible content").selectOption("balance_available_definition");
+  await page.getByLabel("Add eligible content").selectOption("balance_current_definition");
+  await page.getByRole("button", { name: "Move balance_current_definition up", exact: true }).click();
+  await page.getByRole("button", { name: "Run preview" }).click();
+  await page.getByText("Ranked eligible content", { exact: true }).waitFor();
+  assert.deepEqual(await page.getByRole("status").locator("ol code").allTextContents(), [
+    "balance_current_definition", "balance_available_definition",
+  ]);
+  await page.screenshot({ path: resolve(screenshots, "tool-setup-desktop.png") });
+  await page.getByLabel("Context", { exact: true }).selectOption("portsum");
+  await page.getByLabel("Response", { exact: true }).selectOption("empty");
+  await page.getByRole("button", { name: "Save settings" }).click();
+  await page.getByText("Tool settings saved.", { exact: true }).waitFor();
+  await page.reload();
+  await page.getByRole("list", { name: "Ranked content" }).waitFor();
+  assert.equal(await page.getByLabel("Response", { exact: true }).inputValue(), "ranked");
+  await page.getByLabel("Context", { exact: true }).selectOption("portsum");
+  assert.equal(await page.getByLabel("Response", { exact: true }).inputValue(), "empty");
+  await page.getByRole("link", { name: "Back to chat" }).click();
+  await page.getByText("Test mode", { exact: true }).waitFor();
+  const chatWithMock = page.getByLabel("Your question");
+  await chatWithMock.fill("Explain the fictional portfolio view.");
+  await chatWithMock.press("Enter");
+  await page.getByText("There is no eligible demo content available for this request.", { exact: true }).waitFor();
   assert.deepEqual(pageErrors, []);
 
   const mobile = await browser.newPage({ viewport: { width: 360, height: 780 }, isMobile: true, deviceScaleFactor: 1, reducedMotion: "reduce", hasTouch: true });
@@ -100,6 +129,12 @@ try {
   const visibility = await mobile.getByRole("heading", { name: "Compare demo definitions" }).boundingBox();
   assert.ok(visibility && visibility.y >= 57, "The new mobile response starts in view");
   await mobile.screenshot({ path: resolve(screenshots, "comparison-mobile.png") });
+  await mobile.getByRole("link", { name: "Tool setup" }).click();
+  await mobile.getByRole("heading", { name: "Treatment Selector mock" }).waitFor();
+  assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await mobile.getByRole("button", { name: "Run preview" }).click();
+  await mobile.getByText("Ranked eligible content", { exact: true }).waitFor();
+  await mobile.screenshot({ path: resolve(screenshots, "tool-setup-mobile.png"), fullPage: true });
   const fallback = await browser.newPage();
   await fallback.route(/\/api\/turns\/turn_[a-f0-9]+$/, async (route) => {
     const response = await route.fetch();
@@ -112,7 +147,7 @@ try {
   await fallback.locator('[data-renderer="fallback"]').waitFor();
   await fallback.getByRole("heading", { name: "Compare demo definitions" }).waitFor();
   await fallback.getByText("Fictional demonstration only.", { exact: false }).waitFor();
-  console.log("Browser checks passed for A2UI actions, comparison, sources, follow-up, refresh, inspector, stop, retry UI, draft retention, steps, 360 px layout, and canonical renderer fallback.");
+  console.log("Browser checks passed for A2UI actions, comparison, sources, follow-up, refresh, inspector, stop, retry UI, draft retention, steps, 360 px layout, tool setup, and canonical renderer fallback.");
 } finally {
   await browser?.close();
   await preview.close();

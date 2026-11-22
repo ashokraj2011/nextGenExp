@@ -3,6 +3,7 @@ import { SqliteDatabase } from "@sfield/store-sqlite";
 import type { UsageSummary } from "@sfield/core";
 import type { CatalogSnapshot, ContentDecision, PropensityResult, RouteDecision, BalanceProof, Scope, SelectionMode } from "../../packages/contracts/domain";
 import type { Conversation, FailureCode, Progress, PublicEvent, PublicEventType, TurnView } from "../../packages/contracts/api";
+import { defaultToolSetup, type ToolSetup, type TreatmentSource } from "../../packages/contracts/tool-setup";
 import type { CompiledExperience, IssuedAction } from "../../packages/experience/compile";
 import { makeId } from "../../packages/experience/compile";
 import type { Rejection } from "../../packages/ts-adapter";
@@ -25,7 +26,7 @@ export type TurnTrace = {
   surface: "chat";
   sourcePageContext: string | null;
   markers: Record<string, number>;
-  ts?: { contextId: string; baseline: string[]; fixtureVersion: string; rejections: Rejection[]; partial: boolean };
+  ts?: { contextId: string; baseline: string[]; fixtureVersion: string; rejections: Rejection[]; partial: boolean; source?: TreatmentSource };
   finalOrder?: string[];
   components?: string[];
   routeOutcome?: string;
@@ -46,6 +47,7 @@ export type TurnRecord = {
   requestId: string;
   origin: string;
   selectionMode: SelectionMode;
+  toolSetup?: ToolSetup;
   attempts: Partial<Record<Stage, StageAttempt>>;
   trace: TurnTrace;
   catalogScopeId?: string;
@@ -80,6 +82,9 @@ export class Store {
     this.db.open();
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS local_sessions (id TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS tool_setups (
+        principal_id TEXT PRIMARY KEY REFERENCES local_sessions(id), record TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, updated_at INTEGER NOT NULL, record TEXT NOT NULL
       );
@@ -113,6 +118,17 @@ export class Store {
     const sessionId = makeId("local");
     this.db.run("INSERT INTO local_sessions (id) VALUES (?)", sessionId);
     return { id: sessionId, created: true };
+  }
+
+  toolSetup(principalId: string) {
+    return parse<ToolSetup>(this.db.one("SELECT record FROM tool_setups WHERE principal_id = ?", principalId)) ?? defaultToolSetup;
+  }
+
+  saveToolSetup(principalId: string, setup: ToolSetup) {
+    this.db.run(`
+      INSERT INTO tool_setups (principal_id, record) VALUES (?, ?)
+      ON CONFLICT(principal_id) DO UPDATE SET record = excluded.record
+    `, principalId, JSON.stringify(setup));
   }
 
   createConversation(principalId: string, personaId: string, scenarioId: string, now: number) {
@@ -197,6 +213,7 @@ export class Store {
         scope: { turnId: id, principalId: conversation.principalId, conversationId: conversation.id, personaId: conversation.personaId },
         ordinal: retry?.ordinal ?? (latest?.ordinal ?? 0) + 1,
         requestId, origin, selectionMode, attempts: {},
+        toolSetup: this.toolSetup(conversation.principalId),
         trace: { surface: "chat", sourcePageContext: null, selectionMode, markers: { accepted: now }, failures: [] },
       };
       this.db.run("INSERT INTO turns VALUES (?, ?, ?, ?, ?, ?)", id, conversation.id, requestId, record.ordinal, "working", JSON.stringify(record));

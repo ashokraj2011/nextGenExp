@@ -111,6 +111,7 @@ button { color: inherit; }
 }
 .icon-button:hover:not(:disabled) { background: #eef3f5; color: var(--ink); }
 .inspector-trigger { min-height: 35px; border: 1px solid var(--line); font-size: .82rem; font-weight: 600; padding: 6px 9px; }
+.tool-setup-trigger { text-decoration: none; }
 .rail .icon-button { color: #d5e1e7; }
 .rail .icon-button:hover { color: white; background: #294255; }
 
@@ -332,4 +333,8 @@ button { color: inherit; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001s !important; transition-duration: 0.001s !important; scroll-behavior: auto !important; }
+}
+
+@media (max-width: 380px) {
+  .topbar .demo-badge { display: none; }
 }

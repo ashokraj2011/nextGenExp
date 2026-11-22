@@ -46,6 +46,12 @@ Open [PZN Lab test preview](http://127.0.0.1:4174). The **Test mode** badge iden
 
 Try **Compare two terms** for the A2UI comparison. **Guide me through a task** opens the canonical transfer checklist and a portfolio follow-up. To see the eligible set and route decisions, open **Inspector**. Its persona and scenario settings create a new conversation. Type “Show my synthetic demo balance summary” for the read-only metric example.
 
+### sfield tool setup
+
+Open **Tool setup** from the chat header. Turn the four registered read-only tools on or off. For the **Treatment Selector mock**, choose a scenario and context, then use the built-in fixture, set a ranked list from the eligible demo content, return an empty list, or simulate a timeout.
+
+**Run preview** uses the current settings, selected demo persona and turn number. The local Treatment Selector adapter responds directly, so the preview works without LLM gateway credentials. **Save settings** stores the configuration in SQLite for this browser session. New chat requests, including explicit retries, pick up the saved settings. Use **Inspector** after a chat turn to see its Treatment Selector result. Set `PZN_INSPECTOR=off` to hide the tool setup page and disable its API.
+
 ### Live gateway
 
 Copy `.env.example` to `.env` or set the same values in the server environment. Set `LLM_BASE_URL` to the gateway prefix before `/chat/completions` and `LLM_MODEL` to the gateway model alias. Set `LLM_API_KEY` for Bearer authentication. Set `LLM_CONTEXT_WINDOW`, `LLM_MAX_OUTPUT_TOKENS`, and any `LLM_QUIRKS` from the gateway’s tested capabilities.
@@ -74,7 +80,7 @@ npm test
 npm run test:browser
 ~~~
 
-The browser checks use installed Chrome or Playwright Chromium. Install Chromium with `npm exec -- playwright install chromium` if needed. The tests cover actual A2UI action payloads, desktop and 360 px layouts, source details, follow-up rerouting, refresh, stop, retained drafts, and canonical fallback. Screenshots are written to `test-results/`.
+The browser checks use installed Chrome or Playwright Chromium. Install Chromium with `npm exec -- playwright install chromium` if needed. The tests cover actual A2UI action payloads, desktop and 360 px layouts, source details, follow-up rerouting, refresh, stop, retained drafts, canonical fallback, and tool setup. Screenshots are written to `test-results/`.
 
 The deterministic host tests run the pinned sfield runtime through its HTTP/SSE gateway adapter. They check routing and candidacy scopes, simulated exclusions, expiry, distinct unavailable states, provider failures, the balance tool round trip, replay, cancellation, and restart recovery. The original contract validator also passed its 54 cases against the supplied fixture pack.
 
@@ -91,10 +97,10 @@ The smoke run exercises structured comparison, the balance tool round trip, step
 
 ## Project map
 
-- `apps/server` hosts the sfield registry and two agent sessions along with SQLite, SSE, action validation, and the inspector API.
-- `apps/web` contains the responsive assistant-ui chat, registered A2UI components, and inspector.
+- `apps/server` hosts the sfield registry and two agent sessions along with SQLite, SSE, action validation, and the tool setup and inspector APIs.
+- `apps/web` contains the responsive assistant-ui chat, registered A2UI components, inspector, and tool setup panel.
 - `packages/contracts` and `packages/experience` contain the schemas, scoping verifiers, and compiler for approved content and disclosures.
 - `packages/ts-adapter`, `packages/propensity-adapter`, and `fixtures` provide the simulated placement catalog, scores, and ranked eligibility.
-- `vendor/sfield` contains the sfield workspace source, upstream commit reference, and license.
+- `vendor/sfield` contains the sfield workspace source and license.
 
-The project pins dependencies in `package-lock.json` and records the runtime commit, A2UI baseline, and fixture versions in `build-baseline.json`. [sfield source](https://github.com/ashokraj2011/sfield/tree/1b0c942f9b7d317199201533027bfd451d45a072), [A2UI React package](https://www.npmjs.com/package/@a2ui/react/v/0.15.0), [assistant-ui external store runtime](https://www.assistant-ui.com/docs/runtimes/custom/external-store)
+The project pins dependencies in `package-lock.json` and records the runtime commit, A2UI baseline, and fixture versions in `build-baseline.json`. [A2UI React package](https://www.npmjs.com/package/@a2ui/react/v/0.15.0), [assistant-ui external store runtime](https://www.assistant-ui.com/docs/runtimes/custom/external-store)

@@ -10,11 +10,13 @@ import { gatewayFromEnv } from "../apps/server/gateway";
 import type { IncomingHttpHeaders } from "node:http";
 import { startApp } from "../apps/server/http";
 import type { TurnAccepted, TurnView, ConversationView } from "../packages/contracts/api";
+import { defaultToolSetup, type ToolSetup, type ToolSetupView, type TreatmentPreviewInput } from "../packages/contracts/tool-setup";
 import { actionFor, testClient, testProject } from "./client";
 import { startFixtureGateway, type TestInterceptor } from "./gateway-fixture";
 
 async function fixture(intercept?: TestInterceptor, opts: {
   noGateway?: boolean;
+  inspectorEnabled?: boolean;
   preserve?: boolean;
   gatewayEnv?: NodeJS.ProcessEnv;
   authorize?: (headers: IncomingHttpHeaders) => boolean;
@@ -28,6 +30,7 @@ async function fixture(intercept?: TestInterceptor, opts: {
   const options = {
     projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: opts.noGateway ? null : settings, mode: "test",
     selectionMode: opts.preserve ? "preserve_ts_rank" : "semantic_rerank",
+    inspectorEnabled: opts.inspectorEnabled,
   } as const;
   let app = await startApp(options);
   const client = await testClient(app.url);
@@ -46,6 +49,104 @@ async function fixture(intercept?: TestInterceptor, opts: {
     },
   };
 }
+
+test("tool setup previews built-in and configured Treatment Selector responses without a gateway", async (t) => {
+  const f = await fixture(undefined, { noGateway: true });
+  t.after(() => f.close());
+  const { client } = f;
+  const settings = await client.request<ToolSetupView>("/api/admin/tools");
+  assert.deepEqual(settings.setup, defaultToolSetup);
+  assert.ok(!JSON.stringify(settings).includes("DEMO-MID"));
+  const previewPath = "/api/admin/treatment-preview";
+  const input: TreatmentPreviewInput = {
+    scenarioId: "cross-turn-change", contextId: "app-home", personaId: "demo-returning", ordinal: 2, enabled: true, output: null,
+  };
+  assert.deepEqual(await client.request(previewPath, input), {
+    status: "ranked", source: "fixture", contentIds: ["portfolio_explanation"],
+  });
+  assert.deepEqual(await client.request(previewPath, { ...input, output: { mode: "empty" } }), {
+    status: "empty", source: "override", contentIds: [],
+  });
+  assert.deepEqual(await client.request(previewPath, { ...input, output: { mode: "timeout" } }), {
+    status: "timeout", source: "override",
+  });
+  assert.deepEqual(await client.request(previewPath, { ...input, enabled: false }), { status: "disabled" });
+  await client.request(previewPath, { ...input, contextId: "archived-help" }, 400);
+  await client.request(previewPath, { ...input, personaId: "demo-learner" }, 400);
+  const invalid: ToolSetup = {
+    ...defaultToolSetup,
+    treatmentOverrides: [{
+      scenarioId: "normal", contextId: "balance", output: { mode: "ranked", contentIds: ["withdrawn_education"] },
+    }],
+  };
+  await client.request("/api/admin/tools", invalid, 400);
+  await client.request("/api/admin/tools", { ...invalid, treatmentOverrides: [invalid.treatmentOverrides[0], invalid.treatmentOverrides[0]] }, 400);
+  assert.equal((await client.response("/api/admin/tools", defaultToolSetup, { Origin: "https://outside.invalid" })).status, 403);
+  assert.deepEqual((await client.request<ToolSetupView>("/api/admin/tools")).setup, defaultToolSetup);
+});
+
+test("saved tool settings are isolated by browser and take effect on subsequent sfield turns", async (t) => {
+  const f = await fixture(({ envelope }) => envelope.inputType === "PznContextRoutingInput" ? { delayMs: 240 } : undefined);
+  t.after(() => f.close());
+  const { client } = f;
+  const path = "/api/admin/tools";
+  const conversation = await client.conversation();
+  const message = "Compare available and current balance.";
+  const contentIds = ["balance_current_definition", "balance_available_definition"];
+  const rank: ToolSetup = {
+    enabled: { ...defaultToolSetup.enabled, propensity: false },
+    treatmentOverrides: [{ scenarioId: "normal", contextId: "balance", output: { mode: "ranked", contentIds } }],
+  };
+  await client.request(path, rank);
+  const accepted = await client.submit(conversation.id, message);
+  const timeout: ToolSetup = {
+    ...rank, treatmentOverrides: [{ scenarioId: "normal", contextId: "balance", output: { mode: "timeout" } }],
+  };
+  await client.request(path, timeout);
+  const ranked = await client.wait(accepted);
+  assert.equal(ranked.turn.status, "completed");
+  assert.equal(ranked.trace.propensity?.status, "unavailable");
+  assert.equal(ranked.trace.ts?.source, "override");
+  assert.deepEqual(ranked.trace.ts?.baseline, contentIds);
+  assert.ok(ranked.trace.tsScopeId);
+
+  const unrelated = await client.ask(conversation.id, "Explain the fictional portfolio view.");
+  assert.equal(unrelated.trace.ts?.source, "fixture");
+  const failed = await client.ask(conversation.id, message);
+  assert.equal(failed.turn.failureCode, "ts_unavailable");
+  assert.ok(failed.trace.failures.some(({ code }) => code === "TS_TIMEOUT"));
+
+  const restored = await f.restart();
+  assert.deepEqual((await restored.request<ToolSetupView>(path)).setup, timeout);
+  const other = await restored.response(path, undefined, { Cookie: "" });
+  assert.deepEqual((await other.json() as ToolSetupView).setup, defaultToolSetup);
+  await restored.request(path, rank);
+  const retried = await restored.request<TurnAccepted>("/api/turns/" + failed.turn.id + "/retry", { clientRequestId: randomUUID() }, 202);
+  assert.deepEqual((await restored.wait(retried)).trace.ts?.baseline, contentIds);
+
+  await restored.request(path, { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, selection: false } });
+  const disabled = await restored.ask(conversation.id, message);
+  assert.equal(disabled.turn.failureCode, "ts_unavailable");
+  assert.ok(disabled.trace.failures.some(({ code }) => code === "TOOL_DISABLED"));
+
+  await restored.request(path, { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, balances: false } });
+  const metric = await restored.ask(conversation.id, "Show my synthetic demo balance summary.");
+  assert.equal(metric.turn.failureCode, "metric_unavailable");
+  assert.equal(metric.trace.metricReadSucceeded, false);
+
+  await restored.request(path, { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, catalog: false } });
+  const missing = await restored.ask(conversation.id, message);
+  assert.equal(missing.turn.failureCode, "catalog_unavailable");
+});
+
+test("the inspector setting also closes the tool setup page and API", async (t) => {
+  const f = await fixture(undefined, { noGateway: true, inspectorEnabled: false });
+  t.after(() => f.close());
+  assert.equal((await f.client.response("/admin")).status, 404);
+  assert.equal((await f.client.response("/api/admin/tools")).status, 404);
+  assert.equal((await f.client.response("/api/admin/tools", defaultToolSetup)).status, 404);
+  assert.equal((await f.client.response("/api/admin/treatment-preview", {})).status, 404);
+});
 
 test("two-stage completion persists source-rich comparison, scopes, SSE replay, and a rerouted follow-up", async (t) => {
   const f = await fixture();

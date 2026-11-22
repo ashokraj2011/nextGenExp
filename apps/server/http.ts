@@ -8,11 +8,13 @@ import { ActionMessageSchema } from "@a2ui/web_core/v1_0";
 import demo from "../../fixtures/host.json";
 import { type Bootstrap } from "../../packages/contracts/api";
 import { MAX_MESSAGE_LENGTH, type SelectionMode } from "../../packages/contracts/domain";
+import { toolSetupSchema, treatmentPreviewSchema } from "../../packages/contracts/tool-setup";
 import { tsFixtures } from "../../packages/ts-adapter";
 import type { GatewaySettings } from "./gateway";
 import { Runtime } from "./runtime";
 import { ApiError, Store, presentConversation } from "./store";
 import { ExperienceService } from "./service";
+import { previewTreatmentSelector, toolSetupView, validateToolSetup } from "./tool-setup";
 
 type Options = {
   dataDir: string;
@@ -71,7 +73,7 @@ async function body<T>(req: IncomingMessage, schema: z.ZodType<T>): Promise<T> {
 }
 
 async function serveAsset(pathname: string, root: string, res: ServerResponse) {
-  if (pathname !== "/" && pathname !== "/__test/a2ui" && !pathname.startsWith("/assets/")) {
+  if (pathname !== "/" && pathname !== "/admin" && pathname !== "/__test/a2ui" && !pathname.startsWith("/assets/")) {
     throw new ApiError(404, "not_found", "This page is unavailable.");
   }
   const path = resolve(root, "." + (pathname.startsWith("/assets/") ? decodeURIComponent(pathname) : "/index.html"));
@@ -124,6 +126,7 @@ export async function startApp(options: Options) {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
     if (!pathname.startsWith("/api/")) {
+      if (pathname === "/admin" && !inspectorEnabled) throw new ApiError(404, "not_found", "This page is unavailable.");
       if (vite) {
         vite.middlewares(req, res, () => { if (!res.headersSent) res.writeHead(404).end(); });
       } else if (req.method === "GET") {
@@ -153,6 +156,18 @@ export async function startApp(options: Options) {
         gatewayConfigured: Boolean(runtime), mode, selectionMode, inspectorEnabled,
       };
       return json(res, state);
+    }
+    if (resource === "admin" && inspectorEnabled && !operation) {
+      if (id === "tools" && method === "GET") return json(res, toolSetupView(store.toolSetup(principalId)));
+      if (id === "tools" && method === "POST") {
+        const setup = await body(req, toolSetupSchema);
+        validateToolSetup(setup);
+        store.saveToolSetup(principalId, setup);
+        return json(res, setup);
+      }
+      if (id === "treatment-preview" && method === "POST") {
+        return json(res, await previewTreatmentSelector(await body(req, treatmentPreviewSchema)));
+      }
     }
     if (resource === "conversations") {
       if (method === "POST" && !id) {
