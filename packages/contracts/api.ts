@@ -44,9 +44,20 @@ export type Conversation = {
   id: string; title: string; personaId: string; scenarioId: string; updatedAt: number;
 };
 export type ConversationView = Conversation & { turns: TurnView[] };
+export type DemoPersona = {
+  personaId: string;
+  displayName: string;
+  allowedScenarios: string[];
+  profile: {
+    focus: string;
+    summary: string;
+    beneficiaryStatus: "missing" | "on_file";
+    cashCents: number | null;
+  };
+};
 export type Bootstrap = {
   conversations: Conversation[];
-  personas: { personaId: string; displayName: string; allowedScenarios: string[] }[];
+  personas: DemoPersona[];
   scenarios: { scenarioId: string; label: string }[];
   defaultPersonaId: string;
   defaultScenarioId: string;

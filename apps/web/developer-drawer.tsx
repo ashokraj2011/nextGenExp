@@ -21,7 +21,7 @@ export function DeveloperDrawer({ title, icon, closeLabel, close, wide, children
     dialog.current?.close();
     close();
   }
-  return <dialog className={wide ? "inspector call-logs" : "inspector"} ref={dialog} aria-labelledby={titleId}
+  return <dialog className={wide ? "inspector inspector-wide" : "inspector"} ref={dialog} aria-labelledby={titleId}
     onCancel={(event) => { event.preventDefault(); dismiss(); }}
     onClick={(event) => {
       if (event.target === event.currentTarget && event.clientX < event.currentTarget.getBoundingClientRect().left) dismiss();

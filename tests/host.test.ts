@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { gatewayFromEnv } from "../apps/server/gateway";
 import type { IncomingHttpHeaders } from "node:http";
 import { startApp } from "../apps/server/http";
-import type { TurnAccepted, TurnView, ConversationView } from "../packages/contracts/api";
+import type { Bootstrap, TurnAccepted, TurnView, ConversationView } from "../packages/contracts/api";
 import type { TurnPayloads } from "../packages/contracts/inspector";
 import type { GlossaryCondition } from "../packages/contracts/rule-glossary";
 import { leavingWorkQuestion, retirementQuestion } from "../packages/contracts/routing-intents";
@@ -520,6 +520,15 @@ test("portfolio summaries combine the scoped snapshot with the cash treatment on
   const { client, gateway } = f;
   const question = "Let me know my portfolio summary.";
   const offer = "portfolio_cash_investing";
+
+  const { personas } = await client.request<Bootstrap>("/api/bootstrap");
+  assert.doesNotMatch(JSON.stringify(personas), /DEMO-MID/);
+  assert.deepEqual(personas.map(({ displayName, profile }) => ({
+    displayName, cashCents: profile.cashCents, beneficiaries: profile.beneficiaryStatus,
+  })), [
+    { displayName: "Alice Morgan", cashCents: 1_250_000, beneficiaries: "missing" },
+    { displayName: "Jordan Lee", cashCents: 1_000_000, beneficiaries: "on_file" },
+  ]);
 
   for (const [personaId, mid, cashCents, matched] of [
     ["demo-learner", "DEMO-MID-1001", 1_250_000, true],

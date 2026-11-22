@@ -46,6 +46,12 @@ Open [PZN Lab test preview](http://127.0.0.1:4174). The **Test mode** badge iden
 
 Try **Compare two terms** for the A2UI comparison. **Guide me through a task** opens the canonical transfer checklist and a portfolio follow-up. To see the eligible set and route decisions, open **Inspector**. Its persona and scenario settings create a new conversation. Type “Show my synthetic demo balance summary” for the read-only metric example.
 
+### Demo profiles
+
+Click the customer name in the chat header to compare **Alice Morgan** and **Jordan Lee**. Each profile shows the customer’s goal, portfolio cash, and beneficiary status from the demo fixtures. **Start chat** opens a new conversation for that customer in **Normal eligibility**.
+
+For a short demo, run **Learn about retirement** for both customers. Open **Logs → Treatment Selector** to show why Alice sees the beneficiary reminder and Jordan sees the lesson alone. Then ask both for a portfolio summary to show how the same cash threshold applies at $12,500 and $10,000.
+
 ### Intent routing and clarification
 
 sfield sends the latest message, up to four recent turns, and the available intent catalog to the Context Router. History includes clarification questions, assistant reply text, and titles of previously displayed cards. For demo content requests, the LLM selects an intent ID. The host verifies the choice and maps it to a task and Treatment Selector context.
@@ -60,7 +66,7 @@ Ask **Let me know my portfolio summary** in **Normal eligibility**. The Context 
 
 The **Portfolio Snapshot** provider supplies cash, equities, fixed income and the valuation date. sfield reads it through the scoped `portfolio.snapshot.read` tool and renders the values as an A2UI snapshot. The Experience Composer receives eligible portfolio suggestions for this requested summary. The host displays the cash amount from the same snapshot used in eligibility.
 
-Demo learner sees **$12,500** in cash and the investing prompt. Demo returning visitor sees **$10,000** in cash and the snapshot alone. Use **Tool setup → Treatment Selector mock → Portfolio summary** to preview the rule for either persona. In **Logs**, compare **Context Router**, **Treatment Selector**, **Portfolio Snapshot**, and **Experience Composer**.
+Alice Morgan sees **$12,500** in cash and the investing prompt. Jordan Lee sees **$10,000** in cash and the snapshot alone. Use **Tool setup → Treatment Selector mock → Portfolio summary** to preview the rule for either profile. In **Logs**, compare **Context Router**, **Treatment Selector**, **Portfolio Snapshot**, and **Experience Composer**.
 
 The POC uses synthetic accounts and a fixture implementation of `PortfolioSnapshotProvider`. A deployed integration can supply a portfolio service through that interface and call the existing Treatment Selector with the same context and member ID.
 
@@ -68,8 +74,8 @@ The POC uses synthetic accounts and a fixture implementation of `PortfolioSnapsh
 
 Choose **Learn about retirement** in a new chat with **Normal eligibility**. The Context Router selects the `retirement_learning` intent, which maps to the `learning` context. sfield sends that context and the demo member ID to Treatment Selector. The mock CCRE rule **Customer → Beneficiary status → Equals → Missing** controls whether Treatment Selector returns `beneficiary_update` alongside `retirement_learning`. The Composer selects the lesson, and sfield adds the eligible reminder when it renders the lesson.
 
-- **Demo learner** has missing beneficiary details. Chat shows **Retirement planning basics** and **Update your beneficiaries**. Click **See beneficiary update steps** for the A2UI demo guide.
-- **Demo returning visitor** has details on file. Chat shows **Retirement planning basics**.
+- **Alice Morgan** has missing beneficiary details. Chat shows **Retirement planning basics** and **Update your beneficiaries**. Click **See beneficiary update steps** for the A2UI demo guide.
+- **Jordan Lee** has details on file. Chat shows **Retirement planning basics**.
 
 Use **Tool setup → Treatment Selector mock → Learning → Run preview** to evaluate the rule for either persona. In chat, **Logs → Treatment Selector** shows the mock CCRE evaluation and the returned content IDs.
 
@@ -89,13 +95,13 @@ Open **Tool setup** from the chat header to enable the registered sfield tools. 
 
 Type **Create rule** in chat. After the Context Router returns `create_rule`, sfield calls the read-only `ccre.glossary.get` tool. The host passes the returned namespaces, attributes, operators and values to the A2UI editor. Open **Logs → CCRE glossary** to see the tool exchange.
 
-Choose a context and treatment, then build a condition using **Namespace**, **Attribute**, **Operator**, and **Value**. For example, choose **Customer**, **Demo persona**, **Equals**, and **Demo learner**. **Preview rule** evaluates the draft for a persona and turn. **Save rule** adds it to Tool setup for future chat turns. The mock evaluates the structured condition and stores any optional CCRE source as text.
+Choose a context and treatment, then build a condition using **Namespace**, **Attribute**, **Operator**, and **Value**. For example, choose **Customer**, **Demo persona**, **Equals**, and **Alice Morgan**. **Preview rule** evaluates the draft for a persona and turn. **Save rule** adds it to Tool setup for future chat turns. The mock evaluates the structured condition and stores any optional CCRE source as text.
 
 You can also create a rule directly in Tool setup.
 
 1. In **Tool setup**, select **Normal eligibility** and **Balances**, then click **Create rule** under **CCRE rules**.
-2. Target **Available balance: demo definition**, use **Demo persona is**, select **Demo learner**, and click **Add rule**. The optional CCRE source is stored for future integration. The mock evaluates the condition controls.
-3. Click **Run preview** for **Demo learner**, then change the preview persona to **Demo returning visitor** and run it again. The evaluation shows whether the rule matched and the ranked IDs before and after filtering.
+2. Target **Available balance: demo definition**, use **Demo persona is**, select **Alice Morgan**, and click **Add rule**. The optional CCRE source is stored for future integration. The mock evaluates the condition controls.
+3. Click **Run preview** for **Alice Morgan**, then change the preview profile to **Jordan Lee** and run it again. The evaluation shows whether the rule matched and the ranked IDs before and after filtering.
 4. Click **Save and test in chat** and choose **Compare two terms**. This starts a new conversation with the selected persona and scenario. Open **Logs → Treatment Selector → Mock CCRE evaluation** to see the result on the chat turn.
 
 Rules apply to the selected scenario, context and treatment. They filter its fixture or configured ranked list and keep the order of surviving IDs. **From turn number** includes that turn and later turns. **Test in chat** starts at turn 1. Save rule edits or removals to apply them to subsequent chat requests.

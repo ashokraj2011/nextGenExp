@@ -5,16 +5,24 @@
   "personas": [
     {
       "personaId": "demo-learner",
-      "displayName": "Demo learner",
+      "displayName": "Alice Morgan",
       "syntheticMid": "DEMO-MID-1001",
       "beneficiaryStatus": "missing",
+      "profile": {
+        "focus": "Retirement planning",
+        "summary": "Alice is preparing to leave work and wants to learn what to consider as she approaches retirement."
+      },
       "allowedScenarios": ["normal", "conflicting-propensity", "missing-propensity", "propensity-unavailable", "catalog-unavailable", "relevant-blocked", "empty", "ts-unavailable", "catalog-resolution"]
     },
     {
       "personaId": "demo-returning",
-      "displayName": "Demo returning visitor",
+      "displayName": "Jordan Lee",
       "syntheticMid": "DEMO-MID-1002",
       "beneficiaryStatus": "on_file",
+      "profile": {
+        "focus": "Portfolio review",
+        "summary": "Jordan is a returning customer checking how much of his portfolio is in cash before his next review."
+      },
       "allowedScenarios": ["normal", "cross-turn-change"]
     }
   ],

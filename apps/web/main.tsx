@@ -2,13 +2,14 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useAui, useAuiState, useExternalStoreRuntime, type ThreadMessageLike } from "@assistant-ui/react";
 import { CreateSurfaceMessageSchema, type ActionMessage } from "@a2ui/web_core/v1_0";
-import { BookOpenText, Columns2, FileText, GraduationCap, ListChecks, Menu, MessageSquare, PanelRight, Plus, RotateCcw, Settings2, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { BookOpenText, ChevronDown, Columns2, FileText, GraduationCap, ListChecks, Menu, MessageSquare, PanelRight, Plus, RotateCcw, Settings2, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { failureCopy, progressLabels, type Bootstrap, type Conversation, type ConversationView, type TurnView, type TurnAccepted, type Progress } from "../../packages/contracts/api";
 import { MAX_MESSAGE_LENGTH } from "../../packages/contracts/domain";
 import { api } from "./api";
 import { readActiveConversation, rememberActiveConversation } from "./conversation-storage";
 import { Inspector } from "./inspector";
 import { CallLogs } from "./call-logs";
+import { DemoProfiles, ProfileAvatar } from "./demo-profiles";
 import { BasicSmoke, ExperienceControls, ExperienceDataUI, installA2uiStyles } from "./surface";
 import "@fontsource-variable/inter/wght.css";
 import "./styles.css";
@@ -193,7 +194,7 @@ function messageFor(error: unknown) {
   return error instanceof Error && error.name !== "TypeError" ? error.message : "Couldn’t reach the demo. Your draft is still here.";
 }
 
-type DeveloperPanel = { kind: "inspector" } | { kind: "logs"; turnId?: string };
+type Panel = { kind: "profiles" } | { kind: "inspector" } | { kind: "logs"; turnId?: string };
 
 function App() {
   const [configuration, setConfiguration] = useState<Bootstrap>();
@@ -203,16 +204,19 @@ function App() {
   const [notice, setNotice] = useState("");
   const [pending, setPending] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
-  const [developerPanel, setDeveloperPanel] = useState<DeveloperPanel>();
+  const [panel, setPanel] = useState<Panel>();
   const inFlight = useRef(false);
   const previousAttempt = useRef<{ fingerprint: string; id: string } | null>(null);
   const inspectorTrigger = useRef<HTMLButtonElement>(null);
   const logsTrigger = useRef<HTMLButtonElement>(null);
+  const profilesTrigger = useRef<HTMLButtonElement>(null);
   const railTrigger = useRef<HTMLButtonElement>(null);
   const railClose = useRef<HTMLButtonElement>(null);
   const draftKey = conversation?.id ?? "new";
   const latest = conversation?.turns.at(-1);
   const activeTurnId = latest?.status === "working" ? latest.id : undefined;
+  const profilesById = new Map(configuration?.personas.map((persona) => [persona.personaId, persona]));
+  const activeProfile = profilesById.get(conversation?.personaId ?? configuration?.defaultPersonaId ?? "");
   const remember = (row: Conversation) => setConversations((list) => (
     [row, ...list.filter((item) => item.id !== row.id)].sort((a, b) => b.updatedAt - a.updatedAt)
   ));
@@ -341,11 +345,12 @@ function App() {
   const startConversation = async (personaId: string, scenarioId: string) => exclusive(async () => {
     choose(await api.newConversation(personaId, scenarioId));
   });
-  const openLogs = (turnId?: string) => setDeveloperPanel({ kind: "logs", turnId });
-  const closeDeveloperPanel = () => {
-    const trigger = developerPanel?.kind === "logs" ? logsTrigger : inspectorTrigger;
-    setDeveloperPanel(undefined);
-    requestAnimationFrame(() => trigger.current?.focus());
+  const openLogs = (turnId?: string) => setPanel({ kind: "logs", turnId });
+  const closePanel = () => {
+    const triggers = { profiles: profilesTrigger, inspector: inspectorTrigger, logs: logsTrigger };
+    const trigger = panel && triggers[panel.kind];
+    setPanel(undefined);
+    requestAnimationFrame(() => trigger?.current?.focus());
   };
 
   return <div className="app-layout">
@@ -363,7 +368,11 @@ function App() {
           {conversations.length ? conversations.map((row) => (
             <button className="conversation-link" key={row.id} aria-current={conversation?.id === row.id ? "page" : undefined} disabled={pending}
               title={row.title} onClick={() => void exclusive(async () => choose(await api.conversation(row.id)))}>
-              <MessageSquare size={16} aria-hidden="true" /><span>{row.title}</span>
+              <MessageSquare size={16} aria-hidden="true" />
+              <span className="conversation-link-copy">
+                <span className="conversation-link-title">{row.title}</span>
+                <small>{profilesById.get(row.personaId)?.displayName}</small>
+              </span>
             </button>
           )) : <p>New conversations appear here.</p>}
         </nav>
@@ -375,16 +384,23 @@ function App() {
         <div className="topbar-left">
           <button className="icon-button rail-menu" ref={railTrigger} type="button" aria-label="Show conversations" aria-expanded={railOpen}
             aria-controls="conversation-rail" onClick={() => setRailOpen((open) => !open)}><Menu size={21} /></button>
-          <h1>Your assistant</h1>
+          <div className="assistant-heading">
+            <h1>Your assistant</h1>
+            {activeProfile && <button ref={profilesTrigger} className="demo-profile-trigger" type="button" aria-haspopup="dialog"
+              aria-label={"Demo profiles, current profile " + activeProfile.displayName} title="Switch demo profile"
+              onClick={() => setPanel({ kind: "profiles" })}>
+              <ProfileAvatar name={activeProfile.displayName} />
+              <span>{activeProfile.displayName}</span><ChevronDown className="profile-chevron" size={14} aria-hidden="true" />
+            </button>}
+          </div>
         </div>
         <div className="topbar-actions">
           {configuration?.mode === "test" && <span className="test-label" title="Deterministic automated test gateway">Test mode</span>}
           {configuration?.openAiModel && <span className="test-label" title={configuration.openAiModel}>OpenAI API</span>}
-          <span className="demo-badge"><span className="demo-dot" />Demo data</span>
           {configuration?.inspectorEnabled && <a className="tool-setup-trigger inspector-trigger icon-button" aria-label="Tool setup" href="/admin">
             <Settings2 size={18} aria-hidden="true" /><span>Tool setup</span></a>}
           {configuration?.inspectorEnabled && <button className="inspector-trigger icon-button" ref={inspectorTrigger} type="button" aria-label="Open developer inspector"
-            aria-haspopup="dialog" onClick={() => setDeveloperPanel({ kind: "inspector" })}><PanelRight size={18} aria-hidden="true" /><span>Inspector</span></button>}
+            aria-haspopup="dialog" onClick={() => setPanel({ kind: "inspector" })}><PanelRight size={18} aria-hidden="true" /><span>Inspector</span></button>}
           {configuration?.inspectorEnabled && <button className="inspector-trigger call-logs-trigger icon-button" ref={logsTrigger} type="button"
             aria-label="Open call logs" aria-haspopup="dialog" title="Call logs" onClick={() => openLogs()}><FileText size={18} aria-hidden="true" /><span>Logs</span></button>}
         </div>
@@ -404,9 +420,12 @@ function App() {
           void api.event(expId, value).then(() => api.turn(turnId)).then(upsert).catch((error) => setNotice(messageFor(error)));
         }} />
     </main>
-    {configuration && developerPanel?.kind === "inspector" && <Inspector configuration={configuration} conversation={conversation}
-      latest={latest} close={closeDeveloperPanel} create={startConversation} openLogs={openLogs} />}
-    {developerPanel?.kind === "logs" && <CallLogs turns={conversation?.turns ?? noTurns} turnId={developerPanel.turnId} close={closeDeveloperPanel} />}
+    {configuration && activeProfile && panel?.kind === "profiles" && <DemoProfiles personas={configuration.personas}
+      activePersonaId={activeProfile.personaId} pending={pending} close={closePanel}
+      startChat={(personaId) => startConversation(personaId, configuration.defaultScenarioId)} />}
+    {configuration && panel?.kind === "inspector" && <Inspector configuration={configuration} conversation={conversation}
+      latest={latest} close={closePanel} create={startConversation} openLogs={openLogs} />}
+    {panel?.kind === "logs" && <CallLogs turns={conversation?.turns ?? noTurns} turnId={panel.turnId} close={closePanel} />}
   </div>;
 }
 

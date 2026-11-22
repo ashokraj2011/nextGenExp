@@ -15,7 +15,7 @@ const namespaces = [
         read: ({ personaId }) => personaId,
       },
       {
-        id: "is_returning", label: "Returning visitor", description: "True for the Demo returning visitor persona.",
+        id: "is_returning", label: "Returning visitor", description: "Whether the demo customer has visited before.",
         valueType: "boolean", operators: ["eq", "ne"], options: [], minimum: null,
         read: ({ personaId }) => personaId === "demo-returning",
       },

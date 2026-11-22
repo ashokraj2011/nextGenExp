@@ -32,6 +32,7 @@ const idPattern = /^[a-zA-Z0-9_-]{1,128}$/;
 const requestId = z.string().regex(idPattern);
 const messageBody = z.object({ message: z.string().trim().min(1).max(MAX_MESSAGE_LENGTH), clientRequestId: requestId }).strict();
 const createBody = z.object({ personaId: requestId, scenarioId: requestId }).strict();
+const beneficiaryStatusSchema = z.enum(["missing", "on_file"]);
 const retryBody = z.object({ clientRequestId: requestId }).strict();
 const actionBody = z.object({ clientRequestId: requestId, envelope: ActionMessageSchema }).strict();
 const eventBody = z.object({
@@ -97,6 +98,16 @@ export async function startApp(options: Options) {
   const sessionCookie = options.gateway?.profile === "openai" ? "pzn_openai_session" : "pzn_session";
   const sessionPattern = new RegExp("(?:^|;\\s*)" + sessionCookie + "=(local_[a-f0-9]{32})(?:;|$)");
   const portfolioSnapshots = options.portfolioSnapshots ?? fixturePortfolioSnapshotProvider;
+  const personas: Bootstrap["personas"] = await Promise.all(demo.personas.map(async ({
+    personaId, displayName, allowedScenarios, profile, beneficiaryStatus, syntheticMid,
+  }) => ({
+    personaId, displayName, allowedScenarios,
+    profile: {
+      ...profile,
+      beneficiaryStatus: beneficiaryStatusSchema.parse(beneficiaryStatus),
+      cashCents: (await fixturePortfolioSnapshotProvider.read(syntheticMid))?.cashCents ?? null,
+    },
+  })));
   const store = new Store(join(options.dataDir, "app.sqlite"));
   let runtime: Runtime | null;
   try {
@@ -154,7 +165,7 @@ export async function startApp(options: Options) {
     if (resource === "bootstrap" && method === "GET" && !id) {
       const state: Bootstrap = {
         conversations: store.conversations(principalId),
-        personas: demo.personas.map(({ personaId, displayName, allowedScenarios }) => ({ personaId, displayName, allowedScenarios })),
+        personas,
         scenarios: tsFixtures.scenarios.map(({ scenarioId, label }) => ({ scenarioId, label })),
         defaultPersonaId: demo.defaultPersonaId, defaultScenarioId: demo.defaultScenarioId,
         gatewayConfigured: Boolean(runtime), mode, selectionMode, inspectorEnabled,
