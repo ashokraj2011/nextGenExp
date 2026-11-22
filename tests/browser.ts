@@ -69,6 +69,14 @@ try {
   assert.equal(exchanges[11].response.type, "experience.ready");
   assert.equal(exchanges[12].request.envelope.action.name, "request_follow_up");
   assert.equal(exchanges[12].response.turn.message, "Show the fictional transfer checklist.");
+  await page.getByRole("link", { name: "sfield", exact: true }).click();
+  assert.equal(new URL(page.url()).hash, "#sfield");
+  const toolRegistry = page.getByRole("list", { name: "sfield tool registry", exact: true });
+  assert.equal(await toolRegistry.getByRole("listitem").count(), 7);
+  await toolRegistry.getByText("Experience Composer", { exact: true }).waitFor();
+  await toolRegistry.getByRole("link", { name: "Portfolio Snapshot", exact: true }).click();
+  assert.equal(new URL(page.url()).hash, "#contracts");
+  await page.getByRole("button", { name: "Download portfolio-snapshot.tool.json", exact: true }).waitFor();
   await page.getByRole("link", { name: "Proposal", exact: true }).click();
   assert.equal(new URL(page.url()).hash, "#proposal");
   const proposal = page.getByRole("region", { name: "Treatment Selector proposal" });
@@ -411,6 +419,9 @@ try {
   const exchangeBox = await mobileExchange.boundingBox();
   assert.ok(exchangeBox && exchangeBox.width <= 360, "The exchange drawer fits the mobile viewport");
   await mobileExchange.getByRole("button", { name: "Close exchange details", exact: true }).click();
+  await mobile.getByRole("link", { name: "sfield", exact: true }).click();
+  await mobile.getByRole("heading", { name: "Registered tools", exact: true }).waitFor();
+  assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await mobile.getByRole("link", { name: "Proposal", exact: true }).click();
   await mobile.getByText("Compare the current and proposed responses", { exact: true }).click();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);

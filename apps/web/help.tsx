@@ -4,6 +4,7 @@ import { DeveloperDrawer } from "./developer-drawer";
 import { currentTreatmentExample, InteractionDiagram, proposedTreatmentExample, TreatmentProposalDiagram, type DiagramExchange } from "./help-architecture";
 import { contractList, helpContracts, type ContractFile } from "./help-contracts";
 import { addressUpdateExample, helpFlows, type FlowStep, type PayloadExample } from "./help-flow";
+import { SfieldHelp } from "./help-sfield";
 import "./help.css";
 
 const stepIcons = {
@@ -104,6 +105,7 @@ export function Help() {
         <a className="help-home" href="/">PZN Lab</a>
         <nav aria-label="Help sections">
           <a href="#architecture">Architecture</a>
+          <a href="#sfield">sfield</a>
           <a href="#walkthroughs">Walkthroughs</a>
           <a href="#proposal">Proposal</a>
           <a href="#contracts">Contracts</a>
@@ -126,6 +128,7 @@ export function Help() {
         </div>
         <InteractionDiagram onSelect={setExchange} />
       </section>
+      <SfieldHelp selectContract={setContractId} />
       <section id="walkthroughs" className="help-section" aria-labelledby="walkthroughs-title">
         <div className="help-section-heading">
           <h2 id="walkthroughs-title">Demo walkthroughs</h2>

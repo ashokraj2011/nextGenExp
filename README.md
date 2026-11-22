@@ -48,7 +48,7 @@ Try **Compare two terms** for the A2UI comparison. **Guide me through a task** o
 
 ### Help and planning overview
 
-Chat opens at `/` and `/chat`. The **PZN Lab** link returns to the homepage. **Help** at `/help` shows the chat sequence and each component’s role, with interactive turn walkthroughs, sample payloads, and downloadable runtime contracts. **Proposal** shows how Treatment Selector could recommend registered actions and workflows alongside content.
+Chat opens at `/` and `/chat`. The **PZN Lab** link returns to the homepage. **Help** at `/help` shows the chat sequence and each component’s role, with interactive turn walkthroughs, sample payloads, and downloadable runtime contracts. Its **sfield** section shows who calls each registered tool and how the Portfolio Snapshot provider plugs in. **Proposal** shows how Treatment Selector could recommend registered actions and workflows alongside content.
 
 The planning overview is at `/planning`. **Portfolio**, **Retirement**, and **Balances** open chat with a question you can edit before sending. **Compare demo profiles** opens the profile picker in chat.
 
