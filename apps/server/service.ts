@@ -7,7 +7,7 @@ import { ruleGlossarySchema } from "../../packages/contracts/rule-glossary";
 import { FOLLOW_UP_EVENT, type DisplayExperience } from "../../packages/contracts/surface";
 import { normalizedIdsSchema, treatmentOverride } from "../../packages/contracts/tool-setup";
 import { activeContextCatalog, fixtureRejections, tsFixtures } from "../../packages/ts-adapter";
-import { contentCatalog, modelBundle, resolveCandidates } from "../../packages/experience/content";
+import { contentCatalog, lookupContent, modelBundle, resolveCandidates } from "../../packages/experience/content";
 import { compileExperience, compileRuleCreation, makeId } from "../../packages/experience/compile";
 import { verifyContextProposal, verifyRoute, requireCheck, Rejected } from "../../packages/experience/verify";
 import { ApiError, Store, type ConversationRecord, type Stage, type TurnRecord } from "./store";
@@ -202,6 +202,7 @@ export class ExperienceService {
       let turn = current();
       const route = turn.route!;
       verifyRoute(route, catalog, turn.scope, turn.attempts.route?.runId ?? null, this.now());
+      const showPortfolio = isPortfolioSummary(route);
       if (!turn.decision) {
         this.store.progress(id, "eligibility", this.now());
         const result = await runtime.registry(turn, "tsScopeId", 1, signal, async (call) => (
@@ -214,8 +215,9 @@ export class ExperienceService {
         }
 
         const ids = normalizedIdsSchema.parse(result.output);
-        const { candidates, rejections } = resolveCandidates(ids);
-        const partial = Boolean((candidates.length || isPortfolioSummary(route)) && rejections.length);
+        const { candidates: resolved, rejections } = resolveCandidates(ids);
+        const candidates = resolved.filter((candidate) => Boolean(lookupContent(candidate)?.portfolioData) === showPortfolio);
+        const partial = Boolean((candidates.length || showPortfolio) && rejections.length);
         const now = this.now();
         this.store.update(id, (row) => {
           const override = treatmentOverride(row.toolSetup?.treatmentOverrides ?? [], conversation.scenarioId, route.contextId);
@@ -239,7 +241,7 @@ export class ExperienceService {
       turn = current();
       const decision = turn.decision!;
       const expiresAt = Math.min(decision.expiresAt, route.expiresAt);
-      if (isPortfolioSummary(route) && !turn.portfolioSnapshot) {
+      if (showPortfolio && !turn.portfolioSnapshot) {
         stage = "portfolio";
         this.store.progress(id, "portfolio", this.now());
         const result = await runtime.registry(turn, "portfolioScopeId", 1, signal, async (call) => (
@@ -257,7 +259,7 @@ export class ExperienceService {
         });
         turn = current();
       }
-      const portfolio = isPortfolioSummary(route) ? turn.portfolioSnapshot : undefined;
+      const portfolio = showPortfolio ? turn.portfolioSnapshot : undefined;
       if (!decision.candidates.length) {
         if (portfolio) {
           const result = compileExperience({

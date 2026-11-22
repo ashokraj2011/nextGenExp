@@ -545,10 +545,14 @@ test("portfolio summaries combine the scoped snapshot with the cash treatment on
     assert.equal(payloads.portfolio?.status, "succeeded");
     assert.deepEqual(payloads.portfolio?.registryInput.data, { turnRef: turn.id, routeDecisionId: trace.routeDecisionId });
     assert.deepEqual(payloads.portfolio?.result?.data, snapshot.props);
-    const composer = gateway.calls.at(-1)?.envelope;
-    assert.equal(composer?.portfolioSnapshotIncluded, true);
-    assert.equal(composer?.eligible?.candidates.some((candidate) => candidate.title === "Explore investing options"), matched);
-    assert.doesNotMatch(JSON.stringify(composer), /cashCents|1250000|DEMO-MID/);
+    if (matched) {
+      const composer = gateway.calls.at(-1)?.envelope;
+      assert.equal(composer?.portfolioSnapshotIncluded, true);
+      assert.deepEqual(composer?.eligible?.candidates.map((candidate) => candidate.title), ["Explore investing options"]);
+      assert.doesNotMatch(JSON.stringify(composer), /cashCents|1250000|DEMO-MID/);
+    } else {
+      assert.equal(trace.composerRunId, null);
+    }
   }
   assert.deepEqual(reads, ["DEMO-MID-1001", "DEMO-MID-1002"]);
 

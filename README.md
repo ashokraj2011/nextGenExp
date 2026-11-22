@@ -50,7 +50,7 @@ Try **Compare two terms** for the A2UI comparison. **Guide me through a task** o
 
 Ask **Let me know my portfolio summary** in **Normal eligibility**. The Context Router returns `portsum` with the `show` intent. sfield calls Treatment Selector with `{ context, mid }`. In this mock, its built-in CCRE rule adds **Explore investing options** to the eligible set when **Portfolio → Cash balance (USD) → Greater than → 10000** matches. A saved rule for the same scenario, context and treatment replaces that fixture rule.
 
-The **Portfolio Snapshot** provider supplies cash, equities, fixed income and the valuation date. sfield reads it through the scoped `portfolio.snapshot.read` tool and renders the values as an A2UI snapshot. The Experience Composer chooses supplemental content from the eligible set. The host displays the cash amount from the same snapshot used in eligibility.
+The **Portfolio Snapshot** provider supplies cash, equities, fixed income and the valuation date. sfield reads it through the scoped `portfolio.snapshot.read` tool and renders the values as an A2UI snapshot. The Experience Composer receives eligible portfolio suggestions for this requested summary. The host displays the cash amount from the same snapshot used in eligibility.
 
 Demo learner sees **$12,500** in cash and the investing prompt. Demo returning visitor sees **$10,000** in cash and the snapshot alone. Use **Tool setup → Treatment Selector mock → Portfolio summary** to preview the rule for either persona. In **Inspector → Request and response payloads**, compare **Treatment Selector**, **Portfolio Snapshot**, and **Experience Composer**.
 
