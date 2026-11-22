@@ -31,6 +31,12 @@ try {
   await page.goto(preview.url);
   await page.getByText("Test mode", { exact: true }).waitFor();
   await page.getByRole("heading", { name: "What would you like to explore?" }).waitFor();
+  const logs = page.getByRole("dialog", { name: "Call logs" });
+  const logsButton = page.getByRole("button", { name: "Open call logs", exact: true });
+  await logsButton.click();
+  await logs.getByText("Send a question to see its call logs.", { exact: true }).waitFor();
+  await page.keyboard.press("Escape");
+  await logs.waitFor({ state: "hidden" });
   await page.screenshot({ path: resolve(screenshots, "welcome-desktop.png") });
   await page.getByRole("button", { name: /Compare two terms/ }).click();
   await page.getByRole("heading", { name: "Compare demo definitions" }).waitFor();
@@ -51,22 +57,31 @@ try {
   await page.getByRole("heading", { name: "Available balance: demo definition", exact: true, level: 3 }).waitFor();
   assert.equal(await page.getByRole("button", { name: "Helpful", exact: true, pressed: true }).count(), 1);
   await page.getByRole("button", { name: "Open developer inspector" }).click();
-  await page.getByRole("dialog", { name: "Developer inspector" }).waitFor();
+  const inspector = page.getByRole("dialog", { name: "Developer inspector" });
+  await inspector.waitFor();
   await page.getByText("Selected TS context", { exact: true }).waitFor();
   await page.getByLabel("Turn trace").selectOption({ index: 1 });
-  await page.getByText("Request and response payloads", { exact: true }).click();
+  await inspector.getByRole("button", { name: "Open call logs", exact: true }).click();
+  await logs.waitFor();
+  await inspector.waitFor({ state: "hidden" });
+  const routerLogs = logs.locator("details.payload-stage").filter({ has: page.getByText("Context Router · 1 attempt", { exact: true }) });
   await page.getByText("Experience Composer · 1 attempt", { exact: true }).waitFor();
   await page.getByText("Treatment Selector · succeeded", { exact: true }).click();
   const mockRequest = page.locator('pre[aria-label="Mock request"]');
   assert.match(await mockRequest.innerText(), /"mid": "DEMO-MID-1001"/);
-  await page.getByText("Context Router · 1 attempt", { exact: true }).click();
-  await page.getByText("Decoded chat input", { exact: true }).first().click();
-  assert.match(await page.locator('pre[aria-label="Decoded chat input"]').first().innerText(), /Compare available and current balance\./);
-  await page.getByText("Gateway request body", { exact: true }).first().click();
-  assert.match(await page.locator('pre[aria-label="Gateway request body"]').first().innerText(), /"response_format"/);
-  await page.screenshot({ path: resolve(screenshots, "inspector-payloads.png") });
+  await routerLogs.getByText("Context Router · 1 attempt", { exact: true }).click();
+  await routerLogs.getByText("Decoded chat input", { exact: true }).click();
+  assert.match(await routerLogs.locator('pre[aria-label="Decoded chat input"]').innerText(), /Compare available and current balance\./);
+  await routerLogs.getByText("Gateway request body", { exact: true }).click();
+  assert.match(await routerLogs.locator('pre[aria-label="Gateway request body"]').innerText(), /"response_format"/);
+  await page.screenshot({ path: resolve(screenshots, "call-logs-comparison.png") });
+  await logs.getByLabel("Chat turn", { exact: true }).selectOption("");
+  await routerLogs.getByText("Context Router · 1 attempt", { exact: true }).click();
+  await routerLogs.getByText("Decoded chat input", { exact: true }).click();
+  assert.match(await routerLogs.locator('pre[aria-label="Decoded chat input"]').innerText(), /available-balance term/);
   await page.keyboard.press("Escape");
-  await page.getByRole("dialog", { name: "Developer inspector" }).waitFor({ state: "hidden" });
+  await logs.waitFor({ state: "hidden" });
+  await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Open call logs");
 
   const input = page.getByLabel("Your question");
   await input.fill("Explain this slow balance request");
@@ -147,8 +162,7 @@ try {
   await page.getByRole("button", { name: "Save and test in chat", exact: true }).click();
   await page.getByRole("button", { name: /Compare two terms/ }).click();
   await page.getByText("No suitable eligible demo content was selected for this request.", { exact: true }).waitFor();
-  await page.getByRole("button", { name: "Open developer inspector", exact: true }).click();
-  await page.getByText("Request and response payloads", { exact: true }).click();
+  await logsButton.click();
   await page.getByText("Treatment Selector · succeeded", { exact: true }).click();
   await page.getByText("Mock CCRE evaluation", { exact: true }).click();
   assert.match(await page.locator('pre[aria-label="Mock CCRE evaluation"]').innerText(), /"outcome": "excluded"/);
@@ -201,8 +215,7 @@ try {
   assert.deepEqual((await beforeRuleSave.json()).setup.ccreRules ?? [], []);
   await ruleBlock.getByRole("button", { name: "Save rule", exact: true }).click();
   await ruleBlock.getByRole("button", { name: "Saved", exact: true, disabled: true }).waitFor();
-  await author.getByRole("button", { name: "Open developer inspector" }).click();
-  await author.getByText("Request and response payloads", { exact: true }).click();
+  await author.getByRole("button", { name: "Open call logs", exact: true }).click();
   await author.getByText("CCRE glossary · succeeded", { exact: true }).click();
   assert.match(await author.locator('pre[aria-label="Glossary tool request"]').innerText(), /"routerRunId"/);
   assert.match(await author.locator('pre[aria-label="Glossary tool response"]').innerText(), /"namespaces".*"customer"/s);
@@ -227,10 +240,15 @@ try {
   await snapshot.getByText("$12,500", { exact: true }).waitFor();
   await portfolioPage.getByText("You have $12,500 in cash. Would you like to explore investing options?", { exact: true }).waitFor();
   await portfolioPage.screenshot({ path: resolve(screenshots, "portfolio-learner-chat.png") });
-  await portfolioPage.getByRole("button", { name: "Open developer inspector" }).click();
-  await portfolioPage.getByText("Request and response payloads", { exact: true }).click();
-  await portfolioPage.getByText("Portfolio Snapshot · succeeded", { exact: true }).click();
-  assert.match(await portfolioPage.locator('pre[aria-label="Portfolio Snapshot tool response"]').innerText(), /"cashCents": 1250000/);
+  await portfolioPage.getByRole("button", { name: "Open call logs", exact: true }).click();
+  const portfolioLogs = portfolioPage.getByRole("dialog", { name: "Call logs" });
+  for (const stage of ["Context Router · 1 attempt", "Treatment Selector · succeeded", "Portfolio Snapshot · succeeded", "Experience Composer · 1 attempt"]) {
+    await portfolioLogs.getByText(stage, { exact: true }).waitFor();
+  }
+  await portfolioPage.screenshot({ path: resolve(screenshots, "call-logs-portfolio.png") });
+  await portfolioLogs.getByText("Portfolio Snapshot · succeeded", { exact: true }).click();
+  assert.match(await portfolioLogs.locator('pre[aria-label="Portfolio Snapshot tool request"]').innerText(), /"routeDecisionId"/);
+  assert.match(await portfolioLogs.locator('pre[aria-label="Portfolio Snapshot tool response"]').innerText(), /"cashCents": 1250000/);
   await portfolioPage.keyboard.press("Escape");
   await portfolioPage.getByRole("link", { name: "Tool setup" }).click();
   await portfolioPage.getByLabel("Context", { exact: true }).selectOption("portsum");
@@ -266,6 +284,11 @@ try {
   await mobileMessage.press("Enter");
   await mobile.locator('[data-renderer="a2ui"]').getByRole("heading", { name: "Portfolio snapshot", exact: true }).waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await mobile.getByRole("button", { name: "Open call logs", exact: true }).click();
+  const mobileLogs = mobile.getByRole("dialog", { name: "Call logs" });
+  await mobileLogs.getByText("Portfolio Snapshot · succeeded", { exact: true }).waitFor();
+  assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await mobileLogs.getByRole("button", { name: "Close call logs", exact: true }).click();
   await mobileMessage.fill("Create a rule");
   await mobileMessage.press("Enter");
   const mobileRule = mobile.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Create a CCRE rule" });
@@ -293,7 +316,7 @@ try {
   await fallback.locator('[data-renderer="fallback"]').waitFor();
   await fallback.getByRole("heading", { name: "Compare demo definitions" }).waitFor();
   await fallback.getByText("Fictional demonstration only.", { exact: false }).waitFor();
-  console.log("Browser checks passed for A2UI, portfolio snapshots and CCRE eligibility, chat controls, inspector, tool setup, 360 px layout, and canonical renderer fallback.");
+  console.log("Browser checks passed for A2UI, portfolio snapshots and CCRE eligibility, chat controls, inspector, per-turn logs, tool setup, 360 px layout, and canonical renderer fallback.");
 } finally {
   await browser?.close();
   await preview.close();

@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
+import { FileText } from "lucide-react";
 import type { JsonValue } from "@sfield/core";
 import type { TurnView } from "../../packages/contracts/api";
 import type {
   GatewayExchange, InspectorPayload, ModelStagePayloads, RegistryToolPayloads, TreatmentPayloads, TurnPayloads,
 } from "../../packages/contracts/inspector";
 import { api } from "./api";
+import { DeveloperDrawer } from "./developer-drawer";
 
 function JsonBlock({ title, value, open = false }: { title: string; value?: InspectorPayload; open?: boolean }) {
   return <details className="trace-details trace-payload" open={open}>
@@ -82,30 +84,55 @@ function ReadToolStage({ title, stage, payloadLabel = title }: { title: string; 
   </details>;
 }
 
-export function PayloadInspector({ turn }: { turn: TurnView }) {
-  const [open, setOpen] = useState(false);
+function TurnPayloadLog({ turn }: { turn: TurnView }) {
   const [payloads, setPayloads] = useState<TurnPayloads>();
   const [failed, setFailed] = useState(false);
+  const [reload, setReload] = useState(0);
   useEffect(() => {
-    if (!open) return;
     let disposed = false;
     setFailed(false);
     void api.payloads(turn.id).then(
-      (data) => { if (!disposed && data.turnId === turn.id) setPayloads(data); },
+      (data) => {
+        if (disposed) return;
+        if (data.turnId === turn.id) setPayloads(data);
+        else setFailed(true);
+      },
       () => { if (!disposed) setFailed(true); },
     );
     return () => { disposed = true; };
-  }, [open, turn.id, turn.progress, turn.status]);
-  return <details className="trace-details payload-inspector" onToggle={(event) => setOpen(event.currentTarget.open)}>
-    <summary>Request and response payloads</summary>
+  }, [reload, turn.id, turn.progress, turn.status]);
+  return <div className="call-log-list">
     <p>Gateway credentials and configured metadata values are redacted.</p>
-    {failed && <p role="alert">The turn payloads are unavailable. Reopen this section to retry.</p>}
+    {failed && <div className="call-log-error">
+      <p role="alert">The call logs are unavailable.</p>
+      <button className="secondary-button" type="button" onClick={() => setReload((attempt) => attempt + 1)}>Retry loading logs</button>
+    </div>}
     {payloads ? <>
       <ModelStage title="Context Router" stage={payloads.router} />
       {payloads.glossary && <ReadToolStage title="CCRE glossary" payloadLabel="Glossary" stage={payloads.glossary} />}
       <TreatmentStage stage={payloads.treatment} />
       {payloads.portfolio && <ReadToolStage title="Portfolio Snapshot" stage={payloads.portfolio} />}
       <ModelStage title="Experience Composer" stage={payloads.composer} />
-    </> : open && !failed && <p role="status">Loading turn payloads…</p>}
-  </details>;
+    </> : !failed && <p role="status">Loading call logs…</p>}
+  </div>;
+}
+
+export function CallLogs({ turns, turnId, close }: { turns: TurnView[]; turnId?: string; close: () => void }) {
+  const selectorId = useId();
+  const [selected, setSelected] = useState(turnId ?? "");
+  const turn = turns.find((entry) => entry.id === selected) ?? turns.at(-1);
+
+  return <DeveloperDrawer title="Call logs" icon={<FileText size={17} />} closeLabel="Close call logs" close={close} wide>
+    {turn ? <>
+      <section className="trace-selector call-log-selector">
+        <label htmlFor={selectorId}>Chat turn</label>
+        <select id={selectorId} value={selected} onChange={(event) => setSelected(event.target.value)}>
+          <option value="">Latest turn</option>
+          {turns.map((entry, index) => <option key={entry.id} value={entry.id}>{index + 1}. {entry.message.slice(0, 70)}</option>)}
+        </select>
+        <p className="call-log-message">{turn.message}</p>
+      </section>
+      <TurnPayloadLog key={turn.id} turn={turn} />
+    </> : <p className="call-log-empty">Send a question to see its call logs.</p>}
+  </DeveloperDrawer>;
 }

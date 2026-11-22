@@ -271,6 +271,7 @@ button { color: inherit; }
   background: var(--white); color: var(--ink); box-shadow: -16px 0 36px #1526381d;
 }
 .inspector[open] { display: flex; flex-direction: column; }
+.inspector.call-logs { width: min(100%, 640px); }
 .inspector::backdrop { background: #17273844; }
 .inspector-heading { display: flex; align-items: center; gap: 9px; min-height: 66px; padding: 0 15px; border-bottom: 1px solid var(--line); }
 .inspector-heading h2 { flex: 1; font-size: 1.04rem; font-weight: 700; letter-spacing: -.025em; }
@@ -288,6 +289,7 @@ button { color: inherit; }
 .demo-settings .secondary-button { margin-top: 7px; }
 .trace-selector { margin-top: 21px; display: grid; gap: 7px; }
 .trace-selector p { color: var(--muted); font-size: .86rem; line-height: 1.5; }
+.inspector-logs-link { margin-top: 12px; }
 .trace-view { margin-top: 17px; overflow-wrap: anywhere; color: var(--muted); font-size: .83rem; line-height: 1.55; }
 .trace-view section + section { border-top: 1px solid var(--line); padding-top: 15px; margin-top: 15px; }
 .trace-view :is(h3, h4) { color: var(--ink); }
@@ -299,7 +301,12 @@ button { color: inherit; }
 .trace-details summary { cursor: pointer; color: var(--teal-dark); font-weight: 620; min-height: 25px; }
 .trace-details :is(p, ul, ol) { margin: 6px 0; }
 .trace-details :is(ul, ol) { padding-left: 21px; }
-.payload-inspector { margin-top: 13px; color: var(--muted); font-size: .83rem; line-height: 1.5; }
+.call-log-selector { margin-top: 0; }
+.call-log-selector .call-log-message { color: var(--ink); overflow-wrap: anywhere; }
+.call-log-list, .call-log-empty { color: var(--muted); font-size: .83rem; line-height: 1.5; }
+.call-log-list > p, .call-log-error { margin: 13px 0 9px; }
+.call-log-error button { margin-top: 6px; }
+.call-log-list > .payload-stage { margin: 8px 0; padding: 8px 10px; }
 .payload-stage > summary { color: var(--ink); }
 .trace-payload pre {
   max-height: 15rem; overflow: auto; margin: 5px 0 7px; padding: 9px;
@@ -312,6 +319,10 @@ button { color: inherit; }
 .trace-stage h4 { font-weight: 640; font-size: .83rem; }
 .smoke-page { width: min(480px, 95%); display: grid; gap: 15px; padding: 15px; margin: 30px auto; }
 .smoke-page output { font-size: .85rem; overflow-wrap: anywhere; }
+
+@media (max-width: 1000px) {
+  .inspector-trigger:not(.call-logs-trigger) span { display: none; }
+}
 
 @media (max-width: 850px) {
   .app-layout { grid-template-columns: minmax(0, 1fr); }
@@ -328,7 +339,6 @@ button { color: inherit; }
   .topbar h1 { font-size: 1rem; }
   .topbar-actions, .topbar-left { gap: 5px; }
   .topbar .icon-button { min-width: 34px; min-height: 34px; }
-  .inspector-trigger span { display: none; }
   .demo-badge, .test-label { font-size: .7rem; padding: 5px 7px; gap: 5px; }
   .demo-badge .demo-dot { width: 5px; height: 5px; }
   .welcome { padding: 28px 14px 15px; }
@@ -359,6 +369,10 @@ button { color: inherit; }
   *, *::before, *::after { animation-duration: 0.001s !important; transition-duration: 0.001s !important; scroll-behavior: auto !important; }
 }
 
-@media (max-width: 380px) {
+@media (max-width: 480px) {
+  .call-logs-trigger span { display: none; }
+}
+
+@media (max-width: 440px) {
   .topbar .demo-badge { display: none; }
 }

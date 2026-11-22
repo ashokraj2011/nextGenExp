@@ -52,13 +52,13 @@ Ask **Let me know my portfolio summary** in **Normal eligibility**. The Context 
 
 The **Portfolio Snapshot** provider supplies cash, equities, fixed income and the valuation date. sfield reads it through the scoped `portfolio.snapshot.read` tool and renders the values as an A2UI snapshot. The Experience Composer receives eligible portfolio suggestions for this requested summary. The host displays the cash amount from the same snapshot used in eligibility.
 
-Demo learner sees **$12,500** in cash and the investing prompt. Demo returning visitor sees **$10,000** in cash and the snapshot alone. Use **Tool setup → Treatment Selector mock → Portfolio summary** to preview the rule for either persona. In **Inspector → Request and response payloads**, compare **Treatment Selector**, **Portfolio Snapshot**, and **Experience Composer**.
+Demo learner sees **$12,500** in cash and the investing prompt. Demo returning visitor sees **$10,000** in cash and the snapshot alone. Use **Tool setup → Treatment Selector mock → Portfolio summary** to preview the rule for either persona. In **Logs**, compare **Context Router**, **Treatment Selector**, **Portfolio Snapshot**, and **Experience Composer**.
 
 The POC uses synthetic accounts and a fixture implementation of `PortfolioSnapshotProvider`. A deployed integration can supply a portfolio service through that interface and call the existing Treatment Selector with the same context and member ID.
 
 ### Inspect requests and responses
 
-Open **Inspector**, choose a **Turn trace**, and expand **Request and response payloads**. The Context Router and Experience Composer show the compiled Chat Completions request body, assembled assistant response, and individual gateway attempts. The Treatment Selector shows the sfield tool input, mock input and ranked IDs or tool error. The decoded views make structured messages readable alongside the full request and response data.
+Open **Logs** in the chat header and choose a **Chat turn**. The Context Router and Experience Composer show the compiled Chat Completions request body, assembled assistant response, and individual gateway attempts. Treatment Selector shows the sfield tool input, mock input, rule evaluation, and ranked IDs or tool error. Portfolio Snapshot shows its tool request and returned values. In **Inspector**, select a **Turn trace** and click **Open call logs** to open the logs for that turn.
 
 Capture is local to the inspector and saved in SQLite. Gateway headers are excluded, and configured metadata values and known credentials are redacted. For older turns, the inspector verifies a reconstructed gateway body against the saved digest when possible and can show the saved agent input and responses. Set `PZN_INSPECTOR=off` to disable inspector access and new payload capture.
 
@@ -70,7 +70,7 @@ Open **Tool setup** from the chat header to enable the registered sfield tools. 
 
 #### Create and test a CCRE mock rule
 
-Type **Create rule** in chat. After the Context Router returns `create_rule`, sfield calls the read-only `ccre.glossary.get` tool. The host passes the returned namespaces, attributes, operators and values to the A2UI editor. Open **Inspector → Request and response payloads → CCRE glossary** to see the tool exchange.
+Type **Create rule** in chat. After the Context Router returns `create_rule`, sfield calls the read-only `ccre.glossary.get` tool. The host passes the returned namespaces, attributes, operators and values to the A2UI editor. Open **Logs → CCRE glossary** to see the tool exchange.
 
 Choose a context and treatment, then build a condition using **Namespace**, **Attribute**, **Operator**, and **Value**. For example, choose **Customer**, **Demo persona**, **Equals**, and **Demo learner**. **Preview rule** evaluates the draft for a persona and turn. **Save rule** adds it to Tool setup for future chat turns. The mock evaluates the structured condition and stores any optional CCRE source as text.
 
@@ -79,7 +79,7 @@ You can also create a rule directly in Tool setup.
 1. In **Tool setup**, select **Normal eligibility** and **Balances**, then click **Create rule** under **CCRE rules**.
 2. Target **Available balance: demo definition**, use **Demo persona is**, select **Demo learner**, and click **Add rule**. The optional CCRE source is stored for future integration. The mock evaluates the condition controls.
 3. Click **Run preview** for **Demo learner**, then change the preview persona to **Demo returning visitor** and run it again. The evaluation shows whether the rule matched and the ranked IDs before and after filtering.
-4. Click **Save and test in chat** and choose **Compare two terms**. This starts a new conversation with the selected persona and scenario. Open **Inspector → Request and response payloads → Treatment Selector → Mock CCRE evaluation** to see the result on the chat turn.
+4. Click **Save and test in chat** and choose **Compare two terms**. This starts a new conversation with the selected persona and scenario. Open **Logs → Treatment Selector → Mock CCRE evaluation** to see the result on the chat turn.
 
 Rules apply to the selected scenario, context and treatment. They filter its fixture or configured ranked list and keep the order of surviving IDs. **From turn number** includes that turn and later turns. **Test in chat** starts at turn 1. Save rule edits or removals to apply them to subsequent chat requests.
 

@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Code2, X } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Code2, FileText } from "lucide-react";
 import type { Bootstrap, ConversationView, TurnView } from "../../packages/contracts/api";
 import { api, type Trace } from "./api";
-import { PayloadInspector } from "./payload-inspector";
+import { DeveloperDrawer } from "./developer-drawer";
 
 function Detail({ label, children }: { label: string; children: ReactNode }) {
   return <div><dt>{label}</dt><dd>{children}</dd></div>;
@@ -101,14 +101,14 @@ function TraceView({ trace }: { trace: Trace }) {
   </div>;
 }
 
-export function Inspector({ configuration, conversation, latest, close, create }: {
+export function Inspector({ configuration, conversation, latest, close, create, openLogs }: {
   configuration: Bootstrap;
   conversation?: ConversationView;
   latest?: TurnView;
   close: () => void;
   create: (personaId: string, scenarioId: string) => Promise<boolean>;
+  openLogs: (turnId: string) => void;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
   const [personaId, setPersonaId] = useState(conversation?.personaId ?? configuration.defaultPersonaId);
   const [scenarioId, setScenarioId] = useState(conversation?.scenarioId ?? configuration.defaultScenarioId);
   const [selectedTurn, setSelectedTurn] = useState("");
@@ -118,11 +118,6 @@ export function Inspector({ configuration, conversation, latest, close, create }
   const turns = conversation?.turns ?? [];
   const displayedTurn = turns.find((turn) => turn.id === selectedTurn) ?? latest;
   const persona = configuration.personas.find((value) => value.personaId === personaId)!;
-  useEffect(() => {
-    const element = dialog.current;
-    element?.showModal();
-    return () => element?.close();
-  }, []);
   useEffect(() => {
     if (!displayedTurn) { setTrace(undefined); return; }
     const id = displayedTurn.id;
@@ -135,44 +130,37 @@ export function Inspector({ configuration, conversation, latest, close, create }
     return () => { disposed = true; };
   }, [displayedTurn?.id, displayedTurn?.progress, displayedTurn?.status, displayedTurn?.feedback]);
 
-  return <dialog className="inspector" ref={dialog} aria-labelledby="inspector-title" onCancel={(event) => { event.preventDefault(); close(); }}
-    onClick={(event) => { if (event.target === event.currentTarget) { const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left) close(); } }}>
-    <div className="inspector-heading">
-      <span className="inspector-icon"><Code2 size={17} /></span>
-      <h2 id="inspector-title">Developer inspector</h2>
-      <button className="icon-button" aria-label="Close inspector" onClick={close}><X size={20} /></button>
-    </div>
-    <div className="inspector-scroll">
-      <form className="demo-settings" onSubmit={async (event) => {
-        event.preventDefault();
-        setCreating(true);
-        try { if (await create(personaId, scenarioId)) close(); }
-        finally { setCreating(false); }
-      }}>
-        <h3>Demo setup</h3>
-        <label htmlFor="persona">Persona</label>
-        <select id="persona" value={personaId} onChange={(event) => {
-          const next = configuration.personas.find((value) => value.personaId === event.target.value)!;
-          setPersonaId(next.personaId);
-          if (!next.allowedScenarios.includes(scenarioId)) setScenarioId(next.allowedScenarios[0]);
-        }}>{configuration.personas.map((item) => <option key={item.personaId} value={item.personaId}>{item.displayName}</option>)}</select>
-        <label htmlFor="scenario">Scenario</label>
-        <select id="scenario" value={scenarioId} onChange={(event) => setScenarioId(event.target.value)}>
-          {configuration.scenarios.filter((item) => persona.allowedScenarios.includes(item.scenarioId))
-            .map((item) => <option key={item.scenarioId} value={item.scenarioId}>{item.label}</option>)}
-        </select>
-        <button className="secondary-button" type="submit" disabled={creating}>Start with these settings</button>
-      </form>
-      <section className="trace-selector">
-        <label htmlFor="trace-turn">Turn trace</label>
-        {turns.length ? <select id="trace-turn" value={selectedTurn} onChange={(event) => setSelectedTurn(event.target.value)}>
-          <option value="">Latest turn</option>
-          {turns.map((turn, index) => <option value={turn.id} key={turn.id}>{index + 1}. {turn.message.slice(0, 70)}</option>)}
-        </select> : <p>Send a question to see its execution trace.</p>}
-      </section>
-      {displayedTurn && <PayloadInspector key={displayedTurn.id} turn={displayedTurn} />}
-      {traceError && <p role="alert">The turn trace is unavailable.</p>}
-      {trace?.turnId === displayedTurn?.id && trace && <TraceView trace={trace} />}
-    </div>
-  </dialog>;
+  return <DeveloperDrawer title="Developer inspector" icon={<Code2 size={17} />} closeLabel="Close inspector" close={close}>
+    <form className="demo-settings" onSubmit={async (event) => {
+      event.preventDefault();
+      setCreating(true);
+      try { if (await create(personaId, scenarioId)) close(); }
+      finally { setCreating(false); }
+    }}>
+      <h3>Demo setup</h3>
+      <label htmlFor="persona">Persona</label>
+      <select id="persona" value={personaId} onChange={(event) => {
+        const next = configuration.personas.find((value) => value.personaId === event.target.value)!;
+        setPersonaId(next.personaId);
+        if (!next.allowedScenarios.includes(scenarioId)) setScenarioId(next.allowedScenarios[0]);
+      }}>{configuration.personas.map((item) => <option key={item.personaId} value={item.personaId}>{item.displayName}</option>)}</select>
+      <label htmlFor="scenario">Scenario</label>
+      <select id="scenario" value={scenarioId} onChange={(event) => setScenarioId(event.target.value)}>
+        {configuration.scenarios.filter((item) => persona.allowedScenarios.includes(item.scenarioId))
+          .map((item) => <option key={item.scenarioId} value={item.scenarioId}>{item.label}</option>)}
+      </select>
+      <button className="secondary-button" type="submit" disabled={creating}>Start with these settings</button>
+    </form>
+    <section className="trace-selector">
+      <label htmlFor="trace-turn">Turn trace</label>
+      {turns.length ? <select id="trace-turn" value={selectedTurn} onChange={(event) => setSelectedTurn(event.target.value)}>
+        <option value="">Latest turn</option>
+        {turns.map((turn, index) => <option value={turn.id} key={turn.id}>{index + 1}. {turn.message.slice(0, 70)}</option>)}
+      </select> : <p>Send a question to see its execution trace.</p>}
+    </section>
+    {displayedTurn && <button className="secondary-button inspector-logs-link" type="button" aria-haspopup="dialog"
+      onClick={() => openLogs(displayedTurn.id)}><FileText size={16} aria-hidden="true" />Open call logs</button>}
+    {traceError && <p role="alert">The turn trace is unavailable.</p>}
+    {trace?.turnId === displayedTurn?.id && trace && <TraceView trace={trace} />}
+  </DeveloperDrawer>;
 }

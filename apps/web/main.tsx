@@ -2,12 +2,13 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useAui, useAuiState, useExternalStoreRuntime, type ThreadMessageLike } from "@assistant-ui/react";
 import { CreateSurfaceMessageSchema, type ActionMessage } from "@a2ui/web_core/v1_0";
-import { BookOpenText, Columns2, ListChecks, Menu, MessageSquare, PanelRight, Plus, RotateCcw, Settings2, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { BookOpenText, Columns2, FileText, ListChecks, Menu, MessageSquare, PanelRight, Plus, RotateCcw, Settings2, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { failureCopy, progressLabels, type Bootstrap, type Conversation, type ConversationView, type TurnView, type TurnAccepted, type Progress } from "../../packages/contracts/api";
 import { MAX_MESSAGE_LENGTH } from "../../packages/contracts/domain";
 import { api } from "./api";
 import { readActiveConversation, rememberActiveConversation } from "./conversation-storage";
 import { Inspector } from "./inspector";
+import { CallLogs } from "./call-logs";
 import { BasicSmoke, ExperienceControls, ExperienceDataUI, installA2uiStyles } from "./surface";
 import "@fontsource-variable/inter/wght.css";
 import "./styles.css";
@@ -191,6 +192,8 @@ function messageFor(error: unknown) {
   return error instanceof Error && error.name !== "TypeError" ? error.message : "Couldn’t reach the demo. Your draft is still here.";
 }
 
+type DeveloperPanel = { kind: "inspector" } | { kind: "logs"; turnId?: string };
+
 function App() {
   const [configuration, setConfiguration] = useState<Bootstrap>();
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -199,10 +202,11 @@ function App() {
   const [notice, setNotice] = useState("");
   const [pending, setPending] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
-  const [inspector, setInspector] = useState(false);
+  const [developerPanel, setDeveloperPanel] = useState<DeveloperPanel>();
   const inFlight = useRef(false);
   const previousAttempt = useRef<{ fingerprint: string; id: string } | null>(null);
   const inspectorTrigger = useRef<HTMLButtonElement>(null);
+  const logsTrigger = useRef<HTMLButtonElement>(null);
   const railTrigger = useRef<HTMLButtonElement>(null);
   const railClose = useRef<HTMLButtonElement>(null);
   const draftKey = conversation?.id ?? "new";
@@ -336,9 +340,11 @@ function App() {
   const startConversation = async (personaId: string, scenarioId: string) => exclusive(async () => {
     choose(await api.newConversation(personaId, scenarioId));
   });
-  const closeInspector = () => {
-    setInspector(false);
-    inspectorTrigger.current?.focus();
+  const openLogs = (turnId?: string) => setDeveloperPanel({ kind: "logs", turnId });
+  const closeDeveloperPanel = () => {
+    const trigger = developerPanel?.kind === "logs" ? logsTrigger : inspectorTrigger;
+    setDeveloperPanel(undefined);
+    requestAnimationFrame(() => trigger.current?.focus());
   };
 
   return <div className="app-layout">
@@ -377,7 +383,9 @@ function App() {
           {configuration?.inspectorEnabled && <a className="tool-setup-trigger inspector-trigger icon-button" aria-label="Tool setup" href="/admin">
             <Settings2 size={18} aria-hidden="true" /><span>Tool setup</span></a>}
           {configuration?.inspectorEnabled && <button className="inspector-trigger icon-button" ref={inspectorTrigger} type="button" aria-label="Open developer inspector"
-            onClick={() => setInspector(true)}><PanelRight size={18} /><span>Inspector</span></button>}
+            aria-haspopup="dialog" onClick={() => setDeveloperPanel({ kind: "inspector" })}><PanelRight size={18} aria-hidden="true" /><span>Inspector</span></button>}
+          {configuration?.inspectorEnabled && <button className="inspector-trigger call-logs-trigger icon-button" ref={logsTrigger} type="button"
+            aria-label="Open call logs" aria-haspopup="dialog" title="Call logs" onClick={() => openLogs()}><FileText size={18} aria-hidden="true" /><span>Logs</span></button>}
         </div>
       </header>
       <Chat key={conversation?.id ?? "new"} conversation={conversation} configuration={configuration} pending={pending}
@@ -395,7 +403,9 @@ function App() {
           void api.event(expId, value).then(() => api.turn(turnId)).then(upsert).catch((error) => setNotice(messageFor(error)));
         }} />
     </main>
-    {configuration && inspector && <Inspector configuration={configuration} conversation={conversation} latest={latest} close={closeInspector} create={startConversation} />}
+    {configuration && developerPanel?.kind === "inspector" && <Inspector configuration={configuration} conversation={conversation}
+      latest={latest} close={closeDeveloperPanel} create={startConversation} openLogs={openLogs} />}
+    {developerPanel?.kind === "logs" && <CallLogs turns={conversation?.turns ?? noTurns} turnId={developerPanel.turnId} close={closeDeveloperPanel} />}
   </div>;
 }
 
