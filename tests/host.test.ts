@@ -568,6 +568,58 @@ test("portfolio summaries combine the scoped snapshot with the cash treatment on
   assert.equal(missing.turn.experience, undefined);
 });
 
+test("retirement education includes the update card and action only when beneficiary details are missing", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const { client } = f;
+  const question = "I'd like to learn about retirement.";
+
+  for (const [personaId, mid, missing] of [
+    ["demo-learner", "DEMO-MID-1001", true],
+    ["demo-returning", "DEMO-MID-1002", false],
+  ] as const) {
+    const conversation = await client.conversation("normal", personaId);
+    const { turn, trace } = await client.ask(conversation.id, question);
+    assert.equal(turn.status, "completed", JSON.stringify(trace));
+    assert.equal(trace.selectedContextId, "learning");
+    const ids = missing ? ["retirement_learning", "beneficiary_update"] : ["retirement_learning"];
+    assert.deepEqual(trace.finalOrder, ids);
+    const experience = turn.experience!;
+    const titles = experience.blocks.map((block) => {
+      assert.equal(block.component, "PznContentCard");
+      return block.props.title;
+    });
+    assert.deepEqual(titles, missing
+      ? ["Retirement planning basics", "Update your beneficiaries"] : ["Retirement planning basics"]);
+    assert.deepEqual(experience.actions.map(({ label }) => label), missing ? ["See beneficiary update steps"] : []);
+
+    const payloads = await client.request<TurnPayloads>("/api/debug/payloads/" + turn.id);
+    assert.deepEqual(payloads.treatment?.mockInput?.data, { mid, context: "learning" });
+    assert.deepEqual(payloads.treatment?.result?.data, ids);
+    const expectedCcre = {
+      beforeRules: ["retirement_learning", "beneficiary_update"],
+      results: [{ name: "Beneficiary details are missing", contentId: "beneficiary_update", outcome: missing ? "matched" : "excluded" }],
+    };
+    assert.deepEqual(payloads.treatment?.ccre?.data, expectedCcre);
+    const preview = await client.request<TreatmentPreview>("/api/admin/treatment-preview", {
+      personaId, scenarioId: "normal", contextId: "learning", enabled: true, output: null, ordinal: 1,
+    } satisfies TreatmentPreviewInput);
+    assert.deepEqual(preview, { status: "ranked", source: "fixture", contentIds: ids, ccre: expectedCcre });
+
+    if (missing) {
+      const next = await client.request<TurnAccepted>("/api/experiences/" + experience.experienceId + "/actions", {
+        clientRequestId: randomUUID(), envelope: actionFor(experience),
+      }, 202);
+      const steps = await client.wait(next);
+      assert.equal(steps.turn.status, "completed", JSON.stringify(steps.trace));
+      assert.equal(steps.trace.selectedContextId, "learning");
+      assert.deepEqual(steps.trace.components, ["PznStepList"]);
+      assert.deepEqual(steps.trace.finalOrder, ["beneficiary_update"]);
+      assert.deepEqual(steps.turn.experience?.actions, []);
+    }
+  }
+});
+
 test("admission rejects unknown contexts, tampered input, duplicate payload changes, and foreign principals", async (t) => {
   const f = await fixture(({ envelope }) => envelope.inputType === "PznContextRoutingInput" ? {
     json: {

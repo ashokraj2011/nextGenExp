@@ -56,6 +56,15 @@ Demo learner sees **$12,500** in cash and the investing prompt. Demo returning v
 
 The POC uses synthetic accounts and a fixture implementation of `PortfolioSnapshotProvider`. A deployed integration can supply a portfolio service through that interface and call the existing Treatment Selector with the same context and member ID.
 
+### Retirement learning demo
+
+Choose **Learn about retirement** in a new chat with **Normal eligibility**. The Context Router selects `learning`. sfield sends that context and the demo member ID to Treatment Selector. The mock CCRE rule **Customer → Beneficiary status → Equals → Missing** controls whether Treatment Selector returns `beneficiary_update` alongside `retirement_learning`. The Composer selects the lesson, and sfield adds the eligible reminder when it renders the lesson.
+
+- **Demo learner** has missing beneficiary details. Chat shows **Retirement planning basics** and **Update your beneficiaries**. Click **See beneficiary update steps** for the A2UI demo guide.
+- **Demo returning visitor** has details on file. Chat shows **Retirement planning basics**.
+
+Use **Tool setup → Treatment Selector mock → Learning → Run preview** to evaluate the rule for either persona. In chat, **Logs → Treatment Selector** shows the mock CCRE evaluation and the returned content IDs.
+
 ### Inspect requests and responses
 
 Open **Logs** in the chat header and choose a **Chat turn**. The Context Router and Experience Composer show the compiled Chat Completions request body, assembled assistant response, and individual gateway attempts. Treatment Selector shows the sfield tool input, mock input, rule evaluation, and ranked IDs or tool error. Portfolio Snapshot shows its tool request and returned values. In **Inspector**, select a **Turn trace** and click **Open call logs** to open the logs for that turn.
@@ -135,7 +144,7 @@ npm run eval:live -- --smoke
 npm run eval:live
 ~~~
 
-The smoke run exercises structured comparison, the balance tool round trip, step rendering data, and cancellation through the host. The full run evaluates 30 fixture-backed prompts under each ranking mode, in batches of ten conversations. It reports route accuracy, approved clarification, fixture relevance, completion rates, and p95 timing for both stages and the overall request. The first-status measurement is at the SSE client. Live relevance and latency results require the configured gateway.
+The smoke run exercises structured comparison, the balance tool round trip, step rendering data, and cancellation through the host. The full run evaluates the fixture-backed prompts under each ranking mode, in batches of ten conversations. It reports route accuracy, approved clarification, fixture relevance, completion rates, and p95 timing for both stages and the overall request. The first-status measurement is at the SSE client. Live relevance and latency results require the configured gateway.
 
 ## Project map
 

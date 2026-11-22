@@ -3,7 +3,7 @@ import type { DisplayBlock } from "../packages/contracts/surface";
 export type LiveCase = {
   id: string;
   message: string;
-  route: "balance" | "portsum" | "app-home" | "clarify" | "no_match";
+  route: "balance" | "portsum" | "learning" | "app-home" | "clarify" | "no_match";
   outcome: string;
   component?: DisplayBlock["component"];
   relevant?: string[];
@@ -46,6 +46,9 @@ export const liveCases: LiveCase[] = [
   { id: "portfolio-allocation", message: "Show me an explanation of the demo portfolio allocation view.", route: portfolio, outcome: ready, component: card, relevant: [portfolioItem], scenario: "propensity-unavailable" },
   { id: "portfolio-summary-cash", message: "Let me know my portfolio summary.", route: portfolio, outcome: ready, component: "PznPortfolioSnapshot", relevant: ["portfolio_cash_investing"] },
   { id: "portfolio-summary-threshold", message: "Let me know my portfolio summary.", route: portfolio, outcome: ready, component: "PznPortfolioSnapshot", exclude: ["portfolio_cash_investing", portfolioItem], persona: "demo-returning" },
+  { id: "retirement-missing-beneficiary", message: "I'd like to learn about retirement.", route: "learning", outcome: ready, component: card, relevant: ["beneficiary_update"] },
+  { id: "retirement-beneficiary-on-file", message: "I'd like to learn about retirement.", route: "learning", outcome: ready, component: card, relevant: ["retirement_learning"], exclude: ["beneficiary_update"], persona: "demo-returning" },
+  { id: "beneficiary-update-steps", message: "Show me the demo steps to update my beneficiaries.", route: "learning", outcome: ready, component: guide, relevant: ["beneficiary_update"] },
   { id: "transfer-overview", message: "Explain the fictional transfer flow.", route: home, outcome: ready, component: card, relevant: [transferIntro] },
   { id: "transfer-steps", message: "Walk me through the demo transfer steps.", route: home, outcome: ready, component: guide, relevant: [transferGuide] },
   { id: "transfer-preview", message: "How do I get to a preview in the demo transfer checklist?", route: home, outcome: ready, component: guide, relevant: [transferGuide] },

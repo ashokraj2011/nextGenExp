@@ -19,6 +19,12 @@ const namespaces = [
         valueType: "boolean", operators: ["eq", "ne"], options: [], minimum: null,
         read: ({ personaId }) => personaId === "demo-returning",
       },
+      {
+        id: "beneficiary_status", label: "Beneficiary status", description: "Whether the demo account has beneficiary details on file.",
+        valueType: "enum", operators: ["eq", "ne"], minimum: null,
+        options: [{ value: "missing", label: "Missing" }, { value: "on_file", label: "On file" }],
+        read: ({ personaId }) => host.personas.find((persona) => persona.personaId === personaId)?.beneficiaryStatus,
+      },
     ],
   },
   {

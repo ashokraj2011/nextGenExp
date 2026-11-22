@@ -58,6 +58,7 @@ function route(envelope: Envelope): ContextSelectionProposal {
   if (/balance|ledger|available term/.test(text)) contexts.add("balance");
   if (/portfolio|protfolio|holdings|allocation/.test(text)) contexts.add("portsum");
   if (/transfer|app home|demo profile|app help|demo app/.test(text)) contexts.add("app-home");
+  if (/retirement|beneficiar/.test(text)) contexts.add("learning");
   if (!contexts.size && /\b(that|those|again|more)\b/.test(text) && recent?.length) contexts.add(recent.at(-1)!.contextId);
   const ambiguous = contexts.size > 1 || (!contexts.size && /help|explain|show|learn|what/.test(text) && !/weather|recipe|stock price|bitcoin/.test(text));
   const status = ambiguous ? "clarify" : contexts.size === 1 ? "selected" : "no_match";
@@ -102,6 +103,12 @@ function compose({ body, envelope }: GatewayCall): ExperienceProposal | ToolCall
   if (envelope.selectedContextId === "portsum") {
     if (envelope.portfolioSnapshotIncluded) return choose("PznContentCard", [get("Explore investing options")], "summary");
     return choose("PznContentCard", [get("Understanding the fictional portfolio")], "explanation");
+  }
+  if (envelope.selectedContextId === "learning") {
+    if (envelope.intent?.task === "guide") {
+      return choose("PznStepList", [get("Update your beneficiaries")], "steps");
+    }
+    return choose("PznContentCard", [get("Retirement planning basics")], "explanation");
   }
   if (envelope.selectedContextId === "app-home") {
     if (envelope.intent?.task === "guide") return choose("PznStepList", [get("Fictional transfer checklist")], "steps");

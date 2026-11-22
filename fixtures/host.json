@@ -7,17 +7,19 @@
       "personaId": "demo-learner",
       "displayName": "Demo learner",
       "syntheticMid": "DEMO-MID-1001",
+      "beneficiaryStatus": "missing",
       "allowedScenarios": ["normal", "conflicting-propensity", "missing-propensity", "propensity-unavailable", "catalog-unavailable", "relevant-blocked", "empty", "ts-unavailable", "catalog-resolution"]
     },
     {
       "personaId": "demo-returning",
       "displayName": "Demo returning visitor",
       "syntheticMid": "DEMO-MID-1002",
+      "beneficiaryStatus": "on_file",
       "allowedScenarios": ["normal", "cross-turn-change"]
     }
   ],
   "clarificationQuestions": [
-    "Which demo topic would you like to explore: balances, transfers, or portfolio terms?",
+    "Which demo topic would you like to explore? Balances, transfers, portfolio terms, or retirement?",
     "Would you like an explanation, a comparison, or a step-by-step guide?",
     "Would you like a short explanation or a detailed one?"
   ],

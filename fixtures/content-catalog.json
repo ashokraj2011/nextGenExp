@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "fixtureVersion": "pzn-demo-2026-11-v1",
-  "catalogVersion": "content-demo-v2",
+  "catalogVersion": "content-demo-v3",
   "dataClassification": "synthetic_demo_only",
   "entries": [
     {
@@ -300,6 +300,74 @@
         {
           "disclosureId": "demo_only",
           "text": "Fictional investing prompt using synthetic portfolio data."
+        }
+      ]
+    },
+    {
+      "contentId": "retirement_learning",
+      "version": "v1",
+      "publicationStatus": "published",
+      "kind": "education",
+      "title": "Retirement planning basics",
+      "description": "An introduction to retirement planning and the role of beneficiary designations.",
+      "body": "Retirement planning starts with understanding what you may spend in retirement and where that income might come from. A beneficiary is a person or organization you name to receive eligible account assets after your death.",
+      "allowedComponents": ["PznContentCard"],
+      "comparisonGroup": null,
+      "comparisonFields": [],
+      "steps": [],
+      "metricSpec": null,
+      "followUps": [],
+      "sourceRef": "fixture:retirement_learning",
+      "sourceLabel": "Fictional PZN demo catalog",
+      "requiredDisclosures": [
+        {
+          "disclosureId": "demo_only",
+          "text": "Fictional demonstration only."
+        }
+      ]
+    },
+    {
+      "contentId": "beneficiary_update",
+      "version": "v1",
+      "publicationStatus": "published",
+      "kind": "education",
+      "title": "Update your beneficiaries",
+      "description": "Your demo account has no beneficiary details on file.",
+      "body": "Your demo account has no beneficiary details on file. Review the steps to see how you could add a beneficiary.",
+      "allowedComponents": ["PznContentCard", "PznStepList"],
+      "comparisonGroup": null,
+      "comparisonFields": [],
+      "steps": [
+        {
+          "stepId": "open_beneficiary_settings",
+          "title": "Open beneficiary settings",
+          "body": "In the demo flow, open Account settings and choose Beneficiaries."
+        },
+        {
+          "stepId": "add_beneficiary",
+          "title": "Choose Add beneficiary",
+          "body": "The demo shows where you would add a person or organization and specify their share."
+        },
+        {
+          "stepId": "review_beneficiary",
+          "title": "Review the designation",
+          "body": "Check the beneficiary and allocation in the preview."
+        }
+      ],
+      "metricSpec": null,
+      "followUps": [
+        {
+          "followUpId": "fu_beneficiary_steps",
+          "label": "See beneficiary update steps",
+          "userMessage": "Show me the demo steps to update my beneficiaries."
+        }
+      ],
+      "sourceRef": "fixture:beneficiary_update",
+      "sourceLabel": "Fictional PZN demo catalog",
+      "requiredDisclosures": [
+        {
+          "disclosureId": "demo_only",
+          "text": "This guide previews the steps using a synthetic account."
         }
       ]
     },

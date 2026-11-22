@@ -92,7 +92,6 @@ export function verifyExperience(
   const selected = new Set<string>();
   const blockIds = new Set<string>();
   const ranks: number[] = [];
-  const contentOrder: string[] = [];
   const resolved = blocks.map((block) => {
     const { component, candidateIds } = block;
     requireCheck(!blockIds.has(block.blockId), "DUPLICATE_BLOCK_ID");
@@ -109,7 +108,6 @@ export function verifyExperience(
       requireCheck(entry, "CONTENT_MISSING_WITHDRAWN_OR_REVISED");
       requireCheck(entry.allowedComponents.includes(component), "COMPONENT_NOT_ALLOWED");
       if (entry.portfolioData) requireCheck(portfolio && isPortfolioSummary(route), "PORTFOLIO_SNAPSHOT_REQUIRED");
-      contentOrder.push(entry.contentId);
       return entry;
     });
 
@@ -143,10 +141,33 @@ export function verifyExperience(
   const permittedFollowUps = new Map(resolved.flatMap((block) => block.content).flatMap((entry) => (
     entry.followUps.map((followUp) => [followUp.followUpId, followUp] as const)
   )));
+  const showsBeneficiaryGuide = resolved.some(({ proposal, content }) => (
+    proposal.component === "PznStepList" && content[0].contentId === "beneficiary_update"
+  ));
   const followUps = followUpIds.map((id) => {
     const followUp = permittedFollowUps.get(id);
     requireCheck(followUp, "FOLLOW_UP_NOT_ALLOWED");
     return followUp;
-  });
+  }).filter(({ followUpId }) => !showsBeneficiaryGuide || followUpId !== "fu_beneficiary_steps");
+
+  const showsRetirementLesson = route.contextId === "learning" && route.intent.task === "explain"
+    && resolved.some(({ content }) => content.some(({ contentId }) => contentId === "retirement_learning"));
+  const reminder = showsRetirementLesson ? decision.candidates.find(({ contentId }) => contentId === "beneficiary_update") : undefined;
+  if (reminder) {
+    const entry = lookupContent(reminder);
+    requireCheck(entry && entry.allowedComponents.includes("PznContentCard"), "BENEFICIARY_REMINDER_UNAVAILABLE");
+    if (!selected.has(reminder.candidateId)) {
+      const insertBefore = decision.selectionMode === "preserve_ts_rank" ? resolved.findIndex(({ proposal }) => (
+        candidateById.get(proposal.candidateIds[0])!.tsRank > reminder.tsRank
+      )) : -1;
+      resolved.splice(insertBefore < 0 ? resolved.length : insertBefore, 0, {
+        proposal: { blockId: "beneficiary_reminder", component: "PznContentCard", candidateIds: [reminder.candidateId], variant: "compact" },
+        content: [entry],
+      });
+    }
+    const actions = new Map([...entry.followUps, ...followUps].map((action) => [action.followUpId, action]));
+    followUps.splice(0, followUps.length, ...[...actions.values()].slice(0, 3));
+  }
+  const contentOrder = resolved.flatMap(({ content }) => content.map(({ contentId }) => contentId));
   return { proposal: value, blocks: resolved, followUps, contentOrder };
 }

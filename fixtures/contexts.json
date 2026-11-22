@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0",
-  "catalogVersion": "ts-contexts-demo-v2",
+  "catalogVersion": "ts-contexts-demo-v3",
   "contexts": [
     {
       "contextId": "balance",
@@ -12,6 +12,12 @@
       "contextId": "portsum",
       "displayName": "Portfolio summary",
       "description": "Show a synthetic member's portfolio summary, including total value, cash, and asset allocation, or explain what portfolio terms and holdings labels mean.",
+      "active": true
+    },
+    {
+      "contextId": "learning",
+      "displayName": "Learning",
+      "description": "Education about retirement planning basics and beneficiary designations. Includes learning what a beneficiary is and how to review or add one in the demo.",
       "active": true
     },
     {
