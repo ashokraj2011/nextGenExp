@@ -1,6 +1,6 @@
-import type { JsonValue, ModelAttemptRecord, RunRecord, SField } from "@sfield/core";
+import type { CallRecord, JsonValue, ModelAttemptRecord, RunRecord, SField } from "@sfield/core";
 import host from "../../fixtures/host.json";
-import type { ModelStagePayloads, TreatmentPayloads, TurnPayloads } from "../../packages/contracts/inspector";
+import type { ModelStagePayloads, RegistryToolPayloads, TreatmentPayloads, TurnPayloads } from "../../packages/contracts/inspector";
 import { sfieldTools, toolVersion } from "../../packages/contracts/tool-setup";
 import type { configureGateway } from "./gateway";
 import { assistantResponse } from "./payload-capture";
@@ -62,6 +62,26 @@ async function modelPayloads(sf: SField, store: Store, inspection: Inspection, t
   return { attempts, saved: { input: inspection.payload(input), responses } };
 }
 
+function registryPayload(inspection: Inspection, call: CallRecord): RegistryToolPayloads {
+  return {
+    tool: call.toolRef,
+    status: call.result?.status ?? call.state,
+    registryInput: inspection.payload(call.invocation?.normalizedInputs ?? call.proposedArguments),
+    result: call.result?.output === undefined ? undefined : inspection.payload(call.result.output),
+    error: call.result?.error ? inspection.payload({ ...call.result.error }) : undefined,
+  };
+}
+
+async function glossaryPayloads(sf: SField, inspection: Inspection, turn: TurnRecord) {
+  const routerRunId = turn.attempts.route?.runId;
+  if (!turn.glossaryScopeId || !routerRunId) return null;
+  const tool = `${sfieldTools.glossary.id}@${toolVersion}`;
+  const call = (await sf.persistence.listCalls(turn.glossaryScopeId)).find((entry) => (
+    entry.toolRef === tool && entry.proposedArguments.turnRef === turn.public.id && entry.proposedArguments.routerRunId === routerRunId
+  ));
+  return call ? registryPayload(inspection, call) : null;
+}
+
 async function treatmentPayloads(sf: SField, inspection: Inspection, turn: TurnRecord, conversation: ConversationRecord): Promise<TreatmentPayloads | null> {
   if (!turn.tsScopeId || !turn.route) return null;
   const tool = `${sfieldTools.selection.id}@${toolVersion}`;
@@ -76,20 +96,18 @@ async function treatmentPayloads(sf: SField, inspection: Inspection, turn: TurnR
     if (persona) mockInput = { mid: persona.syntheticMid, context: turn.route.contextId };
   }
   return {
-    tool, status: call.result?.status ?? call.state,
-    registryInput: inspection.payload(call.invocation?.normalizedInputs ?? call.proposedArguments),
+    ...registryPayload(inspection, call),
     mockInput: mockInput ? inspection.payload(mockInput) : undefined,
     ccre: turn.treatmentCcre ? inspection.payload(turn.treatmentCcre) : undefined,
-    result: call.result?.output === undefined ? undefined : inspection.payload(call.result.output),
-    error: call.result?.error ? inspection.payload({ ...call.result.error }) : undefined,
   };
 }
 
 export async function readTurnPayloads(sf: SField, store: Store, inspection: Inspection, turn: TurnRecord, conversation: ConversationRecord): Promise<TurnPayloads> {
-  const [router, treatment, composer] = await Promise.all([
+  const [router, glossary, treatment, composer] = await Promise.all([
     modelPayloads(sf, store, inspection, turn, "route"),
+    glossaryPayloads(sf, inspection, turn),
     treatmentPayloads(sf, inspection, turn, conversation),
     modelPayloads(sf, store, inspection, turn, "compose"),
   ]);
-  return { turnId: turn.public.id, router, treatment, composer };
+  return { turnId: turn.public.id, router, glossary, treatment, composer };
 }

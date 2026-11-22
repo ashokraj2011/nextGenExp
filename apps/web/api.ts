@@ -35,6 +35,7 @@ export type Trace = {
   routeDecisionId: string | null;
   contentDecisionId: string | null;
   catalogScopeId: string | null;
+  glossaryScopeId: string | null;
   tsScopeId: string | null;
   routerRunId: string | null;
   composerRunId: string | null;
@@ -42,6 +43,7 @@ export type Trace = {
   propensity: PropensityResult | null;
   selectionMode: SelectionMode;
   routeOutcome?: string;
+  glossaryVersion?: string;
   finalOrder?: string[];
   components?: string[];
   metricReadSucceeded: boolean;

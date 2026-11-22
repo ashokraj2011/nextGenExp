@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import type { JsonValue } from "@sfield/core";
 import type { TurnView } from "../../packages/contracts/api";
-import type { GatewayExchange, InspectorPayload, ModelStagePayloads, TreatmentPayloads, TurnPayloads } from "../../packages/contracts/inspector";
+import type {
+  GatewayExchange, InspectorPayload, ModelStagePayloads, RegistryToolPayloads, TreatmentPayloads, TurnPayloads,
+} from "../../packages/contracts/inspector";
 import { api } from "./api";
 
 function JsonBlock({ title, value, open = false }: { title: string; value?: InspectorPayload; open?: boolean }) {
@@ -71,6 +73,15 @@ function TreatmentStage({ stage }: { stage: TreatmentPayloads | null }) {
   </details>;
 }
 
+function GlossaryStage({ stage }: { stage: RegistryToolPayloads }) {
+  return <details className="trace-details payload-stage">
+    <summary>CCRE glossary · {stage.status}</summary>
+    <p><code>{stage.tool}</code></p>
+    <JsonBlock title="Glossary tool request" value={stage.registryInput} open />
+    <JsonBlock title={stage.error ? "Glossary tool error" : "Glossary tool response"} value={stage.error ?? stage.result} open />
+  </details>;
+}
+
 export function PayloadInspector({ turn }: { turn: TurnView }) {
   const [open, setOpen] = useState(false);
   const [payloads, setPayloads] = useState<TurnPayloads>();
@@ -91,6 +102,7 @@ export function PayloadInspector({ turn }: { turn: TurnView }) {
     {failed && <p role="alert">The turn payloads are unavailable. Reopen this section to retry.</p>}
     {payloads ? <>
       <ModelStage title="Context Router" stage={payloads.router} />
+      {payloads.glossary && <GlossaryStage stage={payloads.glossary} />}
       <TreatmentStage stage={payloads.treatment} />
       <ModelStage title="Experience Composer" stage={payloads.composer} />
     </> : open && !failed && <p role="status">Loading turn payloads…</p>}

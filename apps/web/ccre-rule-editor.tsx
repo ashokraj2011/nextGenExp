@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
+import { formatGlossaryCondition, type RuleGlossary } from "../../packages/contracts/rule-glossary";
 import type { MockCcreCondition, MockCcreRule, ToolSetupView } from "../../packages/contracts/tool-setup";
 import { CcreRuleForm, conditionLabels } from "./ccre-rule-form";
 
@@ -8,15 +9,17 @@ type Props = {
   rules: MockCcreRule[];
   personas: ToolSetupView["personas"];
   content: ToolSetupView["content"];
+  glossary: RuleGlossary;
   limitReached: boolean;
   change: (rules: MockCcreRule[]) => void;
 };
 
-export function CcreRuleEditor({ scope, rules, personas, content, limitReached, change }: Props) {
+export function CcreRuleEditor({ scope, rules, personas, content, glossary, limitReached, change }: Props) {
   const [editor, setEditor] = useState<{ rule?: MockCcreRule }>();
   const replacing = editor?.rule;
   const targets = content.filter(({ contentId }) => contentId === replacing?.contentId || !rules.some((rule) => rule.contentId === contentId));
   function describe(condition: MockCcreCondition) {
+    if (condition.kind === "attribute") return formatGlossaryCondition(condition);
     const label = conditionLabels[condition.kind];
     if (condition.kind === "persona_is") return label + " " + (personas.find((entry) => entry.personaId === condition.personaId)?.displayName ?? condition.personaId);
     if (condition.kind === "from_turn") return label + " " + condition.ordinal;
@@ -51,7 +54,8 @@ export function CcreRuleEditor({ scope, rules, personas, content, limitReached, 
       </li>)}
     </ul>}
     {editor && <div className="admin-rule-draft">
-      <CcreRuleForm scope={scope} personas={personas} targets={targets} initialRule={replacing}>
+      <CcreRuleForm scope={scope} personas={personas} targets={targets} initialRule={replacing}
+        glossary={replacing?.condition.kind === "attribute" ? glossary : undefined}>
         {(rule) => <div className="rule-actions">
           <button type="button" className="send-button" disabled={!rule} onClick={() => rule && saveRule(rule)}>
             {replacing ? "Update rule" : "Add rule"}

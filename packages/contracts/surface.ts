@@ -2,6 +2,7 @@ import { Catalog, ChildListSchema, CreateSurfaceMessageSchema, DynamicStringSche
 import type { CreateSurfaceMessage } from "@a2ui/web_core/v1_0";
 import { z } from "zod";
 import { comparisonFieldSchema, metricValueSchema, stepSchema } from "./domain";
+import { ruleGlossarySchema } from "./rule-glossary";
 
 export const PZN_CATALOG_ID = "https://pzn.example.invalid/catalogs/v1.0/experience";
 export const MAX_SURFACE_BYTES = 256 * 1024;
@@ -37,7 +38,9 @@ export const experienceRoot = { name: "PznExperience", schema: z.object({
 }).strict() } as const;
 export const followUpButton = { name: "PznFollowUp", schema: z.object({ actionId: id, label: limitedText }).strict() } as const;
 const demoKey = z.string().regex(/^[a-z][a-z0-9-]*$/).max(128);
-export const ruleCreation = { name: "PznRuleCreation", schema: z.object({ scenarioId: demoKey, personaId: demoKey }).strict() } as const;
+export const ruleCreation = { name: "PznRuleCreation", schema: z.object({
+  scenarioId: demoKey, personaId: demoKey, glossary: ruleGlossarySchema.optional(),
+}).strict() } as const;
 export type RuleCreationProps = z.infer<typeof ruleCreation.schema>;
 
 export const catalogApis = [experienceRoot, contentCard, comparison, stepList, metricSummary, followUpButton, ruleCreation] as const;

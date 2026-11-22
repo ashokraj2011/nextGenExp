@@ -11,11 +11,13 @@ import type { IncomingHttpHeaders } from "node:http";
 import { startApp } from "../apps/server/http";
 import type { TurnAccepted, TurnView, ConversationView } from "../packages/contracts/api";
 import type { TurnPayloads } from "../packages/contracts/inspector";
+import type { GlossaryCondition } from "../packages/contracts/rule-glossary";
 import {
   defaultToolSetup, type MockCcreRule, type ToolSetup, type ToolSetupView, type TreatmentPreview, type TreatmentPreviewInput,
 } from "../packages/contracts/tool-setup";
 import { actionFor, testClient, testProject } from "./client";
 import { startFixtureGateway, type TestInterceptor } from "./gateway-fixture";
+import { mockRuleGlossary } from "../packages/rule-glossary";
 
 async function fixture(intercept?: TestInterceptor, opts: {
   noGateway?: boolean;
@@ -235,32 +237,40 @@ test("the inspector setting also closes the tool setup page, API, and chat edito
   assert.equal(gateway.calls[0].envelope.canCreateRule, false);
 });
 
-test("chat routes create rule to an A2UI editor and saving appends a scoped mock rule", async (t) => {
+test("create rule reads the sfield glossary and uses its attributes for preview and treatment selection", async (t) => {
   const f = await fixture();
   t.after(() => f.close());
   const { client, gateway } = f;
   const conversation = await client.conversation("normal", "demo-returning");
   const toolsPath = "/api/admin/tools";
   const output = { mode: "ranked" as const, contentIds: ["balance_current_definition", "balance_available_definition"] };
-  const setup: ToolSetup = { ...defaultToolSetup, treatmentOverrides: [{ scenarioId: "normal", contextId: "balance", output }] };
+  const { glossary: _glossary, ...oldEnabledSettings } = defaultToolSetup.enabled;
+  const setup: ToolSetup = { enabled: oldEnabledSettings, treatmentOverrides: [{ scenarioId: "normal", contextId: "balance", output }] };
   await client.request(toolsPath, setup);
 
   const { turn, trace, events } = await client.ask(conversation.id, "Create rule");
   assert.equal(turn.experience?.outcome, "create_rule");
-  const block = { component: "PznRuleCreation", props: { scenarioId: "normal", personaId: "demo-returning" } };
+  const block = { component: "PznRuleCreation", props: { scenarioId: "normal", personaId: "demo-returning", glossary: mockRuleGlossary } };
   assert.deepEqual(turn.experience?.blocks, [block]);
   assert.deepEqual(turn.experience?.messages[0].createSurface.components?.[1], {
     id: "block_1", component: block.component, ...block.props,
   });
   assert.match(events, /event: experience\.ready/);
+  assert.match(events, /"progress":"glossary"/);
   assert.equal(trace.routeOutcome, "create_rule");
   assert.deepEqual(trace.components, ["PznRuleCreation"]);
+  assert.ok(trace.glossaryScopeId && trace.glossaryScopeId !== trace.catalogScopeId);
+  assert.equal(trace.glossaryVersion, mockRuleGlossary.version);
   assert.equal(trace.tsScopeId, null);
   assert.equal(trace.composerRunId, null);
   assert.equal(gateway.calls.length, 1);
   assert.equal(gateway.calls[0].envelope.canCreateRule, true);
   const payloads = await client.request<TurnPayloads>("/api/debug/payloads/" + turn.id);
   assert.match(JSON.stringify(payloads.router?.attempts[0].exchange?.response?.data), /create_rule/);
+  assert.equal(payloads.glossary?.tool, "ccre.glossary.get@1.0.0");
+  assert.equal(payloads.glossary?.status, "succeeded");
+  assert.deepEqual(payloads.glossary?.registryInput.data, { turnRef: turn.id, routerRunId: trace.routerRunId });
+  assert.deepEqual(payloads.glossary?.result?.data, mockRuleGlossary);
   assert.equal(payloads.treatment, null);
   assert.equal(payloads.composer, null);
 
@@ -269,11 +279,38 @@ test("chat routes create rule to an A2UI editor and saving appends a scoped mock
   assert.ok(revision);
   assert.deepEqual((await before.json()).setup, setup);
   const rulesPath = "/api/admin/ccre-rules";
+  const condition: GlossaryCondition = {
+    kind: "attribute", glossaryVersion: mockRuleGlossary.version, namespaceId: "customer", attributeId: "persona",
+    operator: "eq", value: "demo-learner",
+  };
   const rule: MockCcreRule = {
     scenarioId: "normal", contextId: "balance", contentId: output.contentIds[1], name: "Available balance for learners",
-    condition: { kind: "persona_is", personaId: "demo-learner" },
+    condition,
   };
+  const preview: TreatmentPreviewInput = {
+    scenarioId: rule.scenarioId, contextId: rule.contextId, output, personaId: "demo-returning", enabled: true, ordinal: 1,
+    ccreRules: [rule],
+  };
+  const previewPath = "/api/admin/treatment-preview";
+  const returningPreview = await client.request<TreatmentPreview>(previewPath, preview);
+  assert.ok(returningPreview.status === "ranked");
+  assert.equal(returningPreview.ccre?.results[0].outcome, "excluded");
+  const onSecondTurn = { ...condition, namespaceId: "conversation", attributeId: "turn_number", operator: "gte" as const, value: 2 };
+  for (const ordinal of [1, 2]) {
+    const response = await client.request<TreatmentPreview>(previewPath, { ...preview, ordinal, ccreRules: [{ ...rule, condition: onSecondTurn }] });
+    assert.ok(response.status === "ranked");
+    assert.equal(response.contentIds.includes(rule.contentId), ordinal === 2);
+  }
+  const returningCondition = { ...condition, attributeId: "is_returning", value: true };
+  const returningResult = await client.request<TreatmentPreview>(previewPath, { ...preview, ccreRules: [{ ...rule, condition: returningCondition }] });
+  assert.ok(returningResult.status === "ranked");
+  assert.equal(returningResult.ccre?.results[0].outcome, "matched");
+
   await client.request(rulesPath, { ...rule, contextId: "archived-help" }, 400);
+  await client.request(rulesPath, { ...rule, condition: { ...condition, attributeId: "unlisted" } }, 400);
+  await client.request(rulesPath, { ...rule, condition: { ...condition, operator: "gte" } }, 400);
+  await client.request(rulesPath, { ...rule, condition: { ...condition, value: true } }, 400);
+  await client.request(rulesPath, { ...rule, condition: { ...condition, glossaryVersion: "stale" } }, 400);
   assert.deepEqual(await client.request(rulesPath, rule), rule);
   assert.deepEqual(await client.request(rulesPath, rule), rule);
   await client.request(rulesPath, { ...rule, name: "Overwriting the rule" }, 409);
@@ -281,8 +318,21 @@ test("chat routes create rule to an A2UI editor and saving appends a scoped mock
   assert.deepEqual((await client.request<ToolSetupView>(toolsPath)).setup, { ...setup, ccreRules: [rule] });
 
   const after = await client.ask(conversation.id, "Compare available and current balance.");
-  assert.deepEqual(after.trace.ts?.baseline, ["balance_current_definition"]);
+  assert.deepEqual(after.trace.ts?.baseline, returningPreview.contentIds);
   assert.equal(after.turn.experience?.outcome, "no_match");
+  const afterPayloads = await client.request<TurnPayloads>("/api/debug/payloads/" + after.turn.id);
+  assert.equal(afterPayloads.glossary, null);
+
+  const restored = await f.restart();
+  const savedPayloads = await restored.request<TurnPayloads>("/api/debug/payloads/" + turn.id);
+  assert.deepEqual(savedPayloads.glossary, payloads.glossary);
+  await restored.request(toolsPath, { ...setup, enabled: { ...setup.enabled, glossary: false }, ccreRules: [rule] });
+  const unavailable = await restored.ask(conversation.id, "Create rule");
+  assert.equal(unavailable.turn.failureCode, "glossary_unavailable");
+  assert.equal(unavailable.turn.experience, undefined);
+  assert.equal(unavailable.trace.composerRunId, null);
+  const failedPayloads = await restored.request<TurnPayloads>("/api/debug/payloads/" + unavailable.turn.id);
+  assert.equal(failedPayloads.glossary?.status, "failed");
 });
 
 test("two-stage completion persists source-rich comparison, scopes, SSE replay, and a rerouted follow-up", async (t) => {

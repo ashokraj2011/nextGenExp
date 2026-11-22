@@ -1,4 +1,5 @@
 import type { MockCcreCondition, MockCcreEvaluation, MockCcreRule } from "../contracts/tool-setup";
+import { matchesGlossaryCondition } from "../rule-glossary";
 
 type RuleInput = { scenarioId: string; contextId: string; personaId: string; ordinal: number };
 
@@ -8,6 +9,7 @@ function matches(condition: MockCcreCondition, input: RuleInput): boolean {
     case "never": return false;
     case "persona_is": return condition.personaId === input.personaId;
     case "from_turn": return input.ordinal >= condition.ordinal;
+    case "attribute": return matchesGlossaryCondition(condition, input);
   }
 }
 

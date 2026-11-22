@@ -24,19 +24,23 @@ export type ModelStagePayloads = {
   saved?: { input: InspectorPayload; responses: InspectorPayload[] };
 };
 
-export type TreatmentPayloads = {
+export type RegistryToolPayloads = {
   tool: string;
   status: string;
   registryInput: InspectorPayload;
-  mockInput?: InspectorPayload;
-  ccre?: InspectorPayload;
   result?: InspectorPayload;
   error?: InspectorPayload;
+};
+
+export type TreatmentPayloads = RegistryToolPayloads & {
+  mockInput?: InspectorPayload;
+  ccre?: InspectorPayload;
 };
 
 export type TurnPayloads = {
   turnId: string;
   router: ModelStagePayloads | null;
+  glossary: RegistryToolPayloads | null;
   treatment: TreatmentPayloads | null;
   composer: ModelStagePayloads | null;
 };

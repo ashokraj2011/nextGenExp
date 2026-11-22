@@ -156,7 +156,7 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
             return <li key={key}>
               <label className="admin-tool">
                 <span><strong>{tool.label}</strong><code>{tool.id}@{toolVersion}</code><small>{tool.description}</small></span>
-                <input type="checkbox" role="switch" aria-label={tool.label} checked={setup.enabled[key]}
+                <input type="checkbox" role="switch" aria-label={tool.label} checked={setup.enabled[key] !== false}
                   onChange={(event) => edit({ ...setup, enabled: { ...setup.enabled, [key]: event.target.checked } })} />
               </label>
             </li>;
@@ -199,7 +199,7 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
           change={(contentIds) => changeOutput({ mode: "ranked", contentIds })} />}
 
         <CcreRuleEditor key={scenarioId + "/" + contextId} scope={{ scenarioId, contextId }}
-          rules={ccreRules} personas={personas} content={data.content} limitReached={allCcreRules.length >= MAX_CCRE_RULES}
+          rules={ccreRules} personas={personas} content={data.content} glossary={data.glossary} limitReached={allCcreRules.length >= MAX_CCRE_RULES}
           change={(next) => edit({ ...setup, ccreRules: [...allCcreRules.filter((entry) => !inSelectedScope(entry)), ...next] })} />
 
         <div className="admin-preview">

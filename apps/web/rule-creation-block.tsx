@@ -6,7 +6,7 @@ import { api, toolSetupErrorMessage } from "./api";
 import { CcreRuleForm } from "./ccre-rule-form";
 import { TreatmentPreviewResult } from "./treatment-preview";
 
-export function RuleCreationBlock({ scenarioId, personaId }: RuleCreationProps) {
+export function RuleCreationBlock({ scenarioId, personaId, glossary }: RuleCreationProps) {
   const id = useId();
   const [data, setData] = useState<ToolSetupView>();
   const [error, setError] = useState("");
@@ -20,7 +20,7 @@ export function RuleCreationBlock({ scenarioId, personaId }: RuleCreationProps) 
 
   return <section className="content-card rule-creation" aria-labelledby={id}>
     <h3 id={id}>Create a CCRE rule</h3>
-    {data ? <RuleCreationEditor data={data} scenarioId={scenarioId} personaId={personaId} />
+    {data ? <RuleCreationEditor data={data} scenarioId={scenarioId} personaId={personaId} glossary={glossary} />
       : error ? <div className="rule-load-error">
         <p className="rule-error" role="alert">{error}</p>
         <button type="button" className="secondary-button" onClick={() => { setError(""); setAttempt(attempt + 1); }}>Retry loading setup</button>
@@ -28,7 +28,7 @@ export function RuleCreationBlock({ scenarioId, personaId }: RuleCreationProps) 
   </section>;
 }
 
-function RuleCreationEditor({ data, scenarioId, personaId }: RuleCreationProps & { data: ToolSetupView }) {
+function RuleCreationEditor({ data, scenarioId, personaId, glossary }: RuleCreationProps & { data: ToolSetupView }) {
   const id = useId();
   const [contextId, setContext] = useState(data.contexts[0]?.contextId ?? "");
   const [previewPersona, setPreviewPersona] = useState(personaId);
@@ -96,7 +96,8 @@ function RuleCreationEditor({ data, scenarioId, personaId }: RuleCreationProps &
     </div>
     {limitReached ? <p>The setup has reached its rule limit. <a href="/admin">Open Tool setup</a></p>
       : !targets.length ? <p>Every treatment has a rule in this context. <a href="/admin">Open Tool setup</a></p>
-      : <CcreRuleForm scope={{ scenarioId, contextId }} personas={personas} targets={targets} defaultPersonaId={personaId} disabled={Boolean(pending || saved)}>
+      : <CcreRuleForm scope={{ scenarioId, contextId }} personas={personas} targets={targets} defaultPersonaId={personaId}
+          glossary={glossary} disabled={Boolean(pending || saved)}>
         {(rule) => {
           const result = preview?.key === keyFor(rule) ? preview : undefined;
           return <>

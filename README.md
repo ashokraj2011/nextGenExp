@@ -54,13 +54,15 @@ Capture is local to the inspector and saved in SQLite. Gateway headers are exclu
 
 ### sfield tool setup
 
-Open **Tool setup** from the chat header. Turn the four registered read-only tools on or off. For the **Treatment Selector mock**, choose a scenario and context, then use the built-in fixture, set a ranked list from the eligible demo content, return an empty list, or simulate a timeout.
+Open **Tool setup** from the chat header to enable the registered sfield tools. For the **Treatment Selector mock**, choose a scenario and context, then use the built-in fixture, set a ranked list from the eligible demo content, return an empty list, or simulate a timeout.
 
 **Run preview** uses the current settings, selected demo persona and turn number. The local Treatment Selector adapter responds directly, so the preview works without LLM gateway credentials. **Save settings** stores the configuration in SQLite for this browser session. New chat requests, including explicit retries, pick up the saved settings. Use **Inspector** after a chat turn to see its Treatment Selector result. Set `PZN_INSPECTOR=off` to hide the tool setup page and disable its API.
 
 #### Create and test a CCRE mock rule
 
-Type **Create rule** in chat to open the CCRE editor as an A2UI block. The Context Router returns the `create_rule` intent and the app opens the editor in the conversation's demo scenario. Choose a context, treatment and mock condition. **Preview rule** evaluates the draft for the selected persona and turn. **Save rule** adds it to Tool setup for subsequent chat turns. You can edit or remove the saved rule in Tool setup.
+Type **Create rule** in chat. After the Context Router returns `create_rule`, sfield calls the read-only `ccre.glossary.get` tool. The host passes the returned namespaces, attributes, operators and values to the A2UI editor. Open **Inspector → Request and response payloads → CCRE glossary** to see the tool exchange.
+
+Choose a context and treatment, then build a condition using **Namespace**, **Attribute**, **Operator**, and **Value**. For example, choose **Customer**, **Demo persona**, **Equals**, and **Demo learner**. **Preview rule** evaluates the draft for a persona and turn. **Save rule** adds it to Tool setup for future chat turns. The mock evaluates the structured condition and stores any optional CCRE source as text.
 
 You can also create a rule directly in Tool setup.
 

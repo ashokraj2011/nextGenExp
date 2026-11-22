@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import host from "../../fixtures/host.json";
 import type { BalanceProof, IntroKey } from "../contracts/domain";
+import type { RuleGlossary } from "../contracts/rule-glossary";
 import {
   MAX_SURFACE_BYTES, PZN_CATALOG_ID, ruleCreation, validatePznSurface, type DisplayBlock, type DisplayExperience, type RuleCreationProps,
 } from "../contracts/surface";
@@ -62,9 +63,9 @@ export function compileExperience(input: ExperienceInput): CompiledExperience {
   return buildSurface({ status: input.status, outcome: input.outcome, intro, question: input.question, partial: input.partial, expiresAt: input.expiresAt }, blocks, issued);
 }
 
-export function compileRuleCreation(props: RuleCreationProps, expiresAt: number): CompiledExperience {
+export function compileRuleCreation(props: RuleCreationProps & { glossary: RuleGlossary }, expiresAt: number): CompiledExperience {
   return buildSurface({
-    status: "ready", outcome: "create_rule", intro: "Choose a treatment and preview its mock eligibility rule.",
+    status: "ready", outcome: "create_rule", intro: "Choose a treatment and build its eligibility condition from the CCRE glossary.",
     question: null, partial: false, expiresAt,
   }, [{ component: ruleCreation.name, props }], []);
 }

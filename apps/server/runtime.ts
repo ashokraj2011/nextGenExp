@@ -5,11 +5,13 @@ import host from "../../fixtures/host.json";
 import { MAX_MESSAGE_LENGTH, metricReadingSchema, TURN_DEADLINE, type BalanceProof } from "../../packages/contracts/domain";
 import {
   balanceInputSchema, balanceResultSchema, compositionOutputSchema, contextResultSchema,
-  propensityInputSchema, propensityResultSchema, routingOutputSchema, treatmentInputSchema, treatmentResultSchema, turnInputSchema,
+  glossaryInputSchema, glossaryResultSchema, propensityInputSchema, propensityResultSchema, routingOutputSchema,
+  treatmentInputSchema, treatmentResultSchema, turnInputSchema,
 } from "../../packages/contracts/model";
 import { sfieldTools, toolKeys, toolVersion, type MockCcreEvaluation, type ToolKey } from "../../packages/contracts/tool-setup";
 import { activeContextCatalog, fixtureEligibleSets, FixtureTsAdapter } from "../../packages/ts-adapter";
 import { scoreContexts } from "../../packages/propensity-adapter";
+import { mockRuleGlossary } from "../../packages/rule-glossary";
 import { contentCatalog, lookupContent, modelBundle, readDemoBalance, resolveCandidates } from "../../packages/experience/content";
 import { checkFresh, Rejected, requireCheck, verifyContextProposal, verifyExperience, verifyRoute } from "../../packages/experience/verify";
 import { makeId } from "../../packages/experience/compile";
@@ -22,6 +24,15 @@ const toolRefs = {
   propensity: `${sfieldTools.propensity.id}@${toolVersion}`,
   selection: `${sfieldTools.selection.id}@${toolVersion}`,
   balances: `${sfieldTools.balances.id}@${toolVersion}`,
+  glossary: `${sfieldTools.glossary.id}@${toolVersion}`,
+} as const;
+const registryPurposes = {
+  catalogScopeId: "pzn-context-discovery",
+  tsScopeId: "pzn-treatment-selection",
+  glossaryScopeId: "pzn-ccre-glossary",
+} as const;
+const registryBoundaries = {
+  catalog: "catalogScopeId", propensity: "catalogScopeId", selection: "tsScopeId", glossary: "glossaryScopeId",
 } as const;
 export function principalFor(id: string): Principal {
   return { tenantId: "pzn-local", subjectId: id, roles: ["pzn-demo", "pzn-developer"], attributes: {} };
@@ -30,6 +41,11 @@ const actions = new Set<string>(toolKeys.map((key) => sfieldTools[key].id));
 
 function requireToolEnabled(turn: TurnRecord, key: ToolKey) {
   if (turn.toolSetup?.enabled[key] === false) throw new ToolError("TOOL_DISABLED");
+}
+function treatmentAdapter(turn: TurnRecord, conversation: ConversationRecord) {
+  return new FixtureTsAdapter(
+    { scenarioId: conversation.scenarioId, ordinal: turn.ordinal }, turn.toolSetup?.treatmentOverrides, turn.toolSetup?.ccreRules,
+  );
 }
 
 const routeInstructions = [
@@ -141,11 +157,11 @@ export class Runtime {
     return turn;
   }
 
-  private scopedRegistryTurn(ref: unknown, ctx: ToolHandlerContext, key: Exclude<ToolKey, "balances">) {
+  private scopedRegistryTurn(ref: unknown, ctx: ToolHandlerContext, key: keyof typeof registryBoundaries) {
     ctx.signal.throwIfAborted();
     requireCheck(typeof ref === "string", "TURN_REF_REQUIRED");
     const turn = this.current(ref);
-    const boundary = key === "selection" ? "tsScopeId" : "catalogScopeId";
+    const boundary = registryBoundaries[key];
     requireCheck(turn[boundary] === ctx.runId && ctx.principal.tenantId === "pzn-local"
       && turn.scope.principalId === ctx.principal.subjectId && !ctx.agentId, "REGISTRY_SCOPE_MISMATCH");
     const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
@@ -153,10 +169,7 @@ export class Runtime {
     const persona = host.personas.find((entry) => entry.personaId === conversation.personaId);
     requireCheck(persona && persona.allowedScenarios.includes(conversation.scenarioId), "PERSONA_MISMATCH");
     requireToolEnabled(turn, key);
-    const adapter = new FixtureTsAdapter(
-      { scenarioId: conversation.scenarioId, ordinal: turn.ordinal }, turn.toolSetup?.treatmentOverrides, turn.toolSetup?.ccreRules,
-    );
-    return { turn, conversation, persona, adapter };
+    return { turn, conversation, persona };
   }
 
   private tools() {
@@ -173,7 +186,10 @@ export class Runtime {
     return [
       read("catalog", {
         inputs: turnInputSchema, outputs: contextResultSchema,
-        handler: ({ turnRef }, ctx) => this.scopedRegistryTurn(turnRef, ctx, "catalog").adapter.listContexts(ctx.signal),
+        handler: ({ turnRef }, ctx) => {
+          const { turn, conversation } = this.scopedRegistryTurn(turnRef, ctx, "catalog");
+          return treatmentAdapter(turn, conversation).listContexts(ctx.signal);
+        },
       }),
       read("propensity", {
         inputs: propensityInputSchema, outputs: propensityResultSchema,
@@ -187,13 +203,13 @@ export class Runtime {
       read("selection", {
         inputs: treatmentInputSchema, outputs: treatmentResultSchema,
         handler: ({ turnRef, routeDecisionId }, ctx) => {
-          const { turn, persona, adapter } = this.scopedRegistryTurn(turnRef, ctx, "selection");
+          const { turn, conversation, persona } = this.scopedRegistryTurn(turnRef, ctx, "selection");
           requireCheck(turn.route?.routeDecisionId === routeDecisionId && turn.route && turn.catalog && turn.attempts.route, "ROUTE_REQUIRED");
           verifyRoute(turn.route, turn.catalog, turn.scope, turn.attempts.route.runId, this.now());
           const input = { mid: persona.syntheticMid, context: turn.route.contextId };
           let ccre: MockCcreEvaluation | undefined;
           try {
-            const result = adapter.selectEligibleContent(input, ctx.signal);
+            const result = treatmentAdapter(turn, conversation).selectEligibleContent(input, ctx.signal);
             ccre = result.ccre;
             return result.contentIds;
           } finally {
@@ -206,6 +222,14 @@ export class Runtime {
               } catch { /* Diagnostic storage cannot change the tool result. */ }
             }
           }
+        },
+      }),
+      read("glossary", {
+        inputs: glossaryInputSchema, outputs: glossaryResultSchema,
+        handler: ({ turnRef, routerRunId }, ctx) => {
+          const { turn } = this.scopedRegistryTurn(turnRef, ctx, "glossary");
+          requireCheck(this.inspection && turn.trace.routeOutcome === "create_rule" && turn.attempts.route?.runId === routerRunId, "RULE_INTENT_REQUIRED");
+          return mockRuleGlossary;
         },
       }),
       read("balances", {
@@ -300,12 +324,12 @@ export class Runtime {
   }
 
   async registry<T>(
-    turn: TurnRecord, boundary: "catalogScopeId" | "tsScopeId", maxToolCalls: number, signal: AbortSignal,
+    turn: TurnRecord, boundary: keyof typeof registryPurposes, maxToolCalls: number, signal: AbortSignal,
     use: (execute: (tool: keyof typeof toolRefs, inputs: JsonObject) => ReturnType<SField["registry"]["execute"]>) => Promise<T>,
   ) {
     signal.throwIfAborted();
     const scope = await this.sf.executions.open({
-      principal: principalFor(turn.scope.principalId), purpose: boundary === "catalogScopeId" ? "pzn-context-discovery" : "pzn-treatment-selection",
+      principal: principalFor(turn.scope.principalId), purpose: registryPurposes[boundary],
       preset: "read_only", budget: { maxToolCalls },
     });
     try {

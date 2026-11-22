@@ -31,6 +31,7 @@ export type TurnTrace = {
   finalOrder?: string[];
   components?: string[];
   routeOutcome?: string;
+  glossaryVersion?: string;
   selectionMode: SelectionMode;
   failures: { stage: string; code: string }[];
   routeRun?: StageTrace;
@@ -53,6 +54,7 @@ export type TurnRecord = {
   trace: TurnTrace;
   catalogScopeId?: string;
   tsScopeId?: string;
+  glossaryScopeId?: string;
   treatmentMockInput?: { mid: string; context: string };
   treatmentCcre?: MockCcreEvaluation;
   catalog?: CatalogSnapshot;

@@ -20,7 +20,7 @@ function StageDetails({ title, run, skipped }: { title: string; run: Trace["rout
 function TraceView({ trace }: { trace: Trace }) {
   const {
     catalog, propensity, selectedContextId, surface, sourcePageContext, routeDecisionId, contentDecisionId,
-    catalogScopeId, tsScopeId, routerRunId, composerRunId, ts, finalOrder, components, failures,
+    catalogScopeId, glossaryScopeId, glossaryVersion, tsScopeId, routerRunId, composerRunId, ts, finalOrder, components, failures,
   } = trace;
   const creatingRule = trace.routeOutcome === "create_rule";
   const elapsed = trace.markers.terminal === undefined ? null : trace.markers.terminal - trace.markers.accepted;
@@ -57,6 +57,7 @@ function TraceView({ trace }: { trace: Trace }) {
           <Detail label="Content decision"><code>{contentDecisionId ?? "Pending"}</code></Detail>
         </>}
         <Detail label="Components">{components?.join(", ") || "None"}</Detail>
+        {creatingRule && glossaryVersion && <Detail label="Glossary version"><code>{glossaryVersion}</code></Detail>}
         {!creatingRule && <Detail label="Synthetic balance read">{trace.metricReadSucceeded ? "Succeeded" : "No successful read"}</Detail>}
       </dl>
       {ts && <>
@@ -84,6 +85,7 @@ function TraceView({ trace }: { trace: Trace }) {
         <summary>Execution and run IDs</summary>
         <dl className="trace-dl">
           <Detail label="Catalog scope"><code>{catalogScopeId ?? "Pending"}</code></Detail>
+          {glossaryScopeId && <Detail label="Glossary scope"><code>{glossaryScopeId}</code></Detail>}
           {!creatingRule && <Detail label="Selection scope"><code>{tsScopeId ?? "Pending"}</code></Detail>}
           <Detail label="Router run"><code>{routerRunId ?? "Pending"}</code></Detail>
           {!creatingRule && <Detail label="Composer run"><code>{composerRunId ?? "Pending"}</code></Detail>}

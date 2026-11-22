@@ -2,6 +2,7 @@ import type { RunResult } from "@sfield/core";
 import demo from "../../fixtures/host.json";
 import { type FailureCode } from "../../packages/contracts/api";
 import { DECISION_TTL, TURN_DEADLINE, contextCatalogSchema, propensitySchema, type SelectionMode, type PropensityResult } from "../../packages/contracts/domain";
+import { ruleGlossarySchema } from "../../packages/contracts/rule-glossary";
 import { FOLLOW_UP_EVENT, type DisplayExperience } from "../../packages/contracts/surface";
 import { normalizedIdsSchema, treatmentOverride } from "../../packages/contracts/tool-setup";
 import { activeContextCatalog, fixtureRejections, tsFixtures } from "../../packages/ts-adapter";
@@ -119,7 +120,7 @@ export class ExperienceService {
     this.controllers.set(id, controller);
     const timer = setTimeout(() => controller.abort(new TurnFailure("turn_timeout")), remains);
     timer.unref();
-    let stage: "catalog" | "route" | "ts" | "compose" = "catalog";
+    let stage: "catalog" | "route" | "glossary" | "ts" | "compose" = "catalog";
     const current = () => {
       signal.throwIfAborted();
       return runtime.current(id);
@@ -161,11 +162,26 @@ export class ExperienceService {
         const proposal = verifyContextProposal(result.output, catalog, turn.scope, this.now(), this.canCreateRule);
         this.store.update(id, (row) => { row.trace.routeOutcome = proposal.status; row.trace.markers.routeValidated = this.now(); });
         if (proposal.status === "create_rule") {
+          stage = "glossary";
+          this.store.progress(id, "glossary", this.now());
+          const read = await runtime.registry(current(), "glossaryScopeId", 1, signal, async (call) => (
+            call("glossary", { ...asRef(turn), routerRunId: result.runId })
+          ));
+          current();
+          if (read.status !== "succeeded") {
+            this.store.update(id, (row) => { row.trace.failures.push({ stage: "glossary", code: read.error?.code ?? "GLOSSARY_UNAVAILABLE" }); });
+            throw new TurnFailure("glossary_unavailable");
+          }
+          const glossary = ruleGlossarySchema.parse(read.output);
           const { personaId, scenarioId } = conversation;
           const now = this.now();
-          const result = compileRuleCreation({ personaId, scenarioId }, now + DECISION_TTL);
-          this.store.update(id, (row) => { row.trace.components = result.display.blocks.map((block) => block.component); });
-          this.store.finish(id, { type: "completed", result }, now);
+          const editor = compileRuleCreation({ personaId, scenarioId, glossary }, now + DECISION_TTL);
+          this.store.update(id, (row) => {
+            row.trace.glossaryVersion = glossary.version;
+            row.trace.markers.glossaryResolved = now;
+            row.trace.components = editor.display.blocks.map((block) => block.component);
+          });
+          this.store.finish(id, { type: "completed", result: editor }, now);
           return;
         }
         if (proposal.status !== "selected") {
@@ -264,6 +280,7 @@ export class ExperienceService {
         : error instanceof Rejected && ["TURN_EXPIRED", "DECISION_EXPIRED"].includes(error.code) ? (recovering ? "restarted" : "turn_timeout")
         : error instanceof Rejected && error.code === "RESTARTED" ? "restarted"
         : stage === "catalog" ? "catalog_unavailable"
+        : stage === "glossary" ? "glossary_unavailable"
         : stage === "ts" ? "ts_unavailable"
         : error instanceof Rejected ? (stage === "route" ? "route_rejected" : "verification_failed")
         : "internal_error";

@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import host from "../../fixtures/host.json";
+import { glossaryAllowsCondition } from "../../packages/contracts/rule-glossary";
 import {
   MAX_CCRE_RULES, type MockCcreRule, type MockOutput, type ToolSetup, type ToolSetupView, type TreatmentPreview, type TreatmentPreviewInput,
 } from "../../packages/contracts/tool-setup";
 import { contentCatalog } from "../../packages/experience/content";
+import { mockRuleGlossary } from "../../packages/rule-glossary";
 import { activeContexts, fixtureEligibleSets, FixtureTsAdapter, scenariosById, TreatmentSelectorTimeout, tsFixtures } from "../../packages/ts-adapter";
 import { ApiError } from "./store";
 
@@ -21,7 +23,7 @@ export function toolSetupTag(setup: ToolSetup) {
 
 export function toolSetupView(setup: ToolSetup): ToolSetupView {
   return {
-    setup, content, contexts,
+    setup, content, contexts, glossary: mockRuleGlossary,
     defaultPersonaId: host.defaultPersonaId,
     defaultScenarioId: host.defaultScenarioId,
     personas: host.personas.map(({ personaId, displayName, allowedScenarios }) => ({ personaId, displayName, allowedScenarios })),
@@ -48,6 +50,9 @@ function validateCcreRule(rule: MockCcreRule) {
     throw new ApiError(400, "invalid_ccre_treatment", "Choose a rule target from the eligible demo catalog.");
   }
   const { condition } = rule;
+  if (condition.kind === "attribute" && !glossaryAllowsCondition(mockRuleGlossary, condition)) {
+    throw new ApiError(400, "invalid_ccre_attribute", "Choose an attribute, operator and value from the current rule glossary.");
+  }
   if (condition.kind === "persona_is" && !host.personas.some((persona) => (
     persona.personaId === condition.personaId && persona.allowedScenarios.includes(rule.scenarioId)
   ))) {

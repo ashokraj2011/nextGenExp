@@ -260,7 +260,7 @@ export async function startApp(options: Options) {
       const conversation = store.conversation(turn.scope.conversationId, principalId);
       if (id === "payloads") {
         const payloads = await runtime?.payloads(turn, conversation);
-        return json(res, payloads ?? { turnId: turn.public.id, router: null, treatment: null, composer: null });
+        return json(res, payloads ?? { turnId: turn.public.id, router: null, glossary: null, treatment: null, composer: null });
       }
       return json(res, {
         turnId: turn.public.id, personaId: conversation.personaId, scenarioId: conversation.scenarioId, ordinal: turn.ordinal,
@@ -269,6 +269,7 @@ export async function startApp(options: Options) {
         selectedContextId: turn.route?.contextId ?? null, routeDecisionId: turn.route?.routeDecisionId ?? null,
         contentDecisionId: turn.decision?.decisionId ?? null,
         catalogScopeId: turn.catalogScopeId ?? null, tsScopeId: turn.tsScopeId ?? null,
+        glossaryScopeId: turn.glossaryScopeId ?? null,
         routerRunId: turn.attempts.route?.runId ?? null, composerRunId: turn.attempts.compose?.runId ?? null,
         metricReadSucceeded: Boolean(turn.proof),
         ...turn.trace,

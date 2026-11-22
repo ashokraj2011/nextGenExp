@@ -22,10 +22,17 @@
 .rule-load-error button { justify-self: start; }
 .rule-scenario { display: flex; gap: 8px; color: var(--muted); font-size: .83rem; }
 .rule-scenario strong { color: var(--ink); font-weight: 625; }
-.rule-creation-preview {
+.rule-creation-preview, .rule-glossary-condition {
   min-width: 0; margin: 0; padding: 0; border: 0; border-top: 1px solid var(--line);
 }
-.rule-creation-preview legend { margin-bottom: 6px; padding: 0 9px 0 0; font-size: .88rem; font-weight: 650; color: var(--ink); }
+.rule-creation-preview legend, .rule-glossary-condition legend {
+  margin-bottom: 6px; padding: 0 9px 0 0; font-size: .88rem; font-weight: 650; color: var(--ink);
+}
+.rule-glossary-condition { display: grid; gap: 6px; }
+.rule-expression {
+  display: block; padding: 7px 10px; border-radius: 6px; background: var(--teal-pale);
+  color: var(--teal-dark); font-size: .8rem; overflow-wrap: anywhere;
+}
 .rule-creation a { color: var(--teal-dark); font-size: .86rem; }
 .rule-creation .treatment-preview-result { margin-top: 0; }
 .rule-error { color: #a4322b; font-size: .86rem; }

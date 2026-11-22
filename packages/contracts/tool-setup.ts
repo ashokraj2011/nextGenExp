@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { glossaryConditionSchema, type RuleGlossary } from "./rule-glossary";
 
 export const toolVersion = "1.0.0";
 export const sfieldTools = {
@@ -21,6 +22,11 @@ export const sfieldTools = {
     id: "demo.balance.read",
     label: "Demo balance",
     description: "Reads synthetic values for an eligible balance summary.",
+  },
+  glossary: {
+    id: "ccre.glossary.get",
+    label: "CCRE glossary",
+    description: "Lists the demo namespaces, attributes and operators available for authoring rules in chat.",
   },
 } as const;
 export type ToolKey = keyof typeof sfieldTools;
@@ -49,6 +55,7 @@ const mockCcreConditionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("never") }).strict(),
   z.object({ kind: z.literal("persona_is"), personaId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("from_turn"), ordinal: ordinalSchema }).strict(),
+  glossaryConditionSchema,
 ]);
 export const mockCcreRuleSchema = mockScopeSchema.extend({
   name: z.string().trim().min(1).max(MAX_CCRE_RULE_NAME),
@@ -67,7 +74,7 @@ export type MockCcreEvaluation = {
 };
 export const toolSetupSchema = z.object({
   enabled: z.object({
-    catalog: z.boolean(), propensity: z.boolean(), selection: z.boolean(), balances: z.boolean(),
+    catalog: z.boolean(), propensity: z.boolean(), selection: z.boolean(), balances: z.boolean(), glossary: z.boolean().optional(),
   }).strict(),
   treatmentOverrides: z.array(treatmentOverrideSchema).max(64).refine((rules) => (
     new Set(rules.map(({ scenarioId, contextId }) => JSON.stringify([scenarioId, contextId]))).size === rules.length
@@ -78,7 +85,7 @@ export type ToolSetup = z.infer<typeof toolSetupSchema>;
 export type TreatmentOverride = z.infer<typeof treatmentOverrideSchema>;
 export type MockOutput = z.infer<typeof mockOutputSchema>;
 export const defaultToolSetup: ToolSetup = {
-  enabled: { catalog: true, propensity: true, selection: true, balances: true },
+  enabled: { catalog: true, propensity: true, selection: true, balances: true, glossary: true },
   treatmentOverrides: [],
 };
 
@@ -102,6 +109,7 @@ export type TreatmentPreview =
 
 export type ToolSetupView = {
   setup: ToolSetup;
+  glossary: RuleGlossary;
   defaultPersonaId: string;
   defaultScenarioId: string;
   personas: { personaId: string; displayName: string; allowedScenarios: string[] }[];
