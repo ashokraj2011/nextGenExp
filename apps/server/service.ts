@@ -7,7 +7,7 @@ import type { ContextRoutingInput, ExperienceCompositionInput } from "../../pack
 import { isPortfolioSummary, portfolioSnapshotSchema } from "../../packages/contracts/portfolio";
 import { ruleGlossarySchema } from "../../packages/contracts/rule-glossary";
 import {
-  availableRoutingIntents, resolveSummaryFollowUp, routingQuestions,
+  availableRoutingIntents, demoExperiencesQuestion, resolveSummaryFollowUp, routingQuestions,
   ROUTING_HISTORY_TURNS, ROUTING_HISTORY_REQUEST_LENGTH, ROUTING_HISTORY_REPLY_LENGTH,
   type RoutingHistoryEntry,
 } from "../../packages/contracts/routing-intents";
@@ -225,13 +225,10 @@ export class ExperienceService {
           return;
         }
         if (proposal.status === "reply" || proposal.status === "no_match") {
-          if (proposal.replyText) {
-            const now = this.now();
-            const result = compileChatReply(proposal.replyText, proposal.status, now);
-            this.store.finish(id, { type: "completed", result }, now);
-          } else {
-            done("no_match", "no_match", null);
-          }
+          const now = this.now();
+          const text = proposal.status === "reply" ? proposal.replyText : demoExperiencesQuestion;
+          const result = compileChatReply(text, proposal.status, now);
+          this.store.finish(id, { type: "completed", result }, now);
           return;
         }
         if (proposal.status === "clarify") {

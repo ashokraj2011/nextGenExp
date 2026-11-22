@@ -64,7 +64,6 @@ function route(envelope: Envelope): ContextSelectionProposal {
   };
   const noMatch: ContextSelectionProposal = {
     ...base, status: "no_match", intentId: null, clarificationQuestion: null,
-    replyText: "I can help with demo balances, portfolios, home-buying goals, transfers, or retirement planning. Which would you like to explore?",
   };
   const reply = (replyText: string): ContextSelectionProposal => (
     { ...base, status: "reply", intentId: null, clarificationQuestion: null, replyText }
@@ -129,7 +128,7 @@ function route(envelope: Envelope): ContextSelectionProposal {
   if (contexts.size > 1) return clarify();
   if (!contexts.size) {
     if (/weather|recipe|stock price|bitcoin|rental car/.test(text)) return noMatch;
-    return /help|explain|show|learn|what/.test(text) ? clarify() : reply("I’m here. What would you like to talk about?");
+    return /help|explain|show|learn|what|\bhow\b|\?$/.test(text) ? clarify() : reply("I’m here. What would you like to talk about?");
   }
 
   const asksForPortfolioValues = /\b(my|show|summarize|display)\b/.test(text) || /^(?:portfolio|protfolio) summary\W*$/.test(text);

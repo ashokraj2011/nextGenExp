@@ -12,7 +12,7 @@ import { startApp } from "../apps/server/http";
 import type { Bootstrap, TurnAccepted, TurnView, ConversationView } from "../packages/contracts/api";
 import type { TurnPayloads } from "../packages/contracts/inspector";
 import type { GlossaryCondition } from "../packages/contracts/rule-glossary";
-import { leavingWorkQuestion, portfolioSummaryQuestion, retirementQuestion } from "../packages/contracts/routing-intents";
+import { demoExperiencesQuestion, leavingWorkQuestion, portfolioSummaryQuestion, retirementQuestion } from "../packages/contracts/routing-intents";
 import {
   defaultToolSetup, type MockCcreRule, type ToolSetup, type ToolSetupView, type TreatmentPreview, type TreatmentPreviewInput,
 } from "../packages/contracts/tool-setup";
@@ -650,8 +650,26 @@ test("goal shorthand and a misspelled status request open the home down payment 
   assert.equal(specific.trace.intentId, "retirement_learning");
   const unclear = await client.ask(chat.id, "Show me something.");
   assert.equal(unclear.trace.routeOutcome, "clarify");
-  assert.match(unclear.turn.experience?.question ?? "", /home-buying goals/);
+  assert.equal(unclear.turn.experience?.question, demoExperiencesQuestion);
   assert.equal(unclear.trace.goalScopeId, null);
+});
+
+test("vague and unsupported questions show the available demo experiences", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const { client } = f;
+  const chat = await client.conversation();
+  const goal = await client.ask(chat.id, "Show my home-buying goal and savings progress.");
+  assert.equal(goal.turn.experience?.blocks[0]?.component, "PznGoalProgress");
+  const vague = await client.ask(chat.id, "how can i improve this");
+  assert.equal(vague.trace.routeOutcome, "clarify");
+  assert.equal(vague.turn.experience?.question, demoExperiencesQuestion);
+  assert.equal(vague.trace.tsScopeId, null);
+
+  const unsupported = await client.ask(chat.id, "What is the weather tomorrow?");
+  assert.equal(unsupported.trace.routeOutcome, "no_match");
+  assert.equal(unsupported.turn.experience?.intro, demoExperiencesQuestion);
+  assert.equal(unsupported.trace.tsScopeId, null);
 });
 
 test("a misspelled retirement request reaches Learning and shows the beneficiary action only when eligible", async (t) => {
