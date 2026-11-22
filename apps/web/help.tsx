@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, ArrowUpRight, BookOpenText, Braces, Database, Download, GitBranch, House, LayoutGrid, ListFilter, MessageSquare, Sparkles } from "lucide-react";
-import { currentTreatmentExample, InteractionDiagram, proposedTreatmentExample, TreatmentProposalDiagram } from "./help-architecture";
+import { ArrowLeft, ArrowRight, ArrowUpRight, BookOpenText, Braces, Database, Download, GitBranch, House, LayoutGrid, ListFilter, MessageSquare, Sparkles } from "lucide-react";
+import { DeveloperDrawer } from "./developer-drawer";
+import { currentTreatmentExample, InteractionDiagram, proposedTreatmentExample, TreatmentProposalDiagram, type DiagramExchange } from "./help-architecture";
 import { contractList, helpContracts, type ContractFile } from "./help-contracts";
-import { helpFlows, type FlowStep, type PayloadExample } from "./help-flow";
+import { addressUpdateExample, helpFlows, type FlowStep, type PayloadExample } from "./help-flow";
 import "./help.css";
 
 const stepIcons = {
@@ -17,10 +18,10 @@ const stepIcons = {
   render: LayoutGrid,
 };
 
-function PayloadExamples({ examples }: { examples: { direction: string; label: string; source: string }[] }) {
+function PayloadExamples({ examples }: { examples: { direction: string; label: string; source: string; emphasized?: boolean }[] }) {
   return <div className="help-payload-pair">
-    {examples.map(({ direction, label, source }) => (
-      <section className="help-payload" key={direction} aria-label={direction}>
+    {examples.map(({ direction, label, source, emphasized }) => (
+      <section className="help-payload" key={direction} aria-label={direction} data-emphasized={emphasized}>
         <div className="help-payload-caption"><strong>{direction}</strong><span>{label}</span></div>
         <pre tabIndex={0} aria-label={direction + " JSON"}><code>{source}</code></pre>
       </section>
@@ -33,6 +34,24 @@ function PayloadPair({ input, output }: { input: PayloadExample; output: Payload
     { direction: "Input", label: input.label, source: JSON.stringify(input.value, null, 2) },
     { direction: "Output", label: output.label, source: JSON.stringify(output.value, null, 2) },
   ]} />;
+}
+
+function ExchangeDetails({ exchange, close }: { exchange: DiagramExchange; close: () => void }) {
+  const { example, from, to, label, number, reply } = exchange;
+  return <div className="help-exchange-drawer">
+    <DeveloperDrawer title={`Step ${number} · ${label}`} icon={<Braces size={18} />} closeLabel="Close exchange details" close={close} wide>
+      <p className="help-example">As <strong>{addressUpdateExample.persona}</strong>, ask <strong>“{addressUpdateExample.prompt}”</strong></p>
+      <p className="help-exchange-direction">
+        <strong>{from.name}</strong> <ArrowRight size={15} aria-hidden="true" /> <span className="sr-only">to</span> <strong>{to.name}</strong>
+      </p>
+      <p className="help-exchange-description">{example.description}</p>
+      <PayloadExamples examples={[
+        { direction: "Request", label: example.input.label, source: JSON.stringify(example.input.value, null, 2), emphasized: !reply },
+        { direction: "Response", label: example.output.label, source: JSON.stringify(example.output.value, null, 2), emphasized: reply },
+      ]} />
+      <p className="help-example-note">Example payloads use sample IDs. Open <strong>Logs</strong> in chat for a recorded turn.</p>
+    </DeveloperDrawer>
+  </div>;
 }
 
 function downloadContract(file: ContractFile) {
@@ -73,6 +92,7 @@ export function Help() {
   const [flow, setFlow] = useState(helpFlows[0]);
   const [stepId, setStepId] = useState<FlowStep["id"]>("router");
   const [contractId, setContractId] = useState("router");
+  const [exchange, setExchange] = useState<DiagramExchange>();
   useEffect(() => {
     document.getElementById(location.hash.slice(1))?.scrollIntoView();
   }, []);
@@ -98,10 +118,13 @@ export function Help() {
       </div>
       <section id="architecture" className="help-section" aria-labelledby="architecture-title">
         <div className="help-section-heading">
-          <h2 id="architecture-title">Chat turn architecture</h2>
+          <div>
+            <h2 id="architecture-title">Chat turn architecture</h2>
+            <p className="help-exchange-description">Choose a step number to see the request and response for Marcus’s address update.</p>
+          </div>
           <a className="help-section-link" href="#walkthroughs">Inspect a demo turn <ArrowUpRight size={14} aria-hidden="true" /></a>
         </div>
-        <InteractionDiagram />
+        <InteractionDiagram onSelect={setExchange} />
       </section>
       <section id="walkthroughs" className="help-section" aria-labelledby="walkthroughs-title">
         <div className="help-section-heading">
@@ -197,5 +220,6 @@ export function Help() {
       </section>
       <footer className="help-footer"><a href="/planning">Planning overview <ArrowUpRight size={15} aria-hidden="true" /></a></footer>
     </main>
+    {exchange && <ExchangeDetails exchange={exchange} close={() => setExchange(undefined)} />}
   </div>;
 }

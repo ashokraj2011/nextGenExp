@@ -6,7 +6,7 @@ import propensityFixture from "../../fixtures/propensity.json";
 import treatmentFixture from "../../fixtures/treatment-scenarios.json";
 import host from "../../fixtures/host.json";
 import type { ContextSelectionProposal, ExperienceProposal, Intent, ProposalBlock } from "../../packages/contracts/domain";
-import { portfolioSummaryQuestion, type RoutingIntentId } from "../../packages/contracts/routing-intents";
+import { portfolioSummaryQuestion, routingIntents, type RoutingIntentId } from "../../packages/contracts/routing-intents";
 import { mockRuleGlossary } from "../../packages/rule-glossary";
 
 export type PayloadExample = { label: string; value: unknown };
@@ -149,6 +149,110 @@ balanceComposer.tool = {
 };
 balanceComposer.contracts = [...balanceComposer.contracts, "balance"];
 
+const addressContext = "address-update";
+const addressCatalog = { ...catalog, contexts: catalog.contexts.filter(({ contextId }) => contextId === addressContext) };
+const addressContentIds = treatmentFixture.base[addressContext];
+const addressCandidateId = "candidate_address";
+const addressExperienceId = "exp_demo";
+const addressFollowUp = { actionId: "action_demo", componentId: "follow_up_1", label: "See demo transfer steps" };
+const addressBlocks = [
+  { component: "PznStepList", props: { title: "Update your mailing address" } },
+  { component: "PznContentCard", props: { title: "Fund your account", recommendation: true } },
+];
+const addressSteps = {
+  chat: chat(addressPrompt),
+  discovery: discoveryFor("demo-new-account"),
+  router: router(
+    "The model recognizes a mailing address change and returns update_address. The host verifies that intent and maps it to the address-update context.",
+    { request: addressPrompt, recent: [], catalog: addressCatalog, intentCatalog: routingIntents.filter(({ contextId }) => contextId === addressContext) },
+    addressRoute,
+  ),
+  treatment: treatment(
+    addressContext, addressContentIds,
+    "Treatment Selector receives Marcus’s demo member ID and the verified context. His account is unfunded, so the CCRE rule includes fund_account alongside the address guide.",
+    newAccount.syntheticMid,
+  ),
+  composer: composer(
+    addressPrompt, addressContext, "update_address", { topic: "Update mailing address", task: "guide", summary: addressRoute.summary },
+    [{ candidateId: addressCandidateId, title: addressBlocks[0].props.title, tsRank: 1 }],
+    [{ blockId: "b1", component: "PznStepList", candidateIds: [addressCandidateId], variant: "expanded" }],
+    "The composer selects the address guide as a step-by-step answer. The host adds the eligible funding card during verification and rendering.",
+    "steps",
+  ),
+  render: render(
+    "The host verifies the guide and attaches the funding card issued by Treatment Selector. The transfer button opens the existing demo walkthrough.",
+    { label: "Verified inputs · excerpt", value: { selectedCandidateId: addressCandidateId, eligibleFundingCard: "fund_account" } },
+    { label: "DisplayExperience · excerpt", value: { status: "ready", blocks: addressBlocks, actions: [addressFollowUp] } },
+  ),
+};
+
+export const addressUpdateExample = {
+  persona: newAccount.displayName,
+  prompt: addressPrompt,
+  exchanges: {
+    chat: addressSteps.chat,
+    contexts: {
+      description: "sfield requests the active context catalog. This excerpt shows the address-update context used by Marcus’s turn.",
+      input: { label: "contexts.list", value: { turnRef } },
+      output: { label: "ContextCatalog · excerpt", value: addressCatalog },
+    },
+    router: addressSteps.router,
+    treatment: addressSteps.treatment,
+    content: {
+      description: "The host looks up the ranked IDs in the published catalog and assigns turn-scoped candidate IDs. Marcus’s address walkthrough uses those catalog entries.",
+      input: { label: "Ranked IDs passed to catalog resolution", value: addressContentIds },
+      output: { label: "Resolved candidates", value: {
+        candidates: [
+          { candidateId: addressCandidateId, contentId: "address_update_guide", contentVersion: "v1", tsRank: 1 },
+          { candidateId: "candidate_funding", contentId: "fund_account", contentVersion: "v1", tsRank: 2 },
+        ],
+        rejections: [],
+      } },
+    },
+    composer: addressSteps.composer,
+    surface: {
+      description: "The host emits an experience.ready event. The compiled surface contains the address steps, the funding card, and the issued transfer button.",
+      input: { label: "Subscribe to turn events", value: { method: "GET", path: "/api/turns/" + turnRef + "/events", headers: { Accept: "text/event-stream" } } },
+      output: { label: "experience.ready · event excerpt", value: {
+        type: "experience.ready",
+        turnId: turnRef,
+        payload: {
+          experienceId: addressExperienceId, messageId: "msg_demo", a2uiVersion: "1.0",
+          messages: [{
+            version: "1.0",
+            createSurface: {
+              surfaceId: addressExperienceId, catalogId: "https://pzn.example.invalid/catalogs/v1.0/experience",
+              dataModel: { intro: host.introCopy.steps },
+              components: [
+                { id: "root", component: "PznExperience", intro: { "@path": "/intro" }, children: ["block_1", "block_2", addressFollowUp.componentId], actionCount: 1, question: null, partial: false },
+                ...addressBlocks.map(({ component, props }, index) => ({ id: "block_" + (index + 1), component, ...props })),
+                { id: addressFollowUp.componentId, component: "PznFollowUp", actionId: addressFollowUp.actionId, label: addressFollowUp.label },
+              ],
+            },
+          }],
+        },
+      } },
+    },
+    followUp: {
+      description: "Marcus clicks See demo transfer steps. The host verifies the issued action and accepts a new chat turn for the transfer checklist.",
+      input: { label: "POST /api/experiences/" + addressExperienceId + "/actions", value: {
+        clientRequestId: "request_demo_follow_up",
+        envelope: {
+          version: "1.0",
+          action: {
+            name: "request_follow_up", surfaceId: addressExperienceId, sourceComponentId: addressFollowUp.componentId,
+            timestamp: "2026-11-22T00:00:00.000Z", context: { actionId: addressFollowUp.actionId },
+          },
+        },
+      } },
+      output: { label: "HTTP 202 · TurnAccepted excerpt", value: {
+        turnId: "turn_demo_follow_up", eventsUrl: "/api/turns/turn_demo_follow_up/events",
+        turn: { id: "turn_demo_follow_up", message: "Show the fictional transfer checklist.", status: "working", progress: "accepted" },
+      } },
+    },
+  } satisfies Record<string, Pick<FlowStep, "description" | "input" | "output">>,
+};
+
 export const helpFlows: Flow[] = [
   {
     id: "balance", title: "Balance summary", prompt: summaryPrompt, prior: comparePrompt,
@@ -265,31 +369,8 @@ export const helpFlows: Flow[] = [
     ],
   },
   {
-    id: "address-update", title: "Address update", prompt: addressPrompt, persona: newAccount.displayName,
-    steps: [
-      chat(addressPrompt), discoveryFor("demo-new-account"),
-      router("The model identifies a mailing address change and returns update_address. The host verifies the intent and maps it to the address-update context.", { request: addressPrompt, recent: [] }, addressRoute),
-      treatment(
-        "address-update", treatmentFixture.base["address-update"],
-        "The mock returns the address guide. Its Account → Funding status rule also makes the funding card eligible for Marcus because his account is awaiting its first deposit.",
-        newAccount.syntheticMid,
-      ),
-      composer(
-        addressPrompt, "address-update", "update_address", { topic: "Update mailing address", task: "guide", summary: addressRoute.summary },
-        [{ candidateId: "candidate_address", title: "Update your mailing address", tsRank: 1 }],
-        [{ blockId: "b1", component: "PznStepList", candidateIds: ["candidate_address"], variant: "expanded" }],
-        "The composer selects the address guide as a step-by-step answer.",
-        "steps",
-      ),
-      render(
-        "The host verifies the guide and attaches the funding card issued by Treatment Selector. The transfer button opens the existing demo walkthrough.",
-        { label: "Verified inputs · excerpt", value: { selectedCandidateId: "candidate_address", eligibleFundingCard: "fund_account" } },
-        { label: "DisplayExperience · excerpt", value: { status: "ready", blocks: [
-          { component: "PznStepList", props: { title: "Update your mailing address" } },
-          { component: "PznContentCard", props: { title: "Fund your account", recommendation: true } },
-        ], actions: [{ actionId: "action_demo", componentId: "follow_up_1", label: "See demo transfer steps" }] } },
-      ),
-    ],
+    id: addressContext, title: "Address update", prompt: addressUpdateExample.prompt, persona: addressUpdateExample.persona,
+    steps: Object.values(addressSteps),
   },
   {
     id: "authoring", title: "Create rule", prompt: rulePrompt,

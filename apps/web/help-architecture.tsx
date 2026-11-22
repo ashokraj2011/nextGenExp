@@ -4,6 +4,7 @@ import {
 } from "lucide-react";
 import hostFixture from "../../fixtures/host.json";
 import treatmentFixture from "../../fixtures/treatment-scenarios.json";
+import { addressUpdateExample } from "./help-flow";
 
 const participants = [
   {
@@ -29,23 +30,25 @@ const participants = [
 ];
 
 const [chat, host, model, selector, data] = participants;
+const cases = addressUpdateExample.exchanges;
 const exchanges = [
-  { from: chat, to: host, label: "Message + conversation ID" },
-  { from: host, to: selector, label: "Discover active contexts" },
-  { from: selector, to: host, label: "Active context catalog", reply: true },
-  { from: host, to: model, label: "Message, recent turns & intent catalog" },
-  { from: model, to: host, label: "Intent proposal or clarification", reply: true },
-  { from: host, to: selector, label: "Verified context + member ID" },
-  { from: selector, to: host, label: "Ranked eligible content IDs", reply: true },
-  { from: host, to: data, label: "Resolve content and read scoped values" },
-  { from: data, to: host, label: "Published content + demo data", reply: true },
-  { from: host, to: model, label: "Verified intent + eligible candidates" },
-  { from: model, to: host, label: "Experience proposal", reply: true },
-  { from: host, to: chat, label: "Verified A2UI surface", reply: true },
-  { from: chat, to: host, label: "Follow-up click starts a new turn" },
+  { from: chat, to: host, label: "Message + conversation ID", example: cases.chat },
+  { from: host, to: selector, label: "Discover active contexts", example: cases.contexts },
+  { from: selector, to: host, label: "Active context catalog", reply: true, example: cases.contexts },
+  { from: host, to: model, label: "Message, recent turns & intent catalog", example: cases.router },
+  { from: model, to: host, label: "Intent proposal or clarification", reply: true, example: cases.router },
+  { from: host, to: selector, label: "Verified context + member ID", example: cases.treatment },
+  { from: selector, to: host, label: "Ranked eligible content IDs", reply: true, example: cases.treatment },
+  { from: host, to: data, label: "Resolve content and read scoped values", example: cases.content },
+  { from: data, to: host, label: "Published content + demo data", reply: true, example: cases.content },
+  { from: host, to: model, label: "Verified intent + eligible candidates", example: cases.composer },
+  { from: model, to: host, label: "Experience proposal", reply: true, example: cases.composer },
+  { from: host, to: chat, label: "Verified A2UI surface", reply: true, example: cases.surface },
+  { from: chat, to: host, label: "Follow-up click starts a new turn", example: cases.followUp },
 ];
+export type DiagramExchange = (typeof exchanges)[number] & { number: number };
 
-export function InteractionDiagram() {
+export function InteractionDiagram({ onSelect }: { onSelect: (exchange: DiagramExchange) => void }) {
   return <figure className="help-interaction" aria-labelledby="architecture-title">
     <ul className="help-participants" aria-label="Entity responsibilities" role="list">
       {participants.map(({ name, Icon, description }) => (
@@ -58,7 +61,9 @@ export function InteractionDiagram() {
     <div className="help-sequence">
       <div className="help-lifelines" aria-hidden="true">{participants.map(({ name }) => <span key={name} />)}</div>
       <ol aria-label="Chat interaction sequence" role="list">
-        {exchanges.map(({ from, to, label, reply }, index) => {
+        {exchanges.map((exchange, index) => {
+          const { from, to, label, reply } = exchange;
+          const number = index + 1;
           const start = participants.indexOf(from);
           const end = participants.indexOf(to);
           const columns = Math.abs(end - start) + 1;
@@ -71,10 +76,11 @@ export function InteractionDiagram() {
               <span className="help-message-endpoints">
                 {from.shortName} <ArrowRight size={13} aria-hidden="true" /> <span className="sr-only">to</span> {to.shortName}
               </span>
-              <span className="help-message-heading">
-                <span className="help-message-number">{index + 1}</span>
+              <button className="help-message-heading" type="button" aria-haspopup="dialog" aria-label={`Step ${number} · ${label}`}
+                onClick={() => onSelect({ ...exchange, number })}>
+                <span className="help-message-number">{number}</span>
                 <span className="help-message-label">{label}</span>
-              </span>
+              </button>
               <span className="help-message-arrow" aria-hidden="true" />
             </div>
           </li>;

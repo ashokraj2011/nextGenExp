@@ -44,6 +44,31 @@ try {
   const sequence = page.getByRole("list", { name: "Chat interaction sequence" });
   await sequence.getByText("Ranked eligible content IDs", { exact: true }).waitFor();
   await sequence.getByText("Verified A2UI surface", { exact: true }).waitFor();
+  const numberedSteps = await sequence.getByRole("button").all();
+  assert.equal(numberedSteps.length, 13);
+  const exchanges = [];
+  for (const [index, button] of numberedSteps.entries()) {
+    await button.click();
+    const drawer = page.getByRole("dialog", { name: new RegExp(`^Step ${index + 1} ·`) });
+    await drawer.getByText("Marcus Reed", { exact: true }).waitFor();
+    exchanges.push({
+      request: JSON.parse(await drawer.locator('pre[aria-label="Request JSON"]').innerText()),
+      response: JSON.parse(await drawer.locator('pre[aria-label="Response JSON"]').innerText()),
+    });
+    await page.keyboard.press("Escape");
+    await drawer.waitFor({ state: "hidden" });
+  }
+  assert.equal(exchanges[0].request.message, "I moved and need to update my address.");
+  assert.equal(exchanges[2].response.contexts[0].contextId, "address-update");
+  assert.equal(exchanges[4].response.intentId, "update_address");
+  assert.deepEqual(exchanges[5], exchanges[6]);
+  assert.deepEqual(exchanges[6].request.adapterInput, { mid: "DEMO-MID-1003", context: "address-update" });
+  assert.deepEqual(exchanges[6].response, ["address_update_guide", "fund_account"]);
+  assert.equal(exchanges[8].response.candidates[1].contentId, "fund_account");
+  assert.equal(exchanges[10].response.blocks[0].component, "PznStepList");
+  assert.equal(exchanges[11].response.type, "experience.ready");
+  assert.equal(exchanges[12].request.envelope.action.name, "request_follow_up");
+  assert.equal(exchanges[12].response.turn.message, "Show the fictional transfer checklist.");
   await page.getByRole("link", { name: "Proposal", exact: true }).click();
   assert.equal(new URL(page.url()).hash, "#proposal");
   const proposal = page.getByRole("region", { name: "Treatment Selector proposal" });
@@ -380,6 +405,12 @@ try {
   await mobile.getByRole("link", { name: "Help", exact: true }).click();
   await mobile.getByRole("heading", { name: "How PZN Lab works", exact: true }).waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await mobile.getByRole("button", { name: /^Step 6 ·/ }).click();
+  const mobileExchange = mobile.getByRole("dialog", { name: /^Step 6 ·/ });
+  await mobileExchange.getByText("Marcus Reed", { exact: true }).waitFor();
+  const exchangeBox = await mobileExchange.boundingBox();
+  assert.ok(exchangeBox && exchangeBox.width <= 360, "The exchange drawer fits the mobile viewport");
+  await mobileExchange.getByRole("button", { name: "Close exchange details", exact: true }).click();
   await mobile.getByRole("link", { name: "Proposal", exact: true }).click();
   await mobile.getByText("Compare the current and proposed responses", { exact: true }).click();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
