@@ -49,6 +49,12 @@ function fromMessage(body: RequestBody): Envelope | undefined {
   return undefined;
 }
 
+function asksToSeeGoals(text: string) {
+  const request = text.replace(/^(?:please |(?:can|could|would) (?:i|you) )/, "");
+  const topic = request.replace(/^(?:show(?: me)?|view|see|check|review|where (?:is|are)|what (?:about|happen(?:e)?d to)) /, "");
+  return /^(?:(?:my|the|savings) )?goals?[.!?]*$/.test(topic);
+}
+
 function route(envelope: Envelope): ContextSelectionProposal {
   const { request, recent, allowedQuestions, summaryFollowUpIntentId, intentCatalog = [] } = envelope;
   const text = request.toLowerCase().trim();
@@ -92,6 +98,7 @@ function route(envelope: Envelope): ContextSelectionProposal {
   if (/transfer|app home|demo profile|app help|demo app/.test(text)) contexts.add("app-home");
   if (retirementTopic.test(text) || /beneficiar/.test(text)) contexts.add("learning");
   if (/\b(?:down[ -]payment|home[ -]buying|home purchase|buy(?:ing)? (?:a |my |the )?(?:home|house)|mortgage (?:goal|progress|savings)|goal progress|my (?:savings )?goal)\b/.test(text)) contexts.add("goals");
+  if (!contexts.size && asksToSeeGoals(text)) contexts.add("goals");
 
   if (!contexts.size) {
     const previousTopic = recent?.findLast(({ contextId }) => contextId !== null);

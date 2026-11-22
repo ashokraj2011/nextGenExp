@@ -86,7 +86,7 @@ The POC uses synthetic accounts and a fixture implementation of `PortfolioSnapsh
 
 ### Home-buying goal demo
 
-Choose **Home-buying goal** in a new chat or ask “How close am I to buying a house?” The Context Router selects `show_home_goal` for the `goals` context. Treatment Selector returns the eligible home down payment template. sfield calls the scoped **Goal Progress** provider for the target and six monthly savings values. The composer selects `PznGoalProgress`, and the host fills the A2UI card with the verified data.
+Choose **Home-buying goal** in a new chat, type “goals,” or ask “How close am I to buying a house?” The Context Router selects `show_home_goal` for the `goals` context. Treatment Selector returns the eligible home down payment template. sfield calls the scoped **Goal Progress** provider for the target and six monthly savings values. The composer selects `PznGoalProgress`, and the host fills the A2UI card with the verified data.
 
 Alice has saved **$26,000** toward **$50,000**. Jordan has saved **$33,600** toward **$60,000**. Each card includes the remaining amount, percentage saved, and a graph of the monthly growth. Expand **View monthly values** to see the underlying points. **Logs → Goal Progress** shows the tool request and response. **Help → Home-buying goal** walks through the architecture and includes the downloadable contract.
 

@@ -633,6 +633,27 @@ test("home-buying progress reads the eligible member's target and history throug
   assert.deepEqual(reads, ["DEMO-MID-1001", "DEMO-MID-1002"]);
 });
 
+test("goal shorthand and a misspelled status request open the home down payment goal", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const { client } = f;
+  const chat = await client.conversation();
+
+  for (const message of ["goals", "what happend to goals", "Can I see my goals?"]) {
+    const { turn, trace } = await client.ask(chat.id, message);
+    assert.equal(trace.intentId, "show_home_goal");
+    assert.equal(trace.selectedContextId, "goals");
+    assert.equal(turn.experience?.blocks[0]?.component, "PznGoalProgress");
+  }
+
+  const specific = await client.ask(chat.id, "I want to learn about retirement goals.");
+  assert.equal(specific.trace.intentId, "retirement_learning");
+  const unclear = await client.ask(chat.id, "Show me something.");
+  assert.equal(unclear.trace.routeOutcome, "clarify");
+  assert.match(unclear.turn.experience?.question ?? "", /home-buying goals/);
+  assert.equal(unclear.trace.goalScopeId, null);
+});
+
 test("a misspelled retirement request reaches Learning and shows the beneficiary action only when eligible", async (t) => {
   const f = await fixture();
   t.after(() => f.close());

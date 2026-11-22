@@ -48,6 +48,8 @@ export const liveCases: LiveCase[] = [
   { id: "portfolio-summary-cash", message: "Let me know my portfolio summary.", route: portfolio, outcome: ready, component: "PznPortfolioSnapshot", relevant: ["portfolio_cash_investing"] },
   { id: "portfolio-summary-threshold", message: "Let me know my portfolio summary.", route: portfolio, outcome: ready, component: "PznPortfolioSnapshot", exclude: ["portfolio_cash_investing", portfolioItem], persona: "demo-returning" },
   { id: "home-goal-progress", message: "How close am I to buying a house?", route: "goals", outcome: ready, component: "PznGoalProgress", relevant: ["home_down_payment_progress"] },
+  { id: "home-goal-short", message: "goals", route: "goals", outcome: ready, component: "PznGoalProgress" },
+  { id: "home-goal-status", message: "what happend to goals", prior: "goals", route: "goals", outcome: ready, component: "PznGoalProgress" },
   { id: "retirement-missing-beneficiary", message: "I'd like to learn about retirement.", route: "learning", outcome: ready, component: card, relevant: ["beneficiary_update"] },
   { id: "retirement-beneficiary-on-file", message: "I'd like to learn about retirement.", route: "learning", outcome: ready, component: card, relevant: ["retirement_learning"], exclude: ["beneficiary_update"], persona: "demo-returning" },
   { id: "retirement-unclear", message: "last day of job is next week", prior: "i will be 62", route: "clarify", outcome: "clarify" },
