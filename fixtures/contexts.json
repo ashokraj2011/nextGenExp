@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "1.0",
+  "catalogVersion": "ts-contexts-demo-v1",
+  "contexts": [
+    {
+      "contextId": "balance",
+      "displayName": "Balances",
+      "description": "Balance labels, their definitions and comparisons, and synthetic available or current balance summaries. Use for requests about balances. Transfers and portfolio allocation are separate topics.",
+      "active": true
+    },
+    {
+      "contextId": "portsum",
+      "displayName": "Portfolio summary",
+      "description": "Explain the portfolio overview, its holdings and allocation labels, and how sample items are grouped. Its fixture contains definitions without live holdings or investments.",
+      "active": true
+    },
+    {
+      "contextId": "app-home",
+      "displayName": "App home",
+      "description": "General demo app help, entry points and supported capabilities. Includes learning about the fictional transfer flow and guiding a transfer preview. Use for explicit app help or transfer requests.",
+      "active": true
+    },
+    {
+      "contextId": "archived-help",
+      "displayName": "Archived help",
+      "description": "An archived demo placement.",
+      "active": false
+    }
+  ]
+}

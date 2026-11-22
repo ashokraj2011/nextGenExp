@@ -1,0 +1,370 @@
+{
+  "schemaVersion": "1.0",
+  "fixtureVersion": "pzn-demo-2026-11-v1",
+  "catalogVersion": "content-demo-v1",
+  "dataClassification": "synthetic_demo_only",
+  "entries": [
+    {
+      "contentId": "balance_education",
+      "version": "v1",
+      "publicationStatus": "published",
+      "kind": "education",
+      "title": "Understanding the demo balance labels",
+      "description": "A beginner explanation of the fictional balance labels, without account-opening promotion.",
+      "body": "This demo uses two invented labels to illustrate an explanation experience. The available label describes demo units ready to use; the current label describes the demo ledger total. Actual product definitions are outside this POC.",
+      "allowedComponents": [
+        "PznContentCard"
+      ],
+      "comparisonGroup": null,
+      "comparisonFields": [],
+      "steps": [],
+      "metricSpec": null,
+      "followUps": [
+        {
+          "followUpId": "fu_compare_balances",
+          "label": "Compare demo balance terms",
+          "userMessage": "Compare the two fictional balance definitions."
+        },
+        {
+          "followUpId": "fu_explain_available",
+          "label": "Explain available balance",
+          "userMessage": "Explain the available-balance term in this fictional demo."
+        }
+      ],
+      "sourceRef": "fixture:balance_education",
+      "sourceLabel": "Fictional PZN demo catalog",
+      "requiredDisclosures": [
+        {
+          "disclosureId": "demo_only",
+          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+        }
+      ]
+    },
+    {
+      "contentId": "balance_available_definition",
+      "version": "v1",
+      "publicationStatus": "published",
+      "kind": "education",
+      "title": "Available balance: demo definition",
+      "description": "Defines the fictional available-balance term and supports a comparison with the demo current-balance definition.",
+      "body": "In this fictional scenario, available balance means the demo units marked ready to use by the synthetic service.",
+      "allowedComponents": [
+        "PznContentCard",
+        "PznComparison"
+      ],
+      "comparisonGroup": "demo_balance_definitions",
+      "comparisonFields": [
+        {
+          "fieldId": "meaning",
+          "label": "Meaning in this demo",
+          "value": "Demo units marked ready to use"
+        },
+        {
+          "fieldId": "purpose",
+          "label": "Purpose in this demo",
+          "value": "Illustrate a ready-to-use amount"
+        }
+      ],
+      "steps": [],
+      "metricSpec": null,
+      "followUps": [
+        {
+          "followUpId": "fu_compare_balances",
+          "label": "Compare demo balance terms",
+          "userMessage": "Compare the two fictional balance definitions."
+        }
+      ],
+      "sourceRef": "fixture:balance_available_definition",
+      "sourceLabel": "Fictional PZN demo catalog",
+      "requiredDisclosures": [
+        {
+          "disclosureId": "demo_only",
+          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+        }
+      ]
+    },
+    {
+      "contentId": "balance_current_definition",
+      "version": "v1",
+      "publicationStatus": "published",
+      "kind": "education",
+      "title": "Current balance: demo definition",
+      "description": "Defines the fictional current-balance term using the same canonical comparison fields as the available-balance definition.",
+      "body": "In this fictional scenario, current balance means the synthetic ledger total. It is a demonstration definition, not a real product rule.",
+      "allowedComponents": [
+        "PznContentCard",
+        "PznComparison"
+      ],
+      "comparisonGroup": "demo_balance_definitions",
+      "comparisonFields": [
+        {
+          "fieldId": "meaning",
+          "label": "Meaning in this demo",
+          "value": "Synthetic ledger total"
+        },
+        {
+          "fieldId": "purpose",
+          "label": "Purpose in this demo",
+          "value": "Illustrate a ledger-view amount"
+        }
+      ],
+      "steps": [],
+      "metricSpec": null,
+      "followUps": [
+        {
+          "followUpId": "fu_explain_available",
+          "label": "Explain available balance",
+          "userMessage": "Explain the available-balance term in this fictional demo."
+        }
+      ],
+      "sourceRef": "fixture:balance_current_definition",
+      "sourceLabel": "Fictional PZN demo catalog",
+      "requiredDisclosures": [
+        {
+          "disclosureId": "demo_only",
+          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+        }
+      ]
+    },
+    {
+      "contentId": "transfer_learning",
+      "version": "v1",
+      "publicationStatus": "published",
+      "kind": "education",
+      "title": "Learn about the fictional transfer flow",
+      "description": "Educational overview for a customer researching the demo transfer flow before starting anything.",
+      "body": "The fictional flow has three stages: explore the demo guide, review the synthetic checklist, and stop at a preview. This POC does not submit a transfer.",
+      "allowedComponents": [
+        "PznContentCard"
+      ],
+      "comparisonGroup": null,
+      "comparisonFields": [],
+      "steps": [],
+      "metricSpec": null,
+      "followUps": [
+        {
+          "followUpId": "fu_transfer_steps",
+          "label": "See demo transfer steps",
+          "userMessage": "Show the fictional transfer checklist."
+        }
+      ],
+      "sourceRef": "fixture:transfer_learning",
+      "sourceLabel": "Fictional PZN demo catalog",
+      "requiredDisclosures": [
+        {
+          "disclosureId": "demo_only",
+          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+        }
+      ]
+    },
+    {
+      "contentId": "transfer_checklist",
+      "version": "v1",
+      "publicationStatus": "published",
+      "kind": "education",
+      "title": "Fictional transfer checklist",
+      "description": "A registered step-list example with host-owned steps and no transaction execution.",
+      "body": "Use the approved demo steps below. The sequence ends at a preview and cannot submit a real request.",
+      "allowedComponents": [
+        "PznContentCard",
+        "PznStepList"
+      ],
+      "comparisonGroup": null,
+      "comparisonFields": [],
+      "steps": [
+        {
+          "stepId": "learn",
+          "title": "Read the demo overview",
+          "body": "Open the approved fictional overview."
+        },
+        {
+          "stepId": "review",
+          "title": "Review synthetic details",
+          "body": "Inspect only the sample values supplied by this demo."
+        },
+        {
+          "stepId": "preview",
+          "title": "Stop at the preview",
+          "body": "The POC has no submission or transaction capability."
+        }
+      ],
+      "metricSpec": null,
+      "followUps": [
+        {
+          "followUpId": "fu_portfolio_terms",
+          "label": "Explain portfolio terms",
+          "userMessage": "Explain the fictional portfolio example."
+        }
+      ],
+      "sourceRef": "fixture:transfer_checklist",
+      "sourceLabel": "Fictional PZN demo catalog",
+      "requiredDisclosures": [
+        {
+          "disclosureId": "demo_only",
+          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+        }
+      ]
+    },
+    {
+      "contentId": "promotion_general",
+      "version": "v1",
+      "publicationStatus": "published",
+      "kind": "promotion",
+      "title": "Explore the fictional starter experience",
+      "description": "A synthetic promotional card used to test whether semantic ranking respects a learning-only request.",
+      "body": "This is an invented promotional message for the demonstration. It offers no rate, reward, account, or real service.",
+      "allowedComponents": [
+        "PznContentCard"
+      ],
+      "comparisonGroup": null,
+      "comparisonFields": [],
+      "steps": [],
+      "metricSpec": null,
+      "followUps": [
+        {
+          "followUpId": "fu_explain_available",
+          "label": "Explain available balance",
+          "userMessage": "Explain the available-balance term in this fictional demo."
+        }
+      ],
+      "sourceRef": "fixture:promotion_general",
+      "sourceLabel": "Fictional PZN demo catalog",
+      "requiredDisclosures": [
+        {
+          "disclosureId": "demo_only",
+          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+        }
+      ]
+    },
+    {
+      "contentId": "portfolio_explanation",
+      "version": "v1",
+      "publicationStatus": "published",
+      "kind": "education",
+      "title": "Understanding the fictional portfolio view",
+      "description": "Explains the labels in a synthetic portfolio example without retrieving or displaying real holdings.",
+      "body": "The fictional portfolio view groups sample items to demonstrate explanatory content. It contains no real holdings, valuations, or recommendations.",
+      "allowedComponents": [
+        "PznContentCard",
+        "PznComparison"
+      ],
+      "comparisonGroup": "demo_portfolio_labels",
+      "comparisonFields": [
+        {
+          "fieldId": "meaning",
+          "label": "Meaning in this demo",
+          "value": "An invented grouping of sample items"
+        },
+        {
+          "fieldId": "purpose",
+          "label": "Purpose in this demo",
+          "value": "Explain a fictional portfolio label"
+        }
+      ],
+      "steps": [],
+      "metricSpec": null,
+      "followUps": [
+        {
+          "followUpId": "fu_explain_available",
+          "label": "Explain available balance",
+          "userMessage": "Explain the available-balance term in this fictional demo."
+        }
+      ],
+      "sourceRef": "fixture:portfolio_explanation",
+      "sourceLabel": "Fictional PZN demo catalog",
+      "requiredDisclosures": [
+        {
+          "disclosureId": "demo_only",
+          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+        }
+      ]
+    },
+    {
+      "contentId": "balance_metric_template",
+      "version": "v1",
+      "publicationStatus": "published",
+      "kind": "metric_template",
+      "title": "Synthetic balance summary",
+      "description": "A metric-summary template. Rendering requires a successful host-scoped demo.balance.read proof for this exact decision.",
+      "body": "The host fills this template with synthetic values only after the registered demo read succeeds. No values are supplied by model output.",
+      "allowedComponents": [
+        "PznMetricSummary"
+      ],
+      "comparisonGroup": null,
+      "comparisonFields": [],
+      "steps": [],
+      "metricSpec": {
+        "toolId": "demo.balance.read",
+        "metricKeys": [
+          "available",
+          "current"
+        ]
+      },
+      "followUps": [
+        {
+          "followUpId": "fu_compare_balances",
+          "label": "Compare demo balance terms",
+          "userMessage": "Compare the two fictional balance definitions."
+        }
+      ],
+      "sourceRef": "fixture:balance_metric_template",
+      "sourceLabel": "Fictional PZN demo catalog",
+      "requiredDisclosures": [
+        {
+          "disclosureId": "demo_only",
+          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+        }
+      ]
+    },
+    {
+      "contentId": "promotion_blocked",
+      "version": "v1",
+      "publicationStatus": "published",
+      "kind": "promotion",
+      "title": "Fictional restricted transfer offer",
+      "description": "An intentionally relevant but blocked synthetic promotion. It is catalog-valid but excluded from the blocked-item TS scenario.",
+      "body": "This invented offer exists only to test eligibility enforcement. It has no real terms, reward, rate, or action.",
+      "allowedComponents": [
+        "PznContentCard"
+      ],
+      "comparisonGroup": null,
+      "comparisonFields": [],
+      "steps": [],
+      "metricSpec": null,
+      "followUps": [],
+      "sourceRef": "fixture:promotion_blocked",
+      "sourceLabel": "Fictional PZN demo catalog",
+      "requiredDisclosures": [
+        {
+          "disclosureId": "demo_only",
+          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+        }
+      ]
+    },
+    {
+      "contentId": "withdrawn_education",
+      "version": "v1",
+      "publicationStatus": "withdrawn",
+      "kind": "education",
+      "title": "Withdrawn fictional explanation",
+      "description": "A withdrawn fixture for testing catalog-resolution failures.",
+      "body": "This fictional item must not be rendered because its catalog publication status is withdrawn.",
+      "allowedComponents": [
+        "PznContentCard"
+      ],
+      "comparisonGroup": null,
+      "comparisonFields": [],
+      "steps": [],
+      "metricSpec": null,
+      "followUps": [],
+      "sourceRef": "fixture:withdrawn_education",
+      "sourceLabel": "Fictional PZN demo catalog",
+      "requiredDisclosures": [
+        {
+          "disclosureId": "demo_only",
+          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/pzn-poc/experience-proposal.schema.json",
+  "title": "experience-proposal",
+  "description": "Model proposal only. Intent summary is diagnostic. Host verifier enforces status, membership, compatibility, and proof requirements; host compiles all displayed facts.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "enum": [
+        "1.0"
+      ]
+    },
+    "decisionId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "ready",
+        "clarify",
+        "no_match"
+      ]
+    },
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "topic": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "task": {
+          "type": "string",
+          "enum": [
+            "explain",
+            "compare",
+            "guide",
+            "show",
+            "unknown"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "topic",
+        "task",
+        "summary"
+      ]
+    },
+    "introKey": {
+      "type": "string",
+      "enum": [
+        "explanation",
+        "comparison",
+        "steps",
+        "summary",
+        "clarification",
+        "no_match"
+      ]
+    },
+    "clarificationQuestion": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 400
+    },
+    "blocks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blockId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+          },
+          "component": {
+            "type": "string",
+            "enum": [
+              "PznContentCard",
+              "PznComparison",
+              "PznStepList",
+              "PznMetricSummary"
+            ]
+          },
+          "candidateIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+            },
+            "minItems": 1,
+            "maxItems": 2
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "compact",
+              "expanded"
+            ]
+          }
+        },
+        "required": [
+          "blockId",
+          "component",
+          "candidateIds",
+          "variant"
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 3
+    },
+    "followUpIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+      },
+      "minItems": 0,
+      "maxItems": 3,
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "decisionId",
+    "status",
+    "intent",
+    "introKey",
+    "clarificationQuestion",
+    "blocks",
+    "followUpIds"
+  ]
+}

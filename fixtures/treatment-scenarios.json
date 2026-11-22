@@ -1,0 +1,43 @@
+{
+  "fixtureVersion": "pzn-ts-routed-v1",
+  "base": {
+    "balance": ["balance_education", "balance_available_definition", "balance_current_definition", "promotion_general", "balance_metric_template"],
+    "portsum": ["portfolio_explanation"],
+    "app-home": ["transfer_checklist", "transfer_learning", "promotion_general"]
+  },
+  "scenarios": [
+    { "scenarioId": "normal", "label": "Normal eligibility", "rules": [] },
+    { "scenarioId": "conflicting-propensity", "label": "Conflicting propensity", "rules": [] },
+    { "scenarioId": "missing-propensity", "label": "Missing propensity score", "rules": [] },
+    { "scenarioId": "propensity-unavailable", "label": "Propensity unavailable", "rules": [] },
+    { "scenarioId": "catalog-unavailable", "label": "Context catalog unavailable", "rules": [] },
+    {
+      "scenarioId": "relevant-blocked", "label": "Relevant treatment excluded",
+      "rules": [
+        { "context": "app-home", "fromTurn": 1, "eligible": ["transfer_learning", "transfer_checklist"], "rejections": [{ "contentId": "promotion_blocked", "stage": "simulated_ccre", "reasonCode": "RULE_FALSE" }] }
+      ]
+    },
+    {
+      "scenarioId": "empty", "label": "Empty eligibility",
+      "rules": [{ "context": "*", "fromTurn": 1, "eligible": [] }]
+    },
+    {
+      "scenarioId": "ts-unavailable", "label": "TS timeout",
+      "rules": [{ "context": "*", "fromTurn": 1, "error": "TS_TIMEOUT" }]
+    },
+    {
+      "scenarioId": "cross-turn-change", "label": "Eligibility changes between turns",
+      "rules": [
+        { "context": "app-home", "fromTurn": 1, "eligible": ["transfer_learning", "transfer_checklist"] },
+        { "context": "app-home", "fromTurn": 2, "eligible": ["portfolio_explanation"] }
+      ]
+    },
+    {
+      "scenarioId": "catalog-resolution", "label": "Missing or withdrawn content",
+      "rules": [
+        { "context": "balance", "fromTurn": 1, "eligible": ["balance_education", "catalog_missing_item", "withdrawn_education"] },
+        { "context": "balance", "fromTurn": 2, "eligible": ["catalog_missing_item", "withdrawn_education"] }
+      ]
+    }
+  ]
+}

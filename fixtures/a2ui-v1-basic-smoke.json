@@ -1,0 +1,44 @@
+{
+  "version": "1.0",
+  "createSurface": {
+    "surfaceId": "integration-smoke-001",
+    "catalogId": "https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json",
+    "components": [
+      {
+        "id": "root",
+        "component": "Card",
+        "child": "body"
+      },
+      {
+        "id": "body",
+        "component": "Column",
+        "children": ["title", "open"]
+      },
+      {
+        "id": "title",
+        "component": "Text",
+        "text": { "@path": "/title" }
+      },
+      {
+        "id": "open",
+        "component": "Button",
+        "child": "open_label",
+        "variant": "primary",
+        "action": {
+          "event": {
+            "name": "open_content",
+            "context": { "actionId": "smoke-issued-action-001" }
+          }
+        }
+      },
+      {
+        "id": "open_label",
+        "component": "Text",
+        "text": "Read demo guide"
+      }
+    ],
+    "dataModel": {
+      "title": "A2UI integration smoke example"
+    }
+  }
+}

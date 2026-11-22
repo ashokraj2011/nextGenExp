@@ -1,0 +1,41 @@
+{
+  "name": "pzn-intent-experience",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.2",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "bootstrap": "node scripts/setup.mjs",
+    "dev": "node --env-file-if-exists=.env --import tsx apps/server/main.ts --dev",
+    "start": "node --env-file-if-exists=.env --import tsx apps/server/main.ts",
+    "check": "tsc --noEmit",
+    "build": "pnpm check && vite build",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:browser": "node --import tsx tests/browser.ts",
+    "test:preview": "node --import tsx tests/test-preview.ts",
+    "eval:live": "node --env-file-if-exists=.env --import tsx tests/evaluate-live.ts"
+  },
+  "dependencies": {
+    "@a2ui/react": "0.15.0",
+    "@a2ui/web_core": "0.15.0",
+    "@assistant-ui/react": "0.15.37",
+    "@fontsource-variable/inter": "5.3.0",
+    "@sfield/core": "link:.runtime/sfield/packages/core",
+    "@sfield/store-sqlite": "link:.runtime/sfield/packages/store-sqlite",
+    "ajv": "8.20.0",
+    "lucide-react": "1.77.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "tsx": "4.23.15",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "playwright": "1.65.1",
+    "typescript": "5.9.3",
+    "vite": "8.3.8"
+  }
+}

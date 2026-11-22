@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "1.0",
+  "fixtureVersion": "pzn-demo-2026-11-v1",
+  "dataClassification": "synthetic_demo_only",
+  "reads": [
+    {
+      "personaId": "demo-learner",
+      "syntheticMid": "DEMO-MID-1001",
+      "values": [
+        {
+          "metricKey": "available",
+          "displayValue": "1250.00",
+          "unit": "DEMO_UNITS"
+        },
+        {
+          "metricKey": "current",
+          "displayValue": "1500.00",
+          "unit": "DEMO_UNITS"
+        }
+      ]
+    },
+    {
+      "personaId": "demo-returning",
+      "syntheticMid": "DEMO-MID-1002",
+      "values": [
+        {
+          "metricKey": "available",
+          "displayValue": "500.00",
+          "unit": "DEMO_UNITS"
+        },
+        {
+          "metricKey": "current",
+          "displayValue": "650.00",
+          "unit": "DEMO_UNITS"
+        }
+      ]
+    }
+  ]
+}

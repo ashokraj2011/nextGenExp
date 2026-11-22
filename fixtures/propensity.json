@@ -1,0 +1,13 @@
+{
+  "version": "pzn-propensity-demo-v1",
+  "classification": "synthetic_advisory",
+  "defaults": {
+    "demo-learner": { "balance": 0.74, "portsum": 0.46, "app-home": 0.58 },
+    "demo-returning": { "balance": 0.51, "portsum": 0.68, "app-home": 0.82 }
+  },
+  "overrides": [
+    { "personaId": "demo-learner", "scenarioId": "conflicting-propensity", "scores": { "balance": 0.13, "portsum": 0.97, "app-home": 0.32 } },
+    { "personaId": "demo-learner", "scenarioId": "missing-propensity", "scores": { "balance": null, "portsum": 0.42, "app-home": 0 } },
+    { "personaId": "demo-learner", "scenarioId": "propensity-unavailable", "scores": null }
+  ]
+}

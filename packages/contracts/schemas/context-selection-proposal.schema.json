@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "context-selection-proposal",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "enum": [
+        "1.0"
+      ]
+    },
+    "catalogSnapshotId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+    },
+    "catalogVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "selected",
+        "clarify",
+        "no_match"
+      ]
+    },
+    "contextId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+    },
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "topic": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "task": {
+          "type": "string",
+          "enum": [
+            "explain",
+            "compare",
+            "guide",
+            "show",
+            "unknown"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "topic",
+        "task",
+        "summary"
+      ]
+    },
+    "clarificationQuestion": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 400
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "catalogSnapshotId",
+    "catalogVersion",
+    "status",
+    "contextId",
+    "intent",
+    "clarificationQuestion"
+  ]
+}
