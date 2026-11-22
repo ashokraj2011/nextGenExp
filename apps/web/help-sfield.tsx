@@ -25,7 +25,7 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
       <ol className="help-sfield-flow" aria-label="How sfield handles a chat message" role="list">
         <li className="help-sfield-node">
           <span className="help-entity-icon"><Network size={18} aria-hidden="true" /></span>
-          <h3>PZN host</h3>
+          <h3>PZN app server</h3>
           <p>Matches the chat to a demo customer, chooses the next step, and checks the results before building the reply.</p>
           <ArrowRight className="help-proposal-arrow" size={22} aria-hidden="true" />
         </li>

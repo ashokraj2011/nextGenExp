@@ -12,8 +12,8 @@ const participants = [
     description: "Chat sends messages. A2UI displays cards, forms, and buttons.",
   },
   {
-    name: "PZN host + sfield", shortName: "Host + sfield", Icon: Network,
-    description: "The app matches the message to the customer and checks the result. sfield runs the model and tool calls.",
+    name: "PZN app server + sfield", shortName: "App server + sfield", Icon: Network,
+    description: "The app server links the message to the customer and checks the result. sfield calls the model and tools.",
   },
   {
     name: "Language model", shortName: "Language model", Icon: Sparkles,
@@ -129,7 +129,7 @@ export function TreatmentProposalDiagram() {
       </li>
       <li className="help-proposal-entity">
         <span className="help-entity-icon"><Network size={18} aria-hidden="true" /></span>
-        <h3>PZN host + sfield</h3>
+        <h3>PZN app server + sfield</h3>
         <p>Find the right tool, check what it needs and what the customer can do, then run it when its conditions are met.</p>
         <ArrowRight className="help-proposal-arrow" size={22} aria-hidden="true" />
       </li>
