@@ -25,7 +25,7 @@ const blockLabels = {
   PznContentCard: "Explanation",
   PznComparison: "Comparison",
   PznStepList: "Step-by-step guide",
-  PznMetricSummary: "Synthetic data",
+  PznMetricSummary: "Sample balances",
   PznGoalProgress: "Home-buying goal",
 };
 
@@ -71,15 +71,15 @@ function ContentBlock({ block }: { block: DisplayBlock }) {
       {block.component === "PznMetricSummary" && (
         <>
           <dl className="metric-grid">
-            {block.props.values.map(({ metricKey, displayValue, unit }) => (
+            {block.props.values.map(({ metricKey, displayValue }) => (
               <div key={metricKey}>
                 <dt>{metricKey === "available" ? "Available balance" : "Current balance"}</dt>
-                <dd>{displayValue} <span>{unit}</span></dd>
+                <dd>{displayValue} <span>demo units</span></dd>
               </div>
             ))}
           </dl>
           <p className="metric-time">
-            Demo read <time dateTime={block.props.observedAt}>{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(block.props.observedAt))}</time>
+            As of <time dateTime={block.props.observedAt}>{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(block.props.observedAt))}</time>
           </p>
         </>
       )}
@@ -100,7 +100,7 @@ function ContentBlock({ block }: { block: DisplayBlock }) {
 function Introduction({ intro, question, partial }: { intro: string; question: string | null; partial: boolean }) {
   return <>
     {question ? <p className="clarification">{question}</p> : <p className="experience-intro">{intro}</p>}
-    {partial && <p className="partial-result">Some eligible items were unavailable in the demo catalog.</p>}
+    {partial && <p className="partial-result">Some matching content is unavailable.</p>}
   </>;
 }
 

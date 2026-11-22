@@ -50,7 +50,7 @@ function ExchangeDetails({ exchange, close }: { exchange: DiagramExchange; close
         { direction: "Request", label: example.input.label, source: JSON.stringify(example.input.value, null, 2), emphasized: !reply },
         { direction: "Response", label: example.output.label, source: JSON.stringify(example.output.value, null, 2), emphasized: reply },
       ]} />
-      <p className="help-example-note">Example payloads use sample IDs. Open <strong>Logs</strong> in chat for a recorded turn.</p>
+      <p className="help-example-note">These examples use sample IDs. Open <strong>Logs</strong> in chat to see a real run of the demo.</p>
     </DeveloperDrawer>
   </div>;
 }
@@ -116,15 +116,15 @@ export function Help() {
     <main className="help-width help-main">
       <div className="help-intro">
         <h1>How PZN Lab works</h1>
-        <p>Follow a chat turn through sfield, Treatment Selector, and A2UI.</p>
+        <p>See how the app understands a request, picks content for the customer, and displays the reply.</p>
       </div>
       <section id="architecture" className="help-section" aria-labelledby="architecture-title">
         <div className="help-section-heading">
           <div>
-            <h2 id="architecture-title">Chat turn architecture</h2>
+            <h2 id="architecture-title">How chat answers a message</h2>
             <p className="help-exchange-description">Choose a step number to see the request and response for Marcus’s address update.</p>
           </div>
-          <a className="help-section-link" href="#walkthroughs">Inspect a demo turn <ArrowUpRight size={14} aria-hidden="true" /></a>
+          <a className="help-section-link" href="#walkthroughs">See a walkthrough <ArrowUpRight size={14} aria-hidden="true" /></a>
         </div>
         <InteractionDiagram onSelect={setExchange} />
       </section>
@@ -178,22 +178,22 @@ export function Help() {
             </nav>
           </section>
         </div>
-        <p className="help-example-note">Payloads are demo examples. Open <strong>Logs</strong> in chat for the requests and responses recorded on an actual turn.</p>
+        <p className="help-example-note">Open <strong>Logs</strong> in chat to see the requests and responses recorded when you send a message.</p>
       </section>
       <section id="proposal" className="help-section" aria-labelledby="proposal-title">
         <div className="help-section-heading help-reference-heading">
           <h2 id="proposal-title">Treatment Selector proposal</h2>
-          <p>Return ranked recommendations for content, registered actions, and workflows.</p>
+          <p>Let Treatment Selector recommend content, actions, and multi-step tasks.</p>
         </div>
         <div className="help-proposal">
           <TreatmentProposalDiagram />
           <details className="help-tool-exchange">
             <summary>Compare the current and proposed responses</summary>
-            <p>Both examples use the Treatment Selector adapter request for Marcus’s address update.</p>
+            <p>Both examples use the same request to Treatment Selector for Marcus’s address update.</p>
             <p><code>{JSON.stringify(currentTreatmentExample.request)}</code></p>
             <PayloadExamples examples={[
-              { direction: "Current response", label: "Ranked content IDs", source: JSON.stringify(currentTreatmentExample.response, null, 2) },
-              { direction: "Proposed response", label: "Versioned ranked recommendations", source: proposedTreatmentExample },
+              { direction: "Current response", label: "Content IDs in order", source: JSON.stringify(currentTreatmentExample.response, null, 2) },
+              { direction: "Proposed response", label: "Content, actions, and workflows", source: proposedTreatmentExample },
             ]} />
           </details>
         </div>
@@ -201,7 +201,7 @@ export function Help() {
       <section id="contracts" className="help-section" aria-labelledby="contracts-title">
         <div className="help-section-heading help-reference-heading">
           <h2 id="contracts-title">Contracts</h2>
-          <p>Browse and download the runtime schemas, shared types and tool interfaces used in this app.</p>
+          <p>See what each service expects and sends back. Download the formats and types used by the app.</p>
         </div>
         <div className="help-contract-library">
           <nav className="help-contract-nav" aria-label="Contract library">

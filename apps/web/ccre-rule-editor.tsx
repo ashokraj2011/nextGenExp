@@ -34,7 +34,7 @@ export function CcreRuleEditor({ scope, rules, personas, content, glossary, limi
     <div className="admin-rules-heading">
       <div>
         <h3>CCRE rules</h3>
-        <p>The mock keeps a treatment when its condition matches. Rules apply to the selected scenario and context.</p>
+        <p>A rule controls when an item can appear. These rules apply to this test case and topic.</p>
       </div>
       {!editor && <button className="secondary-button" type="button" disabled={limitReached || !targets.length} onClick={() => setEditor({})}>
         <Plus size={16} aria-hidden="true" />Create rule

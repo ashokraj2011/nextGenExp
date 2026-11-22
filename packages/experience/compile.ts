@@ -27,7 +27,7 @@ type ExperienceInput = {
 
 export function compileExperience(input: ExperienceInput): CompiledExperience {
   const intro = input.portfolio ? host.introCopy.summary : input.outcome === "eligible_empty"
-    ? "There is no eligible demo content available for this request."
+    ? "This demo has no content to show for this request."
     : host.introCopy[input.introKey];
   const blocks: DisplayBlock[] = (input.approved?.blocks ?? []).map(({ proposal, content }) => {
     const primary = content[0];
@@ -85,7 +85,7 @@ export function compileExperience(input: ExperienceInput): CompiledExperience {
 
 export function compileRuleCreation(props: RuleCreationProps & { glossary: RuleGlossary }, expiresAt: number): CompiledExperience {
   return buildSurface({
-    status: "ready", outcome: "create_rule", intro: "Choose a treatment and build its eligibility condition from the CCRE glossary.",
+    status: "ready", outcome: "create_rule", intro: "Choose content and set a rule for when to show it.",
     question: null, partial: false, expiresAt,
   }, [{ component: ruleCreation.name, props }], []);
 }

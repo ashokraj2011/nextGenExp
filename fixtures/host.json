@@ -46,11 +46,11 @@
     "Would you like a short explanation or a detailed one?"
   ],
   "introCopy": {
-    "explanation": "Here is an explanation from the fictional demo catalog.",
-    "comparison": "Here is a comparison using the approved fictional definitions.",
-    "steps": "Here are the approved steps for this fictional demonstration.",
-    "summary": "Here is a summary using synthetic demo data.",
-    "clarification": "A little more detail will help select the demo experience.",
-    "no_match": "No suitable eligible demo content was selected for this request."
+    "explanation": "Here’s how this works in the demo.",
+    "comparison": "Here’s how the terms compare in the demo.",
+    "steps": "Here are the steps in this demo.",
+    "summary": "Here’s a summary using sample data.",
+    "clarification": "A little more detail will help me answer.",
+    "no_match": "I couldn’t find a match for this request in the demo."
   }
 }

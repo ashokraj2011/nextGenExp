@@ -42,8 +42,8 @@ try {
   await page.getByRole("link", { name: "Help", exact: true }).click();
   await page.getByRole("heading", { name: "How PZN Lab works", exact: true, level: 1 }).waitFor();
   const sequence = page.getByRole("list", { name: "Chat interaction sequence" });
-  await sequence.getByText("Ranked eligible content IDs", { exact: true }).waitFor();
-  await sequence.getByText("Verified A2UI surface", { exact: true }).waitFor();
+  await sequence.getByText("Matching content IDs in order", { exact: true }).waitFor();
+  await sequence.getByText("A2UI instructions for cards and buttons", { exact: true }).waitFor();
   const numberedSteps = await sequence.getByRole("button").all();
   assert.equal(numberedSteps.length, 13);
   const exchanges = [];
@@ -91,8 +91,8 @@ try {
   const stepInput = stepDetails.locator('pre[aria-label="Input JSON"]').first();
   assert.equal(JSON.parse(await stepInput.innerText()).summaryFollowUpIntentId, "show_balance");
   await flow.getByRole("button", { name: /Experience Composer/ }).click();
-  await stepDetails.getByText("Balance read and composer continuation", { exact: true }).click();
-  await stepDetails.getByText("Tool result sent back to the composer", { exact: true }).waitFor();
+  await stepDetails.getByText("How the model gets the balances", { exact: true }).click();
+  await stepDetails.getByText("Balances sent back to the model", { exact: true }).waitFor();
   await walkthrough.getByRole("button", { name: "Portfolio summary", exact: true }).click();
   await flow.getByRole("button", { name: /Portfolio Snapshot/ }).click();
   assert.equal(JSON.parse(await stepDetails.locator('pre[aria-label="Output JSON"]').innerText()).cashCents, 1_250_000);
@@ -137,8 +137,8 @@ try {
   await page.getByRole("button", { name: "Open developer inspector" }).click();
   const inspector = page.getByRole("dialog", { name: "Developer inspector" });
   await inspector.waitFor();
-  await page.getByText("Selected TS context", { exact: true }).waitFor();
-  await page.getByLabel("Turn trace").selectOption({ index: 1 });
+  await page.getByText("Selected topic", { exact: true }).waitFor();
+  await page.getByLabel("Chat message").selectOption({ index: 1 });
   await inspector.getByRole("button", { name: "Open call logs", exact: true }).click();
   await logs.waitFor();
   await inspector.waitFor({ state: "hidden" });
@@ -153,7 +153,7 @@ try {
   await routerLogs.getByText("Gateway request body", { exact: true }).click();
   assert.match(await routerLogs.locator('pre[aria-label="Gateway request body"]').innerText(), /"response_format"/);
   await page.screenshot({ path: resolve(screenshots, "call-logs-comparison.png") });
-  await logs.getByLabel("Chat turn", { exact: true }).selectOption("");
+  await logs.getByLabel("Chat message", { exact: true }).selectOption("");
   await routerLogs.getByText("Context Router · 1 attempt", { exact: true }).click();
   await routerLogs.getByText("Decoded chat input", { exact: true }).click();
   assert.match(await routerLogs.locator('pre[aria-label="Decoded chat input"]').innerText(), /available-balance term/);
@@ -194,52 +194,52 @@ try {
   assert.equal(await page.getByRole("switch", { name: "Treatment Selector", exact: true }).isChecked(), true);
   assert.equal(await page.getByRole("switch", { name: "CCRE glossary", exact: true }).isChecked(), true);
   await page.getByLabel("Response", { exact: true }).selectOption("ranked");
-  await page.getByLabel("Add eligible content").selectOption("balance_available_definition");
-  await page.getByLabel("Add eligible content").selectOption("balance_current_definition");
+  await page.getByLabel("Add content").selectOption("balance_available_definition");
+  await page.getByLabel("Add content").selectOption("balance_current_definition");
   await page.getByRole("button", { name: "Move balance_current_definition up", exact: true }).click();
   await page.getByRole("button", { name: "Run preview" }).click();
-  await page.getByText("Ranked eligible content", { exact: true }).waitFor();
+  await page.getByText("Matching content", { exact: true }).waitFor();
   assert.deepEqual(await page.getByRole("status").locator("ol code").allTextContents(), [
     "balance_current_definition", "balance_available_definition",
   ]);
   await page.screenshot({ path: resolve(screenshots, "tool-setup-desktop.png") });
-  await page.getByLabel("Context", { exact: true }).selectOption("portsum");
+  await page.getByLabel("Topic", { exact: true }).selectOption("portsum");
   await page.getByLabel("Response", { exact: true }).selectOption("empty");
   await page.getByRole("button", { name: "Save settings" }).click();
   await page.getByText("Tool settings saved.", { exact: true }).waitFor();
   await page.reload();
-  await page.getByRole("list", { name: "Ranked content" }).waitFor();
+  await page.getByRole("list", { name: "Content order" }).waitFor();
   assert.equal(await page.getByLabel("Response", { exact: true }).inputValue(), "ranked");
-  await page.getByLabel("Context", { exact: true }).selectOption("portsum");
+  await page.getByLabel("Topic", { exact: true }).selectOption("portsum");
   assert.equal(await page.getByLabel("Response", { exact: true }).inputValue(), "empty");
   await page.getByRole("link", { name: "Back to chat" }).click();
   await page.getByText("Test mode", { exact: true }).waitFor();
   const chatWithMock = page.getByLabel("Your question");
   await chatWithMock.fill("Explain the fictional portfolio view.");
   await chatWithMock.press("Enter");
-  await page.getByText("There is no eligible demo content available for this request.", { exact: true }).waitFor();
+  await page.getByText("This demo has no content to show for this request.", { exact: true }).waitFor();
 
   await page.getByRole("link", { name: "Tool setup" }).click();
   await page.getByRole("button", { name: "Create rule", exact: true }).click();
   await page.getByLabel("Rule name", { exact: true }).fill("Available definition for learners");
-  await page.getByLabel("Target treatment", { exact: true }).selectOption("balance_available_definition");
-  await page.getByLabel("Mock condition", { exact: true }).selectOption("persona_is");
-  await page.getByLabel("Matching persona", { exact: true }).selectOption("demo-learner");
-  await page.getByLabel("CCRE source (optional)", { exact: true }).fill("Sample source retained for the CCRE integration.");
+  await page.getByLabel("Content for this rule", { exact: true }).selectOption("balance_available_definition");
+  await page.getByLabel("When to show it", { exact: true }).selectOption("persona_is");
+  await page.getByLabel("Matching profile", { exact: true }).selectOption("demo-learner");
+  await page.getByLabel("CCRE rule text (optional)", { exact: true }).fill("Sample source retained for the CCRE integration.");
   await page.screenshot({ path: resolve(screenshots, "ccre-rule-editor.png"), fullPage: true });
   await page.getByRole("button", { name: "Add rule", exact: true }).click();
   await page.getByRole("button", { name: "Run preview", exact: true }).click();
   await page.getByText("Matched", { exact: true }).waitFor();
-  await page.getByLabel("Demo persona", { exact: true }).selectOption("demo-returning");
+  await page.getByLabel("Demo profile", { exact: true }).selectOption("demo-returning");
   await page.getByRole("button", { name: "Run preview", exact: true }).click();
-  await page.getByText("Excluded", { exact: true }).waitFor();
-  assert.deepEqual(await page.getByRole("list", { name: "Eligible content in rank order" }).locator("code").allTextContents(), [
+  await page.getByText("Filtered out", { exact: true }).waitFor();
+  assert.deepEqual(await page.getByRole("list", { name: "Matching content in order" }).locator("code").allTextContents(), [
     "balance_current_definition",
   ]);
   await page.screenshot({ path: resolve(screenshots, "ccre-rule-preview.png"), fullPage: true });
   await page.getByRole("button", { name: "Save and test in chat", exact: true }).click();
   await page.getByRole("button", { name: /Compare two terms/ }).click();
-  await page.getByText("No suitable eligible demo content was selected for this request.", { exact: true }).waitFor();
+  await page.getByText("I couldn’t find a match for this request in the demo.", { exact: true }).waitFor();
   await logsButton.click();
   await page.getByText("Treatment Selector · succeeded", { exact: true }).click();
   await page.getByText("Mock CCRE evaluation", { exact: true }).click();
@@ -255,10 +255,10 @@ try {
   await authorMessage.press("Enter");
   const ruleBlock = author.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Create a CCRE rule" });
   await ruleBlock.getByLabel("Rule name", { exact: true }).fill("Available balance for learners");
-  await ruleBlock.getByLabel("Target treatment", { exact: true }).selectOption("balance_available_definition");
-  const namespace = ruleBlock.getByLabel("Namespace", { exact: true });
-  const attribute = ruleBlock.getByLabel("Attribute", { exact: true });
-  const operator = ruleBlock.getByLabel("Operator", { exact: true });
+  await ruleBlock.getByLabel("Content for this rule", { exact: true }).selectOption("balance_available_definition");
+  const namespace = ruleBlock.getByLabel("Field group", { exact: true });
+  const attribute = ruleBlock.getByLabel("Field", { exact: true });
+  const operator = ruleBlock.getByLabel("Comparison", { exact: true });
   const ruleValue = ruleBlock.getByLabel("Value", { exact: true });
   const expression = ruleBlock.locator("output");
   assert.equal(await namespace.inputValue(), "customer");
@@ -284,10 +284,10 @@ try {
   await author.screenshot({ path: resolve(screenshots, "ccre-glossary-chat.png") });
   await ruleBlock.getByRole("button", { name: "Preview rule", exact: true }).click();
   await ruleBlock.getByText("Matched", { exact: true }).waitFor();
-  await ruleBlock.getByLabel("Preview persona", { exact: true }).selectOption("demo-returning");
+  await ruleBlock.getByLabel("Preview profile", { exact: true }).selectOption("demo-returning");
   await ruleBlock.getByRole("button", { name: "Preview rule", exact: true }).click();
-  await ruleBlock.getByText("Excluded", { exact: true }).waitFor();
-  const rankedAfterRule = ruleBlock.getByRole("list", { name: "Eligible content in rank order" });
+  await ruleBlock.getByText("Filtered out", { exact: true }).waitFor();
+  const rankedAfterRule = ruleBlock.getByRole("list", { name: "Matching content in order" });
   assert.ok(!(await rankedAfterRule.locator("code").allTextContents()).includes("balance_available_definition"));
   const beforeRuleSave = await author.request.get(preview.url + "/api/admin/tools");
   assert.deepEqual((await beforeRuleSave.json()).setup.ccreRules ?? [], []);
@@ -304,7 +304,7 @@ try {
   await ruleBlock.getByRole("link", { name: "Open Tool setup" }).click();
   await author.getByRole("list", { name: "CCRE rules for this context" }).getByText("Available balance for learners", { exact: true }).waitFor();
   await author.getByRole("button", { name: "Edit rule Available balance for learners", exact: true }).click();
-  assert.equal(await author.getByLabel("Namespace", { exact: true }).inputValue(), "customer");
+  assert.equal(await author.getByLabel("Field group", { exact: true }).inputValue(), "customer");
   assert.equal(await author.getByLabel("Value", { exact: true }).inputValue(), "demo-learner");
 
   const portfolioPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
@@ -347,11 +347,11 @@ try {
   assert.match(await portfolioLogs.locator('pre[aria-label="Portfolio Snapshot tool response"]').innerText(), /"cashCents": 1250000/);
   await portfolioPage.keyboard.press("Escape");
   await portfolioPage.getByRole("link", { name: "Tool setup" }).click();
-  await portfolioPage.getByLabel("Context", { exact: true }).selectOption("portsum");
-  await portfolioPage.getByLabel("Demo persona", { exact: true }).selectOption("demo-returning");
+  await portfolioPage.getByLabel("Topic", { exact: true }).selectOption("portsum");
+  await portfolioPage.getByLabel("Demo profile", { exact: true }).selectOption("demo-returning");
   await portfolioPage.getByRole("button", { name: "Run preview", exact: true }).click();
   await portfolioPage.getByText("Cash above $10,000", { exact: true }).waitFor();
-  await portfolioPage.getByText("Excluded", { exact: true }).waitFor();
+  await portfolioPage.getByText("Filtered out", { exact: true }).waitFor();
   await portfolioPage.getByRole("button", { name: "Test in chat", exact: true }).click();
   await jordanProfileTrigger.waitFor();
   await portfolioQuestion.fill("Let me know my portfolio summary.");
@@ -461,17 +461,17 @@ try {
   await mobileMessage.fill("Create a rule");
   await mobileMessage.press("Enter");
   const mobileRule = mobile.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Create a CCRE rule" });
-  await mobileRule.getByLabel("Namespace", { exact: true }).waitFor();
+  await mobileRule.getByLabel("Field group", { exact: true }).waitFor();
   const mobileCard = await mobileRule.boundingBox();
   assert.ok(mobileCard && mobileCard.x >= 0 && mobileCard.x + mobileCard.width <= 360, "The rule editor fits the mobile conversation");
   await mobile.getByRole("link", { name: "Tool setup" }).click();
-  await mobile.getByRole("heading", { name: "Treatment Selector mock" }).waitFor();
+  await mobile.getByRole("heading", { name: "Treatment Selector test settings" }).waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await mobile.getByRole("button", { name: "Create rule", exact: true }).click();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await mobile.getByRole("button", { name: "Cancel", exact: true }).click();
   await mobile.getByRole("button", { name: "Run preview" }).click();
-  await mobile.getByText("Ranked eligible content", { exact: true }).waitFor();
+  await mobile.getByText("Matching content", { exact: true }).waitFor();
   await mobile.screenshot({ path: resolve(screenshots, "tool-setup-mobile.png"), fullPage: true });
   const fallback = await browser.newPage();
   await fallback.route(/\/api\/turns\/turn_[a-f0-9]+$/, async (route) => {

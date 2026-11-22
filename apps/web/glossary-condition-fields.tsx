@@ -47,20 +47,20 @@ export function GlossaryConditionFields({ glossary, initial, defaultValue, child
   const condition = predicate && glossaryAllowsCondition(glossary, predicate) ? predicate : undefined;
 
   return children(condition, <fieldset className="rule-glossary-condition">
-    <legend>CCRE condition</legend>
+    <legend>When this rule matches</legend>
     <div className="rule-fields">
       <div className="setup-field">
-        <label htmlFor={id + "-namespace"}>Namespace</label>
+        <label htmlFor={id + "-namespace"}>Field group</label>
         <select id={id + "-namespace"} value={draft.namespaceId} onChange={(event) => {
           const next = glossary.namespaces.find(({ id }) => id === event.target.value);
           if (next) setDraft(selectAttribute(next.id, next.attributes[0]));
         }}>
-          {!namespace && <option value="" disabled>Choose a namespace</option>}
+          {!namespace && <option value="" disabled>Choose a group</option>}
           {glossary.namespaces.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
         </select>
       </div>
       <div className="setup-field">
-        <label htmlFor={id + "-attribute"}>Attribute</label>
+        <label htmlFor={id + "-attribute"}>Field</label>
         <select id={id + "-attribute"} value={draft.attributeId} disabled={!namespace} onChange={(event) => {
           const next = namespace?.attributes.find(({ id }) => id === event.target.value);
           if (namespace && next) setDraft(selectAttribute(namespace.id, next));
@@ -70,7 +70,7 @@ export function GlossaryConditionFields({ glossary, initial, defaultValue, child
       </div>
       {attribute && <>
         <div className="setup-field">
-          <label htmlFor={id + "-operator"}>Operator</label>
+          <label htmlFor={id + "-operator"}>Comparison</label>
           <select id={id + "-operator"} value={draft.operator} onChange={(event) => {
             const operator = attribute.operators.find((operator) => operator === event.target.value);
             if (operator) setDraft({ ...draft, operator });
@@ -91,6 +91,6 @@ export function GlossaryConditionFields({ glossary, initial, defaultValue, child
       </>}
     </div>
     {attribute && <p id={id + "-description"} className="rule-field-note">{attribute.description}</p>}
-    {condition && <output className="rule-expression" aria-label="Mock condition expression"><code>{formatGlossaryCondition(condition)}</code></output>}
+    {condition && <output className="rule-expression" aria-label="Rule expression"><code>{formatGlossaryCondition(condition)}</code></output>}
   </fieldset>);
 }

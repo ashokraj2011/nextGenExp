@@ -7,8 +7,8 @@ import { GlossaryConditionFields } from "./glossary-condition-fields";
 import "./ccre-rule.css";
 
 export const conditionLabels = {
-  persona_is: "Demo persona is",
-  from_turn: "From turn number",
+  persona_is: "Demo profile is",
+  from_turn: "From message number",
   always: "Always match",
   never: "Never match",
 } satisfies Record<Exclude<MockCcreCondition, { kind: "attribute" }>["kind"], string>;
@@ -43,19 +43,19 @@ export function CcreRuleForm({ scope, targets, personas, initialRule, defaultPer
             <input value={draft.name} maxLength={MAX_CCRE_RULE_NAME} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
           </label>
           <div className="setup-field">
-            <label htmlFor={id + "-treatment"}>Target treatment</label>
+            <label htmlFor={id + "-treatment"}>Content for this rule</label>
             <select id={id + "-treatment"} value={contentId} onChange={(event) => setDraft({ ...draft, contentId: event.target.value })}>
-              {!contentId && <option value="" disabled>Choose a treatment</option>}
+              {!contentId && <option value="" disabled>Choose content</option>}
               {targets.map(({ contentId, title }) => <option key={contentId} value={contentId}>{title}</option>)}
             </select>
           </div>
         </div>
         {fields}
         <div className="setup-field">
-          <label htmlFor={id + "-source"}>CCRE source (optional)</label>
+          <label htmlFor={id + "-source"}>CCRE rule text (optional)</label>
           <textarea id={id + "-source"} value={draft.source} rows={3} spellCheck={false} maxLength={MAX_CCRE_SOURCE_LENGTH}
             aria-describedby={id + "-source-note"} onChange={(event) => setDraft({ ...draft, source: event.target.value })} />
-          <p id={id + "-source-note"} className="rule-field-note">Preview evaluates the mock condition. CCRE source is saved as text.</p>
+          <p id={id + "-source-note"} className="rule-field-note">Preview uses the selections above. The app saves this text with the rule.</p>
         </div>
       </fieldset>
       {children(rule)}
@@ -90,18 +90,18 @@ function PresetConditionFields({ initialCondition, personas, defaultPersonaId, c
   return children(valid ? condition : undefined,
     <div className="rule-fields">
       <div className="setup-field">
-        <label htmlFor={id + "-condition"}>Mock condition</label>
+        <label htmlFor={id + "-condition"}>When to show it</label>
         <select id={id + "-condition"} value={draft.kind} onChange={(event) => setDraft({ ...draft, kind: event.target.value as Preset["kind"] })}>
           {Object.entries(conditionLabels).map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}
         </select>
       </div>
       {draft.kind === "persona_is" && <div className="setup-field">
-        <label htmlFor={id + "-persona"}>Matching persona</label>
+        <label htmlFor={id + "-persona"}>Matching profile</label>
         <select id={id + "-persona"} value={draft.personaId} onChange={(event) => setDraft({ ...draft, personaId: event.target.value })}>
           {personas.map(({ personaId, displayName }) => <option key={personaId} value={personaId}>{displayName}</option>)}
         </select>
       </div>}
-      {draft.kind === "from_turn" && <label className="setup-field">First matching turn
+      {draft.kind === "from_turn" && <label className="setup-field">First matching message
         <input type="number" min={1} step={1} value={draft.ordinal} onChange={(event) => setDraft({ ...draft, ordinal: event.target.value })} />
       </label>}
     </div>);

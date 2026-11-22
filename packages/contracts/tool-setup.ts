@@ -10,7 +10,7 @@ export const sfieldTools = {
   },
   propensity: {
     id: "propensity.context.score",
-    label: "Context propensity",
+    label: "Topic relevance scores",
     description: "Provides advisory scores for the current contexts.",
   },
   selection: {

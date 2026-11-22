@@ -55,23 +55,23 @@ export const helpContracts = [
       {
         id: "chat",
         title: "Chat API and turn events",
-        description: "The browser creates a conversation, submits turns with a client request ID, and receives progress and completed experiences over server-sent events.",
+        description: "The browser starts a chat, sends each message with an ID, and gets progress updates and the finished reply.",
         endpoints: [
-          ["GET /api/bootstrap", "Load the demo profiles, scenarios, conversations and mode."],
-          ["POST /api/conversations", "Start a conversation for a profile and scenario."],
-          ["GET /api/conversations/:id", "Restore a conversation and its turns."],
-          ["POST /api/conversations/:id/turns", "Accept a chat message and issue a turn ID."],
-          ["GET /api/turns/:id/events", "Stream and replay turn events."],
-          ["GET /api/turns/:id", "Read the current turn and its experience."],
-          ["POST /api/turns/:id/cancel", "Stop an active turn."],
-          ["POST /api/turns/:id/retry", "Submit a new attempt for a saved turn."],
+          ["GET /api/bootstrap", "Load demo profiles, test cases, saved chats, and the current mode."],
+          ["POST /api/conversations", "Start a chat for a profile and test case."],
+          ["GET /api/conversations/:id", "Load a saved chat and its messages."],
+          ["POST /api/conversations/:id/turns", "Accept a message and return an ID for the request."],
+          ["GET /api/turns/:id/events", "Send progress updates and replay missed updates."],
+          ["GET /api/turns/:id", "Get the status and reply for a message."],
+          ["POST /api/turns/:id/cancel", "Stop a request that is in progress."],
+          ["POST /api/turns/:id/retry", "Try a saved request again."],
         ],
         files: [{ name: "http-inputs.ts", source: httpInputsSource }, { name: "api.ts", source: apiSource }],
       },
       {
         id: "discovery",
         title: "Context catalog and propensity",
-        description: "The catalog lists active Treatment Selector contexts. Propensity provides advisory scores for those contexts, including an unavailable status when scores cannot be read.",
+        description: "The context catalog lists supported topics. Propensity scores suggest which topics might be relevant to the customer.",
         files: [
           jsonFile("context-discovery.tools.json", {
             "contexts.list": { input: turnInputSchema, output: contextResultSchema },
@@ -83,7 +83,7 @@ export const helpContracts = [
       {
         id: "router",
         title: "Context Router",
-        description: "The input carries the latest message, recent turns, active intents and approved questions. The structured output selects an intent, requests clarification, replies, or opens the rule editor.",
+        description: "The first model call gets the message, recent chat, supported requests, and approved questions. It identifies the request, asks a question, replies directly, or asks to open the rule editor.",
         files: [
           { name: "model-inputs.ts", source: modelInputsSource },
           jsonFile("context-selection-proposal.schema.json", routingOutputSchema),
@@ -93,8 +93,8 @@ export const helpContracts = [
       {
         id: "gateway",
         title: "Model gateway",
-        description: "sfield compiles model requests into streamed Chat Completions requests with messages and a structured response format. Test mode uses a deterministic gateway through the same contract. The server supports additional headers and body fields for a deployed gateway.",
-        endpoints: [["POST /chat/completions", "Run a model stage using the configured gateway prefix."]],
+        description: "sfield sends the chat messages and expected response format to the model. Test mode supplies sample responses. You can configure extra request details for an office gateway.",
+        endpoints: [["POST /chat/completions", "Send a request to the configured model."]],
         files: [{ name: "sfield-model.ts", source: sfieldModelSource }, { name: "gateway.env.example", source: gatewaySettingsExample }],
       },
     ],
@@ -105,7 +105,7 @@ export const helpContracts = [
       {
         id: "treatment",
         title: "Treatment Selector",
-        description: "The registered tool accepts a turn and verified route ID. The adapter receives the synthetic member ID and context and returns ranked eligible content IDs.",
+        description: "The tool uses the message and the checked topic to send Treatment Selector a demo member ID and topic. Treatment Selector returns matching content IDs in order.",
         files: [
           jsonFile("treatment-selector.tool.json", { input: treatmentInputSchema, output: treatmentResultSchema }),
           { name: "ts-adapter.ts", source: treatmentAdapterSource },
@@ -115,7 +115,7 @@ export const helpContracts = [
       {
         id: "balance",
         title: "Demo balance read",
-        description: "The composer requests synthetic balances with empty arguments. The tool derives the member and verified decision from the run scope and returns timestamped demo values.",
+        description: "The model asks for balances without passing account details. The tool looks up the right demo customer and returns the amounts and the time they were read.",
         files: [
           jsonFile("demo-balance.tool.json", { input: balanceInputSchema, output: balanceResultSchema }),
           { name: "domain.ts", source: domainSource },
@@ -124,7 +124,7 @@ export const helpContracts = [
       {
         id: "portfolio",
         title: "Portfolio Snapshot",
-        description: "The scoped read returns cash, equities and fixed income in cents. The provider interface gives an enterprise adapter the same request and response boundary.",
+        description: "The tool returns cash and investment balances in cents. A connected service can supply these figures through the provider interface.",
         files: [
           jsonFile("portfolio-snapshot.tool.json", { input: portfolioInputSchema, output: portfolioResultSchema }),
           { name: "portfolio.ts", source: portfolioSource },
@@ -134,7 +134,7 @@ export const helpContracts = [
       {
         id: "glossary",
         title: "CCRE glossary",
-        description: "The glossary response defines versioned namespaces, attributes, value types and operators for the rule editor.",
+        description: "The glossary lists the groups, fields, value types, and comparisons you can use to build a rule.",
         files: [
           jsonFile("ccre-glossary.tool.json", { input: glossaryInputSchema, output: glossaryResultSchema }),
           { name: "rule-glossary.ts", source: glossarySource },
@@ -143,7 +143,7 @@ export const helpContracts = [
       {
         id: "goal",
         title: "Goal Progress",
-        description: "The scoped tool returns the home down payment target and savings history for the eligible demo member. Monthly values are ordered and amounts use integer cents.",
+        description: "The tool returns the down payment target and monthly savings for the demo customer, in date order. Amounts use whole cents.",
         files: [
           jsonFile("goal-progress.tool.json", { input: goalProgressInputSchema, output: goalProgressResultSchema }),
           { name: "goal-progress.ts", source: goalSource },
@@ -153,12 +153,12 @@ export const helpContracts = [
       {
         id: "rules",
         title: "Rule authoring and Tool setup",
-        description: "These contracts define treatment overrides, scoped CCRE mock rules, preview inputs and evaluation results. The mock evaluates structured conditions and stores optional CCRE source text.",
+        description: "These formats cover tool settings, sample rules, and previews. The demo checks the conditions entered in the form and saves any optional CCRE rule text.",
         endpoints: [
-          ["GET /api/admin/tools", "Read the current setup, glossary and available treatments."],
-          ["POST /api/admin/tools", "Save a tool configuration with its revision for concurrent edits."],
-          ["POST /api/admin/treatment-preview", "Preview eligible content for a persona, scenario and turn."],
-          ["POST /api/admin/ccre-rules", "Add a rule for a scenario, context and treatment."],
+          ["GET /api/admin/tools", "Load tool settings, rule fields, and available content."],
+          ["POST /api/admin/tools", "Save tool settings and check that nobody else edited them first."],
+          ["POST /api/admin/treatment-preview", "Preview what a demo profile would see for a test case and message number."],
+          ["POST /api/admin/ccre-rules", "Add a rule for a test case, topic, and piece of content."],
         ],
         files: [{ name: "tool-setup.ts", source: toolSetupSource }, { name: "rule-glossary.ts", source: glossarySource }],
       },
@@ -170,7 +170,7 @@ export const helpContracts = [
       {
         id: "composer",
         title: "Experience Composer",
-        description: "The input contains the verified intent and eligible candidates. The proposal selects display components, scoped candidate IDs and available follow-ups.",
+        description: "The second model call gets the checked request and matching content. It picks what to show, which layout to use, and any follow-up buttons.",
         files: [
           { name: "model-inputs.ts", source: modelInputsSource },
           jsonFile("experience-proposal.schema.json", compositionOutputSchema),
@@ -180,26 +180,26 @@ export const helpContracts = [
       {
         id: "domain",
         title: "Decisions, content and proof",
-        description: "Shared domain types bind catalogs, routes, content decisions and data proof to a conversation and turn. The content contract carries versions, disclosures, source references and supported components.",
+        description: "These formats tie the topic, content, and account figures to the message they answer. Each content item includes its version, source, and display options.",
         files: [{ name: "domain.ts", source: domainSource }],
       },
       {
         id: "render",
         title: "A2UI surfaces and actions",
-        description: "The host compiles a versioned A2UI surface using the registered component catalog. A follow-up sends an issued action ID back to the host.",
+        description: "The app tells A2UI which cards, forms, and buttons to show. When the customer clicks a button, chat sends its ID back.",
         endpoints: [
-          ["POST /api/experiences/:id/actions", "Validate a follow-up action and start its next turn."],
-          ["POST /api/events", "Record rendering and feedback."],
+          ["POST /api/experiences/:id/actions", "Check the selected button and start the next request."],
+          ["POST /api/events", "Record what was shown and any feedback."],
         ],
         files: [{ name: "surface.ts", source: surfaceSource }, { name: "http-inputs.ts", source: httpInputsSource }],
       },
       {
         id: "logs",
         title: "Inspector and call logs",
-        description: "Local logs expose recorded model bodies, tool inputs, results and attempt status. Captured exchanges redact credentials and configured metadata values.",
+        description: "Logs show model and tool requests, replies, and whether each call worked. Logs hide credentials and configured private values.",
         endpoints: [
-          ["GET /api/debug/turns/:id", "Read the trace, route decisions and eligibility details."],
-          ["GET /api/debug/payloads/:id", "Read model and tool payloads for the selected turn."],
+          ["GET /api/debug/turns/:id", "See the topic, which content matched, and what was displayed."],
+          ["GET /api/debug/payloads/:id", "See model and tool requests and responses for the chosen message."],
         ],
         files: [{ name: "inspector.ts", source: inspectorSource }, { name: "web-api.ts", source: traceSource }],
       },

@@ -45,7 +45,7 @@ const homeGoal = { fixtureVersion: goalFixture.fixtureVersion, goalId: goalFixtu
 function chat(message: string): FlowStep {
   return {
     id: "chat", title: "Chat request", role: "Browser",
-    description: "The browser sends the message and a client request ID in the active conversation. The host records the turn, binds it to the demo profile and streams updates.",
+    description: "The browser sends the message with an ID. The app saves it to the demo customer’s chat and sends back progress updates.",
     input: { label: "POST /api/conversations/conversation_demo/turns", value: { message, clientRequestId: "request_demo" } },
     output: { label: "TurnAccepted · excerpt", value: { turnId: turnRef, eventsUrl: "/api/turns/" + turnRef + "/events", turn: { id: turnRef, status: "working", progress: "accepted" } } },
     contracts: ["chat"],
@@ -59,12 +59,12 @@ function discoveryFor(personaId: keyof typeof propensityFixture.defaults): FlowS
     scores: catalog.contexts.map(({ contextId }) => ({ contextId, score: scores[contextId] ?? null })),
   };
   return {
-    id: "discovery", title: "Context discovery", role: "sfield tools",
-    description: "sfield reads the active context catalog and advisory propensity scores. The host stores a scoped catalog snapshot. The router uses these inputs to evaluate the user's request.",
-    input: { label: "Registry tool inputs", value: {
+    id: "discovery", title: "Load supported topics", role: "sfield tools",
+    description: "sfield fetches the supported topics and scores that suggest which ones may fit. The app saves a copy of the list for this message and sends it to the first model call.",
+    input: { label: "Tool requests", value: {
       "contexts.list": { turnRef }, "propensity.context.score": { turnRef, catalogSnapshotId },
     } },
-    output: { label: "Catalog and propensity results", value: { catalog, propensity } },
+    output: { label: "Topics and relevance scores", value: { catalog, propensity } },
     contracts: ["discovery", "domain"],
   };
 }
@@ -79,8 +79,8 @@ function routeProposal(intentId: RoutingIntentId, summary: string): ContextSelec
 
 function router(description: string, value: object, proposal: ContextSelectionProposal): FlowStep {
   return {
-    id: "router", title: "Context Router", role: "sfield · LLM 1", description,
-    input: { label: "Routing envelope · excerpt", value: { inputType: "PznContextRoutingInput", catalogSnapshotId, ...value } },
+    id: "router", title: "Context Router", role: "First model call", description,
+    input: { label: "What the model receives · excerpt", value: { inputType: "PznContextRoutingInput", catalogSnapshotId, ...value } },
     output: { label: "ContextSelectionProposal", value: proposal },
     contracts: ["router", "gateway"],
   };
@@ -88,11 +88,11 @@ function router(description: string, value: object, proposal: ContextSelectionPr
 
 function treatment(context: string, contentIds: string[], description: string, memberId = mid): FlowStep {
   return {
-    id: "treatment", title: "Treatment Selector", role: "Eligibility", description,
-    input: { label: "sfield tool and adapter requests", value: {
+    id: "treatment", title: "Treatment Selector", role: "Finds matching content", description,
+    input: { label: "Tool request and what Treatment Selector receives", value: {
       registryInput: { turnRef, routeDecisionId }, adapterInput: { mid: memberId, context },
     } },
-    output: { label: "Ranked eligible content IDs", value: contentIds },
+    output: { label: "Matching content IDs in order", value: contentIds },
     contracts: ["treatment", "rules", "domain"],
   };
 }
@@ -106,8 +106,8 @@ function composer(
     schemaVersion: "1.0", decisionId, status: "ready", intent, introKey, clarificationQuestion: null, blocks, followUpIds,
   };
   return {
-    id: "composer", title: "Experience Composer", role: "sfield · LLM 2", description,
-    input: { label: "Composition envelope · excerpt", value: {
+    id: "composer", title: "Experience Composer", role: "Second model call", description,
+    input: { label: "What the model receives · excerpt", value: {
       inputType: "PznExperienceCompositionInput", request, selectedContextId, selectedIntentId, intent,
       ...(selectedIntentId === "show_portfolio" && { portfolioSnapshotIncluded: true }),
       ...(selectedIntentId === "show_home_goal" && { goalProgressIncluded: true }),
@@ -119,7 +119,7 @@ function composer(
 }
 
 function render(description: string, input: PayloadExample, output: PayloadExample): FlowStep {
-  return { id: "render", title: "Verify and render", role: "Host + A2UI", description, input, output, contracts: ["render", "chat", "logs"] };
+  return { id: "render", title: "Check and display", role: "App and A2UI", description, input, output, contracts: ["render", "chat", "logs"] };
 }
 
 const comparePrompt = "Compare available and current balance.";
@@ -138,14 +138,14 @@ const balanceCard: ProposalBlock = { blockId: "b1", component: "PznMetricSummary
 const balanceComposer = composer(
   summaryPrompt, "balance", "show_balance", { topic: "Show demo balances", task: "show", summary: balanceRoute.summary },
   [{ candidateId: "candidate_balance", title: "Synthetic balance summary", tsRank: 5 }], [balanceCard],
-  "The composer receives the verified intent and resolved eligible candidates. It requests the scoped balance read. sfield sends the tool result back to the same composer, which selects the balance summary card.",
+  "The composer gets the checked request and matching content. It asks the balance tool for the figures, then chooses a balance summary card.",
   "summary", ["fu_compare_balances"],
 );
 balanceComposer.tool = {
-  title: "Balance read and composer continuation",
-  description: "The first composer exchange asks for the read. The next request includes the tool result as a tool message. The host verifies the proof before publishing the figures.",
+  title: "How the model gets the balances",
+  description: "The model asks for the balances. sfield sends back the figures, and the app checks that they came from that tool call before showing them.",
   input: { label: "demo.balance.read arguments", value: {} },
-  output: { label: "Tool result sent back to the composer", value: demoBalance },
+  output: { label: "Balances sent back to the model", value: demoBalance },
 };
 balanceComposer.contracts = [...balanceComposer.contracts, "balance"];
 
@@ -163,24 +163,24 @@ const addressSteps = {
   chat: chat(addressPrompt),
   discovery: discoveryFor("demo-new-account"),
   router: router(
-    "The model recognizes a mailing address change and returns update_address. The host verifies that intent and maps it to the address-update context.",
+    "The model recognizes the mailing address change and returns update_address. The app checks it and picks Address update as the topic.",
     { request: addressPrompt, recent: [], catalog: addressCatalog, intentCatalog: routingIntents.filter(({ contextId }) => contextId === addressContext) },
     addressRoute,
   ),
   treatment: treatment(
     addressContext, addressContentIds,
-    "Treatment Selector receives Marcus’s demo member ID and the verified context. His account is unfunded, so the CCRE rule includes fund_account alongside the address guide.",
+    "Treatment Selector gets Marcus’s demo member ID and the topic. His account is waiting for a first deposit, so the rule adds fund_account to the address guide.",
     newAccount.syntheticMid,
   ),
   composer: composer(
     addressPrompt, addressContext, "update_address", { topic: "Update mailing address", task: "guide", summary: addressRoute.summary },
     [{ candidateId: addressCandidateId, title: addressBlocks[0].props.title, tsRank: 1 }],
     [{ blockId: "b1", component: "PznStepList", candidateIds: [addressCandidateId], variant: "expanded" }],
-    "The composer selects the address guide as a step-by-step answer. The host adds the eligible funding card during verification and rendering.",
+    "The model chooses the address guide. The app checks the choices and adds the funding card that Treatment Selector returned.",
     "steps",
   ),
   render: render(
-    "The host verifies the guide and attaches the funding card issued by Treatment Selector. The transfer button opens the existing demo walkthrough.",
+    "Chat shows the address guide and the funding card. The button opens the transfer walkthrough.",
     { label: "Verified inputs · excerpt", value: { selectedCandidateId: addressCandidateId, eligibleFundingCard: "fund_account" } },
     { label: "DisplayExperience · excerpt", value: { status: "ready", blocks: addressBlocks, actions: [addressFollowUp] } },
   ),
@@ -192,16 +192,16 @@ export const addressUpdateExample = {
   exchanges: {
     chat: addressSteps.chat,
     contexts: {
-      description: "sfield requests the active context catalog. This excerpt shows the address-update context used by Marcus’s turn.",
+      description: "sfield asks which topics are supported. This example shows the Address update topic used for Marcus’s message.",
       input: { label: "contexts.list", value: { turnRef } },
       output: { label: "ContextCatalog · excerpt", value: addressCatalog },
     },
     router: addressSteps.router,
     treatment: addressSteps.treatment,
     content: {
-      description: "The host looks up the ranked IDs in the published catalog and assigns turn-scoped candidate IDs. Marcus’s address walkthrough uses those catalog entries.",
-      input: { label: "Ranked IDs passed to catalog resolution", value: addressContentIds },
-      output: { label: "Resolved candidates", value: {
+      description: "The app uses the returned IDs to look up the address guide and funding card. It gives each item an ID for this message.",
+      input: { label: "Content IDs to look up", value: addressContentIds },
+      output: { label: "Matching items", value: {
         candidates: [
           { candidateId: addressCandidateId, contentId: "address_update_guide", contentVersion: "v1", tsRank: 1 },
           { candidateId: "candidate_funding", contentId: "fund_account", contentVersion: "v1", tsRank: 2 },
@@ -211,8 +211,8 @@ export const addressUpdateExample = {
     },
     composer: addressSteps.composer,
     surface: {
-      description: "The host emits an experience.ready event. The compiled surface contains the address steps, the funding card, and the issued transfer button.",
-      input: { label: "Subscribe to turn events", value: { method: "GET", path: "/api/turns/" + turnRef + "/events", headers: { Accept: "text/event-stream" } } },
+      description: "The app tells chat the answer is ready. It sends the address steps, the funding card, and the transfer button.",
+      input: { label: "Listen for chat updates", value: { method: "GET", path: "/api/turns/" + turnRef + "/events", headers: { Accept: "text/event-stream" } } },
       output: { label: "experience.ready · event excerpt", value: {
         type: "experience.ready",
         turnId: turnRef,
@@ -234,7 +234,7 @@ export const addressUpdateExample = {
       } },
     },
     followUp: {
-      description: "Marcus clicks See demo transfer steps. The host verifies the issued action and accepts a new chat turn for the transfer checklist.",
+      description: "Marcus clicks See demo transfer steps. The app checks that the button is valid and starts a new request for the transfer checklist.",
       input: { label: "POST /api/experiences/" + addressExperienceId + "/actions", value: {
         clientRequestId: "request_demo_follow_up",
         envelope: {
@@ -259,7 +259,7 @@ export const helpFlows: Flow[] = [
     steps: [
       chat(summaryPrompt), discovery,
       router(
-        "The host finds the previous verified balance topic and supplies show_balance for this clear follow-up. The LLM receives that reference along with the chat history and returns the structured routing decision.",
+        "The app sees that the chat was about balances. It sends that hint and the recent conversation to the model, which returns show_balance.",
         {
           request: summaryPrompt,
           recent: [{
@@ -269,10 +269,10 @@ export const helpFlows: Flow[] = [
           summaryFollowUpIntentId: "show_balance",
         }, balanceRoute,
       ),
-      treatment("balance", treatmentFixture.base.balance, "The host verifies the route before sfield calls the existing Treatment Selector interface through the mock adapter. The returned IDs are resolved to published catalog entries and scoped candidate IDs."),
+      treatment("balance", treatmentFixture.base.balance, "The app checks the topic before sfield calls Treatment Selector. The app then uses the returned IDs to look up the matching content."),
       balanceComposer,
       render(
-        "The host verifies the candidate and fresh balance proof, then compiles the A2UI surface. The browser renders registered components and uses the canonical display blocks as its fallback.",
+        "The app checks the content and balances, then tells A2UI what to show. Chat can use the same checked content if A2UI can’t display it.",
         { label: "Verified inputs · excerpt", value: { block: balanceCard, balanceProofValues: demoBalance.values } },
         { label: "A2UI CreateSurfaceMessage · excerpt", value: {
           version: "1.0",
@@ -292,11 +292,11 @@ export const helpFlows: Flow[] = [
     id: "portfolio", title: "Portfolio summary", prompt: portfolioPrompt,
     steps: [
       chat(portfolioPrompt), discovery,
-      router("The model selects show_portfolio from the active intent catalog. The host validates the proposal and maps it to the portsum context.", { request: portfolioPrompt, recent: [] }, portfolioRoute),
-      treatment("portsum", treatmentFixture.base.portsum, "The Treatment Selector mock evaluates the existing eligibility rule against demo cash. Alice's $12,500 meets the greater-than-$10,000 rule. Jordan's $10,000 equals the threshold, so his turn publishes the snapshot by itself."),
+      router("The model picks show_portfolio. The app checks the choice and sends Portfolio summary (portsum) as the topic.", { request: portfolioPrompt, recent: [] }, portfolioRoute),
+      treatment("portsum", treatmentFixture.base.portsum, "Treatment Selector checks a rule that requires more than $10,000 in cash. Alice has $12,500 and gets the investing card. Jordan has $10,000 and gets the portfolio summary by itself."),
       {
-        id: "portfolio", title: "Portfolio Snapshot", role: "Scoped read",
-        description: "The portfolio provider returns the account values for the verified demo member. The host can reuse the snapshot read for eligibility and use the same values in the displayed summary.",
+        id: "portfolio", title: "Portfolio Snapshot", role: "Account data",
+        description: "The tool returns the demo customer’s portfolio values. The app can use the same figures to check the rule and show the summary.",
         input: { label: "portfolio.snapshot.read", value: { turnRef, routeDecisionId } },
         output: { label: "PortfolioSnapshot", value: portfolio },
         contracts: ["portfolio"],
@@ -305,11 +305,11 @@ export const helpFlows: Flow[] = [
         portfolioPrompt, "portsum", "show_portfolio", { topic: "Show portfolio summary", task: "show", summary: portfolioRoute.summary },
         [{ candidateId: "candidate_cash", title: "Explore investing options", tsRank: 2 }],
         [{ blockId: "b1", component: "PznContentCard", candidateIds: ["candidate_cash"], variant: "compact" }],
-        "The model receives the eligible suggestion and a flag that the host already has the snapshot. If the suggestion is selected, the host uses the snapshot to fill in the cash amount.",
+        "The model sees the suggested investing card and knows the app has the portfolio figures. If the model chooses the card, the app fills in the cash amount.",
         "summary",
       ),
       render(
-        "The host builds the portfolio snapshot from the scoped data and adds the eligible recommendation selected by the composer.",
+        "Chat shows the portfolio figures and the suggestion the model chose.",
         { label: "Verified inputs · excerpt", value: { portfolio, selectedCandidateId: "candidate_cash" } },
         { label: "DisplayExperience · excerpt", value: { status: "ready", blocks: [
           { component: "PznPortfolioSnapshot", props: portfolio },
@@ -322,11 +322,11 @@ export const helpFlows: Flow[] = [
     id: "home-goal", title: "Home-buying goal", prompt: goalPrompt,
     steps: [
       chat(goalPrompt), discovery,
-      router("The model chooses show_home_goal from the intent catalog. The host verifies the route and maps it to the goals context.", { request: goalPrompt, recent: [] }, goalRoute),
-      treatment("goals", treatmentFixture.base.goals, "Treatment Selector returns the eligible home down payment template. The host resolves the ID to a published candidate before reading savings history."),
+      router("The model picks show_home_goal. The app checks the choice and uses Home-buying goal as the topic.", { request: goalPrompt, recent: [] }, goalRoute),
+      treatment("goals", treatmentFixture.base.goals, "Treatment Selector returns the down payment card ID. The app looks up the card before reading the customer’s savings history."),
       {
-        id: "goal", title: "Goal Progress", role: "Scoped read",
-        description: "sfield reads the verified demo member's target and monthly savings history. The host checks the amounts and the order of the months.",
+        id: "goal", title: "Goal Progress", role: "Savings data",
+        description: "sfield reads the demo customer’s goal and monthly savings. The app checks the amounts and the order of the months.",
         input: { label: "goal.progress.read", value: { turnRef, routeDecisionId } },
         output: { label: "GoalProgress", value: homeGoal },
         contracts: ["goal"],
@@ -335,11 +335,11 @@ export const helpFlows: Flow[] = [
         goalPrompt, "goals", "show_home_goal", { topic: "Show home-buying goal", task: "show", summary: goalRoute.summary },
         [{ candidateId: "candidate_home_goal", title: "Home down payment", tsRank: 1 }],
         [{ blockId: "b1", component: "PznGoalProgress", candidateIds: ["candidate_home_goal"], variant: "expanded" }],
-        "The model receives the eligible goal template and a flag that the host has the goal data. It selects the goal chart component.",
+        "The model sees the available goal card and knows the app has the figures. It chooses to show a chart.",
         "summary",
       ),
       render(
-        "The host attaches the verified goal data to the A2UI card. The browser shows the saved amount, target, remaining gap and growth graph.",
+        "Chat shows how much the customer has saved, what’s left to reach the target, and how their savings have grown.",
         { label: "Verified inputs · excerpt", value: { selectedCandidateId: "candidate_home_goal", goal: homeGoal } },
         { label: "DisplayExperience · excerpt", value: { status: "ready", blocks: [{ component: "PznGoalProgress", props: { title: "Home down payment", goal: homeGoal } }] } },
       ),
@@ -349,17 +349,17 @@ export const helpFlows: Flow[] = [
     id: "retirement", title: "Retirement learning", prompt: retirementPrompt,
     steps: [
       chat(retirementPrompt), discovery,
-      router("The model interprets the request as retirement learning. The host verifies the intent and selects the Learning context.", { request: retirementPrompt, recent: [] }, retirementRoute),
-      treatment("learning", treatmentFixture.base.learning, "The Treatment Selector mock returns retirement learning content and includes the beneficiary reminder when the customer has missing beneficiary details. Alice is eligible for the reminder."),
+      router("The model recognizes a request to learn about retirement. The app checks the choice and selects Learning as the topic.", { request: retirementPrompt, recent: [] }, retirementRoute),
+      treatment("learning", treatmentFixture.base.learning, "Treatment Selector returns a retirement lesson. Alice’s account is missing beneficiary details, so she also gets a reminder."),
       composer(
         retirementPrompt, "learning", "retirement_learning", { topic: "Learn about retirement", task: "explain", summary: retirementRoute.summary },
         [{ candidateId: "candidate_learning", title: "Retirement planning basics", tsRank: 1 }],
         [{ blockId: "b1", component: "PznContentCard", candidateIds: ["candidate_learning"], variant: "compact" }],
-        "The model selects the retirement lesson from the eligible candidate bundle. The host can append the beneficiary reminder issued by Treatment Selector when the lesson is rendered.",
+        "The model chooses the retirement lesson. The app adds the reminder that Treatment Selector returned.",
         "explanation",
       ),
       render(
-        "The host renders the lesson with Alice's eligible beneficiary reminder. Its issued action starts a new turn for the beneficiary update guide.",
+        "Chat shows the lesson and Alice’s reminder. The button opens the beneficiary update guide.",
         { label: "Verified inputs · excerpt", value: { selectedCandidateId: "candidate_learning", eligibleReminder: "beneficiary_update" } },
         { label: "DisplayExperience · excerpt", value: { status: "ready", blocks: [
           { component: "PznContentCard", props: { title: "Retirement planning basics" } },
@@ -377,35 +377,35 @@ export const helpFlows: Flow[] = [
     steps: [
       chat(rulePrompt), discovery,
       router(
-        "When rule authoring is enabled, the model selects the explicit rule-authoring intent. The host verifies the capability and proceeds to the glossary.",
+        "The model recognizes a request to create a rule. If the rule editor is available, the app loads the fields it needs.",
         { request: rulePrompt, canCreateRule: true, recent: [] },
         { ...routeProposal("create_rule", "Open the CCRE rule editor."), status: "create_rule" },
       ),
       {
-        id: "glossary", title: "CCRE glossary", role: "Scoped read",
-        description: "sfield asks the glossary tool for namespaces, attributes and supported operators. The host validates the versioned response and passes it to the editor.",
+        id: "glossary", title: "CCRE glossary", role: "Rule fields",
+        description: "sfield asks for the fields and comparisons you can use in a rule. The app checks the list and gives it to the editor.",
         input: { label: "ccre.glossary.get", value: { turnRef, routerRunId: "run_demo" } },
         output: { label: "RuleGlossary", value: mockRuleGlossary },
         contracts: ["glossary", "rules"],
       },
       render(
-        "A2UI opens the rule editor inside chat. Preview evaluates the draft for a demo profile and turn. Save registers the rule for subsequent Treatment Selector calls.",
+        "Chat opens the rule editor. Preview checks the rule for a demo customer and message number. Save applies it to future requests.",
         { label: "Rule editor properties · excerpt", value: { scenarioId: "normal", personaId: "demo-learner", glossary: { version: mockRuleGlossary.version } } },
         { label: "DisplayExperience · excerpt", value: { status: "ready", outcome: "create_rule", blocks: [{ component: "PznRuleCreation" }] } },
       ),
     ],
   },
   {
-    id: "clarification", title: "Clarify intent", prompt: summaryPrompt, prior: "Hi",
+    id: "clarification", title: "Ask a follow-up", prompt: summaryPrompt, prior: "Hi",
     steps: [
       chat(summaryPrompt), discovery,
       router(
-        "With a greeting as the only prior turn, the subject of the summary is unclear. The model proposes a portfolio clarification. The host displays the approved question and waits for the following chat turn.",
+        "The chat has only a greeting, so the model asks whether the customer meant a portfolio summary. The app shows the question and waits for an answer.",
         { request: summaryPrompt, recent: [{ request: "Hi", contextId: null, intentId: null, clarificationQuestion: null, assistantReply: "Hi! What would you like to talk about?" }] },
         { ...routeProposal("show_portfolio", "Confirm whether the customer wants a portfolio summary."), status: "clarify", clarificationQuestion: portfolioSummaryQuestion },
       ),
       render(
-        "The router's approved question appears in chat. A confirmation starts a new turn with that question in its history. Conversational replies can also go straight from the router to chat.",
+        "Chat shows the follow-up question. When the customer answers, the next model call sees that question in the chat history.",
         { label: "Verified clarification · excerpt", value: { status: "clarify", intentId: null, possibleIntentId: "show_portfolio", clarificationQuestion: portfolioSummaryQuestion } },
         { label: "DisplayExperience · excerpt", value: { status: "clarify", outcome: "clarify", question: portfolioSummaryQuestion, blocks: [], actions: [] } },
       ),

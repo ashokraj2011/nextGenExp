@@ -9,7 +9,7 @@ const namespaces = [
     id: "customer", label: "Customer",
     attributes: [
       {
-        id: "persona", label: "Demo persona", description: "The synthetic persona used for the preview or chat turn.",
+        id: "persona", label: "Demo profile", description: "The demo customer used for the preview or chat message.",
         valueType: "enum", operators: ["eq", "ne"], minimum: null,
         options: host.personas.map(({ personaId, displayName }) => ({ value: personaId, label: displayName })),
         read: ({ personaId }) => personaId,
@@ -42,7 +42,7 @@ const namespaces = [
     id: "conversation", label: "Conversation",
     attributes: [
       {
-        id: "turn_number", label: "Turn number", description: "The position of the request in this conversation, starting at one.",
+        id: "turn_number", label: "Message number", description: "The first request is 1, the next is 2, and so on.",
         valueType: "integer", operators: ["eq", "ne", "gte", "lte"], options: [], minimum: 1,
         read: ({ ordinal }) => ordinal,
       },

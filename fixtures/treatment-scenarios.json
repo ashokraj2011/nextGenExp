@@ -50,27 +50,27 @@
     }
   ],
   "scenarios": [
-    { "scenarioId": "normal", "label": "Normal eligibility", "rules": [] },
-    { "scenarioId": "conflicting-propensity", "label": "Conflicting propensity", "rules": [] },
-    { "scenarioId": "missing-propensity", "label": "Missing propensity score", "rules": [] },
-    { "scenarioId": "propensity-unavailable", "label": "Propensity unavailable", "rules": [] },
-    { "scenarioId": "catalog-unavailable", "label": "Context catalog unavailable", "rules": [] },
+    { "scenarioId": "normal", "label": "Standard rules", "rules": [] },
+    { "scenarioId": "conflicting-propensity", "label": "High score for another topic", "rules": [] },
+    { "scenarioId": "missing-propensity", "label": "Missing relevance score", "rules": [] },
+    { "scenarioId": "propensity-unavailable", "label": "Relevance scores unavailable", "rules": [] },
+    { "scenarioId": "catalog-unavailable", "label": "Topic list unavailable", "rules": [] },
     {
-      "scenarioId": "relevant-blocked", "label": "Relevant treatment excluded",
+      "scenarioId": "relevant-blocked", "label": "Rule filters out matching content",
       "rules": [
         { "context": "app-home", "fromTurn": 1, "eligible": ["transfer_learning", "transfer_checklist"], "rejections": [{ "contentId": "promotion_blocked", "stage": "simulated_ccre", "reasonCode": "RULE_FALSE" }] }
       ]
     },
     {
-      "scenarioId": "empty", "label": "Empty eligibility",
+      "scenarioId": "empty", "label": "No matching content",
       "rules": [{ "context": "*", "fromTurn": 1, "eligible": [] }]
     },
     {
-      "scenarioId": "ts-unavailable", "label": "TS timeout",
+      "scenarioId": "ts-unavailable", "label": "Treatment Selector times out",
       "rules": [{ "context": "*", "fromTurn": 1, "error": "TS_TIMEOUT" }]
     },
     {
-      "scenarioId": "cross-turn-change", "label": "Eligibility changes between turns",
+      "scenarioId": "cross-turn-change", "label": "Matching content changes by message",
       "rules": [
         { "context": "app-home", "fromTurn": 1, "eligible": ["transfer_learning", "transfer_checklist"] },
         { "context": "app-home", "fromTurn": 2, "eligible": ["portfolio_explanation"] }

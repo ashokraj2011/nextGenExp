@@ -22,13 +22,13 @@ function RankedContent({ ids, content, change }: {
 
   return <div className="rank-editor">
     <div className="setup-field">
-      <label htmlFor="mock-content">Add eligible content</label>
+      <label htmlFor="mock-content">Add content</label>
       <select id="mock-content" value="" disabled={!choices.length} onChange={(event) => change([...ids, event.target.value])}>
         <option value="" disabled>{choices.length ? "Choose a demo item" : "All demo items added"}</option>
         {choices.map(({ contentId, title }) => <option key={contentId} value={contentId}>{title}</option>)}
       </select>
     </div>
-    {ids.length ? <ol className="rank-list" aria-label="Ranked content">
+    {ids.length ? <ol className="rank-list" aria-label="Content order">
       {ids.map((id, index) => <li key={id}>
         <span className="rank-number" aria-hidden="true">{index + 1}</span>
         <span className="rank-item"><strong>{content.find(({ contentId }) => contentId === id)?.title ?? id}</strong><code>{id}</code></span>
@@ -40,7 +40,7 @@ function RankedContent({ ids, content, change }: {
           <button type="button" className="icon-button" aria-label={"Remove " + id} onClick={() => change(ids.filter((value) => value !== id))}><Trash2 size={16} /></button>
         </span>
       </li>)}
-    </ol> : <p className="admin-muted">Add at least one item, or choose Empty result.</p>}
+    </ol> : <p className="admin-muted">Add at least one item, or choose Return no content.</p>}
   </div>;
 }
 
@@ -141,7 +141,7 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
         <p>Saved settings apply to new chat requests in this browser.</p>
       </div>
       <div className="admin-save">
-        <p role="status">{saveNotice || (incompleteRankedResponse ? "Add content to each ranked response before saving." : dirty ? "Unsaved changes" : "")}</p>
+        <p role="status">{saveNotice || (incompleteRankedResponse ? "Add at least one item to each custom response before saving." : dirty ? "Unsaved changes" : "")}</p>
         <button className="send-button" type="submit" disabled={!dirty || incompleteRankedResponse || saving || startingChat}>{saving ? "Saving…" : "Save settings"}</button>
       </div>
       {saveError && <p className="admin-error" role="alert">{saveError}</p>}
@@ -149,7 +149,7 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
     <fieldset className="admin-layout" disabled={saving || startingChat}>
       <section className="admin-card" aria-labelledby="sfield-tools-title">
         <h2 id="sfield-tools-title">sfield tools</h2>
-        <p>Control which registered tools can run.</p>
+        <p>Turn tools on or off.</p>
         <ul className="admin-tools">
           {toolKeys.map((key) => {
             const tool = sfieldTools[key];
@@ -165,17 +165,17 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
       </section>
 
       <section className="admin-card" aria-labelledby="treatment-mock-title">
-        <h2 id="treatment-mock-title">Treatment Selector mock</h2>
-        <p>Set the eligible response for a scenario and context.</p>
+        <h2 id="treatment-mock-title">Treatment Selector test settings</h2>
+        <p>Choose what Treatment Selector returns for a topic and test case.</p>
         <div className="admin-fields">
           <div className="setup-field">
-            <label htmlFor="mock-scenario">Scenario</label>
+            <label htmlFor="mock-scenario">Test case</label>
             <select id="mock-scenario" value={scenarioId} onChange={(event) => setScenario(event.target.value)}>
               {data.scenarios.map(({ scenarioId, label }) => <option key={scenarioId} value={scenarioId}>{label}</option>)}
             </select>
           </div>
           <div className="setup-field">
-            <label htmlFor="mock-context">Context</label>
+            <label htmlFor="mock-context">Topic</label>
             <select id="mock-context" value={contextId} onChange={(event) => setContext(event.target.value)}>
               {data.contexts.map(({ contextId, displayName }) => <option key={contextId} value={contextId}>{displayName}</option>)}
             </select>
@@ -188,9 +188,9 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
               else if (mode === "empty" || mode === "timeout") changeOutput({ mode });
               else changeOutput(null);
             }}>
-              <option value="fixture">Built-in fixture</option>
-              <option value="ranked">Ranked content</option>
-              <option value="empty">Empty result</option>
+              <option value="fixture">Default response</option>
+              <option value="ranked">Choose content order</option>
+              <option value="empty">Return no content</option>
               <option value="timeout">Simulate timeout</option>
             </select>
           </div>
@@ -204,16 +204,16 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
 
         <div className="admin-preview">
           <h3>Preview response</h3>
-          <p>Test the current settings without an LLM gateway.</p>
+          <p>See what Treatment Selector would return before trying it in chat.</p>
           <div className="admin-preview-fields">
             <div className="setup-field">
-              <label htmlFor="mock-persona">Demo persona</label>
+              <label htmlFor="mock-persona">Demo profile</label>
               <select id="mock-persona" value={personaId ?? ""} onChange={(event) => setPreviewPersona(event.target.value)}>
                 {personas.map((persona) => <option key={persona.personaId} value={persona.personaId}>{persona.displayName}</option>)}
               </select>
             </div>
             <div className="setup-field">
-              <label htmlFor="mock-turn">Turn number</label>
+              <label htmlFor="mock-turn">Message number</label>
               <input id="mock-turn" type="number" min={1} step={1} value={ordinal} onChange={(event) => setOrdinal(event.target.value)} />
             </div>
           </div>
@@ -226,7 +226,7 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
               <MessageSquare size={16} aria-hidden="true" />{startingChat ? "Opening chat…" : dirty ? "Save and test in chat" : "Test in chat"}
             </button>
           </div>
-          <p id="test-chat-note" className="admin-test-note">Test in chat starts a new conversation at turn 1 with the selected persona and scenario.</p>
+          <p id="test-chat-note" className="admin-test-note">Test in chat opens a new chat with this profile and test case.</p>
           {chatError && <p className="admin-error" role="alert">{chatError}</p>}
           {previewResult && ("error" in previewResult
             ? <p className="admin-error" role="alert">{previewResult.error}</p>

@@ -84,9 +84,9 @@ function RuleCreationEditor({ data, scenarioId, personaId, glossary }: RuleCreat
     return <p className="rule-error" role="alert">Rule setup is unavailable for this demo conversation.</p>;
   }
   return <div className="rule-creation-body">
-    <p className="rule-scenario">Scenario <strong>{scenario.label}</strong></p>
+    <p className="rule-scenario">Test case <strong>{scenario.label}</strong></p>
     <div className="setup-field">
-      <label htmlFor={id + "-context"}>Context</label>
+      <label htmlFor={id + "-context"}>Topic</label>
       <select id={id + "-context"} disabled={Boolean(pending || saved)} value={contextId} onChange={(event) => {
         setContext(event.target.value);
         setSaveError("");
@@ -95,7 +95,7 @@ function RuleCreationEditor({ data, scenarioId, personaId, glossary }: RuleCreat
       </select>
     </div>
     {limitReached ? <p>The setup has reached its rule limit. <a href="/admin">Open Tool setup</a></p>
-      : !targets.length ? <p>Every treatment has a rule in this context. <a href="/admin">Open Tool setup</a></p>
+      : !targets.length ? <p>All items for this topic already have rules. <a href="/admin">Open Tool setup</a></p>
       : <CcreRuleForm scope={{ scenarioId, contextId }} personas={personas} targets={targets} defaultPersonaId={personaId}
           glossary={glossary} disabled={Boolean(pending || saved)}>
         {(rule) => {
@@ -105,12 +105,12 @@ function RuleCreationEditor({ data, scenarioId, personaId, glossary }: RuleCreat
               <legend>Preview as</legend>
               <div className="rule-fields">
                 <div className="setup-field">
-                  <label htmlFor={id + "-preview-persona"}>Preview persona</label>
+                  <label htmlFor={id + "-preview-persona"}>Preview profile</label>
                   <select id={id + "-preview-persona"} value={previewPersona} onChange={(event) => setPreviewPersona(event.target.value)}>
                     {personas.map((entry) => <option key={entry.personaId} value={entry.personaId}>{entry.displayName}</option>)}
                   </select>
                 </div>
-                <label className="setup-field">Preview turn
+                <label className="setup-field">Message number
                   <input type="number" min={1} step={1} value={turnNumber} onChange={(event) => setTurnNumber(event.target.value)} />
                 </label>
               </div>

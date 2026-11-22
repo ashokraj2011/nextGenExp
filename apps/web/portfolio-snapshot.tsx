@@ -8,7 +8,7 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
   const invested = equityCents + fixedIncomeCents;
   const total = cashCents + invested;
   const allocation = [
-    { label: "Equities", amount: equityCents, color: "equities" },
+    { label: "Stocks", amount: equityCents, color: "equities" },
     { label: "Fixed income", amount: fixedIncomeCents, color: "fixed-income" },
     { label: "Cash", amount: cashCents, color: "cash" },
   ];
@@ -23,7 +23,7 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
       <div><dt>Invested</dt><dd>{formatPortfolioAmount(invested)}</dd></div>
       <div><dt>Cash</dt><dd>{formatPortfolioAmount(cashCents)}</dd></div>
     </dl>
-    <h4>Allocation</h4>
+    <h4>Portfolio breakdown</h4>
     <div className="portfolio-allocation-bar" aria-hidden="true">
       {allocation.map(({ amount, color }) => <span className={color} key={color} style={{ width: percent(amount) + "%" }} />)}
     </div>

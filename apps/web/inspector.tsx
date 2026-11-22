@@ -30,7 +30,7 @@ function TraceView({ trace }: { trace: Trace }) {
       <dl className="trace-dl">
         {(trace.intentId || creatingRule) && <Detail label="Router intent"><code>{trace.intentId ?? "create_rule"}</code></Detail>}
         {trace.possibleIntentId && <Detail label="Possible intent"><code>{trace.possibleIntentId}</code></Detail>}
-        {!creatingRule && <Detail label={selectedContextId ? "Selected TS context" : "Routing outcome"}>
+        {!creatingRule && <Detail label={selectedContextId ? "Selected topic" : "Routing outcome"}>
           {selectedContextId ?? trace.routeOutcome ?? "Pending"}
         </Detail>}
         <Detail label="Delivery surface">{surface}</Detail>
@@ -44,7 +44,7 @@ function TraceView({ trace }: { trace: Trace }) {
         {catalog.contexts.map((item) => <p key={item.contextId}><strong>{item.displayName}</strong><br />{item.description}</p>)}
       </details>}
       {propensity && <details className="trace-details">
-        <summary>Synthetic propensity · {propensity.status}</summary>
+        <summary>Topic relevance scores · {propensity.status}</summary>
         <dl className="trace-dl">{propensity.scores.map(({ contextId, score }) => (
           <Detail key={contextId} label={contextId}>{score === null ? "Unknown" : score.toFixed(2)}</Detail>
         ))}</dl>
@@ -52,7 +52,7 @@ function TraceView({ trace }: { trace: Trace }) {
       </details>}
     </section>
     <section>
-      <h3>{creatingRule ? "Rule creation" : "Selection and composition"}</h3>
+      <h3>{creatingRule ? "Rule creation" : "Content and layout"}</h3>
       <dl className="trace-dl">
         {!creatingRule && <>
           <Detail label="Selection mode">{trace.selectionMode}</Detail>
@@ -60,14 +60,14 @@ function TraceView({ trace }: { trace: Trace }) {
         </>}
         <Detail label="Components">{components?.join(", ") || "None"}</Detail>
         {creatingRule && glossaryVersion && <Detail label="Glossary version"><code>{glossaryVersion}</code></Detail>}
-        {!creatingRule && <Detail label="Synthetic balance read">{trace.metricReadSucceeded ? "Succeeded" : "No successful read"}</Detail>}
+        {!creatingRule && <Detail label="Sample balance lookup">{trace.metricReadSucceeded ? "Succeeded" : "No successful lookup"}</Detail>}
         {portfolioScopeId && <Detail label="Portfolio Snapshot">{trace.portfolioReadSucceeded ? "Succeeded" : "Awaiting snapshot"}</Detail>}
         {trace.goalScopeId && <Detail label="Goal Progress">{trace.goalReadSucceeded ? "Succeeded" : "Awaiting goal progress"}</Detail>}
       </dl>
       {ts && <>
-        <dl className="trace-dl"><Detail label="TS response">{ts.source === "override" ? "Configured mock" : "Built-in fixture"}</Detail></dl>
+        <dl className="trace-dl"><Detail label="Treatment Selector response">{ts.source === "override" ? "Custom response" : "Default response"}</Detail></dl>
         <details className="trace-details" open>
-          <summary>TS eligibility order</summary>
+          <summary>Matching content in order</summary>
           {ts.baseline.length ? <ol>{ts.baseline.map((id) => <li key={id}><code>{id}</code></li>)}</ol> : <p>Empty eligible list</p>}
         </details>
         <details className="trace-details">
@@ -142,13 +142,13 @@ export function Inspector({ configuration, conversation, latest, close, create, 
       finally { setCreating(false); }
     }}>
       <h3>Demo setup</h3>
-      <label htmlFor="persona">Persona</label>
+      <label htmlFor="persona">Demo profile</label>
       <select id="persona" value={personaId} onChange={(event) => {
         const next = configuration.personas.find((value) => value.personaId === event.target.value)!;
         setPersonaId(next.personaId);
         if (!next.allowedScenarios.includes(scenarioId)) setScenarioId(next.allowedScenarios[0]);
       }}>{configuration.personas.map((item) => <option key={item.personaId} value={item.personaId}>{item.displayName}</option>)}</select>
-      <label htmlFor="scenario">Scenario</label>
+      <label htmlFor="scenario">Test case</label>
       <select id="scenario" value={scenarioId} onChange={(event) => setScenarioId(event.target.value)}>
         {configuration.scenarios.filter((item) => persona.allowedScenarios.includes(item.scenarioId))
           .map((item) => <option key={item.scenarioId} value={item.scenarioId}>{item.label}</option>)}
@@ -156,9 +156,9 @@ export function Inspector({ configuration, conversation, latest, close, create, 
       <button className="secondary-button" type="submit" disabled={creating}>Start with these settings</button>
     </form>
     <section className="trace-selector">
-      <label htmlFor="trace-turn">Turn trace</label>
+      <label htmlFor="trace-turn">Chat message</label>
       {turns.length ? <select id="trace-turn" value={selectedTurn} onChange={(event) => setSelectedTurn(event.target.value)}>
-        <option value="">Latest turn</option>
+        <option value="">Latest message</option>
         {turns.map((turn, index) => <option value={turn.id} key={turn.id}>{index + 1}. {turn.message.slice(0, 70)}</option>)}
       </select> : <p>Send a question to see its execution trace.</p>}
     </section>

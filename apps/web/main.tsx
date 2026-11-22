@@ -47,7 +47,7 @@ function Welcome({ testMode, configured, disabled }: { testMode: boolean; config
         </button>
       ))}
     </div>
-    {!testMode && !configured && <p className="gateway-status" role="status">Model gateway setup is required to generate responses.</p>}
+    {!testMode && !configured && <p className="gateway-status" role="status">Set up a model connection to get chat responses.</p>}
   </section>;
 }
 
@@ -411,7 +411,7 @@ function App() {
           </div>
         </div>
         <div className="topbar-actions">
-          {configuration?.mode === "test" && <span className="test-label" title="Deterministic automated test gateway">Test mode</span>}
+          {configuration?.mode === "test" && <span className="test-label" title="Uses sample model responses">Test mode</span>}
           {configuration?.openAiModel && <span className="test-label" title={configuration.openAiModel}>Live model</span>}
           {configuration?.inspectorEnabled && <a className="tool-setup-trigger inspector-trigger icon-button" aria-label="Tool setup" href="/admin">
             <Settings2 size={18} aria-hidden="true" /><span>Tool setup</span></a>}

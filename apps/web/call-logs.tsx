@@ -54,7 +54,7 @@ function ModelStage({ title, stage }: { title: string; stage: ModelStagePayloads
         ) : <p>No gateway body was saved for this attempt.</p>}
       </details>)}
       {stage.saved && <>
-        <p>Saved sfield payloads for the run.</p>
+        <p>Saved sfield requests and responses.</p>
         <JsonBlock title="Saved agent input" value={stage.saved.input} />
         {stage.saved.responses.map((response, index) => <JsonBlock key={index} title={`Saved response ${index + 1}`} value={response} />)}
       </>}
@@ -126,9 +126,9 @@ export function CallLogs({ turns, turnId, close }: { turns: TurnView[]; turnId?:
   return <DeveloperDrawer title="Call logs" icon={<FileText size={17} />} closeLabel="Close call logs" close={close} wide>
     {turn ? <>
       <section className="trace-selector call-log-selector">
-        <label htmlFor={selectorId}>Chat turn</label>
+        <label htmlFor={selectorId}>Chat message</label>
         <select id={selectorId} value={selected} onChange={(event) => setSelected(event.target.value)}>
-          <option value="">Latest turn</option>
+          <option value="">Latest message</option>
           {turns.map((entry, index) => <option key={entry.id} value={entry.id}>{index + 1}. {entry.message.slice(0, 70)}</option>)}
         </select>
         <p className="call-log-message">{turn.message}</p>
