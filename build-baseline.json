@@ -6,7 +6,6 @@
   "a2uiCommit": "4fdc4c632cf761af64fa474530df8211483fa282",
   "a2uiProtocol": "1.0",
   "a2uiPackages": "0.15.0",
-  "pnpm": "10.33.2",
   "nodeTested": "26.12.0",
   "fixtureVersions": {
     "contexts": "ts-contexts-demo-v1",
@@ -15,5 +14,6 @@
     "content": "content-demo-v1",
     "balanceRead": "pzn-demo-2026-11-v1",
     "host": "pzn-host-v1.1"
-  }
+  },
+  "npmTested": "11.20.0"
 }
