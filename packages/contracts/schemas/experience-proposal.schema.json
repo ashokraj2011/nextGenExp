@@ -94,7 +94,8 @@
               "PznContentCard",
               "PznComparison",
               "PznStepList",
-              "PznMetricSummary"
+              "PznMetricSummary",
+              "PznGoalProgress"
             ]
           },
           "candidateIds": {

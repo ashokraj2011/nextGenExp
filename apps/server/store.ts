@@ -4,6 +4,7 @@ import type { UsageSummary } from "@sfield/core";
 import type { CatalogSnapshot, ContentDecision, PropensityResult, RouteDecision, BalanceProof, Scope, SelectionMode } from "../../packages/contracts/domain";
 import type { Conversation, FailureCode, Progress, PublicEvent, PublicEventType, TurnView } from "../../packages/contracts/api";
 import type { GatewayExchange } from "../../packages/contracts/inspector";
+import type { GoalProgress } from "../../packages/contracts/goal-progress";
 import type { PortfolioSnapshot } from "../../packages/contracts/portfolio";
 import type { RoutingIntentId } from "../../packages/contracts/routing-intents";
 import { defaultToolSetup, type MockCcreEvaluation, type ToolSetup, type TreatmentSource } from "../../packages/contracts/tool-setup";
@@ -62,6 +63,8 @@ export type TurnRecord = {
   portfolioScopeId?: string;
   portfolioForRule?: PortfolioSnapshot;
   portfolioSnapshot?: PortfolioSnapshot;
+  goalScopeId?: string;
+  goalProgress?: GoalProgress;
   treatmentMockInput?: { mid: string; context: string };
   treatmentCcre?: MockCcreEvaluation;
   catalog?: CatalogSnapshot;

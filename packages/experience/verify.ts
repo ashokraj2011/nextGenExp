@@ -3,6 +3,7 @@ import type {
   BalanceProof, CatalogSnapshot, ContentDecision, ContentEntry, Dated, ExperienceProposal, ProposalBlock, RouteDecision, Scope,
 } from "../contracts/domain";
 import { isContextProposal, isExperienceProposal } from "../contracts/model";
+import { isHomeGoalSummary, type GoalProgress } from "../contracts/goal-progress";
 import { isPortfolioSummary, type PortfolioSnapshot } from "../contracts/portfolio";
 import { availableRoutingIntents, routingQuestions } from "../contracts/routing-intents";
 import { contentCatalog, lookupContent, retirementReminderCandidate } from "./content";
@@ -87,7 +88,7 @@ export type VerifiedExperience = {
 const readyIntros = new Set(["explanation", "comparison", "steps", "summary"]);
 export function verifyExperience(
   value: unknown, decision: ContentDecision, route: RouteDecision, scope: Scope, composerRunId: string,
-  proof: BalanceProof | null, now: number, portfolio?: PortfolioSnapshot,
+  proof: BalanceProof | null, now: number, portfolio?: PortfolioSnapshot, goalProgress?: GoalProgress,
 ): VerifiedExperience {
   requireCheck(isExperienceProposal(value), "SCHEMA_INVALID");
   checkFresh(decision, scope, now);
@@ -98,6 +99,9 @@ export function verifyExperience(
   requireCheck(decision.catalogVersion === contentCatalog.catalogVersion, "CATALOG_VERSION_MISMATCH");
 
   const { status, blocks, clarificationQuestion, introKey, followUpIds } = value;
+  if (goalProgress && isHomeGoalSummary(route)) {
+    requireCheck(status === "ready" && blocks.some(({ component }) => component === "PznGoalProgress"), "GOAL_PROGRESS_CARD_REQUIRED");
+  }
   if (status === "ready") {
     requireCheck(blocks.length && clarificationQuestion === null && readyIntros.has(introKey), "STATUS_SHAPE_INVALID");
   } else {
@@ -139,6 +143,7 @@ export function verifyExperience(
         }), "COMPARISON_FIELDS_MISMATCH");
     }
     if (component === "PznStepList") requireCheck(content[0].steps.length, "STEPS_UNAVAILABLE");
+    if (component === "PznGoalProgress") requireCheck(goalProgress && isHomeGoalSummary(route), "GOAL_PROGRESS_REQUIRED");
     if (component === "PznMetricSummary") {
       requireCheck(proof, "METRIC_PROOF_REQUIRED");
       requireCheck(sameScope(proof.scope, scope) && proof.toolId === content[0].metricSpec?.toolId

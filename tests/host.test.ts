@@ -20,6 +20,7 @@ import { actionFor, testClient, testProject } from "./client";
 import { startFixtureGateway, type TestInterceptor } from "./gateway-fixture";
 import { mockRuleGlossary } from "../packages/rule-glossary";
 import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../packages/portfolio-snapshot";
+import { fixtureGoalProgressProvider, type GoalProgressProvider } from "../packages/goal-progress";
 
 async function fixture(intercept?: TestInterceptor, opts: {
   noGateway?: boolean;
@@ -28,6 +29,7 @@ async function fixture(intercept?: TestInterceptor, opts: {
   gatewayEnv?: NodeJS.ProcessEnv;
   authorize?: (headers: IncomingHttpHeaders) => boolean;
   portfolioSnapshots?: PortfolioSnapshotProvider;
+  goalProgressProvider?: GoalProgressProvider;
   openAiProfile?: boolean;
 } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "pzn-host-test-"));
@@ -42,6 +44,7 @@ async function fixture(intercept?: TestInterceptor, opts: {
     selectionMode: opts.preserve ? "preserve_ts_rank" : "semantic_rerank",
     inspectorEnabled: opts.inspectorEnabled,
     portfolioSnapshots: opts.portfolioSnapshots,
+    goalProgressProvider: opts.goalProgressProvider,
   } as const;
   let app = await startApp(options);
   const client = await testClient(app.url);
@@ -576,6 +579,58 @@ test("portfolio summaries combine the scoped snapshot with the cash treatment on
   const missing = await client.ask(empty.id, question);
   assert.equal(missing.turn.failureCode, "portfolio_unavailable");
   assert.equal(missing.turn.experience, undefined);
+});
+
+test("home-buying progress reads the eligible member's target and history through sfield", async (t) => {
+  const reads: string[] = [];
+  const f = await fixture(undefined, { goalProgressProvider: {
+    async read(mid, signal) {
+      reads.push(mid);
+      return fixtureGoalProgressProvider.read(mid, signal);
+    },
+  } });
+  t.after(() => f.close());
+  const { client, gateway } = f;
+
+  for (const [persona, mid, target, saved, message] of [
+    ["demo-learner", "DEMO-MID-1001", 5_000_000, 2_600_000, "Show my home-buying goal and savings progress."],
+    ["demo-returning", "DEMO-MID-1002", 6_000_000, 3_360_000, "How close am I to buying a house?"],
+  ] as const) {
+    const chat = await client.conversation("normal", persona);
+    const { turn, trace } = await client.ask(chat.id, message);
+    assert.equal(turn.status, "completed", JSON.stringify(trace));
+    assert.equal(trace.intentId, "show_home_goal");
+    assert.equal(trace.selectedContextId, "goals");
+    assert.equal(trace.goalReadSucceeded, true);
+    assert.deepEqual(trace.finalOrder, ["home_down_payment_progress"]);
+    const block = turn.experience?.blocks[0];
+    assert.equal(block?.component, "PznGoalProgress");
+    assert.equal(block.props.goal.targetCents, target);
+    assert.equal(block.props.goal.history.length, 6);
+    assert.equal(block.props.goal.history.at(-1)?.savedCents, saved);
+
+    const logs = await client.request<TurnPayloads>("/api/debug/payloads/" + turn.id);
+    assert.deepEqual(logs.treatment?.mockInput?.data, { context: "goals", mid });
+    assert.deepEqual(logs.treatment?.result?.data, ["home_down_payment_progress"]);
+    assert.equal(logs.goal?.tool, "goal.progress.read@1.0.0");
+    assert.deepEqual(logs.goal?.registryInput.data, { turnRef: turn.id, routeDecisionId: trace.routeDecisionId });
+    assert.deepEqual(logs.goal?.result?.data, block.props.goal);
+    const composer = gateway.calls.at(-1)?.envelope;
+    assert.equal(composer?.goalProgressIncluded, true);
+    assert.doesNotMatch(JSON.stringify(composer), /targetCents|savedCents|DEMO-MID/);
+  }
+
+  const empty = await client.conversation("empty");
+  const excluded = await client.ask(empty.id, "Show my mortgage goal.");
+  assert.equal(excluded.turn.experience?.outcome, "eligible_empty");
+  assert.equal(excluded.trace.goalScopeId, null);
+
+  await client.request("/api/admin/tools", { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, goal: false } });
+  const chat = await client.conversation();
+  const disabled = await client.ask(chat.id, "Show my mortgage goal.");
+  assert.equal(disabled.turn.failureCode, "goal_unavailable");
+  assert.equal(disabled.turn.experience, undefined);
+  assert.deepEqual(reads, ["DEMO-MID-1001", "DEMO-MID-1002"]);
 });
 
 test("a misspelled retirement request reaches Learning and shows the beneficiary action only when eligible", async (t) => {

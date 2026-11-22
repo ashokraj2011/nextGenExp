@@ -112,6 +112,7 @@ function TurnPayloadLog({ turn }: { turn: TurnView }) {
       {payloads.glossary && <ReadToolStage title="CCRE glossary" payloadLabel="Glossary" stage={payloads.glossary} />}
       <TreatmentStage stage={payloads.treatment} />
       {payloads.portfolio && <ReadToolStage title="Portfolio Snapshot" stage={payloads.portfolio} />}
+      {payloads.goal && <ReadToolStage title="Goal Progress" stage={payloads.goal} />}
       <ModelStage title="Experience Composer" stage={payloads.composer} />
     </> : !failed && <p role="status">Loading call logs…</p>}
   </div>;

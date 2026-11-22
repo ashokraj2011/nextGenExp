@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0",
-  "catalogVersion": "ts-contexts-demo-v3",
+  "catalogVersion": "ts-contexts-demo-v4",
   "contexts": [
     {
       "contextId": "balance",
@@ -18,6 +18,12 @@
       "contextId": "learning",
       "displayName": "Learning",
       "description": "Education about retirement planning basics and beneficiary designations. Includes learning what a beneficiary is and how to review or add one in the demo.",
+      "active": true
+    },
+    {
+      "contextId": "goals",
+      "displayName": "Home-buying goal",
+      "description": "Review the synthetic home down payment target, progress and historical savings growth.",
       "active": true
     },
     {

@@ -12,6 +12,7 @@ export const routingIntents = [
   { intentId: "show_balance", label: "Show demo balances", contextId: "balance", task: "show", description: "Retrieve the actual synthetic available or current balance amounts." },
   { intentId: "explain_portfolio", label: "Understand portfolios", contextId: "portsum", task: "explain", description: "Learn what the portfolio view, holdings, or allocation labels mean." },
   { intentId: "show_portfolio", label: "Show portfolio summary", contextId: "portsum", task: "show", description: "Show the customer's synthetic portfolio value, cash, holdings, or allocation." },
+  { intentId: "show_home_goal", label: "Show home-buying goal", contextId: "goals", task: "show", description: "Show the customer's demo home down payment target, current savings, remaining gap, or savings history." },
   { intentId: "retirement_learning", label: "Learn about retirement", contextId: "learning", task: "explain", description: "Learn about retirement planning or beneficiary designations, including a confirmed interest in retirement when leaving work." },
   { intentId: "beneficiary_update_steps", label: "Review beneficiary update steps", contextId: "learning", task: "guide", description: "See the demo steps to review or add a beneficiary." },
   { intentId: "learn_transfers", label: "Learn about the demo app", contextId: "app-home", task: "explain", description: "Get explicit demo app help or learn about the fictional transfer flow." },

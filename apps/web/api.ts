@@ -37,6 +37,7 @@ export type Trace = {
   catalogScopeId: string | null;
   glossaryScopeId: string | null;
   portfolioScopeId: string | null;
+  goalScopeId: string | null;
   tsScopeId: string | null;
   routerRunId: string | null;
   composerRunId: string | null;
@@ -51,6 +52,7 @@ export type Trace = {
   components?: string[];
   metricReadSucceeded: boolean;
   portfolioReadSucceeded: boolean;
+  goalReadSucceeded: boolean;
   ts?: { baseline: string[]; fixtureVersion: string; partial: boolean; source?: TreatmentSource; rejections: { contentId: string; stage: string; reasonCode: string }[] };
   routeRun?: Stage;
   composeRun?: Stage;

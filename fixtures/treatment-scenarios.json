@@ -1,9 +1,10 @@
 {
-  "fixtureVersion": "pzn-ts-routed-v3",
+  "fixtureVersion": "pzn-ts-routed-v4",
   "base": {
     "balance": ["balance_education", "balance_available_definition", "balance_current_definition", "promotion_general", "balance_metric_template"],
     "portsum": ["portfolio_explanation", "portfolio_cash_investing"],
     "learning": ["retirement_learning", "beneficiary_update"],
+    "goals": ["home_down_payment_progress"],
     "app-home": ["transfer_checklist", "transfer_learning", "promotion_general"]
   },
   "defaultCcreRules": [

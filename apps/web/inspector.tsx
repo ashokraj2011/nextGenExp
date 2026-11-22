@@ -62,6 +62,7 @@ function TraceView({ trace }: { trace: Trace }) {
         {creatingRule && glossaryVersion && <Detail label="Glossary version"><code>{glossaryVersion}</code></Detail>}
         {!creatingRule && <Detail label="Synthetic balance read">{trace.metricReadSucceeded ? "Succeeded" : "No successful read"}</Detail>}
         {portfolioScopeId && <Detail label="Portfolio Snapshot">{trace.portfolioReadSucceeded ? "Succeeded" : "Awaiting snapshot"}</Detail>}
+        {trace.goalScopeId && <Detail label="Goal Progress">{trace.goalReadSucceeded ? "Succeeded" : "Awaiting goal progress"}</Detail>}
       </dl>
       {ts && <>
         <dl className="trace-dl"><Detail label="TS response">{ts.source === "override" ? "Configured mock" : "Built-in fixture"}</Detail></dl>
@@ -91,6 +92,7 @@ function TraceView({ trace }: { trace: Trace }) {
           {glossaryScopeId && <Detail label="Glossary scope"><code>{glossaryScopeId}</code></Detail>}
           {!creatingRule && <Detail label="Selection scope"><code>{tsScopeId ?? "Pending"}</code></Detail>}
           {portfolioScopeId && <Detail label="Portfolio scope"><code>{portfolioScopeId}</code></Detail>}
+          {trace.goalScopeId && <Detail label="Goal progress scope"><code>{trace.goalScopeId}</code></Detail>}
           <Detail label="Router run"><code>{routerRunId ?? "Pending"}</code></Detail>
           {!creatingRule && <Detail label="Composer run"><code>{composerRunId ?? "Pending"}</code></Detail>}
         </dl>

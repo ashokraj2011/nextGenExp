@@ -84,6 +84,12 @@ Alice Morgan sees **$12,500** in cash and the investing prompt. Jordan Lee sees 
 
 The POC uses synthetic accounts and a fixture implementation of `PortfolioSnapshotProvider`. A deployed integration can supply a portfolio service through that interface and call the existing Treatment Selector with the same context and member ID.
 
+### Home-buying goal demo
+
+Choose **Home-buying goal** in a new chat or ask “How close am I to buying a house?” The Context Router selects `show_home_goal` for the `goals` context. Treatment Selector returns the eligible home down payment template. sfield calls the scoped **Goal Progress** provider for the target and six monthly savings values. The composer selects `PznGoalProgress`, and the host fills the A2UI card with the verified data.
+
+Alice has saved **$26,000** toward **$50,000**. Jordan has saved **$33,600** toward **$60,000**. Each card includes the remaining amount, percentage saved, and a graph of the monthly growth. Expand **View monthly values** to see the underlying points. **Logs → Goal Progress** shows the tool request and response. **Help → Home-buying goal** walks through the architecture and includes the downloadable contract.
+
 ### Retirement learning demo
 
 Choose **Learn about retirement** in a new chat with **Normal eligibility**. The Context Router selects the `retirement_learning` intent, which maps to the `learning` context. sfield sends that context and the demo member ID to Treatment Selector. The mock CCRE rule **Customer → Beneficiary status → Equals → Missing** controls whether Treatment Selector returns `beneficiary_update` alongside `retirement_learning`. The Composer selects the lesson, and sfield adds the eligible reminder when it renders the lesson.

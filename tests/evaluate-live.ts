@@ -15,7 +15,7 @@ const gateway = gatewayFromEnv(process.env, useOpenAi ? "openai" : "gateway");
 if (!gateway) throw new Error("Set LLM_BASE_URL, LLM_MODEL, and LLM_API_KEY or LLM_GATEWAY_HEADERS_JSON before running gateway verification.");
 const smoke = process.argv.includes("--smoke");
 const modes: SelectionMode[] = smoke ? ["semantic_rerank"] : ["semantic_rerank", "preserve_ts_rank"];
-const smokeCases = ["balance-compare", "metric-summary", "balance-summary-follow-up", "transfer-steps"];
+const smokeCases = ["balance-compare", "metric-summary", "balance-summary-follow-up", "home-goal-progress", "transfer-steps"];
 if (useOpenAi) smokeCases.push("portfolio-summary-cash", "portfolio-summary-threshold", "retirement-missing-beneficiary", "retirement-beneficiary-on-file");
 const chosen = smoke ? liveCases.filter(({ id }) => smokeCases.includes(id)) : liveCases;
 

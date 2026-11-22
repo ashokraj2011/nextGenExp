@@ -1,4 +1,5 @@
 import type { JsonObject } from "@sfield/core";
+import { goalMonthPattern, homeDownPaymentGoalId } from "./goal-progress";
 import { glossaryOperators, glossaryValueTypes } from "./rule-glossary";
 import { routingIntents } from "./routing-intents";
 import contextSchema from "./schemas/context-selection-proposal.schema.json";
@@ -34,6 +35,7 @@ export const propensityInputSchema = closed({ turnRef: string, catalogSnapshotId
 export const treatmentInputSchema = closed({ turnRef: string, routeDecisionId: string });
 export const glossaryInputSchema = closed({ turnRef: string, routerRunId: string });
 export const portfolioInputSchema = closed({ turnRef: string, routeDecisionId: string });
+export const goalProgressInputSchema = closed({ turnRef: string, routeDecisionId: string });
 export const balanceInputSchema = closed({});
 export const contextResultSchema = closed({
   schemaVersion: { type: "string", enum: ["1.0"] },
@@ -51,6 +53,16 @@ const cents = { type: "integer", minimum: 0, maximum: 1_000_000_000_000 };
 export const portfolioResultSchema = closed({
   fixtureVersion: string, asOf: string, currency: { type: "string", enum: ["USD"] },
   cashCents: cents, equityCents: cents, fixedIncomeCents: cents,
+});
+export const goalProgressResultSchema = closed({
+  fixtureVersion: { ...string, minLength: 1 },
+  goalId: { type: "string", enum: [homeDownPaymentGoalId] },
+  currency: { type: "string", enum: ["USD"] },
+  targetCents: { ...cents, minimum: 1 },
+  history: {
+    ...array(closed({ month: { ...string, pattern: goalMonthPattern.source }, savedCents: cents }), 12),
+    minItems: 2,
+  },
 });
 const glossaryAttributeResultSchema = closed({
   id: string,

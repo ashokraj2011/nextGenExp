@@ -6,11 +6,13 @@ import domainSource from "../../packages/contracts/domain.ts?raw";
 import toolSetupSource from "../../packages/contracts/tool-setup.ts?raw";
 import glossarySource from "../../packages/contracts/rule-glossary.ts?raw";
 import portfolioSource from "../../packages/contracts/portfolio.ts?raw";
+import goalSource from "../../packages/contracts/goal-progress.ts?raw";
 import surfaceSource from "../../packages/contracts/surface.ts?raw";
 import inspectorSource from "../../packages/contracts/inspector.ts?raw";
 import treatmentAdapterSource from "../../packages/ts-adapter/index.ts?raw";
 import contentBundleSource from "../../packages/experience/content.ts?raw";
 import portfolioProviderSource from "../../packages/portfolio-snapshot/index.ts?raw";
+import goalProviderSource from "../../packages/goal-progress/index.ts?raw";
 import contextFixtureSource from "../../fixtures/contexts.json?raw";
 import treatmentFixtureSource from "../../fixtures/treatment-scenarios.json?raw";
 import sfieldModelSource from "../../vendor/sfield/packages/core/src/types/model.ts?raw";
@@ -19,6 +21,7 @@ import {
   routingOutputSchema, compositionOutputSchema, turnInputSchema, contextResultSchema, propensityInputSchema,
   propensityResultSchema, treatmentInputSchema, treatmentResultSchema, glossaryInputSchema, glossaryResultSchema,
   portfolioInputSchema, portfolioResultSchema, balanceInputSchema, balanceResultSchema,
+  goalProgressInputSchema, goalProgressResultSchema,
 } from "../../packages/contracts/model-schemas";
 
 export type ContractFile = { name: string; source: string };
@@ -135,6 +138,16 @@ export const helpContracts = [
         files: [
           jsonFile("ccre-glossary.tool.json", { input: glossaryInputSchema, output: glossaryResultSchema }),
           { name: "rule-glossary.ts", source: glossarySource },
+        ],
+      },
+      {
+        id: "goal",
+        title: "Goal Progress",
+        description: "The scoped tool returns the home down payment target and savings history for the eligible demo member. Monthly values are ordered and amounts use integer cents.",
+        files: [
+          jsonFile("goal-progress.tool.json", { input: goalProgressInputSchema, output: goalProgressResultSchema }),
+          { name: "goal-progress.ts", source: goalSource },
+          { name: "goal-progress-provider.ts", source: goalProviderSource },
         ],
       },
       {

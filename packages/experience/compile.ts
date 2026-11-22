@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import host from "../../fixtures/host.json";
 import type { BalanceProof, IntroKey } from "../contracts/domain";
+import type { GoalProgress } from "../contracts/goal-progress";
 import { formatPortfolioAmount, type PortfolioSnapshot } from "../contracts/portfolio";
 import type { RuleGlossary } from "../contracts/rule-glossary";
 import {
@@ -21,6 +22,7 @@ type ExperienceInput = {
   approved?: VerifiedExperience;
   proof?: BalanceProof | null;
   portfolio?: PortfolioSnapshot;
+  goalProgress?: GoalProgress;
 };
 
 export function compileExperience(input: ExperienceInput): CompiledExperience {
@@ -54,6 +56,10 @@ export function compileExperience(input: ExperienceInput): CompiledExperience {
             return value;
           }),
         } };
+      }
+      case "PznGoalProgress": {
+        if (!input.goalProgress) throw new Error("Verified goal progress is required");
+        return { component: proposal.component, props: { ...shared, goal: input.goalProgress } };
       }
       case "PznContentCard": {
         if (primary.portfolioData === "cash") {

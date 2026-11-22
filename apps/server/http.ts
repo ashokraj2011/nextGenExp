@@ -11,6 +11,7 @@ import { actionBody, createBody, eventBody, idPattern, messageBody, retryBody } 
 import { mockCcreRuleSchema, toolSetupSchema, treatmentPreviewSchema } from "../../packages/contracts/tool-setup";
 import { tsFixtures } from "../../packages/ts-adapter";
 import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
+import { fixtureGoalProgressProvider, type GoalProgressProvider } from "../../packages/goal-progress";
 import type { GatewaySettings } from "./gateway";
 import { Runtime } from "./runtime";
 import { ApiError, Store, presentConversation } from "./store";
@@ -27,6 +28,7 @@ type Options = {
   selectionMode?: SelectionMode;
   inspectorEnabled?: boolean;
   portfolioSnapshots?: PortfolioSnapshotProvider;
+  goalProgressProvider?: GoalProgressProvider;
 };
 const beneficiaryStatusSchema = z.enum(["missing", "on_file"]);
 const MIME: Record<string, string> = {
@@ -90,6 +92,7 @@ export async function startApp(options: Options) {
   const sessionCookie = options.gateway?.profile === "openai" ? "pzn_openai_session" : "pzn_session";
   const sessionPattern = new RegExp("(?:^|;\\s*)" + sessionCookie + "=(local_[a-f0-9]{32})(?:;|$)");
   const portfolioSnapshots = options.portfolioSnapshots ?? fixturePortfolioSnapshotProvider;
+  const goalProgressProvider = options.goalProgressProvider ?? fixtureGoalProgressProvider;
   const personas: Bootstrap["personas"] = await Promise.all(demo.personas.map(async ({
     personaId, displayName, allowedScenarios, profile, beneficiaryStatus, syntheticMid,
   }) => ({
@@ -103,7 +106,9 @@ export async function startApp(options: Options) {
   const store = new Store(join(options.dataDir, "app.sqlite"));
   let runtime: Runtime | null;
   try {
-    runtime = options.gateway ? await Runtime.open(store, join(options.dataDir, "sfield.sqlite"), options.gateway, now, inspectorEnabled, portfolioSnapshots) : null;
+    runtime = options.gateway
+      ? await Runtime.open(store, join(options.dataDir, "sfield.sqlite"), options.gateway, now, inspectorEnabled, portfolioSnapshots, goalProgressProvider)
+      : null;
   } catch (error) {
     store.close();
     throw error;
@@ -269,7 +274,7 @@ export async function startApp(options: Options) {
       const conversation = store.conversation(turn.scope.conversationId, principalId);
       if (id === "payloads") {
         const payloads = await runtime?.payloads(turn, conversation);
-        return json(res, payloads ?? { turnId: turn.public.id, router: null, glossary: null, treatment: null, portfolio: null, composer: null });
+        return json(res, payloads ?? { turnId: turn.public.id, router: null, glossary: null, treatment: null, portfolio: null, goal: null, composer: null });
       }
       return json(res, {
         turnId: turn.public.id, personaId: conversation.personaId, scenarioId: conversation.scenarioId, ordinal: turn.ordinal,
@@ -281,6 +286,8 @@ export async function startApp(options: Options) {
         glossaryScopeId: turn.glossaryScopeId ?? null,
         portfolioScopeId: turn.portfolioScopeId ?? null,
         portfolioReadSucceeded: Boolean(turn.portfolioSnapshot),
+        goalScopeId: turn.goalScopeId ?? null,
+        goalReadSucceeded: Boolean(turn.goalProgress),
         routerRunId: turn.attempts.route?.runId ?? null, composerRunId: turn.attempts.compose?.runId ?? null,
         metricReadSucceeded: Boolean(turn.proof),
         ...turn.trace,

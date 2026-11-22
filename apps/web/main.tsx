@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useAui, useAuiState, useExternalStoreRuntime, type ThreadMessageLike } from "@assistant-ui/react";
 import { CreateSurfaceMessageSchema, type ActionMessage } from "@a2ui/web_core/v1_0";
-import { BookOpenText, ChevronDown, CircleHelp, Columns2, FileText, GraduationCap, ListChecks, Menu, MessageSquare, PanelRight, Plus, RotateCcw, Settings2, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { BookOpenText, ChevronDown, CircleHelp, Columns2, FileText, GraduationCap, House, ListChecks, Menu, MessageSquare, PanelRight, Plus, RotateCcw, Settings2, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { failureCopy, progressLabels, type Bootstrap, type Conversation, type ConversationView, type TurnView, type TurnAccepted, type Progress } from "../../packages/contracts/api";
 import { MAX_MESSAGE_LENGTH } from "../../packages/contracts/domain";
 import { api } from "./api";
@@ -18,6 +18,7 @@ const starters = [
   { Icon: Columns2, label: "Compare two terms", message: "Compare available and current balance." },
   { Icon: ListChecks, label: "Guide me through a task", message: "Walk me through the demo transfer steps." },
   { Icon: GraduationCap, label: "Learn about retirement", message: "I'd like to learn about retirement." },
+  { Icon: House, label: "Home-buying goal", message: "Show my home-buying goal and savings progress." },
 ];
 type ConversationOperations = {
   latest?: TurnView;
@@ -36,7 +37,7 @@ function Welcome({ testMode, configured, disabled }: { testMode: boolean; config
   return <section className="welcome">
     <div className="welcome-mark"><LabMark /></div>
     <h2>What would you like to explore?</h2>
-    <p className="welcome-subtitle">Explore demo balances, portfolio terms, transfers, or retirement.</p>
+    <p className="welcome-subtitle">Explore demo finances and track progress toward a home-buying goal.</p>
     <div className="starters">
       {starters.map(({ Icon, label, message }) => (
         <button key={label} type="button" className="starter" disabled={disabled} onClick={() => aui.thread().append(message)}>

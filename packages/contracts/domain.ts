@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { RoutingIntentId } from "./routing-intents";
 
-export const componentNames = ["PznContentCard", "PznComparison", "PznStepList", "PznMetricSummary"] as const;
+export const componentNames = ["PznContentCard", "PznComparison", "PznStepList", "PznMetricSummary", "PznGoalProgress"] as const;
 export type ComponentName = typeof componentNames[number];
 export type Variant = "compact" | "expanded";
 export type SelectionMode = "semantic_rerank" | "preserve_ts_rank";

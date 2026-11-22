@@ -315,6 +315,28 @@ try {
   await snapshot.getByText("$10,000", { exact: true }).waitFor();
   assert.equal(await portfolioPage.getByRole("heading", { name: "Explore investing options", exact: true }).count(), 0);
   await portfolioPage.screenshot({ path: resolve(screenshots, "portfolio-returning-chat.png") });
+  const goalPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  goalPage.setDefaultTimeout(12_000);
+  goalPage.on("pageerror", (error) => pageErrors.push(error.message));
+  await goalPage.goto(preview.url);
+  await goalPage.getByRole("button", { name: /Home-buying goal/ }).click();
+  const goal = goalPage.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Home down payment", exact: true });
+  const goalValues = goal.locator(".goal-values");
+  await goal.getByText("52% saved", { exact: true }).waitFor();
+  await goalValues.getByText("$26,000", { exact: true }).waitFor();
+  await goalValues.getByText("$50,000", { exact: true }).waitFor();
+  await goalValues.getByText("$24,000", { exact: true }).waitFor();
+  await goalPage.waitForFunction(() => {
+    const chart = document.querySelector<HTMLCanvasElement>(".goal-figure canvas");
+    const context = chart?.getContext("2d");
+    return chart && context && context.getImageData(0, 0, chart.width, chart.height).data.some((value) => value > 0);
+  });
+  await goalPage.screenshot({ path: resolve(screenshots, "home-goal-desktop.png") });
+  await goal.getByText("View monthly values", { exact: true }).click();
+  assert.equal(await goal.getByRole("row").count(), 7);
+  await goalPage.getByRole("button", { name: "Open call logs", exact: true }).click();
+  await goalPage.getByText("Goal Progress · succeeded", { exact: true }).click();
+  assert.match(await goalPage.locator('pre[aria-label="Goal Progress tool response"]').innerText(), /"targetCents": 5000000/);
   assert.deepEqual(pageErrors, []);
 
   const mobile = await browser.newPage({ viewport: { width: 360, height: 780 }, isMobile: true, deviceScaleFactor: 1, reducedMotion: "reduce", hasTouch: true });
@@ -359,6 +381,11 @@ try {
   await mobileLogs.getByText("Portfolio Snapshot · succeeded", { exact: true }).waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await mobileLogs.getByRole("button", { name: "Close call logs", exact: true }).click();
+  await mobileMessage.fill("Show my mortgage goal.");
+  await mobileMessage.press("Enter");
+  const mobileGoal = mobile.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Home down payment", exact: true });
+  await mobileGoal.getByRole("img", { name: /Down payment savings/ }).waitFor();
+  assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await mobileMessage.fill("Create a rule");
   await mobileMessage.press("Enter");
   const mobileRule = mobile.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Create a CCRE rule" });
@@ -386,7 +413,10 @@ try {
   await fallback.locator('[data-renderer="fallback"]').waitFor();
   await fallback.getByRole("heading", { name: "Compare demo definitions" }).waitFor();
   await fallback.getByText("Fictional demonstration only.", { exact: false }).waitFor();
-  console.log("Browser checks passed for the chat homepage, Help walkthrough and contract downloads, planning overview, personalization, chat controls, logs, tool setup, and renderer fallback.");
+  await fallback.getByLabel("Your question").fill("Show my home-buying goal.");
+  await fallback.getByLabel("Your question").press("Enter");
+  await fallback.locator('[data-renderer="fallback"]').getByRole("img", { name: /Down payment savings/ }).waitFor();
+  console.log("Browser checks passed for the chat homepage, Help, planning overview, goal growth graph, personalization, chat controls, logs, tool setup, and renderer fallback.");
 } finally {
   await browser?.close();
   await preview.close();

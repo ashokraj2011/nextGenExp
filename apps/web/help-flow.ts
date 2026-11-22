@@ -1,5 +1,6 @@
 import balanceFixture from "../../fixtures/demo-balance-reads.json";
 import contextFixture from "../../fixtures/contexts.json";
+import goalFixture from "../../fixtures/demo-goal-progress.json";
 import portfolioFixture from "../../fixtures/demo-portfolio-snapshots.json";
 import propensityFixture from "../../fixtures/propensity.json";
 import treatmentFixture from "../../fixtures/treatment-scenarios.json";
@@ -10,7 +11,7 @@ import { mockRuleGlossary } from "../../packages/rule-glossary";
 
 export type PayloadExample = { label: string; value: unknown };
 export type FlowStep = {
-  id: "chat" | "discovery" | "router" | "treatment" | "portfolio" | "composer" | "glossary" | "render";
+  id: "chat" | "discovery" | "router" | "treatment" | "portfolio" | "goal" | "composer" | "glossary" | "render";
   title: string;
   role: string;
   description: string;
@@ -43,6 +44,8 @@ const portfolio = {
   fixtureVersion: portfolioFixture.fixtureVersion, asOf: portfolioFixture.asOf,
   currency: portfolioFixture.currency, ...portfolioAmounts,
 };
+const { targetCents, history } = goalFixture.goals[0];
+const homeGoal = { fixtureVersion: goalFixture.fixtureVersion, goalId: goalFixture.goalId, currency: goalFixture.currency, targetCents, history };
 
 function chat(message: string): FlowStep {
   return {
@@ -104,6 +107,7 @@ function composer(
     input: { label: "Composition envelope · excerpt", value: {
       inputType: "PznExperienceCompositionInput", request, selectedContextId, selectedIntentId, intent,
       ...(selectedIntentId === "show_portfolio" && { portfolioSnapshotIncluded: true }),
+      ...(selectedIntentId === "show_home_goal" && { goalProgressIncluded: true }),
       eligible: { decisionId, partial: false, selectionMode: "semantic_rerank", candidates },
     } },
     output: { label: "ExperienceProposal", value: output },
@@ -118,10 +122,12 @@ function render(description: string, input: PayloadExample, output: PayloadExamp
 const comparePrompt = "Compare available and current balance.";
 const summaryPrompt = "show me the summary";
 const portfolioPrompt = "Let me know my portfolio summary.";
+const goalPrompt = "Show my home-buying goal and savings progress.";
 const retirementPrompt = "I'd like to learn about retirement.";
 const rulePrompt = "Create rule";
 const balanceRoute = routeProposal("show_balance", "Show the summary of the established balance topic.");
 const portfolioRoute = routeProposal("show_portfolio", "Show the customer's demo portfolio.");
+const goalRoute = routeProposal("show_home_goal", "Show progress toward a home down payment.");
 const retirementRoute = routeProposal("retirement_learning", "Explain retirement planning basics.");
 const balanceCard: ProposalBlock = { blockId: "b1", component: "PznMetricSummary", candidateIds: ["candidate_balance"], variant: "compact" };
 const balanceComposer = composer(
@@ -200,6 +206,33 @@ export const helpFlows: Flow[] = [
           { component: "PznPortfolioSnapshot", props: portfolio },
           { component: "PznContentCard", props: { recommendation: true, title: "Explore investing options", body: "You have $12,500 in cash. Would you like to explore investing options?" } },
         ] } },
+      ),
+    ],
+  },
+  {
+    id: "home-goal", title: "Home-buying goal", prompt: goalPrompt,
+    steps: [
+      chat(goalPrompt), discovery,
+      router("The model chooses show_home_goal from the intent catalog. The host verifies the route and maps it to the goals context.", { request: goalPrompt, recent: [] }, goalRoute),
+      treatment("goals", treatmentFixture.base.goals, "Treatment Selector returns the eligible home down payment template. The host resolves the ID to a published candidate before reading savings history."),
+      {
+        id: "goal", title: "Goal Progress", role: "Scoped read",
+        description: "sfield reads the verified demo member's target and monthly savings history. The host checks the amounts and the order of the months.",
+        input: { label: "goal.progress.read", value: { turnRef, routeDecisionId } },
+        output: { label: "GoalProgress", value: homeGoal },
+        contracts: ["goal"],
+      },
+      composer(
+        goalPrompt, "goals", "show_home_goal", { topic: "Show home-buying goal", task: "show", summary: goalRoute.summary },
+        [{ candidateId: "candidate_home_goal", title: "Home down payment", tsRank: 1 }],
+        [{ blockId: "b1", component: "PznGoalProgress", candidateIds: ["candidate_home_goal"], variant: "expanded" }],
+        "The model receives the eligible goal template and a flag that the host has the goal data. It selects the goal chart component.",
+        "summary",
+      ),
+      render(
+        "The host attaches the verified goal data to the A2UI card. The browser shows the saved amount, target, remaining gap and growth graph.",
+        { label: "Verified inputs · excerpt", value: { selectedCandidateId: "candidate_home_goal", goal: homeGoal } },
+        { label: "DisplayExperience · excerpt", value: { status: "ready", blocks: [{ component: "PznGoalProgress", props: { title: "Home down payment", goal: homeGoal } }] } },
       ),
     ],
   },

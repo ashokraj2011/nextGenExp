@@ -43,5 +43,6 @@ export type TurnPayloads = {
   glossary: RegistryToolPayloads | null;
   treatment: TreatmentPayloads | null;
   portfolio: RegistryToolPayloads | null;
+  goal: RegistryToolPayloads | null;
   composer: ModelStagePayloads | null;
 };

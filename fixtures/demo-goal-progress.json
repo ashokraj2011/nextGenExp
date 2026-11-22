@@ -1,0 +1,31 @@
+{
+  "fixtureVersion": "pzn-demo-home-goal-v1",
+  "goalId": "home_down_payment",
+  "currency": "USD",
+  "goals": [
+    {
+      "mid": "DEMO-MID-1001",
+      "targetCents": 5000000,
+      "history": [
+        { "month": "2026-06", "savedCents": 750000 },
+        { "month": "2026-07", "savedCents": 1000000 },
+        { "month": "2026-08", "savedCents": 1320000 },
+        { "month": "2026-09", "savedCents": 1760000 },
+        { "month": "2026-10", "savedCents": 2150000 },
+        { "month": "2026-11", "savedCents": 2600000 }
+      ]
+    },
+    {
+      "mid": "DEMO-MID-1002",
+      "targetCents": 6000000,
+      "history": [
+        { "month": "2026-06", "savedCents": 1050000 },
+        { "month": "2026-07", "savedCents": 1360000 },
+        { "month": "2026-08", "savedCents": 1750000 },
+        { "month": "2026-09", "savedCents": 2290000 },
+        { "month": "2026-10", "savedCents": 2830000 },
+        { "month": "2026-11", "savedCents": 3360000 }
+      ]
+    }
+  ]
+}

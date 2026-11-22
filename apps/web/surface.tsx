@@ -4,26 +4,29 @@ import {
   ActionMessageSchema, Catalog, CreateSurfaceMessageSchema, MessageProcessor, basicCatalog, injectBasicCatalogStyles,
   type ActionMessage, type CreateSurfaceMessage, type SurfaceModel,
 } from "@a2ui/web_core/v1_0";
-import { ArrowUpRight, BookOpenText, ChartNoAxesColumnIncreasing, ChevronDown, Columns2, FileText, ListChecks } from "lucide-react";
+import { ArrowUpRight, BookOpenText, ChartNoAxesColumnIncreasing, ChevronDown, Columns2, FileText, House, ListChecks } from "lucide-react";
 import { makeAssistantDataUI } from "@assistant-ui/react";
 import {
   PZN_CATALOG_ID, FOLLOW_UP_EVENT, contentCard, comparison, stepList, metricSummary, experienceRoot, followUpButton, ruleCreation, portfolioSnapshot,
-  validatePznSurface, type DisplayBlock, type DisplayExperience,
+  goalProgressCard, validatePznSurface, type DisplayBlock, type DisplayExperience,
 } from "../../packages/contracts/surface";
 import { RuleCreationBlock } from "./rule-creation-block";
 import { PortfolioSnapshotBlock } from "./portfolio-snapshot";
+import { GoalProgressDetails } from "./goal-progress";
 
 const icons = {
   PznContentCard: BookOpenText,
   PznComparison: Columns2,
   PznStepList: ListChecks,
   PznMetricSummary: ChartNoAxesColumnIncreasing,
+  PznGoalProgress: House,
 };
 const blockLabels = {
   PznContentCard: "Explanation",
   PznComparison: "Comparison",
   PznStepList: "Step-by-step guide",
   PznMetricSummary: "Synthetic data",
+  PznGoalProgress: "Home-buying goal",
 };
 
 function ContentBlock({ block }: { block: DisplayBlock }) {
@@ -33,7 +36,8 @@ function ContentBlock({ block }: { block: DisplayBlock }) {
   const Icon = icons[component];
   const recommendation = block.component === "PznContentCard" && block.props.recommendation;
   return (
-    <section className={"content-card " + props.variant + (recommendation ? " portfolio-recommendation" : "")}>
+    <section className={"content-card " + props.variant + (recommendation ? " portfolio-recommendation" : "")}
+      aria-label={component === "PznGoalProgress" ? props.title : undefined}>
       <div className="content-kind"><Icon size={16} aria-hidden="true" />{recommendation ? "Suggested next step" : blockLabels[component]}</div>
       <h3>{props.title}</h3>
       {block.component === "PznContentCard" && (recommendation || block.props.variant === "expanded" ? (
@@ -79,6 +83,7 @@ function ContentBlock({ block }: { block: DisplayBlock }) {
           </p>
         </>
       )}
+      {block.component === goalProgressCard.name && <GoalProgressDetails goal={block.props.goal} />}
       <div className="content-footer">
         {props.disclosures.map((disclosure) => <p className="disclosure" key={disclosure}>{disclosure}</p>)}
         <details className="source-details">
@@ -120,6 +125,7 @@ const pznCatalog = new Catalog<ReactCatalogComponent>(PZN_CATALOG_ID, "1.0", [
   createComponentImplementation(comparison, ({ props }) => <ContentBlock block={{ component: comparison.name, props }} />),
   createComponentImplementation(stepList, ({ props }) => <ContentBlock block={{ component: stepList.name, props }} />),
   createComponentImplementation(metricSummary, ({ props }) => <ContentBlock block={{ component: metricSummary.name, props }} />),
+  createComponentImplementation(goalProgressCard, ({ props }) => <ContentBlock block={{ component: goalProgressCard.name, props }} />),
   createComponentImplementation(portfolioSnapshot, ({ props }) => <PortfolioSnapshotBlock {...props} />),
   createComponentImplementation(ruleCreation, ({ props }) => <RuleCreationBlock {...props} />),
   createComponentImplementation(followUpButton, ({ props, context }) => {

@@ -21,6 +21,7 @@ type Envelope = {
   allowedQuestions: string[];
   canCreateRule?: boolean;
   portfolioSnapshotIncluded?: boolean;
+  goalProgressIncluded?: boolean;
 };
 type RequestBody = {
   model: string;
@@ -57,7 +58,7 @@ function route(envelope: Envelope): ContextSelectionProposal {
   };
   const noMatch: ContextSelectionProposal = {
     ...base, status: "no_match", intentId: null, clarificationQuestion: null,
-    replyText: "I can help with demo balances, portfolio summaries, transfers, or retirement planning. Which would you like to explore?",
+    replyText: "I can help with demo balances, portfolios, home-buying goals, transfers, or retirement planning. Which would you like to explore?",
   };
   const reply = (replyText: string): ContextSelectionProposal => (
     { ...base, status: "reply", intentId: null, clarificationQuestion: null, replyText }
@@ -90,6 +91,7 @@ function route(envelope: Envelope): ContextSelectionProposal {
   if (/portfolio|protfolio|holdings|allocation/.test(text)) contexts.add("portsum");
   if (/transfer|app home|demo profile|app help|demo app/.test(text)) contexts.add("app-home");
   if (retirementTopic.test(text) || /beneficiar/.test(text)) contexts.add("learning");
+  if (/\b(?:down[ -]payment|home[ -]buying|home purchase|buy(?:ing)? (?:a |my |the )?(?:home|house)|mortgage (?:goal|progress|savings)|goal progress|my (?:savings )?goal)\b/.test(text)) contexts.add("goals");
 
   if (!contexts.size) {
     const previousTopic = recent?.findLast(({ contextId }) => contextId !== null);
@@ -125,7 +127,7 @@ function route(envelope: Envelope): ContextSelectionProposal {
 
   const asksForPortfolioValues = /\b(my|show|summarize|display)\b/.test(text) || /^(?:portfolio|protfolio) summary\W*$/.test(text);
   const showPortfolio = asksForPortfolioValues && !/\b(explain|terms|labels)\b/.test(text) && !/^what(?: is|'s) (?:a|the)\b/.test(text);
-  const task = /compare|difference|versus/.test(text) ? "compare"
+  const task = contexts.has("goals") ? "show" : /compare|difference|versus/.test(text) ? "compare"
     : /guide|steps|checklist|how do|walk/.test(text) ? "guide"
     : (contexts.has("portsum") ? showPortfolio : /summary|how much|amount|show my/.test(text)) ? "show" : "explain";
   const contextId = [...contexts][0];
@@ -162,6 +164,9 @@ function compose({ body, envelope }: GatewayCall): ExperienceProposal | ToolCall
   if (envelope.selectedContextId === "portsum") {
     if (envelope.portfolioSnapshotIncluded) return choose("PznContentCard", [get("Explore investing options")], "summary");
     return choose("PznContentCard", [get("Understanding the fictional portfolio")], "explanation");
+  }
+  if (envelope.selectedContextId === "goals" && envelope.goalProgressIncluded) {
+    return choose("PznGoalProgress", [get("Home down payment")], "summary");
   }
   if (envelope.selectedContextId === "learning") {
     if (envelope.intent?.task === "guide") {

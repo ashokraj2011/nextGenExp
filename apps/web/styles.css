@@ -144,6 +144,7 @@ button { color: inherit; }
 .welcome h2 { font-size: clamp(2rem, 4.1vw, 2.92rem); line-height: 1.1; letter-spacing: -.057em; font-weight: 730; }
 .welcome-subtitle { color: var(--muted); font-size: 1.02rem; line-height: 1.65; margin: 15px auto 0; }
 .starters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 39px; }
+.starters .starter:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .starter {
   min-width: 0; display: grid; align-content: start; justify-items: start; gap: 8px;
   min-height: 144px; text-align: left; background: var(--white); border: 1px solid var(--line); border-radius: var(--radius);

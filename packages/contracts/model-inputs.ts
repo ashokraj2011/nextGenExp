@@ -23,5 +23,6 @@ export type ExperienceCompositionInput = {
   selectedContextId: string;
   eligible: ReturnType<typeof modelBundle>;
   portfolioSnapshotIncluded?: true;
+  goalProgressIncluded?: true;
   allowedQuestions: readonly string[];
 };

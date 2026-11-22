@@ -76,6 +76,7 @@ export function modelBundle(decision: ContentDecision, route?: RouteDecision) {
         comparisonFields: content.comparisonFields,
         steps: content.steps,
         requiresBalanceRead: content.metricSpec !== null,
+        ...(content.allowedComponents.includes("PznGoalProgress") && { requiresGoalProgress: true }),
         ...(content.portfolioData && { requiresPortfolioSnapshot: true }),
         followUps: content.followUps.map(({ followUpId, label }) => ({ followUpId, label })),
       };

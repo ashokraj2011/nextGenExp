@@ -2,6 +2,7 @@ import type { RunResult } from "@sfield/core";
 import demo from "../../fixtures/host.json";
 import { type FailureCode } from "../../packages/contracts/api";
 import { DECISION_TTL, TURN_DEADLINE, contextCatalogSchema, propensitySchema, type SelectionMode, type PropensityResult } from "../../packages/contracts/domain";
+import { goalProgressSchema, isHomeGoalSummary } from "../../packages/contracts/goal-progress";
 import type { ContextRoutingInput, ExperienceCompositionInput } from "../../packages/contracts/model-inputs";
 import { isPortfolioSummary, portfolioSnapshotSchema } from "../../packages/contracts/portfolio";
 import { ruleGlossarySchema } from "../../packages/contracts/rule-glossary";
@@ -127,7 +128,7 @@ export class ExperienceService {
     this.controllers.set(id, controller);
     const timer = setTimeout(() => controller.abort(new TurnFailure("turn_timeout")), remains);
     timer.unref();
-    let stage: "catalog" | "route" | "glossary" | "ts" | "portfolio" | "compose" = "catalog";
+    let stage: "catalog" | "route" | "glossary" | "ts" | "portfolio" | "goal" | "compose" = "catalog";
     const current = () => {
       signal.throwIfAborted();
       return runtime.current(id);
@@ -251,6 +252,7 @@ export class ExperienceService {
       const route = turn.route!;
       verifyRoute(route, catalog, turn.scope, turn.attempts.route?.runId ?? null, this.now());
       const showPortfolio = isPortfolioSummary(route);
+      const showGoal = isHomeGoalSummary(route);
       if (!turn.decision) {
         this.store.progress(id, "eligibility", this.now());
         const result = await runtime.registry(turn, "tsScopeId", 1, signal, async (call) => (
@@ -264,7 +266,11 @@ export class ExperienceService {
 
         const ids = normalizedIdsSchema.parse(result.output);
         const { candidates: resolved, rejections } = resolveCandidates(ids);
-        const candidates = resolved.filter((candidate) => Boolean(lookupContent(candidate)?.portfolioData) === showPortfolio);
+        const candidates = resolved.filter((candidate) => {
+          const content = lookupContent(candidate);
+          return Boolean(content?.portfolioData) === showPortfolio
+            && Boolean(content?.allowedComponents.includes("PznGoalProgress")) === showGoal;
+        });
         const partial = Boolean((candidates.length || showPortfolio) && rejections.length);
         const now = this.now();
         this.store.update(id, (row) => {
@@ -321,6 +327,25 @@ export class ExperienceService {
         }
         return;
       }
+      if (showGoal && !turn.goalProgress) {
+        stage = "goal";
+        this.store.progress(id, "goal", this.now());
+        const result = await runtime.registry(turn, "goalScopeId", 1, signal, async (call) => (
+          call("goal", { ...asRef(turn), routeDecisionId: route.routeDecisionId })
+        ));
+        current();
+        if (result.status !== "succeeded") {
+          this.store.update(id, (row) => { row.trace.failures.push({ stage, code: result.error?.code ?? "GOAL_PROGRESS_UNAVAILABLE" }); });
+          throw new TurnFailure("goal_unavailable");
+        }
+        const progress = goalProgressSchema.parse(result.output);
+        this.store.update(id, (row) => {
+          row.goalProgress = progress;
+          row.trace.markers.goalResolved = this.now();
+        });
+        turn = current();
+      }
+      const goalProgress = showGoal ? turn.goalProgress : undefined;
 
       stage = "compose";
       this.store.progress(id, "composition", this.now());
@@ -329,6 +354,7 @@ export class ExperienceService {
         request: turn.public.message, intent: route.intent,
         selectedIntentId: turn.trace.intentId ?? undefined, selectedContextId: route.contextId, eligible: modelBundle(decision, route),
         ...(portfolio && { portfolioSnapshotIncluded: true }),
+        ...(goalProgress && { goalProgressIncluded: true }),
         allowedQuestions: demo.clarificationQuestions,
       } satisfies ExperienceCompositionInput, signal, recovering);
 
@@ -345,7 +371,7 @@ export class ExperienceService {
       const resultForDisplay = compileExperience({
         status: verified.proposal.status, outcome: verified.proposal.status, introKey: verified.proposal.introKey,
         question: verified.proposal.clarificationQuestion, partial: decision.partial && Boolean(portfolio || verified.proposal.status === "ready"),
-        expiresAt, approved: verified, proof, portfolio,
+        expiresAt, approved: verified, proof, portfolio, goalProgress,
       });
       this.store.update(id, (row) => {
         row.trace.markers.proposalValidated = this.now();
@@ -363,6 +389,7 @@ export class ExperienceService {
         : stage === "glossary" ? "glossary_unavailable"
         : stage === "ts" ? "ts_unavailable"
         : stage === "portfolio" ? "portfolio_unavailable"
+        : stage === "goal" ? "goal_unavailable"
         : error instanceof Rejected ? (stage === "route" ? "route_rejected" : "verification_failed")
         : "internal_error";
       this.store.update(id, (row) => { row.trace.failures.push({ stage, code: error instanceof Rejected ? error.code : mapped }); });

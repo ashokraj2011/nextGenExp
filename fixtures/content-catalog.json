@@ -1,9 +1,27 @@
 {
   "schemaVersion": "1.0",
   "fixtureVersion": "pzn-demo-2026-11-v1",
-  "catalogVersion": "content-demo-v3",
+  "catalogVersion": "content-demo-v4",
   "dataClassification": "synthetic_demo_only",
   "entries": [
+    {
+      "contentId": "home_down_payment_progress",
+      "version": "v1",
+      "publicationStatus": "published",
+      "kind": "metric_template",
+      "title": "Home down payment",
+      "description": "Show demo savings progress toward the home down payment target, including growth over time.",
+      "body": "The host renders this template with the verified goal target and monthly savings history.",
+      "allowedComponents": ["PznGoalProgress"],
+      "comparisonGroup": null,
+      "comparisonFields": [],
+      "steps": [],
+      "metricSpec": null,
+      "followUps": [],
+      "sourceRef": "fixture:home_down_payment_progress",
+      "sourceLabel": "Demo content catalog",
+      "requiredDisclosures": [{ "disclosureId": "demo_only", "text": "Savings and targets use synthetic demo data." }]
+    },
     {
       "contentId": "balance_education",
       "version": "v1",

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowLeft, ArrowUpRight, BookOpenText, Braces, Database, Download, GitBranch, LayoutGrid, ListFilter, MessageSquare, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, BookOpenText, Braces, Database, Download, GitBranch, House, LayoutGrid, ListFilter, MessageSquare, Sparkles } from "lucide-react";
 import { contractList, helpContracts, type ContractFile } from "./help-contracts";
 import { helpFlows, type FlowStep, type PayloadExample } from "./help-flow";
 import "./help.css";
@@ -10,6 +10,7 @@ const stepIcons = {
   router: Sparkles,
   treatment: ListFilter,
   portfolio: Database,
+  goal: House,
   composer: Braces,
   glossary: BookOpenText,
   render: LayoutGrid,
