@@ -46,6 +46,12 @@ Open [PZN Lab test preview](http://127.0.0.1:4174). The **Test mode** badge iden
 
 Try **Compare two terms** for the A2UI comparison. **Guide me through a task** opens the canonical transfer checklist and a portfolio follow-up. To see the eligible set and route decisions, open **Inspector**. Its persona and scenario settings create a new conversation. Type “Show my synthetic demo balance summary” for the read-only metric example.
 
+### Inspect requests and responses
+
+Open **Inspector**, choose a **Turn trace**, and expand **Request and response payloads**. The Context Router and Experience Composer show the compiled Chat Completions request body, assembled assistant response, and individual gateway attempts. The Treatment Selector shows the sfield tool input, mock input and ranked IDs or tool error. The decoded views make structured messages readable alongside the full request and response data.
+
+Capture is local to the inspector and saved in SQLite. Gateway headers are excluded, and configured metadata values and known credentials are redacted. For older turns, the inspector verifies a reconstructed gateway body against the saved digest when possible and can show the saved agent input and responses. Set `PZN_INSPECTOR=off` to disable inspector access and new payload capture.
+
 ### sfield tool setup
 
 Open **Tool setup** from the chat header. Turn the four registered read-only tools on or off. For the **Treatment Selector mock**, choose a scenario and context, then use the built-in fixture, set a ranked list from the eligible demo content, return an empty list, or simulate a timeout.

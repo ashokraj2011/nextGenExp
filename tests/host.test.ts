@@ -10,6 +10,7 @@ import { gatewayFromEnv } from "../apps/server/gateway";
 import type { IncomingHttpHeaders } from "node:http";
 import { startApp } from "../apps/server/http";
 import type { TurnAccepted, TurnView, ConversationView } from "../packages/contracts/api";
+import type { TurnPayloads } from "../packages/contracts/inspector";
 import { defaultToolSetup, type ToolSetup, type ToolSetupView, type TreatmentPreviewInput } from "../packages/contracts/tool-setup";
 import { actionFor, testClient, testProject } from "./client";
 import { startFixtureGateway, type TestInterceptor } from "./gateway-fixture";
@@ -36,10 +37,10 @@ async function fixture(intercept?: TestInterceptor, opts: {
   const client = await testClient(app.url);
   return {
     gateway, client, dataDir: dir,
-    async restart(prepare?: (dir: string) => void) {
+    async restart(prepare?: (dir: string) => void, overrides: { inspectorEnabled?: boolean } = {}) {
       await app.close();
       prepare?.(dir);
-      app = await startApp(options);
+      app = await startApp({ ...options, ...overrides });
       return testClient(app.url, client.cookie);
     },
     async close() {
@@ -115,6 +116,10 @@ test("saved tool settings are isolated by browser and take effect on subsequent 
   const failed = await client.ask(conversation.id, message);
   assert.equal(failed.turn.failureCode, "ts_unavailable");
   assert.ok(failed.trace.failures.some(({ code }) => code === "TS_TIMEOUT"));
+  const failedPayloads = await client.request<TurnPayloads>("/api/debug/payloads/" + failed.turn.id);
+  assert.deepEqual(failedPayloads.treatment?.mockInput?.data, { mid: "DEMO-MID-1001", context: "balance" });
+  assert.match(JSON.stringify(failedPayloads.treatment?.error?.data), /TS_TIMEOUT/);
+  assert.equal(failedPayloads.composer, null);
 
   const restored = await f.restart();
   assert.deepEqual((await restored.request<ToolSetupView>(path)).setup, timeout);
@@ -166,6 +171,20 @@ test("two-stage completion persists source-rich comparison, scopes, SSE replay, 
   assert.equal(gateway.calls.at(1)?.body.tools?.length, 1);
   assert.match(events, /event: experience\.ready/);
   assert.doesNotMatch(events, /Deterministic test intent|DEMO-MID|text_delta|routeDecisionId/);
+  const payloadPath = "/api/debug/payloads/" + turn.id;
+  const payloads = await client.request<TurnPayloads>(payloadPath);
+  const router = payloads.router?.attempts[0].exchange;
+  const composer = payloads.composer?.attempts[0].exchange;
+  assert.equal(router?.source, "recorded");
+  assert.equal(composer?.source, "recorded");
+  assert.deepEqual(router?.request.data, gateway.calls[0].body);
+  assert.deepEqual(composer?.request.data, gateway.calls[1].body);
+  assert.match(JSON.stringify(router?.response?.data), /balance/);
+  assert.match(JSON.stringify(composer?.response?.data), /PznComparison/);
+  assert.deepEqual(payloads.treatment?.mockInput?.data, { mid: "DEMO-MID-1001", context: "balance" });
+  assert.deepEqual(payloads.treatment?.registryInput.data, { turnRef: turn.id, routeDecisionId: trace.routeDecisionId });
+  assert.deepEqual(payloads.treatment?.result?.data, trace.ts?.baseline);
+  assert.equal((await client.response(payloadPath, undefined, { Cookie: "" })).status, 404);
   const exp = turn.experience!;
   assert.equal(exp.messages[0].version, "1.0");
   const [block] = exp.blocks;
@@ -203,6 +222,28 @@ test("two-stage completion persists source-rich comparison, scopes, SSE replay, 
   const restoredClient = await f.restart();
   const restored = await restoredClient.request<ConversationView>("/api/conversations/" + original.id);
   assert.deepEqual(restored.turns.map((entry) => entry.experience?.experienceId), [exp.experienceId, picked.experienceId, fed.turn.experience?.experienceId]);
+  assert.deepEqual(await restoredClient.request<TurnPayloads>(payloadPath), payloads);
+});
+
+test("older comparison payloads are verified from the saved run without reissuing either model call", async (t) => {
+  const f = await fixture(undefined, { inspectorEnabled: false });
+  t.after(() => f.close());
+  const conversation = await f.client.conversation();
+  const accepted = await f.client.submit(conversation.id, "Compare available and current balance.");
+  await (await f.client.response(accepted.eventsUrl)).text();
+  assert.equal((await f.client.turn(accepted.turnId)).status, "completed");
+  const path = "/api/debug/payloads/" + accepted.turnId;
+  assert.equal((await f.client.response(path)).status, 404);
+  const client = await f.restart(undefined, { inspectorEnabled: true });
+  const payloads = await client.request<TurnPayloads>(path);
+  const router = payloads.router?.attempts[0].exchange;
+  const composer = payloads.composer?.attempts[0].exchange;
+  assert.equal(router?.source, "verified");
+  assert.equal(composer?.source, "verified");
+  assert.equal(f.gateway.calls.length, 2);
+  assert.deepEqual(router?.request.data, f.gateway.calls[0].body);
+  assert.deepEqual(composer?.request.data, f.gateway.calls[1].body);
+  assert.deepEqual(payloads.treatment?.mockInput?.data, { mid: "DEMO-MID-1001", context: "balance" });
 });
 
 test("scenario outcomes distinguish intent-only routing, empty eligibility, partial resolution, and outages", async (t) => {
@@ -271,6 +312,12 @@ test("synthetic metrics require a successful real sfield tool call before displa
   assert.ok(f.gateway.calls.at(-1)?.body.messages.some((message) => message.role === "tool"));
   assert.equal(result.trace.composeRun?.tokensReported, false);
   assert.doesNotMatch(result.events, /invocation|proofType|modelCalls/);
+  const payloads = await f.client.request<TurnPayloads>("/api/debug/payloads/" + result.turn.id);
+  const attempts = payloads.composer?.attempts ?? [];
+  assert.equal(attempts.length, 2);
+  assert.match(JSON.stringify(attempts[0].exchange?.response?.data), /toolCalls/);
+  assert.deepEqual(attempts[1].exchange?.request.data, f.gateway.calls[2].body);
+  assert.match(JSON.stringify(attempts[1].exchange?.response?.data), /PznMetricSummary/);
 });
 
 test("admission rejects unknown contexts, tampered input, duplicate payload changes, and foreign principals", async (t) => {
@@ -461,6 +508,10 @@ test("custom gateway headers and body fields reach every request, including tool
     assert.deepEqual(Object.fromEntries(Object.keys(fields).map((key) => [key, Reflect.get(call.body, key)])), fields);
   }
   assert.ok(!result.events.includes(key));
+  const payloads = await f.client.request<TurnPayloads>("/api/debug/payloads/" + result.turn.id);
+  const body = payloads.router?.attempts[0].exchange?.request.data;
+  assert.deepEqual(body, { ...f.gateway.calls[0].body, metadata: "[REDACTED]", region: "[REDACTED]" });
+  assert.doesNotMatch(JSON.stringify(payloads), /pzn-header-only-test-key|demo-east|x-gateway-context/i);
 });
 
 test("gateway configuration rejects ambiguous auth and attempts to replace adapter fields", () => {
@@ -492,6 +543,13 @@ test("gateway error reflection redacts credentials from a JSON-valued header", a
   const result = await f.client.ask(conversation.id, "Explain demo balances.");
   assert.equal(result.turn.failureCode, "gateway_unavailable");
   assert.ok(!result.events.includes(reflected));
+  const payloads = await f.client.request<TurnPayloads>("/api/debug/payloads/" + result.turn.id);
+  const failed = payloads.router?.attempts[0];
+  assert.equal(failed?.status, "failed");
+  assert.match(JSON.stringify(failed?.exchange?.response?.data), /\[REDACTED\]/);
+  assert.ok(!JSON.stringify(payloads).includes(reflected));
+  assert.equal(payloads.treatment, null);
+  assert.equal(payloads.composer, null);
   const database = new DatabaseSync(join(f.dataDir, "sfield.sqlite"), { readOnly: true });
   try {
     const attempts = database.prepare("SELECT body FROM model_attempts WHERE run_id = ?").all(result.trace.routerRunId!);

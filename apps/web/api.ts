@@ -1,5 +1,6 @@
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import type { Bootstrap, ConversationView, TurnAccepted, TurnView } from "../../packages/contracts/api";
+import type { TurnPayloads } from "../../packages/contracts/inspector";
 import type { ContextCatalog, PropensityResult, SelectionMode } from "../../packages/contracts/domain";
 import type { ToolSetup, ToolSetupView, TreatmentPreview, TreatmentPreviewInput, TreatmentSource } from "../../packages/contracts/tool-setup";
 
@@ -66,4 +67,5 @@ export const api = {
     })
   ),
   debug: (id: string) => request<Trace>("/api/debug/turns/" + id),
+  payloads: (id: string) => request<TurnPayloads>("/api/debug/payloads/" + id),
 };

@@ -3,6 +3,7 @@ import { SqliteDatabase } from "@sfield/store-sqlite";
 import type { UsageSummary } from "@sfield/core";
 import type { CatalogSnapshot, ContentDecision, PropensityResult, RouteDecision, BalanceProof, Scope, SelectionMode } from "../../packages/contracts/domain";
 import type { Conversation, FailureCode, Progress, PublicEvent, PublicEventType, TurnView } from "../../packages/contracts/api";
+import type { GatewayExchange } from "../../packages/contracts/inspector";
 import { defaultToolSetup, type ToolSetup, type TreatmentSource } from "../../packages/contracts/tool-setup";
 import type { CompiledExperience, IssuedAction } from "../../packages/experience/compile";
 import { makeId } from "../../packages/experience/compile";
@@ -52,6 +53,7 @@ export type TurnRecord = {
   trace: TurnTrace;
   catalogScopeId?: string;
   tsScopeId?: string;
+  treatmentMockInput?: { mid: string; context: string };
   catalog?: CatalogSnapshot;
   propensity?: PropensityResult;
   route?: RouteDecision;
@@ -84,6 +86,9 @@ export class Store {
       CREATE TABLE IF NOT EXISTS local_sessions (id TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS tool_setups (
         principal_id TEXT PRIMARY KEY REFERENCES local_sessions(id), record TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS gateway_exchanges (
+        attempt_id TEXT PRIMARY KEY, record TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, updated_at INTEGER NOT NULL, record TEXT NOT NULL
@@ -129,6 +134,14 @@ export class Store {
       INSERT INTO tool_setups (principal_id, record) VALUES (?, ?)
       ON CONFLICT(principal_id) DO UPDATE SET record = excluded.record
     `, principalId, JSON.stringify(setup));
+  }
+
+  gatewayExchange(attemptId: string) {
+    return parse<GatewayExchange>(this.db.one("SELECT record FROM gateway_exchanges WHERE attempt_id = ?", attemptId));
+  }
+
+  saveGatewayExchange(attemptId: string, exchange: GatewayExchange) {
+    this.db.run("INSERT OR IGNORE INTO gateway_exchanges (attempt_id, record) VALUES (?, ?)", attemptId, JSON.stringify(exchange));
   }
 
   createConversation(principalId: string, personaId: string, scenarioId: string, now: number) {

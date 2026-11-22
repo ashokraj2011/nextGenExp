@@ -53,6 +53,18 @@ try {
   await page.getByRole("button", { name: "Open developer inspector" }).click();
   await page.getByRole("dialog", { name: "Developer inspector" }).waitFor();
   await page.getByText("Selected TS context", { exact: true }).waitFor();
+  await page.getByLabel("Turn trace").selectOption({ index: 1 });
+  await page.getByText("Request and response payloads", { exact: true }).click();
+  await page.getByText("Experience Composer · 1 attempt", { exact: true }).waitFor();
+  await page.getByText("Treatment Selector · succeeded", { exact: true }).click();
+  const mockRequest = page.locator('pre[aria-label="Mock request"]');
+  assert.match(await mockRequest.innerText(), /"mid": "DEMO-MID-1001"/);
+  await page.getByText("Context Router · 1 attempt", { exact: true }).click();
+  await page.getByText("Decoded chat input", { exact: true }).first().click();
+  assert.match(await page.locator('pre[aria-label="Decoded chat input"]').first().innerText(), /Compare available and current balance\./);
+  await page.getByText("Gateway request body", { exact: true }).first().click();
+  assert.match(await page.locator('pre[aria-label="Gateway request body"]').first().innerText(), /"response_format"/);
+  await page.screenshot({ path: resolve(screenshots, "inspector-payloads.png") });
   await page.keyboard.press("Escape");
   await page.getByRole("dialog", { name: "Developer inspector" }).waitFor({ state: "hidden" });
 

@@ -1,5 +1,7 @@
 import { digestJson, EnvSecretResolver, OpenAICompatibleProvider, Scrubber, stableBody } from "@sfield/core";
-import type { JsonObject, JsonValue, ModelBinding, ModelProvider, OpenAIQuirk, SFieldOptions, SFieldPlugin } from "@sfield/core";
+import type { JsonObject, JsonValue, ModelBinding, ModelProvider, ModelStreamEvent, OpenAIQuirk, SFieldOptions, SFieldPlugin } from "@sfield/core";
+import type { GatewayExchange } from "../../packages/contracts/inspector";
+import { createPayloadCapture } from "./payload-capture";
 
 export type GatewaySettings = {
   baseUrl: string;
@@ -108,15 +110,19 @@ function headerSecrets(value: string): string[] {
 type GatewayConfiguration = {
   model: JsonObject;
   options: Pick<SFieldOptions, "env" | "bindings" | "plugins" | "secrets">;
+  inspection?: ReturnType<typeof createPayloadCapture> & { compile: ModelProvider["compile"] };
 };
 
-export function configureGateway(settings: GatewaySettings): GatewayConfiguration {
+export function configureGateway(
+  settings: GatewaySettings, record?: (attemptId: string, exchange: GatewayExchange) => void,
+): GatewayConfiguration {
   const env = { LLM_API_KEY: settings.apiKey };
   const headers = settings.headers ?? {};
   const bodyFields = settings.bodyFields ?? {};
   const headerNames = Object.keys(headers);
   const bodyFieldNames = Object.keys(bodyFields);
-  if (!headerNames.length && !bodyFieldNames.length) {
+  const hasOverrides = headerNames.length > 0 || bodyFieldNames.length > 0;
+  if (!hasOverrides && !record) {
     return {
       model: {
         provider: "openai_compatible", model: settings.model, base_url: settings.baseUrl,
@@ -131,11 +137,12 @@ export function configureGateway(settings: GatewaySettings): GatewayConfiguratio
   const id = "pzn_chat_gateway";
   const credentialValues = [...Object.values(headers).flatMap(headerSecrets), ...(settings.apiKey ? [settings.apiKey] : [])];
   const scrubber = new Scrubber(credentialValues);
-  const adapter = new OpenAICompatibleProvider((input, init) => {
+  const adapter = new OpenAICompatibleProvider(hasOverrides ? (input, init) => {
     const outgoing = new Headers(init?.headers);
     for (const [name, value] of Object.entries(headers)) outgoing.set(name, value);
     return fetch(input, { ...init, headers: outgoing, redirect: "error" });
-  });
+  } : undefined);
+  const capture = record && createPayloadCapture([...credentialValues, ...headerSecrets(JSON.stringify(bodyFields))], bodyFieldNames);
   const provider: ModelProvider = {
     id,
     describe: (binding) => adapter.describe(binding),
@@ -147,11 +154,21 @@ export function configureGateway(settings: GatewaySettings): GatewayConfiguratio
       return { ...compiled, provider: id, body, digest: digestJson(body) };
     },
     async *stream(request, options) {
-      for await (const event of adapter.stream(request, options)) {
-        if (event.type === "error") {
-          yield { ...event, error: { ...event.error, message: scrubber.scrubText(event.error.message) } };
-        } else {
-          yield event;
+      let outcome: Extract<ModelStreamEvent, { type: "done" | "error" }> | undefined;
+      try {
+        for await (const event of adapter.stream(request, options)) {
+          if (event.type === "error") {
+            outcome = { ...event, error: { ...event.error, message: scrubber.scrubText(event.error.message) } };
+            yield outcome;
+          } else {
+            if (event.type === "done") outcome = event;
+            yield event;
+          }
+        }
+      } finally {
+        if (record && capture) {
+          try { record(options.attemptId, capture.exchange(request, outcome, "recorded")); }
+          catch { /* A diagnostic write cannot change the model result. */ }
         }
       }
     },
@@ -176,6 +193,7 @@ export function configureGateway(settings: GatewaySettings): GatewayConfiguratio
   const resolver = new EnvSecretResolver(env);
   return {
     model: { binding: id },
+    inspection: capture && { ...capture, compile: (request) => provider.compile(request) },
     options: {
       env, bindings: { models: { [id]: binding } }, plugins: [plugin],
       secrets: {

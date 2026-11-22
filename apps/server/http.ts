@@ -92,16 +92,16 @@ async function serveAsset(pathname: string, root: string, res: ServerResponse) {
 export async function startApp(options: Options) {
   const now = Date.now;
   const selectionMode = options.selectionMode ?? "semantic_rerank";
+  const inspectorEnabled = options.inspectorEnabled ?? true;
   const store = new Store(join(options.dataDir, "app.sqlite"));
   let runtime: Runtime | null;
   try {
-    runtime = options.gateway ? await Runtime.open(store, join(options.dataDir, "sfield.sqlite"), options.gateway, now) : null;
+    runtime = options.gateway ? await Runtime.open(store, join(options.dataDir, "sfield.sqlite"), options.gateway, now, inspectorEnabled) : null;
   } catch (error) {
     store.close();
     throw error;
   }
   const experience = new ExperienceService(store, runtime, selectionMode, now);
-  const inspectorEnabled = options.inspectorEnabled ?? true;
   const mode = options.mode ?? "live";
   let vite: ViteDevServer | undefined;
   const streams = new Set<ServerResponse>();
@@ -235,9 +235,13 @@ export async function startApp(options: Options) {
       store.analytics(principalId, data.experienceId, data.eventId, data.type, now());
       return json(res, { received: true });
     }
-    if (resource === "debug" && inspectorEnabled && id === "turns" && operation && method === "GET") {
+    if (resource === "debug" && inspectorEnabled && (id === "turns" || id === "payloads") && operation && method === "GET") {
       const turn = store.ownTurn(operation, principalId);
       const conversation = store.conversation(turn.scope.conversationId, principalId);
+      if (id === "payloads") {
+        const payloads = await runtime?.payloads(turn, conversation);
+        return json(res, payloads ?? { turnId: turn.public.id, router: null, treatment: null, composer: null });
+      }
       return json(res, {
         turnId: turn.public.id, personaId: conversation.personaId, scenarioId: conversation.scenarioId, ordinal: turn.ordinal,
         catalog: turn.catalog ? { id: turn.catalog.snapshotId, ...turn.catalog.catalog } : null,

@@ -15,6 +15,7 @@ import { checkFresh, Rejected, requireCheck, verifyContextProposal, verifyExperi
 import { makeId } from "../../packages/experience/compile";
 import { configureGateway, type GatewaySettings } from "./gateway";
 import { stageAgent, type ConversationRecord, type Stage, type StageAttempt, type Store, type TurnRecord } from "./store";
+import { readTurnPayloads } from "./turn-payloads";
 
 const toolRefs = {
   catalog: `${sfieldTools.catalog.id}@${toolVersion}`,
@@ -97,11 +98,15 @@ function runtimeConfig(settings: GatewaySettings, model: JsonObject): ConfigDocu
 
 export class Runtime {
   private sf!: SField;
-  private constructor(private readonly store: Store, private readonly now: () => number) {}
+  private constructor(
+    private readonly store: Store,
+    private readonly now: () => number,
+    private readonly inspection: ReturnType<typeof configureGateway>["inspection"],
+  ) {}
 
-  static async open(store: Store, path: string, settings: GatewaySettings, now: () => number) {
-    const runtime = new Runtime(store, now);
-    const gateway = configureGateway(settings);
+  static async open(store: Store, path: string, settings: GatewaySettings, now: () => number, inspectorEnabled = false) {
+    const gateway = configureGateway(settings, inspectorEnabled ? (id, exchange) => store.saveGatewayExchange(id, exchange) : undefined);
+    const runtime = new Runtime(store, now, gateway.inspection);
     runtime.sf = await SField.create({
       deployment: "durable_single", config: runtimeConfig(settings, gateway.model),
       persistence: new SqlitePersistence({ path }),
@@ -122,6 +127,10 @@ export class Runtime {
       limits: { requestMaxBytes: 64 * 1024, grants: { effects: ["read"] } },
     });
     return runtime;
+  }
+
+  payloads(turn: TurnRecord, conversation: ConversationRecord) {
+    return this.inspection && readTurnPayloads(this.sf, this.store, this.inspection, turn, conversation);
   }
 
   current(id: string): TurnRecord {
@@ -180,7 +189,12 @@ export class Runtime {
           const { turn, persona, adapter } = this.scopedRegistryTurn(turnRef, ctx, "selection");
           requireCheck(turn.route?.routeDecisionId === routeDecisionId && turn.route && turn.catalog && turn.attempts.route, "ROUTE_REQUIRED");
           verifyRoute(turn.route, turn.catalog, turn.scope, turn.attempts.route.runId, this.now());
-          return adapter.getRankedEligibleIds({ mid: persona.syntheticMid, context: turn.route.contextId }, ctx.signal);
+          const input = { mid: persona.syntheticMid, context: turn.route.contextId };
+          if (this.inspection) {
+            try { this.store.update(turn.public.id, (row) => { row.treatmentMockInput = input; }); }
+            catch { /* The mock call still runs when diagnostic storage is unavailable. */ }
+          }
+          return adapter.getRankedEligibleIds(input, ctx.signal);
         },
       }),
       read("balances", {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Code2, X } from "lucide-react";
 import type { Bootstrap, ConversationView, TurnView } from "../../packages/contracts/api";
 import { api, type Trace } from "./api";
+import { PayloadInspector } from "./payload-inspector";
 
 function Detail({ label, children }: { label: string; children: ReactNode }) {
   return <div><dt>{label}</dt><dd>{children}</dd></div>;
@@ -160,6 +161,7 @@ export function Inspector({ configuration, conversation, latest, close, create }
           {turns.map((turn, index) => <option value={turn.id} key={turn.id}>{index + 1}. {turn.message.slice(0, 70)}</option>)}
         </select> : <p>Send a question to see its execution trace.</p>}
       </section>
+      {displayedTurn && <PayloadInspector key={displayedTurn.id} turn={displayedTurn} />}
       {traceError && <p role="alert">The turn trace is unavailable.</p>}
       {trace?.turnId === displayedTurn?.id && trace && <TraceView trace={trace} />}
     </div>

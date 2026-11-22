@@ -250,7 +250,7 @@ button { color: inherit; }
 .retry { align-self: start; }
 
 .inspector {
-  position: fixed; inset: 0 0 0 auto; overflow: hidden; width: min(100%, 378px); max-width: none;
+  position: fixed; inset: 0 0 0 auto; overflow: hidden; width: min(100%, 480px); max-width: none;
   height: 100dvh; max-height: none; margin: 0; padding: 0; border: 0; border-left: 1px solid var(--line);
   background: var(--white); color: var(--ink); box-shadow: -16px 0 36px #1526381d;
 }
@@ -283,6 +283,14 @@ button { color: inherit; }
 .trace-details summary { cursor: pointer; color: var(--teal-dark); font-weight: 620; min-height: 25px; }
 .trace-details :is(p, ul, ol) { margin: 6px 0; }
 .trace-details :is(ul, ol) { padding-left: 21px; }
+.payload-inspector { margin-top: 13px; color: var(--muted); font-size: .83rem; line-height: 1.5; }
+.payload-stage > summary { color: var(--ink); }
+.trace-payload pre {
+  max-height: 15rem; overflow: auto; margin: 5px 0 7px; padding: 9px;
+  border-radius: 6px; background: #f4f7f8; color: var(--ink);
+  font-size: .79rem; line-height: 1.46; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.trace-payload pre code { font-size: inherit; }
 .trace-stages { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 8px 0; }
 .trace-stage, .trace-view .trace-stage + .trace-stage { min-width: 0; padding: 5px 8px; margin: 0; border: 1px solid var(--line); border-radius: 8px; background: #f8faf9; }
 .trace-stage h4 { font-weight: 640; font-size: .83rem; }
