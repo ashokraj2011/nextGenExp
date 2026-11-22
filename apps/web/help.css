@@ -134,11 +134,30 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
-.help-message-label {
-  display: inline-block;
+.help-message-heading {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 5px;
   padding: 1px 4px;
-  color: var(--help-green);
   background: #fff;
+}
+.help-message-number {
+  display: inline-grid;
+  flex: 0 0 20px;
+  place-items: center;
+  height: 20px;
+  border-radius: 50%;
+  color: #254e3c;
+  background: #e3efe2;
+  font-size: .72rem;
+  font-weight: 710;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.help-message-label {
+  min-width: 0;
+  color: var(--help-green);
   font-size: .76rem;
   line-height: 1.3;
   font-weight: 615;
@@ -367,7 +386,8 @@
     font-weight: 600;
     line-height: 1.3;
   }
-  .help-message-label { padding: 4px 0 0; font-size: .82rem; background: transparent; }
+  .help-message-heading { padding: 4px 0 0; background: transparent; }
+  .help-message-label { font-size: .82rem; }
 }
 
 @media (max-width: 800px) {

@@ -58,7 +58,7 @@ export function InteractionDiagram() {
     <div className="help-sequence">
       <div className="help-lifelines" aria-hidden="true">{participants.map(({ name }) => <span key={name} />)}</div>
       <ol aria-label="Chat interaction sequence" role="list">
-        {exchanges.map(({ from, to, label, reply }) => {
+        {exchanges.map(({ from, to, label, reply }, index) => {
           const start = participants.indexOf(from);
           const end = participants.indexOf(to);
           const columns = Math.abs(end - start) + 1;
@@ -71,7 +71,10 @@ export function InteractionDiagram() {
               <span className="help-message-endpoints">
                 {from.shortName} <ArrowRight size={13} aria-hidden="true" /> <span className="sr-only">to</span> {to.shortName}
               </span>
-              <span className="help-message-label">{label}</span>
+              <span className="help-message-heading">
+                <span className="help-message-number">{index + 1}</span>
+                <span className="help-message-label">{label}</span>
+              </span>
               <span className="help-message-arrow" aria-hidden="true" />
             </div>
           </li>;
