@@ -41,12 +41,16 @@ try {
   assert.equal(new URL(page.url()).pathname, "/");
   await page.getByRole("link", { name: "Help", exact: true }).click();
   await page.getByRole("heading", { name: "How PZN Lab works", exact: true, level: 1 }).waitFor();
+  const architecture = page.getByRole("region", { name: "How chat answers a message", exact: true });
+  await architecture.getByRole("heading", { name: "PZN app server", exact: true }).waitFor();
+  await architecture.getByRole("heading", { name: "sfield", exact: true }).waitFor();
   const sequence = page.getByRole("list", { name: "Chat interaction sequence" });
   await sequence.getByText("Matching content IDs in order", { exact: true }).waitFor();
   await sequence.getByText("A2UI instructions for cards and buttons", { exact: true }).waitFor();
   const numberedSteps = await sequence.getByRole("button").all();
   assert.equal(numberedSteps.length, 13);
   const exchanges = [];
+  const exchangePaths = [];
   for (const [index, button] of numberedSteps.entries()) {
     await button.click();
     const drawer = page.getByRole("dialog", { name: new RegExp(`^Step ${index + 1} ·`) });
@@ -55,9 +59,14 @@ try {
       request: JSON.parse(await drawer.locator('pre[aria-label="Request JSON"]').innerText()),
       response: JSON.parse(await drawer.locator('pre[aria-label="Response JSON"]').innerText()),
     });
+    exchangePaths.push(await drawer.locator(".help-exchange-direction strong").allTextContents());
     await page.keyboard.press("Escape");
     await drawer.waitFor({ state: "hidden" });
   }
+  assert.deepEqual(exchangePaths[3], ["PZN app server", "sfield", "Language model"]);
+  assert.deepEqual(exchangePaths[5], ["PZN app server", "sfield", "Treatment Selector"]);
+  assert.deepEqual(exchangePaths[6], ["Treatment Selector", "sfield", "PZN app server"]);
+  assert.deepEqual(exchangePaths[9], ["PZN app server", "sfield", "Language model"]);
   assert.equal(exchanges[0].request.message, "I moved and need to update my address.");
   assert.equal(exchanges[2].response.contexts[0].contextId, "address-update");
   assert.equal(exchanges[4].response.intentId, "update_address");

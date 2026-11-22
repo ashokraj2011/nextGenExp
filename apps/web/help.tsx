@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, ArrowUpRight, BookOpenText, Braces, Database, Download, GitBranch, House, LayoutGrid, ListFilter, MessageSquare, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, BookOpenText, Braces, Database, Download, GitBranch, House, LayoutGrid, ListFilter, MessageSquare, Sparkles } from "lucide-react";
 import { DeveloperDrawer } from "./developer-drawer";
-import { currentTreatmentExample, InteractionDiagram, proposedTreatmentExample, TreatmentProposalDiagram, type DiagramExchange } from "./help-architecture";
+import { currentTreatmentExample, ExchangePath, InteractionDiagram, proposedTreatmentExample, TreatmentProposalDiagram, type DiagramExchange } from "./help-architecture";
 import { contractList, helpContracts, type ContractFile } from "./help-contracts";
 import { addressUpdateExample, helpFlows, type FlowStep, type PayloadExample } from "./help-flow";
 import { SfieldHelp } from "./help-sfield";
@@ -38,12 +38,12 @@ function PayloadPair({ input, output }: { input: PayloadExample; output: Payload
 }
 
 function ExchangeDetails({ exchange, close }: { exchange: DiagramExchange; close: () => void }) {
-  const { example, from, to, label, number, reply } = exchange;
+  const { example, path, label, number, reply } = exchange;
   return <div className="help-exchange-drawer">
     <DeveloperDrawer title={`Step ${number} · ${label}`} icon={<Braces size={18} />} closeLabel="Close exchange details" close={close} wide>
       <p className="help-example">As <strong>{addressUpdateExample.persona}</strong>, ask <strong>“{addressUpdateExample.prompt}”</strong></p>
       <p className="help-exchange-direction">
-        <strong>{from.name}</strong> <ArrowRight size={15} aria-hidden="true" /> <span className="sr-only">to</span> <strong>{to.name}</strong>
+        <ExchangePath path={path} />
       </p>
       <p className="help-exchange-description">{example.description}</p>
       <PayloadExamples examples={[

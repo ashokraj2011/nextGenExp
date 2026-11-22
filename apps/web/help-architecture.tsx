@@ -1,6 +1,6 @@
-import type { CSSProperties } from "react";
+import { Fragment, type CSSProperties } from "react";
 import {
-  ArrowRight, BookOpenText, Database, GitBranch, ListFilter, MessageSquare, Network, Sparkles, Zap,
+  ArrowRight, BookOpenText, Database, GitBranch, ListFilter, MessageSquare, Network, ShieldCheck, Sparkles, Zap,
 } from "lucide-react";
 import hostFixture from "../../fixtures/host.json";
 import treatmentFixture from "../../fixtures/treatment-scenarios.json";
@@ -12,8 +12,12 @@ const participants = [
     description: "Chat sends messages. A2UI displays cards, forms, and buttons.",
   },
   {
-    name: "PZN app server + sfield", shortName: "App server + sfield", Icon: Network,
-    description: "The app server links the message to the customer and checks the result. sfield calls the model and tools.",
+    name: "PZN app server", shortName: "App server", Icon: Network,
+    description: "Matches the chat to a demo customer, chooses the next step, and checks the results before building the reply.",
+  },
+  {
+    name: "sfield", shortName: "sfield", Icon: ShieldCheck,
+    description: "Runs inside the app server. Calls the language model and runs the tools that call Treatment Selector.",
   },
   {
     name: "Language model", shortName: "Language model", Icon: Sparkles,
@@ -29,27 +33,37 @@ const participants = [
   },
 ];
 
-const [chat, host, model, selector, data] = participants;
+const [chat, host, sfield, model, selector, data] = participants;
 const cases = addressUpdateExample.exchanges;
 const exchanges = [
-  { from: chat, to: host, label: "Message + conversation ID", example: cases.chat },
-  { from: host, to: selector, label: "Ask which topics are supported", example: cases.contexts },
-  { from: selector, to: host, label: "List of supported topics", reply: true, example: cases.contexts },
-  { from: host, to: model, label: "Message, recent chat, and request options", example: cases.router },
-  { from: model, to: host, label: "Likely request or follow-up question", reply: true, example: cases.router },
-  { from: host, to: selector, label: "Topic and member ID", example: cases.treatment },
-  { from: selector, to: host, label: "Matching content IDs in order", reply: true, example: cases.treatment },
-  { from: host, to: data, label: "Look up content and account details", example: cases.content },
-  { from: data, to: host, label: "Content and sample account details", reply: true, example: cases.content },
-  { from: host, to: model, label: "Customer’s request and matching content", example: cases.composer },
-  { from: model, to: host, label: "Suggested layout for the reply", reply: true, example: cases.composer },
-  { from: host, to: chat, label: "A2UI instructions for cards and buttons", reply: true, example: cases.surface },
-  { from: chat, to: host, label: "Button starts the next chat step", example: cases.followUp },
+  { path: [chat, host], label: "Message + conversation ID", example: cases.chat },
+  { path: [host, sfield, selector], label: "Ask which topics are supported", example: cases.contexts },
+  { path: [selector, sfield, host], label: "List of supported topics", reply: true, example: cases.contexts },
+  { path: [host, sfield, model], label: "Message, recent chat, and request options", example: cases.router },
+  { path: [model, sfield, host], label: "Likely request or follow-up question", reply: true, example: cases.router },
+  { path: [host, sfield, selector], label: "Topic and member ID", example: cases.treatment },
+  { path: [selector, sfield, host], label: "Matching content IDs in order", reply: true, example: cases.treatment },
+  { path: [host, data], label: "Look up content by ID", example: cases.content },
+  { path: [data, host], label: "Matching content for this request", reply: true, example: cases.content },
+  { path: [host, sfield, model], label: "Customer’s request and matching content", example: cases.composer },
+  { path: [model, sfield, host], label: "Suggested layout for the reply", reply: true, example: cases.composer },
+  { path: [host, chat], label: "A2UI instructions for cards and buttons", reply: true, example: cases.surface },
+  { path: [chat, host], label: "Button starts the next chat step", example: cases.followUp },
 ];
 export type DiagramExchange = (typeof exchanges)[number] & { number: number };
 
+export function ExchangePath({ path, short = false }: { path: DiagramExchange["path"]; short?: boolean }) {
+  return path.map((participant, index) => (
+    <Fragment key={participant.name}>
+      {index > 0 && <><ArrowRight size={short ? 13 : 15} aria-hidden="true" /><span className="sr-only">to</span></>}
+      {short ? <span>{participant.shortName}</span> : <strong>{participant.name}</strong>}
+    </Fragment>
+  ));
+}
+
 export function InteractionDiagram({ onSelect }: { onSelect: (exchange: DiagramExchange) => void }) {
-  return <figure className="help-interaction" aria-labelledby="architecture-title">
+  return <figure className="help-interaction" aria-labelledby="architecture-title"
+    style={{ "--lane-count": participants.length } as CSSProperties}>
     <ul className="help-participants" aria-label="Entity responsibilities" role="list">
       {participants.map(({ name, Icon, description }) => (
         <li key={name}>
@@ -62,10 +76,11 @@ export function InteractionDiagram({ onSelect }: { onSelect: (exchange: DiagramE
       <div className="help-lifelines" aria-hidden="true">{participants.map(({ name }) => <span key={name} />)}</div>
       <ol aria-label="Chat interaction sequence" role="list">
         {exchanges.map((exchange, index) => {
-          const { from, to, label, reply } = exchange;
+          const { path, label, reply } = exchange;
           const number = index + 1;
-          const start = participants.indexOf(from);
-          const end = participants.indexOf(to);
+          const lanes = path.map((participant) => participants.indexOf(participant));
+          const start = lanes[0];
+          const end = lanes[lanes.length - 1];
           const columns = Math.abs(end - start) + 1;
           const style = {
             gridColumn: `${Math.min(start, end) + 1} / span ${columns}`,
@@ -74,20 +89,24 @@ export function InteractionDiagram({ onSelect }: { onSelect: (exchange: DiagramE
           return <li key={label}>
             <div className="help-message-edge" style={style} data-reply={reply} data-direction={start < end ? "right" : "left"}>
               <span className="help-message-endpoints">
-                {from.shortName} <ArrowRight size={13} aria-hidden="true" /> <span className="sr-only">to</span> {to.shortName}
+                <ExchangePath path={path} short />
               </span>
               <button className="help-message-heading" type="button" aria-haspopup="dialog" aria-label={`Step ${number} · ${label}`}
                 onClick={() => onSelect({ ...exchange, number })}>
                 <span className="help-message-number">{number}</span>
                 <span className="help-message-label">{label}</span>
               </button>
-              <span className="help-message-arrow" aria-hidden="true" />
+              <span className="help-message-arrow" aria-hidden="true">
+                {path.slice(1).map((participant, leg) => (
+                  <span key={participant.name} style={{ flex: Math.abs(lanes[leg + 1] - lanes[leg]) }} />
+                ))}
+              </span>
             </div>
           </li>;
         })}
       </ol>
     </div>
-    <figcaption>The model can use relevance scores as hints when it picks a topic. If the request is unclear, chat asks a follow-up question. The app reads account details as needed.</figcaption>
+    <figcaption>The model can use relevance scores as hints when it picks a topic. If the request is unclear, chat asks a follow-up question. When the reply needs account details, the app can read them through sfield tools.</figcaption>
   </figure>;
 }
 

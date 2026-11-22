@@ -90,7 +90,7 @@
 }
 .help-participants, .help-lifelines, .help-sequence ol > li {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--lane-count), minmax(0, 1fr));
 }
 .help-participants, .help-sequence ol, .help-proposal-flow, .help-sfield-flow { margin: 0; padding: 0; list-style: none; }
 .help-participants li {
@@ -101,7 +101,7 @@
   border-radius: 11px;
   background: #f6f9f4;
 }
-.help-participants li:nth-child(2) { border-color: #b9cebe; background: #edf5ed; }
+.help-participants li:nth-child(2), .help-participants li:nth-child(3) { border-color: #b9cebe; background: #edf5ed; }
 .help-entity-icon {
   display: inline-grid;
   place-items: center;
@@ -146,6 +146,7 @@
   text-align: inherit;
 }
 .help-message-heading:hover { background: var(--help-tint); }
+.help-message-heading:focus-visible { outline-offset: -2px; }
 .help-message-heading:hover .help-message-number, .help-message-heading:focus-visible .help-message-number {
   color: #fff;
   background: #35624b;
@@ -171,9 +172,11 @@
   font-weight: 615;
   text-wrap: balance;
 }
-.help-message-arrow { display: block; position: relative; height: 1px; margin-top: 2px; border-top: 1px solid #86a592; }
-.help-message-edge[data-reply="true"] .help-message-arrow { border-top-style: dashed; }
-.help-message-arrow::after {
+.help-message-arrow { display: flex; height: 1px; margin-top: 2px; }
+.help-message-arrow > span { position: relative; border-top: 1px solid #86a592; }
+.help-message-edge[data-direction="left"] .help-message-arrow { flex-direction: row-reverse; }
+.help-message-edge[data-reply="true"] .help-message-arrow > span { border-top-style: dashed; }
+.help-message-arrow > span::after {
   content: "";
   position: absolute;
   right: 1px;
@@ -184,7 +187,7 @@
   border-right: 1px solid #5d866d;
   transform: rotate(45deg);
 }
-.help-message-edge[data-direction="left"] .help-message-arrow::after { left: 1px; right: auto; transform: rotate(-135deg); }
+.help-message-edge[data-direction="left"] .help-message-arrow > span::after { left: 1px; right: auto; transform: rotate(-135deg); }
 .help-proposal-flow, .help-sfield-flow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1.32fr);
@@ -416,10 +419,9 @@
 .help-contract-source { border-radius: 11px; min-height: 340px; max-height: 478px; }
 .help-footer { margin-top: 25px; }
 
-@media (max-width: 860px) {
-  .help-participants { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+@media (max-width: 960px) {
+  .help-participants { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
   .help-participants li { margin: 0; }
-  .help-participants li:last-child { grid-column: 1 / -1; }
   .help-lifelines, .help-message-arrow { display: none; }
   .help-sequence ol { display: grid; gap: 6px; padding-top: 12px; }
   .help-sequence ol > li { display: block; }
@@ -457,6 +459,7 @@
 
 @media (max-width: 620px) {
   .help-width { width: calc(100% - 28px); }
+  .help-participants { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .help-topbar-inner { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; padding-top: 9px; }
   .help-topbar nav {
     grid-column: 1 / -1;
