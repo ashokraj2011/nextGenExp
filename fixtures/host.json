@@ -1,5 +1,5 @@
 {
-  "fixtureVersion": "pzn-host-v1.1",
+  "fixtureVersion": "pzn-host-v1.2",
   "defaultPersonaId": "demo-learner",
   "defaultScenarioId": "normal",
   "personas": [
@@ -8,6 +8,7 @@
       "displayName": "Alice Morgan",
       "syntheticMid": "DEMO-MID-1001",
       "beneficiaryStatus": "missing",
+      "accountFundingStatus": "funded",
       "profile": {
         "focus": "Retirement planning",
         "summary": "Alice is preparing to leave work and wants to learn what to consider as she approaches retirement."
@@ -19,15 +20,28 @@
       "displayName": "Jordan Lee",
       "syntheticMid": "DEMO-MID-1002",
       "beneficiaryStatus": "on_file",
+      "accountFundingStatus": "funded",
       "profile": {
         "focus": "Portfolio review",
         "summary": "Jordan is a returning customer checking how much of his portfolio is in cash before his next review."
       },
       "allowedScenarios": ["normal", "cross-turn-change"]
+    },
+    {
+      "personaId": "demo-new-account",
+      "displayName": "Marcus Reed",
+      "syntheticMid": "DEMO-MID-1003",
+      "beneficiaryStatus": "on_file",
+      "accountFundingStatus": "unfunded",
+      "profile": {
+        "focus": "New account holder",
+        "summary": "Marcus recently moved and wants to update his mailing address. His new account is awaiting its first deposit."
+      },
+      "allowedScenarios": ["normal"]
     }
   ],
   "clarificationQuestions": [
-    "This is a demo with sample data. You can compare balances, view a portfolio summary, see a home-buying savings graph, learn about retirement, or walk through a transfer. What would you like to try?",
+    "This is a demo with sample data. You can compare balances, view a portfolio summary, see a home-buying savings graph, learn about retirement, update a mailing address, or walk through a transfer. What would you like to try?",
     "Would you like an explanation, a comparison, or a step-by-step guide?",
     "Would you like a short explanation or a detailed one?"
   ],

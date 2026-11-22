@@ -47,21 +47,25 @@ export function lookupContent(candidate: Candidate): ContentEntry | undefined {
   return content?.publicationStatus === "published" && content.version === candidate.contentVersion ? content : undefined;
 }
 
-export function retirementReminderCandidate(decision: ContentDecision, route: RouteDecision) {
-  if (route.contextId === "learning" && route.intent.task === "explain"
-    && decision.candidates.some(({ contentId }) => contentId === "retirement_learning")) {
-    return decision.candidates.find(({ contentId }) => contentId === "beneficiary_update");
-  }
-  return undefined;
+const supplementalCards = [
+  { contextId: "learning", task: "explain", primaryContentId: "retirement_learning", contentId: "beneficiary_update" },
+  { contextId: "address-update", task: "guide", primaryContentId: "address_update_guide", contentId: "fund_account" },
+];
+
+export function eligibleSupplementalCard(decision: ContentDecision, route: RouteDecision) {
+  const card = supplementalCards.find(({ contextId, task }) => contextId === route.contextId && task === route.intent.task);
+  if (!card || !decision.candidates.some(({ contentId }) => contentId === card.primaryContentId)) return;
+  const candidate = decision.candidates.find(({ contentId }) => contentId === card.contentId);
+  if (candidate) return { primaryContentId: card.primaryContentId, candidate };
 }
 
 export function modelBundle(decision: ContentDecision, route?: RouteDecision) {
-  const reminder = route && retirementReminderCandidate(decision, route);
+  const supplemental = route && eligibleSupplementalCard(decision, route);
   return {
     decisionId: decision.decisionId,
     partial: decision.partial,
     selectionMode: decision.selectionMode,
-    candidates: decision.candidates.filter((candidate) => candidate !== reminder).map((candidate) => {
+    candidates: decision.candidates.filter((candidate) => candidate !== supplemental?.candidate).map((candidate) => {
       const content = lookupContent(candidate);
       if (!content) throw new Error("CONTENT_UNAVAILABLE");
       return {

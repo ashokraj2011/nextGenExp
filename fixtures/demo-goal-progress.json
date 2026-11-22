@@ -26,6 +26,14 @@
         { "month": "2026-10", "savedCents": 2830000 },
         { "month": "2026-11", "savedCents": 3360000 }
       ]
+    },
+    {
+      "mid": "DEMO-MID-1003",
+      "targetCents": 4000000,
+      "history": [
+        { "month": "2026-10", "savedCents": 0 },
+        { "month": "2026-11", "savedCents": 0 }
+      ]
     }
   ]
 }

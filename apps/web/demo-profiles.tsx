@@ -40,6 +40,7 @@ export function DemoProfiles({ personas, activePersonaId, pending, close, startC
             <div><dt>Beneficiaries</dt><dd className={profile.beneficiaryStatus === "missing" ? "profile-missing" : undefined}>
               {profile.beneficiaryStatus === "missing" ? "Missing" : "On file"}
             </dd></div>
+            <div><dt>Account funding</dt><dd>{profile.accountFundingStatus === "unfunded" ? "Awaiting first deposit" : "Funded"}</dd></div>
           </dl>
           <button className="secondary-button" type="button" disabled={pending} aria-label={"Start chat as " + displayName}
             onClick={() => void start(personaId)}>Start chat <ArrowRight size={15} aria-hidden="true" /></button>

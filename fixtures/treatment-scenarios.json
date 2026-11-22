@@ -1,10 +1,11 @@
 {
-  "fixtureVersion": "pzn-ts-routed-v4",
+  "fixtureVersion": "pzn-ts-routed-v5",
   "base": {
     "balance": ["balance_education", "balance_available_definition", "balance_current_definition", "promotion_general", "balance_metric_template"],
     "portsum": ["portfolio_explanation", "portfolio_cash_investing"],
     "learning": ["retirement_learning", "beneficiary_update"],
     "goals": ["home_down_payment_progress"],
+    "address-update": ["address_update_guide", "fund_account"],
     "app-home": ["transfer_checklist", "transfer_learning", "promotion_general"]
   },
   "defaultCcreRules": [
@@ -32,6 +33,19 @@
         "attributeId": "beneficiary_status",
         "operator": "eq",
         "value": "missing"
+      }
+    },
+    {
+      "contextId": "address-update",
+      "contentId": "fund_account",
+      "name": "Account is unfunded",
+      "condition": {
+        "kind": "attribute",
+        "glossaryVersion": "pzn-ccre-mock-v1",
+        "namespaceId": "account",
+        "attributeId": "funding_status",
+        "operator": "eq",
+        "value": "unfunded"
       }
     }
   ],

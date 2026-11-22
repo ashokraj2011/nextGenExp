@@ -20,20 +20,15 @@ export type FlowStep = {
   contracts: string[];
   tool?: { title: string; description: string; input: PayloadExample; output: PayloadExample };
 };
-type Flow = { id: string; title: string; prompt: string; prior?: string; steps: FlowStep[] };
+type Flow = { id: string; title: string; prompt: string; prior?: string; persona?: string; steps: FlowStep[] };
 
 const turnRef = "turn_demo";
 const catalogSnapshotId = "catalog_demo";
 const decisionId = "decision_demo";
 const routeDecisionId = "route_demo";
 const mid = host.personas[0].syntheticMid;
+const newAccount = host.personas.find(({ personaId }) => personaId === "demo-new-account")!;
 const catalog = { ...contextFixture, contexts: contextFixture.contexts.filter(({ active }) => active) };
-const propensity = {
-  version: propensityFixture.version,
-  classification: propensityFixture.classification,
-  status: "available",
-  scores: Object.entries(propensityFixture.defaults["demo-learner"]).map(([contextId, score]) => ({ contextId, score })),
-};
 const demoBalance = {
   fixtureVersion: balanceFixture.fixtureVersion,
   observedAt: "2026-11-22T00:00:00.000Z",
@@ -57,15 +52,23 @@ function chat(message: string): FlowStep {
   };
 }
 
-const discovery: FlowStep = {
-  id: "discovery", title: "Context discovery", role: "sfield tools",
-  description: "sfield reads the active context catalog and advisory propensity scores. The host stores a scoped catalog snapshot. The router uses these inputs to evaluate the user's request.",
-  input: { label: "Registry tool inputs", value: {
-    "contexts.list": { turnRef }, "propensity.context.score": { turnRef, catalogSnapshotId },
-  } },
-  output: { label: "Catalog and propensity results", value: { catalog, propensity } },
-  contracts: ["discovery", "domain"],
-};
+function discoveryFor(personaId: keyof typeof propensityFixture.defaults): FlowStep {
+  const scores: Record<string, number> = propensityFixture.defaults[personaId];
+  const propensity = {
+    version: propensityFixture.version, classification: propensityFixture.classification, status: "available",
+    scores: catalog.contexts.map(({ contextId }) => ({ contextId, score: scores[contextId] ?? null })),
+  };
+  return {
+    id: "discovery", title: "Context discovery", role: "sfield tools",
+    description: "sfield reads the active context catalog and advisory propensity scores. The host stores a scoped catalog snapshot. The router uses these inputs to evaluate the user's request.",
+    input: { label: "Registry tool inputs", value: {
+      "contexts.list": { turnRef }, "propensity.context.score": { turnRef, catalogSnapshotId },
+    } },
+    output: { label: "Catalog and propensity results", value: { catalog, propensity } },
+    contracts: ["discovery", "domain"],
+  };
+}
+const discovery = discoveryFor("demo-learner");
 
 function routeProposal(intentId: RoutingIntentId, summary: string): ContextSelectionProposal {
   return {
@@ -83,11 +86,11 @@ function router(description: string, value: object, proposal: ContextSelectionPr
   };
 }
 
-function treatment(context: string, contentIds: string[], description: string): FlowStep {
+function treatment(context: string, contentIds: string[], description: string, memberId = mid): FlowStep {
   return {
     id: "treatment", title: "Treatment Selector", role: "Eligibility", description,
     input: { label: "sfield tool and adapter requests", value: {
-      registryInput: { turnRef, routeDecisionId }, adapterInput: { mid, context },
+      registryInput: { turnRef, routeDecisionId }, adapterInput: { mid: memberId, context },
     } },
     output: { label: "Ranked eligible content IDs", value: contentIds },
     contracts: ["treatment", "rules", "domain"],
@@ -124,11 +127,13 @@ const summaryPrompt = "show me the summary";
 const portfolioPrompt = "Let me know my portfolio summary.";
 const goalPrompt = "Show my home-buying goal and savings progress.";
 const retirementPrompt = "I'd like to learn about retirement.";
+const addressPrompt = "I moved and need to update my address.";
 const rulePrompt = "Create rule";
 const balanceRoute = routeProposal("show_balance", "Show the summary of the established balance topic.");
 const portfolioRoute = routeProposal("show_portfolio", "Show the customer's demo portfolio.");
 const goalRoute = routeProposal("show_home_goal", "Show progress toward a home down payment.");
 const retirementRoute = routeProposal("retirement_learning", "Explain retirement planning basics.");
+const addressRoute = routeProposal("update_address", "Show the mailing address update steps.");
 const balanceCard: ProposalBlock = { blockId: "b1", component: "PznMetricSummary", candidateIds: ["candidate_balance"], variant: "compact" };
 const balanceComposer = composer(
   summaryPrompt, "balance", "show_balance", { topic: "Show demo balances", task: "show", summary: balanceRoute.summary },
@@ -256,6 +261,33 @@ export const helpFlows: Flow[] = [
           { component: "PznContentCard", props: { title: "Retirement planning basics" } },
           { component: "PznContentCard", props: { title: "Update your beneficiaries" } },
         ], actions: [{ actionId: "action_demo", componentId: "follow_up_1", label: "See beneficiary update steps" }] } },
+      ),
+    ],
+  },
+  {
+    id: "address-update", title: "Address update", prompt: addressPrompt, persona: newAccount.displayName,
+    steps: [
+      chat(addressPrompt), discoveryFor("demo-new-account"),
+      router("The model identifies a mailing address change and returns update_address. The host verifies the intent and maps it to the address-update context.", { request: addressPrompt, recent: [] }, addressRoute),
+      treatment(
+        "address-update", treatmentFixture.base["address-update"],
+        "The mock returns the address guide. Its Account → Funding status rule also makes the funding card eligible for Marcus because his account is awaiting its first deposit.",
+        newAccount.syntheticMid,
+      ),
+      composer(
+        addressPrompt, "address-update", "update_address", { topic: "Update mailing address", task: "guide", summary: addressRoute.summary },
+        [{ candidateId: "candidate_address", title: "Update your mailing address", tsRank: 1 }],
+        [{ blockId: "b1", component: "PznStepList", candidateIds: ["candidate_address"], variant: "expanded" }],
+        "The composer selects the address guide as a step-by-step answer.",
+        "steps",
+      ),
+      render(
+        "The host verifies the guide and attaches the funding card issued by Treatment Selector. The transfer button opens the existing demo walkthrough.",
+        { label: "Verified inputs · excerpt", value: { selectedCandidateId: "candidate_address", eligibleFundingCard: "fund_account" } },
+        { label: "DisplayExperience · excerpt", value: { status: "ready", blocks: [
+          { component: "PznStepList", props: { title: "Update your mailing address" } },
+          { component: "PznContentCard", props: { title: "Fund your account", recommendation: true } },
+        ], actions: [{ actionId: "action_demo", componentId: "follow_up_1", label: "See demo transfer steps" }] } },
       ),
     ],
   },

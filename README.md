@@ -58,7 +58,7 @@ The original hero photograph in `apps/web/assets/coastal-planning.jpg` was gener
 
 ### Demo profiles
 
-Click the customer name in the chat header to compare **Alice Morgan** and **Jordan Lee**. Each profile shows the customer’s goal, portfolio cash, and beneficiary status from the demo fixtures. **Start chat** opens a new conversation for that customer in **Normal eligibility**.
+Click the customer name in the chat header to compare **Alice Morgan**, **Jordan Lee**, and **Marcus Reed**. Each profile shows the customer’s focus, portfolio cash, beneficiary status, and funding status from the demo fixtures. **Start chat** opens a new conversation for that customer in **Normal eligibility**.
 
 For a short demo, run **Learn about retirement** for both customers. Open **Logs → Treatment Selector** to show why Alice sees the beneficiary reminder and Jordan sees the lesson alone. Then ask both for a portfolio summary to show how the same cash threshold applies at $12,500 and $10,000.
 
@@ -98,6 +98,12 @@ Choose **Learn about retirement** in a new chat with **Normal eligibility**. The
 - **Jordan Lee** has details on file. Chat shows **Retirement planning basics**.
 
 Use **Tool setup → Treatment Selector mock → Learning → Run preview** to evaluate the rule for either persona. In chat, **Logs → Treatment Selector** shows the mock CCRE evaluation and the returned content IDs.
+
+### Address update and account funding demo
+
+Start a chat as **Marcus Reed**, a new account holder awaiting his first deposit. Choose **Update mailing address** or ask “I moved and need to update my address.” The Context Router selects `update_address`. sfield calls Treatment Selector with Marcus’s synthetic member ID and the `address-update` context. The mock returns `address_update_guide` and evaluates **Account → Funding status → Equals → Unfunded** to determine whether it can also return `fund_account`.
+
+Chat displays the address-change walkthrough followed by **Fund your account**. **See demo transfer steps** opens the existing walkthrough. The same address request as **Jordan Lee** shows the guide alone because he has already funded his account. **Tool setup → Address update → Run preview** compares the rules for both profiles. **Logs → Treatment Selector → Mock CCRE evaluation** shows the result for the current turn. **Help → Address update** shows the input and output at each step.
 
 ### Inspect requests and responses
 

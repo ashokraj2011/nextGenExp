@@ -96,6 +96,9 @@ function route(envelope: Envelope): ContextSelectionProposal {
   if (/portfolio|protfolio|holdings|allocation/.test(text)) contexts.add("portsum");
   if (/transfer|app home|demo profile|app help|demo app/.test(text)) contexts.add("app-home");
   if (retirementTopic.test(text) || /beneficiar/.test(text)) contexts.add("learning");
+  if (/\b(?:address (?:update|change)|(?:update|change|edit|correct) (?:my |the |a )?(?:(?:mailing|home|street|postal|residential) )?address)\b/.test(text)) {
+    contexts.add("address-update");
+  }
   if (/\b(?:down[ -]payment|home[ -]buying|home purchase|buy(?:ing)? (?:a |my |the )?(?:home|house)|mortgage (?:goal|progress|savings)|goal progress|my (?:savings )?goal)\b/.test(text)) contexts.add("goals");
   if (!contexts.size && asksToSeeGoals(text)) contexts.add("goals");
 
@@ -133,7 +136,7 @@ function route(envelope: Envelope): ContextSelectionProposal {
 
   const asksForPortfolioValues = /\b(my|show|summarize|display)\b/.test(text) || /^(?:portfolio|protfolio) summary\W*$/.test(text);
   const showPortfolio = asksForPortfolioValues && !/\b(explain|terms|labels)\b/.test(text) && !/^what(?: is|'s) (?:a|the)\b/.test(text);
-  const task = contexts.has("goals") ? "show" : /compare|difference|versus/.test(text) ? "compare"
+  const task = contexts.has("goals") ? "show" : contexts.has("address-update") ? "guide" : /compare|difference|versus/.test(text) ? "compare"
     : /guide|steps|checklist|how do|walk/.test(text) ? "guide"
     : (contexts.has("portsum") ? showPortfolio : /summary|how much|amount|show my/.test(text)) ? "show" : "explain";
   const contextId = [...contexts][0];
@@ -179,6 +182,9 @@ function compose({ body, envelope }: GatewayCall): ExperienceProposal | ToolCall
       return choose("PznStepList", [get("Update your beneficiaries")], "steps");
     }
     return choose("PznContentCard", [get("Retirement planning basics")], "explanation");
+  }
+  if (envelope.selectedContextId === "address-update") {
+    return choose("PznStepList", [get("Update your mailing address")], "steps");
   }
   if (envelope.selectedContextId === "app-home") {
     if (envelope.intent?.task === "guide") return choose("PznStepList", [get("Fictional transfer checklist")], "steps");

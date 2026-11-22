@@ -31,6 +31,7 @@ type Options = {
   goalProgressProvider?: GoalProgressProvider;
 };
 const beneficiaryStatusSchema = z.enum(["missing", "on_file"]);
+const accountFundingStatusSchema = z.enum(["funded", "unfunded"]);
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".woff2": "font/woff2", ".woff": "font/woff", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml",
@@ -94,12 +95,13 @@ export async function startApp(options: Options) {
   const portfolioSnapshots = options.portfolioSnapshots ?? fixturePortfolioSnapshotProvider;
   const goalProgressProvider = options.goalProgressProvider ?? fixtureGoalProgressProvider;
   const personas: Bootstrap["personas"] = await Promise.all(demo.personas.map(async ({
-    personaId, displayName, allowedScenarios, profile, beneficiaryStatus, syntheticMid,
+    personaId, displayName, allowedScenarios, profile, beneficiaryStatus, accountFundingStatus, syntheticMid,
   }) => ({
     personaId, displayName, allowedScenarios,
     profile: {
       ...profile,
       beneficiaryStatus: beneficiaryStatusSchema.parse(beneficiaryStatus),
+      accountFundingStatus: accountFundingStatusSchema.parse(accountFundingStatus),
       cashCents: (await fixturePortfolioSnapshotProvider.read(syntheticMid))?.cashCents ?? null,
     },
   })));

@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0",
-  "catalogVersion": "ts-contexts-demo-v4",
+  "catalogVersion": "ts-contexts-demo-v5",
   "contexts": [
     {
       "contextId": "balance",
@@ -24,6 +24,12 @@
       "contextId": "goals",
       "displayName": "Home-buying goal",
       "description": "Review the synthetic home down payment target, progress and historical savings growth.",
+      "active": true
+    },
+    {
+      "contextId": "address-update",
+      "displayName": "Address update",
+      "description": "Guide a customer through changing the mailing or residential address on their demo account. Treatment Selector can recommend funding after the guide if the account is unfunded.",
       "active": true
     },
     {

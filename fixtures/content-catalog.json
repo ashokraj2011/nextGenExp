@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "fixtureVersion": "pzn-demo-2026-11-v1",
-  "catalogVersion": "content-demo-v4",
+  "catalogVersion": "content-demo-v5",
   "dataClassification": "synthetic_demo_only",
   "entries": [
     {
@@ -387,6 +387,69 @@
           "disclosureId": "demo_only",
           "text": "This guide previews the steps using a synthetic account."
         }
+      ]
+    },
+    {
+      "contentId": "address_update_guide",
+      "version": "v1",
+      "publicationStatus": "published",
+      "kind": "education",
+      "title": "Update your mailing address",
+      "description": "A walkthrough for changing the address where account correspondence is sent.",
+      "body": "Follow the address-change walkthrough using sample details.",
+      "allowedComponents": ["PznStepList"],
+      "comparisonGroup": null,
+      "comparisonFields": [],
+      "steps": [
+        {
+          "stepId": "open_profile",
+          "title": "Open your profile settings",
+          "body": "Go to Contact information and find the mailing address on file."
+        },
+        {
+          "stepId": "edit_address",
+          "title": "Edit the mailing address",
+          "body": "Choose Edit and review where you would enter the new street address, city, state, and postal code."
+        },
+        {
+          "stepId": "review_address",
+          "title": "Review the change",
+          "body": "Check the sample address and which account correspondence would go there."
+        }
+      ],
+      "metricSpec": null,
+      "followUps": [],
+      "sourceRef": "fixture:address_update_guide",
+      "sourceLabel": "Demo content catalog",
+      "requiredDisclosures": [
+        { "disclosureId": "demo_only", "text": "This walkthrough uses a sample account and ends at review." }
+      ]
+    },
+    {
+      "contentId": "fund_account",
+      "version": "v1",
+      "publicationStatus": "published",
+      "kind": "education",
+      "title": "Fund your account",
+      "description": "A suggested next step for a demo account awaiting its first deposit.",
+      "body": "See how to make a deposit using a bank transfer.",
+      "allowedComponents": ["PznContentCard"],
+      "recommendation": true,
+      "comparisonGroup": null,
+      "comparisonFields": [],
+      "steps": [],
+      "metricSpec": null,
+      "followUps": [
+        {
+          "followUpId": "fu_transfer_steps",
+          "label": "See demo transfer steps",
+          "userMessage": "Show the fictional transfer checklist."
+        }
+      ],
+      "sourceRef": "fixture:fund_account",
+      "sourceLabel": "Demo content catalog",
+      "requiredDisclosures": [
+        { "disclosureId": "demo_only", "text": "Demo transfer preview." }
       ]
     },
     {

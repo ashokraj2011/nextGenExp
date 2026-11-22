@@ -97,7 +97,8 @@ export function Help() {
         </div>
         <div className="help-walkthrough">
           <p className="help-example">
-            {flow.prior ? <>After <strong>“{flow.prior}”</strong> ask <strong>“{flow.prompt}”</strong></> : <>Ask <strong>“{flow.prompt}”</strong></>}
+            {flow.prior ? <>After <strong>“{flow.prior}”</strong> ask </> : flow.persona ? <>As <strong>{flow.persona}</strong>, ask </> : "Ask "}
+            <strong>“{flow.prompt}”</strong>
           </p>
           <ol className="help-steps" aria-label="Turn flow">
             {flow.steps.map((option) => {

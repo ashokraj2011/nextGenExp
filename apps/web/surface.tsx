@@ -36,7 +36,7 @@ function ContentBlock({ block }: { block: DisplayBlock }) {
   const Icon = icons[component];
   const recommendation = block.component === "PznContentCard" && block.props.recommendation;
   return (
-    <section className={"content-card " + props.variant + (recommendation ? " portfolio-recommendation" : "")}
+    <section className={"content-card " + props.variant + (recommendation ? " suggested-next-step" : "")}
       aria-label={component === "PznGoalProgress" ? props.title : undefined}>
       <div className="content-kind"><Icon size={16} aria-hidden="true" />{recommendation ? "Suggested next step" : blockLabels[component]}</div>
       <h3>{props.title}</h3>

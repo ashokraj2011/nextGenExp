@@ -3,7 +3,7 @@ import type { DisplayBlock } from "../packages/contracts/surface";
 export type LiveCase = {
   id: string;
   message: string;
-  route: "balance" | "portsum" | "learning" | "goals" | "app-home" | "clarify" | "reply" | "no_match";
+  route: "balance" | "portsum" | "learning" | "goals" | "address-update" | "app-home" | "clarify" | "reply" | "no_match";
   outcome: string;
   component?: DisplayBlock["component"];
   relevant?: string[];
@@ -57,6 +57,8 @@ export const liveCases: LiveCase[] = [
   { id: "retirement-acknowledgment", message: "thats nice", prior: ["i will be 62", "yes"], route: "reply", outcome: "reply" },
   { id: "retirement-inferred-follow-up", message: "last day of job is next week", prior: ["i want to know about retierment", "am old", "i am going to loose my job", "i will be 62"], route: "learning", outcome: ready, component: card, relevant: ["beneficiary_update"] },
   { id: "beneficiary-update-steps", message: "Show me the demo steps to update my beneficiaries.", route: "learning", outcome: ready, component: guide, relevant: ["beneficiary_update"] },
+  { id: "address-new-account", message: "I moved and need to update my address.", route: "address-update", outcome: ready, component: guide, relevant: ["fund_account"], persona: "demo-new-account" },
+  { id: "address-funded-account", message: "I moved and need to update my address.", route: "address-update", outcome: ready, component: guide, relevant: ["address_update_guide"], exclude: ["fund_account"], persona: "demo-returning" },
   { id: "transfer-overview", message: "Explain the fictional transfer flow.", route: home, outcome: ready, component: card, relevant: [transferIntro] },
   { id: "transfer-steps", message: "Walk me through the demo transfer steps.", route: home, outcome: ready, component: guide, relevant: [transferGuide] },
   { id: "transfer-preview", message: "How do I get to a preview in the demo transfer checklist?", route: home, outcome: ready, component: guide, relevant: [transferGuide] },

@@ -204,7 +204,7 @@ button { color: inherit; }
 .portfolio-snapshot .equities { background: #247a72; }
 .portfolio-snapshot .fixed-income { background: #6b8fb0; }
 .portfolio-snapshot .cash { background: #d6a657; }
-.portfolio-recommendation { border-color: #c4ddd6; background: #f8fdfb; }
+.suggested-next-step { border-color: #c4ddd6; background: #f8fdfb; }
 .compare-column dl { display: grid; gap: 9px; margin-top: 10px; }
 .compare-column dt, .metric-grid dt { color: var(--muted); font-size: .8rem; font-weight: 585; }
 .compare-column dd { margin-top: 2px; color: var(--soft-ink); font-size: .91rem; }
@@ -293,6 +293,7 @@ button { color: inherit; }
 .inspector-icon { display: grid; place-items: center; width: 32px; height: 32px; background: var(--teal-pale); border-radius: 8px; color: var(--teal-dark); }
 .inspector-scroll { min-height: 0; overflow-y: auto; padding: 16px; }
 .profile-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.profile-grid .profile-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .profile-card {
   display: flex; flex-direction: column; gap: 15px; padding: 16px;
   border: 1px solid var(--line); border-radius: 14px; background: var(--white);

@@ -531,6 +531,7 @@ test("portfolio summaries combine the scoped snapshot with the cash treatment on
   })), [
     { displayName: "Alice Morgan", cashCents: 1_250_000, beneficiaries: "missing" },
     { displayName: "Jordan Lee", cashCents: 1_000_000, beneficiaries: "on_file" },
+    { displayName: "Marcus Reed", cashCents: 0, beneficiaries: "on_file" },
   ]);
 
   for (const [personaId, mid, cashCents, matched] of [
@@ -579,6 +580,73 @@ test("portfolio summaries combine the scoped snapshot with the cash treatment on
   const missing = await client.ask(empty.id, question);
   assert.equal(missing.turn.failureCode, "portfolio_unavailable");
   assert.equal(missing.turn.experience, undefined);
+});
+
+test("the address guide includes the funding suggestion only when Treatment Selector returns it", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const { client, gateway } = f;
+  const prompt = "I moved and need to update my address.";
+  const contextId = "address-update";
+  const guide = "address_update_guide";
+  const suggestion = "fund_account";
+  const { personas } = await client.request<Bootstrap>("/api/bootstrap");
+  assert.equal(personas.find(({ personaId }) => personaId === "demo-new-account")?.profile.accountFundingStatus, "unfunded");
+
+  for (const [personaId, mid, matched] of [
+    ["demo-new-account", "DEMO-MID-1003", true],
+    ["demo-returning", "DEMO-MID-1002", false],
+  ] as const) {
+    const chat = await client.conversation("normal", personaId);
+    const { turn, trace } = await client.ask(chat.id, prompt);
+    const experience = turn.experience!;
+    assert.equal(turn.status, "completed", JSON.stringify(trace.failures));
+    assert.equal(trace.intentId, "update_address");
+    assert.equal(trace.selectedContextId, contextId);
+    const expected = matched ? [guide, suggestion] : [guide];
+    assert.deepEqual(trace.finalOrder, expected);
+    const [primary, funding] = experience.blocks;
+    assert.equal(primary.component, "PznStepList");
+    assert.equal(primary.props.title, "Update your mailing address");
+    if (matched) {
+      assert.equal(funding.component, "PznContentCard");
+      assert.equal(funding.props.title, "Fund your account");
+      assert.equal(funding.props.recommendation, true);
+    }
+    const ccre = {
+      beforeRules: [guide, suggestion],
+      results: [{ name: "Account is unfunded", contentId: suggestion, outcome: matched ? "matched" : "excluded" }],
+    };
+    const logs = await client.request<TurnPayloads>("/api/debug/payloads/" + turn.id);
+    assert.deepEqual(logs.treatment?.mockInput?.data, { mid, context: contextId });
+    assert.deepEqual(logs.treatment?.result?.data, expected);
+    assert.deepEqual(logs.treatment?.ccre?.data, ccre);
+    assert.deepEqual(gateway.calls.at(-1)?.envelope.eligible?.candidates.map(({ title }) => title),
+      ["Update your mailing address"]);
+    const preview = await client.request<TreatmentPreview>("/api/admin/treatment-preview", {
+      scenarioId: "normal", contextId, personaId, ordinal: 1, enabled: true, output: null,
+    } satisfies TreatmentPreviewInput);
+    assert.deepEqual(preview, { status: "ranked", source: "fixture", contentIds: expected, ccre });
+
+    assert.deepEqual(experience.actions.map(({ label }) => label), matched ? ["See demo transfer steps"] : []);
+    if (matched) {
+      const transfer = await client.request<TurnAccepted>("/api/experiences/" + experience.experienceId + "/actions", {
+        clientRequestId: randomUUID(), envelope: actionFor(experience),
+      }, 202);
+      const next = await client.wait(transfer);
+      assert.equal(next.trace.intentId, "guide_transfer");
+      assert.deepEqual(next.trace.finalOrder, ["transfer_checklist"]);
+    }
+  }
+
+  await client.request("/api/admin/tools", {
+    ...defaultToolSetup,
+    ccreRules: [{ scenarioId: "normal", contextId, contentId: suggestion, name: "Pause first deposit suggestion", condition: { kind: "never" } }],
+  } satisfies ToolSetup);
+  const chat = await client.conversation("normal", "demo-new-account");
+  const excluded = await client.ask(chat.id, prompt);
+  assert.deepEqual(excluded.trace.finalOrder, [guide]);
+  assert.deepEqual(excluded.turn.experience?.actions, []);
 });
 
 test("home-buying progress reads the eligible member's target and history through sfield", async (t) => {

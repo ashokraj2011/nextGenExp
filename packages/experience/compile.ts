@@ -67,7 +67,9 @@ export function compileExperience(input: ExperienceInput): CompiledExperience {
           const body = `You have ${formatPortfolioAmount(input.portfolio.cashCents)} in cash. ${primary.body}`;
           return { component: proposal.component, props: { ...shared, description: primary.description, body, recommendation: true } };
         }
-        return { component: proposal.component, props: { ...shared, description: primary.description, body: primary.body } };
+        return { component: proposal.component, props: {
+          ...shared, description: primary.description, body: primary.body, ...(primary.recommendation && { recommendation: true }),
+        } };
       }
     }
   });

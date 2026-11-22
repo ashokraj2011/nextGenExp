@@ -28,6 +28,17 @@ const namespaces = [
     ],
   },
   {
+    id: "account", label: "Account",
+    attributes: [
+      {
+        id: "funding_status", label: "Funding status", description: "Whether the demo account has received its first deposit.",
+        valueType: "enum", operators: ["eq", "ne"], minimum: null,
+        options: [{ value: "unfunded", label: "Unfunded" }, { value: "funded", label: "Funded" }],
+        read: ({ personaId }) => host.personas.find((persona) => persona.personaId === personaId)?.accountFundingStatus,
+      },
+    ],
+  },
+  {
     id: "conversation", label: "Conversation",
     attributes: [
       {

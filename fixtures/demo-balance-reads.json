@@ -34,6 +34,14 @@
           "unit": "DEMO_UNITS"
         }
       ]
+    },
+    {
+      "personaId": "demo-new-account",
+      "syntheticMid": "DEMO-MID-1003",
+      "values": [
+        { "metricKey": "available", "displayValue": "0.00", "unit": "DEMO_UNITS" },
+        { "metricKey": "current", "displayValue": "0.00", "unit": "DEMO_UNITS" }
+      ]
     }
   ]
 }

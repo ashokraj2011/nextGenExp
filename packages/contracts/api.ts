@@ -54,6 +54,7 @@ export type DemoPersona = {
     focus: string;
     summary: string;
     beneficiaryStatus: "missing" | "on_file";
+    accountFundingStatus: "funded" | "unfunded";
     cashCents: number | null;
   };
 };

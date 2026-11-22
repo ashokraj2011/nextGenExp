@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useAui, useAuiState, useExternalStoreRuntime, type ThreadMessageLike } from "@assistant-ui/react";
 import { CreateSurfaceMessageSchema, type ActionMessage } from "@a2ui/web_core/v1_0";
-import { BookOpenText, ChevronDown, CircleHelp, Columns2, FileText, GraduationCap, House, ListChecks, Menu, MessageSquare, PanelRight, Plus, RotateCcw, Settings2, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { BookOpenText, ChevronDown, CircleHelp, Columns2, FileText, GraduationCap, House, ListChecks, MapPin, Menu, MessageSquare, PanelRight, Plus, RotateCcw, Settings2, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { failureCopy, progressLabels, type Bootstrap, type Conversation, type ConversationView, type TurnView, type TurnAccepted, type Progress } from "../../packages/contracts/api";
 import { MAX_MESSAGE_LENGTH } from "../../packages/contracts/domain";
 import { api } from "./api";
@@ -19,6 +19,7 @@ const starters = [
   { Icon: ListChecks, label: "Guide me through a task", message: "Walk me through the demo transfer steps." },
   { Icon: GraduationCap, label: "Learn about retirement", message: "I'd like to learn about retirement." },
   { Icon: House, label: "Home-buying goal", message: "Show my home-buying goal and savings progress." },
+  { Icon: MapPin, label: "Update mailing address", message: "I need to update my mailing address." },
 ];
 type ConversationOperations = {
   latest?: TurnView;

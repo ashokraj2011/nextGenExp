@@ -6,7 +6,7 @@ import { isContextProposal, isExperienceProposal } from "../contracts/model";
 import { isHomeGoalSummary, type GoalProgress } from "../contracts/goal-progress";
 import { isPortfolioSummary, type PortfolioSnapshot } from "../contracts/portfolio";
 import { availableRoutingIntents, routingQuestions } from "../contracts/routing-intents";
-import { contentCatalog, lookupContent, retirementReminderCandidate } from "./content";
+import { contentCatalog, eligibleSupplementalCard, lookupContent } from "./content";
 
 export class Rejected extends Error {
   constructor(readonly code: string) {
@@ -158,6 +158,11 @@ export function verifyExperience(
     return { proposal: block, content };
   });
 
+  if (resolved.some(({ content }) => content[0].contentId === "fund_account")) {
+    requireCheck(route.contextId === "address-update"
+      && resolved.some(({ content }) => content[0].contentId === "address_update_guide"), "FUNDING_REQUIRES_ADDRESS_GUIDE");
+  }
+
   if (decision.selectionMode === "preserve_ts_rank") {
     requireCheck(ranks.every((rank, index) => index === 0 || ranks[index - 1] < rank), "TS_ORDER_VIOLATION");
   }
@@ -173,17 +178,17 @@ export function verifyExperience(
     return followUp;
   }).filter(({ followUpId }) => !showsBeneficiaryGuide || followUpId !== "fu_beneficiary_steps");
 
-  const showsRetirementLesson = resolved.some(({ content }) => content.some(({ contentId }) => contentId === "retirement_learning"));
-  const reminder = showsRetirementLesson ? retirementReminderCandidate(decision, route) : undefined;
-  if (reminder) {
-    const entry = lookupContent(reminder);
-    requireCheck(entry && entry.allowedComponents.includes("PznContentCard"), "BENEFICIARY_REMINDER_UNAVAILABLE");
-    if (!selected.has(reminder.candidateId)) {
+  const supplemental = eligibleSupplementalCard(decision, route);
+  if (supplemental && resolved.some(({ content }) => content.some(({ contentId }) => contentId === supplemental.primaryContentId))) {
+    const { candidate } = supplemental;
+    const entry = lookupContent(candidate);
+    requireCheck(entry && entry.allowedComponents.includes("PznContentCard"), "SUPPLEMENTAL_CARD_UNAVAILABLE");
+    if (!selected.has(candidate.candidateId)) {
       const insertBefore = decision.selectionMode === "preserve_ts_rank" ? resolved.findIndex(({ proposal }) => (
-        candidateById.get(proposal.candidateIds[0])!.tsRank > reminder.tsRank
+        candidateById.get(proposal.candidateIds[0])!.tsRank > candidate.tsRank
       )) : -1;
       resolved.splice(insertBefore < 0 ? resolved.length : insertBefore, 0, {
-        proposal: { blockId: "beneficiary_reminder", component: "PznContentCard", candidateIds: [reminder.candidateId], variant: "compact" },
+        proposal: { blockId: "supplemental_card", component: "PznContentCard", candidateIds: [candidate.candidateId], variant: "compact" },
         content: [entry],
       });
     }
