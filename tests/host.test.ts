@@ -27,6 +27,7 @@ async function fixture(intercept?: TestInterceptor, opts: {
   gatewayEnv?: NodeJS.ProcessEnv;
   authorize?: (headers: IncomingHttpHeaders) => boolean;
   portfolioSnapshots?: PortfolioSnapshotProvider;
+  openAiProfile?: boolean;
 } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "pzn-host-test-"));
   const gateway = await startFixtureGateway(intercept, opts.authorize);
@@ -35,7 +36,8 @@ async function fixture(intercept?: TestInterceptor, opts: {
     LLM_API_KEY: gateway.settings.apiKey, ...opts.gatewayEnv,
   }) : gateway.settings;
   const options = {
-    projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: opts.noGateway ? null : settings, mode: "test",
+    projectRoot: fileURLToPath(testProject), dataDir: dir,
+    gateway: opts.noGateway || !settings ? null : opts.openAiProfile ? { ...settings, profile: "openai" as const } : settings, mode: "test",
     selectionMode: opts.preserve ? "preserve_ts_rank" : "semantic_rerank",
     inspectorEnabled: opts.inspectorEnabled,
     portfolioSnapshots: opts.portfolioSnapshots,
@@ -747,6 +749,7 @@ test("custom gateway headers and body fields reach every request, including tool
     assert.equal(call.headers["content-type"], "application/json");
     assert.equal(call.body.stream, true);
     assert.equal(call.body.response_format.type, "json_schema");
+    assert.ok(Reflect.get(call.body, "max_tokens") > 0);
     assert.deepEqual(Object.fromEntries(Object.keys(fields).map((key) => [key, Reflect.get(call.body, key)])), fields);
   }
   assert.ok(!result.events.includes(key));
@@ -754,6 +757,50 @@ test("custom gateway headers and body fields reach every request, including tool
   const body = payloads.router?.attempts[0].exchange?.request.data;
   assert.deepEqual(body, { ...f.gateway.calls[0].body, metadata: "[REDACTED]", region: "[REDACTED]" });
   assert.doesNotMatch(JSON.stringify(payloads), /pzn-header-only-test-key|demo-east|x-gateway-context/i);
+});
+
+test("direct OpenAI and office gateway use their own credentials and request settings", () => {
+  const env = {
+    OPENAI_API_KEY: "openai-example-key",
+    OPENAI_MODEL: "gpt-4.1-mini",
+    OPENAI_MAX_OUTPUT_TOKENS: "2048",
+    LLM_BASE_URL: "https://office.example.invalid/api",
+    LLM_MODEL: "office-model",
+    LLM_API_KEY: "office-example-key",
+    LLM_GATEWAY_HEADERS_JSON: '{"X-Office-Context":{"project":"demo"}}',
+    LLM_GATEWAY_BODY_JSON: '{"region":"office"}',
+  };
+  const direct = gatewayFromEnv(env, "openai");
+  assert.deepEqual(direct, {
+    profile: "openai", baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini", apiKey: "openai-example-key",
+    contextWindow: 16384, maxOutputTokens: 2048,
+  });
+  const office = gatewayFromEnv(env);
+  assert.equal(office?.baseUrl, env.LLM_BASE_URL);
+  assert.equal(office?.apiKey, env.LLM_API_KEY);
+  assert.equal(office?.model, env.LLM_MODEL);
+  assert.deepEqual(office?.headers, { "x-office-context": '{"project":"demo"}' });
+  assert.deepEqual(office?.bodyFields, { region: "office" });
+  assert.throws(() => gatewayFromEnv({ ...env, OPENAI_API_KEY: "" }, "openai"), /Set OPENAI_API_KEY/);
+  assert.equal(gatewayFromEnv({ OPENAI_API_KEY: env.OPENAI_API_KEY }), null);
+});
+
+test("the direct profile uses OpenAI completion parameters and a separate browser session", async (t) => {
+  const f = await fixture(undefined, { openAiProfile: true });
+  t.after(() => f.close());
+  const { client, gateway } = f;
+  assert.match(client.cookie, /^pzn_openai_session=/);
+  const boot = await client.request<{ openAiModel: string }>("/api/bootstrap");
+  assert.equal(boot.openAiModel, gateway.settings.model);
+  const conversation = await client.conversation();
+  const result = await client.ask(conversation.id, "Compare available and current balance.");
+  assert.equal(result.turn.experience?.blocks[0]?.component, "PznComparison");
+  assert.equal(gateway.calls.length, 2);
+  for (const { body } of gateway.calls) {
+    assert.ok(Reflect.get(body, "max_completion_tokens") > 0);
+    assert.equal(Reflect.has(body, "max_tokens"), false);
+  }
+  assert.doesNotMatch(JSON.stringify(gateway.calls[1].body.response_format), /"uniqueItems"/);
 });
 
 test("gateway configuration rejects ambiguous auth and attempts to replace adapter fields", () => {

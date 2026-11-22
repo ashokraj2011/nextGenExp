@@ -83,7 +83,18 @@ You can also create a rule directly in Tool setup.
 
 Rules apply to the selected scenario, context and treatment. They filter its fixture or configured ranked list and keep the order of surviving IDs. **From turn number** includes that turn and later turns. **Test in chat** starts at turn 1. Save rule edits or removals to apply them to subsequent chat requests.
 
-### Live gateway
+### Direct OpenAI API for local testing
+
+Set `OPENAI_API_KEY` in the server environment or in the ignored `.env.openai` file. The local preset uses `gpt-4.1-mini` and the OpenAI Chat Completions endpoint. Set `OPENAI_MODEL` to choose a different Chat Completions model that supports tool calling and structured outputs. See the [OpenAI API quickstart](https://developers.openai.com/api/docs/quickstart) and [model documentation](https://developers.openai.com/api/docs/models/gpt-4.1-mini).
+
+~~~sh
+npm run build
+npm run start:openai
+~~~
+
+Open the local preview and check the **OpenAI API** label in chat. Treatment Selector, CCRE, and portfolio reads use the demo fixtures. The preview defaults to port **4175** and stores its local state in `.pzn-data/openai`. Use `npm run eval:openai` to run the live API smoke cases. [Open the OpenAI preview](http://127.0.0.1:4175/)
+
+### Office gateway
 
 Copy `.env.example` to `.env` or set the same values in the server environment. Set `LLM_BASE_URL` to the gateway prefix before `/chat/completions` and `LLM_MODEL` to the gateway model alias. Set `LLM_API_KEY` for Bearer authentication. Set `LLM_CONTEXT_WINDOW`, `LLM_MAX_OUTPUT_TOKENS`, and any `LLM_QUIRKS` from the gateway’s tested capabilities.
 

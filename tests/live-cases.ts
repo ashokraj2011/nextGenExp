@@ -1,11 +1,11 @@
-import type { ComponentName } from "../packages/contracts/domain";
+import type { DisplayBlock } from "../packages/contracts/surface";
 
 export type LiveCase = {
   id: string;
   message: string;
   route: "balance" | "portsum" | "app-home" | "clarify" | "no_match";
   outcome: string;
-  component?: ComponentName;
+  component?: DisplayBlock["component"];
   relevant?: string[];
   exclude?: string[];
   scenario?: string;
@@ -44,6 +44,8 @@ export const liveCases: LiveCase[] = [
   { id: "portfolio-labels", message: "What do the labels in the demo portfolio overview mean?", route: portfolio, outcome: ready, component: card, relevant: [portfolioItem] },
   { id: "portfolio-holdings", message: "How are the sample holdings shown in the fictional portfolio?", route: portfolio, outcome: ready, component: card, relevant: [portfolioItem] },
   { id: "portfolio-allocation", message: "Show me an explanation of the demo portfolio allocation view.", route: portfolio, outcome: ready, component: card, relevant: [portfolioItem], scenario: "propensity-unavailable" },
+  { id: "portfolio-summary-cash", message: "Let me know my portfolio summary.", route: portfolio, outcome: ready, component: "PznPortfolioSnapshot", relevant: ["portfolio_cash_investing"] },
+  { id: "portfolio-summary-threshold", message: "Let me know my portfolio summary.", route: portfolio, outcome: ready, component: "PznPortfolioSnapshot", exclude: ["portfolio_cash_investing"], persona: "demo-returning" },
   { id: "transfer-overview", message: "Explain the fictional transfer flow.", route: home, outcome: ready, component: card, relevant: [transferIntro] },
   { id: "transfer-steps", message: "Walk me through the demo transfer steps.", route: home, outcome: ready, component: guide, relevant: [transferGuide] },
   { id: "transfer-preview", message: "How do I get to a preview in the demo transfer checklist?", route: home, outcome: ready, component: guide, relevant: [transferGuide] },

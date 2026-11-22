@@ -10,11 +10,14 @@ import type { TurnView } from "../packages/contracts/api";
 import { testClient, testProject } from "./client";
 import { liveCases, type LiveCase } from "./live-cases";
 
-const gateway = gatewayFromEnv();
+const useOpenAi = process.argv.includes("--openai");
+const gateway = gatewayFromEnv(process.env, useOpenAi ? "openai" : "gateway");
 if (!gateway) throw new Error("Set LLM_BASE_URL, LLM_MODEL, and LLM_API_KEY or LLM_GATEWAY_HEADERS_JSON before running gateway verification.");
 const smoke = process.argv.includes("--smoke");
 const modes: SelectionMode[] = smoke ? ["semantic_rerank"] : ["semantic_rerank", "preserve_ts_rank"];
-const chosen = smoke ? liveCases.filter(({ id }) => ["balance-compare", "metric-summary", "transfer-steps"].includes(id)) : liveCases;
+const smokeCases = ["balance-compare", "metric-summary", "transfer-steps"];
+if (useOpenAi) smokeCases.push("portfolio-summary-cash", "portfolio-summary-threshold");
+const chosen = smoke ? liveCases.filter(({ id }) => smokeCases.includes(id)) : liveCases;
 
 function p95(values: number[]) {
   return values.length ? Math.round([...values].sort((a, b) => a - b)[Math.ceil(values.length * .95) - 1]) : null;
@@ -60,6 +63,7 @@ for (const selectionMode of modes) {
         reportedTokens: [trace.routeRun, trace.composeRun].filter((item) => item?.tokensReported).length,
         estimatedTokens: [trace.routeRun, trace.composeRun].filter((item) => item && !item.tokensReported).length,
         metricReadSucceeded: trace.metricReadSucceeded,
+        ...(trace.failures.length && { failureCodes: trace.failures.map(({ stage, code }) => ({ stage, code })) }),
       };
     }
 
@@ -78,6 +82,7 @@ for (const selectionMode of modes) {
     }
     console.log(JSON.stringify({
       mode: selectionMode, verification: smoke ? "gateway_smoke" : "live_prompt_evaluation", concurrency,
+      provider: useOpenAi ? "openai" : "gateway", model: gateway.model,
       contextChoice: ratio(results.filter(({ expectedRoute }) => expectedRoute !== "no_match" && expectedRoute !== "clarify").map(({ routeMatches }) => routeMatches)),
       clarification: ratio(results.filter(({ expectedRoute }) => expectedRoute === "clarify").map(({ routeMatches, outcomeMatches }) => routeMatches && outcomeMatches)),
       unsupported: ratio(results.filter(({ expectedRoute }) => expectedRoute === "no_match").map(({ routeMatches, outcomeMatches }) => routeMatches && outcomeMatches)),

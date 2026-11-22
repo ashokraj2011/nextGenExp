@@ -52,6 +52,7 @@ export type Bootstrap = {
   defaultScenarioId: string;
   mode: "live" | "test";
   gatewayConfigured: boolean;
+  openAiModel?: string;
   selectionMode: SelectionMode;
   inspectorEnabled: boolean;
 };

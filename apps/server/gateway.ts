@@ -4,6 +4,7 @@ import type { GatewayExchange } from "../../packages/contracts/inspector";
 import { createPayloadCapture } from "./payload-capture";
 
 export type GatewaySettings = {
+  profile?: "openai";
   baseUrl: string;
   model: string;
   apiKey?: string;
@@ -16,6 +17,7 @@ export type GatewaySettings = {
 
 const headerVariable = "LLM_GATEWAY_HEADERS_JSON";
 const bodyVariable = "LLM_GATEWAY_BODY_JSON";
+const openAiBaseUrl = "https://api.openai.com/v1";
 const transportHeaders = new Set(["host", "content-length", "transfer-encoding", "connection", "upgrade"]);
 const managedBodyFields = new Set([
   "model", "messages", "stream", "stream_options", "tools", "tool_choice", "functions", "function_call",
@@ -52,7 +54,25 @@ function readHeaders(text?: string): Record<string, string> {
   return Object.fromEntries(headers.entries());
 }
 
-export function gatewayFromEnv(env: NodeJS.ProcessEnv = process.env): GatewaySettings | null {
+function modelLimits(contextSetting?: string, outputSetting?: string) {
+  const contextWindow = Number(contextSetting || 16_384);
+  const maxOutputTokens = Number(outputSetting || 1_500);
+  if (!Number.isSafeInteger(contextWindow) || !Number.isSafeInteger(maxOutputTokens)
+    || maxOutputTokens < 512 || contextWindow - maxOutputTokens < 2_048) {
+    throw new Error("The configured model limits leave insufficient space for routing and composition.");
+  }
+  return { contextWindow, maxOutputTokens };
+}
+
+export function gatewayFromEnv(env: NodeJS.ProcessEnv = process.env, profile: "gateway" | "openai" = "gateway"): GatewaySettings | null {
+  if (profile === "openai") {
+    const apiKey = env.OPENAI_API_KEY?.trim();
+    if (!apiKey) throw new Error("Set OPENAI_API_KEY in the server environment or .env.openai before using OpenAI API mode.");
+    return {
+      profile, baseUrl: openAiBaseUrl, apiKey, model: env.OPENAI_MODEL?.trim() || "gpt-4.1-mini",
+      ...modelLimits(env.OPENAI_CONTEXT_WINDOW, env.OPENAI_MAX_OUTPUT_TOKENS),
+    };
+  }
   const baseUrl = env.LLM_BASE_URL?.trim();
   const model = env.LLM_MODEL?.trim();
   if (!baseUrl || !model) return null;
@@ -74,18 +94,12 @@ export function gatewayFromEnv(env: NodeJS.ProcessEnv = process.env): GatewaySet
     || (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)))) {
     throw new Error("LLM_BASE_URL must use HTTPS or a loopback HTTP gateway, with a path prefix only.");
   }
-  const contextWindow = Number(env.LLM_CONTEXT_WINDOW || 16_384);
-  const maxOutputTokens = Number(env.LLM_MAX_OUTPUT_TOKENS || 1_500);
-  if (!Number.isSafeInteger(contextWindow) || !Number.isSafeInteger(maxOutputTokens)
-    || maxOutputTokens < 512 || contextWindow - maxOutputTokens < 2_048) {
-    throw new Error("The configured model limits leave insufficient space for routing and composition.");
-  }
-
+  const limits = modelLimits(env.LLM_CONTEXT_WINDOW, env.LLM_MAX_OUTPUT_TOKENS);
   const quirks = (env.LLM_QUIRKS || "").split(",").map((quirk) => quirk.trim()).filter(Boolean) as OpenAIQuirk[];
   if (new Set(quirks).size !== quirks.length || quirks.some((quirk) => !supportedQuirks.includes(quirk))) {
     throw new Error("LLM_QUIRKS contains an unsupported or repeated adapter option.");
   }
-  return { baseUrl: baseUrl.replace(/\/+$/, ""), model, apiKey, contextWindow, maxOutputTokens, quirks, headers, bodyFields };
+  return { baseUrl: baseUrl.replace(/\/+$/, ""), model, apiKey, ...limits, quirks, headers, bodyFields };
 }
 
 function headerSecrets(value: string): string[] {
@@ -107,6 +121,18 @@ function headerSecrets(value: string): string[] {
   return secrets;
 }
 
+function openAiRequestBody(compiledBody: string) {
+  const { max_tokens, ...body } = JSON.parse(compiledBody) as JsonObject;
+  const format = body.response_format as JsonObject | undefined;
+  const output = format?.json_schema as JsonObject | undefined;
+  if (output?.schema) {
+    // The original schema still enforces uniqueness in sfield and the host verifier.
+    const schema = JSON.stringify(output.schema, (key, value: unknown) => key === "uniqueItems" ? undefined : value);
+    output.schema = JSON.parse(schema) as JsonObject;
+  }
+  return stableBody({ ...body, max_completion_tokens: max_tokens });
+}
+
 type GatewayConfiguration = {
   model: JsonObject;
   options: Pick<SFieldOptions, "env" | "bindings" | "plugins" | "secrets">;
@@ -117,12 +143,13 @@ export function configureGateway(
   settings: GatewaySettings, record?: (attemptId: string, exchange: GatewayExchange) => void,
 ): GatewayConfiguration {
   const env = { LLM_API_KEY: settings.apiKey };
-  const headers = settings.headers ?? {};
-  const bodyFields = settings.bodyFields ?? {};
+  const directOpenAi = settings.profile === "openai";
+  const headers = directOpenAi ? {} : settings.headers ?? {};
+  const bodyFields = directOpenAi ? {} : settings.bodyFields ?? {};
   const headerNames = Object.keys(headers);
   const bodyFieldNames = Object.keys(bodyFields);
   const hasOverrides = headerNames.length > 0 || bodyFieldNames.length > 0;
-  if (!hasOverrides && !record) {
+  if (!hasOverrides && !record && !directOpenAi) {
     return {
       model: {
         provider: "openai_compatible", model: settings.model, base_url: settings.baseUrl,
@@ -137,7 +164,7 @@ export function configureGateway(
   const id = "pzn_chat_gateway";
   const credentialValues = [...Object.values(headers).flatMap(headerSecrets), ...(settings.apiKey ? [settings.apiKey] : [])];
   const scrubber = new Scrubber(credentialValues);
-  const adapter = new OpenAICompatibleProvider(hasOverrides ? (input, init) => {
+  const adapter = new OpenAICompatibleProvider(hasOverrides || directOpenAi ? (input, init) => {
     const outgoing = new Headers(init?.headers);
     for (const [name, value] of Object.entries(headers)) outgoing.set(name, value);
     return fetch(input, { ...init, headers: outgoing, redirect: "error" });
@@ -148,9 +175,12 @@ export function configureGateway(
     describe: (binding) => adapter.describe(binding),
     async compile(request) {
       const compiled = await adapter.compile(request);
-      const body = bodyFieldNames.length
-        ? stableBody({ ...bodyFields, ...JSON.parse(compiled.body) as JsonObject })
-        : compiled.body;
+      let body = compiled.body;
+      if (directOpenAi) {
+        body = openAiRequestBody(compiled.body);
+      } else if (bodyFieldNames.length) {
+        body = stableBody({ ...bodyFields, ...JSON.parse(compiled.body) as JsonObject });
+      }
       return { ...compiled, provider: id, body, digest: digestJson(body) };
     },
     async *stream(request, options) {
@@ -181,7 +211,7 @@ export function configureGateway(
     identity: {
       id: "model:default",
       revision: digestJson([id, settings.model, settings.baseUrl, settings.contextWindow, settings.maxOutputTokens,
-        settings.quirks ?? [], headerNames.sort(), bodyFieldNames.sort(), Boolean(settings.apiKey)]),
+        settings.quirks ?? [], headerNames.sort(), bodyFieldNames.sort(), Boolean(settings.apiKey), ...(directOpenAi ? ["openai"] : [])]),
       accountScope: id, classification: "restricted",
     },
     model: settings.model, baseUrl: settings.baseUrl, provider: id,

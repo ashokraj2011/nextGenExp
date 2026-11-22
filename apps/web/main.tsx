@@ -372,6 +372,7 @@ function App() {
         </div>
         <div className="topbar-actions">
           {configuration?.mode === "test" && <span className="test-label" title="Deterministic automated test gateway">Test mode</span>}
+          {configuration?.openAiModel && <span className="test-label" title={configuration.openAiModel}>OpenAI API</span>}
           <span className="demo-badge"><span className="demo-dot" />Demo data</span>
           {configuration?.inspectorEnabled && <a className="tool-setup-trigger inspector-trigger icon-button" aria-label="Tool setup" href="/admin">
             <Settings2 size={18} aria-hidden="true" /><span>Tool setup</span></a>}

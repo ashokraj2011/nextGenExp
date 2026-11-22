@@ -94,6 +94,8 @@ export async function startApp(options: Options) {
   const now = Date.now;
   const selectionMode = options.selectionMode ?? "semantic_rerank";
   const inspectorEnabled = options.inspectorEnabled ?? true;
+  const sessionCookie = options.gateway?.profile === "openai" ? "pzn_openai_session" : "pzn_session";
+  const sessionPattern = new RegExp("(?:^|;\\s*)" + sessionCookie + "=(local_[a-f0-9]{32})(?:;|$)");
   const portfolioSnapshots = options.portfolioSnapshots ?? fixturePortfolioSnapshotProvider;
   const store = new Store(join(options.dataDir, "app.sqlite"));
   let runtime: Runtime | null;
@@ -142,9 +144,9 @@ export async function startApp(options: Options) {
       throw new ApiError(403, "origin_unavailable", "Use the local demo address.");
     }
 
-    const token = req.headers.cookie?.match(/(?:^|;\s*)pzn_session=(local_[a-f0-9]{32})(?:;|$)/)?.[1];
+    const token = req.headers.cookie?.match(sessionPattern)?.[1];
     const { id: principalId, created } = store.session(token);
-    if (created) res.setHeader("Set-Cookie", "pzn_session=" + principalId + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000");
+    if (created) res.setHeader("Set-Cookie", sessionCookie + "=" + principalId + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000");
 
     const [resource, id, operation, extra] = pathname.slice(5).split("/");
     if (extra !== undefined || (id && !idPattern.test(id))) throw new ApiError(404, "not_found", "This item is unavailable.");
@@ -156,6 +158,7 @@ export async function startApp(options: Options) {
         scenarios: tsFixtures.scenarios.map(({ scenarioId, label }) => ({ scenarioId, label })),
         defaultPersonaId: demo.defaultPersonaId, defaultScenarioId: demo.defaultScenarioId,
         gatewayConfigured: Boolean(runtime), mode, selectionMode, inspectorEnabled,
+        ...(options.gateway?.profile === "openai" && { openAiModel: options.gateway.model }),
       };
       return json(res, state);
     }
