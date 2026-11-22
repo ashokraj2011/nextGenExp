@@ -2,7 +2,7 @@ import { createServer, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { GatewaySettings } from "../apps/server/gateway";
 import type { ComponentName, ContextSelectionProposal, ExperienceProposal, Intent } from "../packages/contracts/domain";
-import { leavingWorkQuestion, retirementQuestion, type RoutingHistoryEntry, type RoutingIntent, type RoutingIntentId } from "../packages/contracts/routing-intents";
+import { leavingWorkQuestion, portfolioSummaryQuestion, retirementQuestion, type RoutingHistoryEntry, type RoutingIntent, type RoutingIntentId } from "../packages/contracts/routing-intents";
 import type { modelBundle } from "../packages/experience/content";
 
 type Envelope = {
@@ -64,6 +64,9 @@ function route(envelope: Envelope): ContextSelectionProposal {
   const clarify = (clarificationQuestion = allowedQuestions[0], intentId: RoutingIntentId | null = null): ContextSelectionProposal => (
     { ...base, status: "clarify", intentId, clarificationQuestion }
   );
+  const select = (intentId: RoutingIntentId): ContextSelectionProposal => (
+    { ...base, status: "selected", intentId, clarificationQuestion: null }
+  );
   const previous = recent?.at(-1);
   if (/^(?:hi|hello|hey|how are you)[!.?]*$/.test(text)) return reply("Hi! What would you like to talk about?");
   if (/^(?:(?:that(?:['’]s|s| is) )?(?:nice|great|cool|helpful|interesting)|thanks|thank you|got it)[!.?]*$/.test(text)) {
@@ -88,11 +91,23 @@ function route(envelope: Envelope): ContextSelectionProposal {
 
   if (!contexts.size) {
     const previousTopic = recent?.findLast(({ contextId }) => contextId !== null);
+    const priorQuestion = previous?.clarificationQuestion;
+    const confirms = /^(?:yes\b|sure\b|correct\b|that'?s right\b)/.test(text);
+    const askedAboutPortfolioSummary = priorQuestion === portfolioSummaryQuestion;
+    const portfolioIntent = intentCatalog.find(({ intentId }) => intentId === "show_portfolio");
+    if (askedAboutPortfolioSummary && confirms && portfolioIntent) return select(portfolioIntent.intentId);
+    const summaryText = text.replace(/^(?:please |can you |could you |can i )/, "");
+    const asksForSummary = /^(?:(?:show|see|give|view|display|get|pull up)(?: me)? )?(?:(?:the|my|a) )?summary[.!?]*$/.test(summaryText);
+    if (portfolioIntent && asksForSummary) {
+      return previousTopic?.contextId === portfolioIntent.contextId
+        ? select(portfolioIntent.intentId)
+        : clarify(portfolioSummaryQuestion, portfolioIntent.intentId);
+    }
+
     const establishedRetirement = previousTopic?.intentId === "retirement_learning"
       || (previousTopic?.contextId === "learning" && retirementTopic.test(previousTopic.request.toLowerCase()));
-    const priorQuestion = recent?.at(-1)?.clarificationQuestion;
     const askedAboutRetirement = priorQuestion === retirementQuestion || priorQuestion === leavingWorkQuestion;
-    const confirmedRetirement = askedAboutRetirement && /^(?:yes\b|sure\b|correct\b|that'?s right\b)/.test(text);
+    const confirmedRetirement = askedAboutRetirement && confirms;
     const leavingWork = /\blast day (?:at|of) (?:(?:my|the) )?(?:job|work)\b/.test(text);
     const losingJob = /\b(?:lose|loose|lost|losing) (?:my|the) job\b/.test(text);
     const ageClue = /\b(?:(?:will be|turning|turn|i am|i'm) [5-8]\d|am old|getting older)\b/.test(text);
@@ -101,7 +116,7 @@ function route(envelope: Envelope): ContextSelectionProposal {
       const possibleIntent = intentCatalog.find(({ intentId }) => intentId === "retirement_learning");
       return clarify(leavingWork || losingJob ? leavingWorkQuestion : retirementQuestion, possibleIntent?.intentId ?? null);
     }
-    else if (askedAboutRetirement && /^(?:no|not really)[.!]*$/.test(text)) return clarify();
+    else if ((askedAboutRetirement || askedAboutPortfolioSummary) && /^(?:no|not really)[.!]*$/.test(text)) return clarify();
     else if (previousTopic?.contextId && /\b(that|those|again|more)\b/.test(text)) contexts.add(previousTopic.contextId);
   }
   if (contexts.size > 1) return clarify();
@@ -118,9 +133,7 @@ function route(envelope: Envelope): ContextSelectionProposal {
   const contextId = [...contexts][0];
   const choice = intentCatalog.find((item) => item.contextId === contextId && item.task === task)
     ?? intentCatalog.find((item) => item.contextId === contextId && item.task === "explain");
-  return choice && choice.contextId !== null
-    ? { ...base, status: "selected", intentId: choice.intentId, clarificationQuestion: null }
-    : noMatch;
+  return choice && choice.contextId !== null ? select(choice.intentId) : noMatch;
 }
 
 function compose({ body, envelope }: GatewayCall): ExperienceProposal | ToolCall {

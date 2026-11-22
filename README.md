@@ -68,6 +68,8 @@ For greetings, acknowledgments, or general questions that need no demo tools, th
 
 When the goal is unclear, the router selects a focused question from the approved list and chat displays it. In a new chat, try “i will be 62” followed by “last day of job is next week.” Confirm that you want retirement planning information to route to `retirement_learning`. In a chat that already established retirement as the goal, the same messages can continue that topic directly. Use **Logs → Context Router** to see the input and decision.
 
+After a greeting, “Show me the summary” asks “Did you mean your portfolio summary?” Reply “yes” to see the portfolio snapshot. If the conversation already establishes the portfolio as the subject, the same request opens the snapshot directly.
+
 ### Portfolio Snapshot demo
 
 Ask **Let me know my portfolio summary** in **Normal eligibility**. The Context Router selects `show_portfolio`, which maps to the `portsum` context. sfield calls Treatment Selector with `{ context, mid }`. In this mock, its built-in CCRE rule adds **Explore investing options** to the eligible set when **Portfolio → Cash balance (USD) → Greater than → 10000** matches. A saved rule for the same scenario, context and treatment replaces that fixture rule.

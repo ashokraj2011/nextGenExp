@@ -29,7 +29,8 @@ export function availableRoutingIntents(catalog: ContextCatalog, canCreateRule: 
 
 export const retirementQuestion = "Are you looking for general retirement planning information?";
 export const leavingWorkQuestion = "Would you like general retirement planning information as you leave your job?";
-export const routingQuestions = [...host.clarificationQuestions, retirementQuestion, leavingWorkQuestion];
+export const portfolioSummaryQuestion = "Did you mean your portfolio summary?";
+export const routingQuestions = [...host.clarificationQuestions, retirementQuestion, leavingWorkQuestion, portfolioSummaryQuestion];
 export const ROUTING_HISTORY_TURNS = 4;
 export const ROUTING_HISTORY_REQUEST_LENGTH = 350;
 export const ROUTING_HISTORY_REPLY_LENGTH = 1600;

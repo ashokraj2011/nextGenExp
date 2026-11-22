@@ -12,7 +12,7 @@ import { startApp } from "../apps/server/http";
 import type { Bootstrap, TurnAccepted, TurnView, ConversationView } from "../packages/contracts/api";
 import type { TurnPayloads } from "../packages/contracts/inspector";
 import type { GlossaryCondition } from "../packages/contracts/rule-glossary";
-import { leavingWorkQuestion, retirementQuestion } from "../packages/contracts/routing-intents";
+import { leavingWorkQuestion, portfolioSummaryQuestion, retirementQuestion } from "../packages/contracts/routing-intents";
 import {
   defaultToolSetup, type MockCcreRule, type ToolSetup, type ToolSetupView, type TreatmentPreview, type TreatmentPreviewInput,
 } from "../packages/contracts/tool-setup";
@@ -628,6 +628,39 @@ test("a misspelled retirement request reaches Learning and shows the beneficiary
       assert.deepEqual(steps.turn.experience?.actions, []);
     }
   }
+});
+
+test("a summary request uses the established portfolio topic or asks for confirmation", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const { client } = f;
+  const chat = await client.conversation();
+  const message = "show me the summary";
+  await client.ask(chat.id, "Hi");
+
+  const clarification = await client.ask(chat.id, message);
+  assert.equal(clarification.turn.experience?.question, portfolioSummaryQuestion);
+  assert.equal(clarification.trace.routeOutcome, "clarify");
+  assert.equal(clarification.trace.intentId, null);
+  assert.equal(clarification.trace.possibleIntentId, "show_portfolio");
+  const logs = await client.request<TurnPayloads>("/api/debug/payloads/" + clarification.turn.id);
+  assert.equal(logs.treatment, null);
+  assert.equal(logs.portfolio, null);
+  assert.equal(logs.composer, null);
+
+  for (const followUp of ["yes", message]) {
+    const summary = await client.ask(chat.id, followUp);
+    assert.equal(summary.trace.intentId, "show_portfolio");
+    assert.equal(summary.trace.selectedContextId, "portsum");
+    assert.equal(summary.turn.experience?.blocks[0]?.component, "PznPortfolioSnapshot");
+  }
+
+  const otherChat = await client.conversation();
+  assert.equal((await client.ask(otherChat.id, message)).turn.experience?.question, portfolioSummaryQuestion);
+  const balances = await client.ask(otherChat.id, "No, show my balance summary.");
+  assert.equal(balances.trace.intentId, "show_balance");
+  assert.equal(balances.trace.selectedContextId, "balance");
+  assert.equal(balances.turn.experience?.blocks[0]?.component, "PznMetricSummary");
 });
 
 test("recent retirement clues prompt for clarification until the user confirms the goal", async (t) => {
