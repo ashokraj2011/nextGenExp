@@ -6,6 +6,7 @@ import {
   MAX_CCRE_RULES, type MockCcreRule, type MockOutput, type ToolSetup, type ToolSetupView, type TreatmentPreview, type TreatmentPreviewInput,
 } from "../../packages/contracts/tool-setup";
 import { contentCatalog } from "../../packages/experience/content";
+import type { PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import { mockRuleGlossary } from "../../packages/rule-glossary";
 import { activeContexts, fixtureEligibleSets, FixtureTsAdapter, scenariosById, TreatmentSelectorTimeout, tsFixtures } from "../../packages/ts-adapter";
 import { ApiError } from "./store";
@@ -81,7 +82,7 @@ export function addCcreRule(setup: ToolSetup, rule: MockCcreRule): ToolSetup {
   return { ...setup, ccreRules: [...rules, rule] };
 }
 
-export async function previewTreatmentSelector(input: TreatmentPreviewInput): Promise<TreatmentPreview> {
+export async function previewTreatmentSelector(input: TreatmentPreviewInput, portfolios?: PortfolioSnapshotProvider): Promise<TreatmentPreview> {
   const { scenarioId, contextId, personaId, ordinal, enabled, output, ccreRules = [] } = input;
   validateMock(scenarioId, contextId, output);
   for (const rule of ccreRules) {
@@ -94,10 +95,10 @@ export async function previewTreatmentSelector(input: TreatmentPreviewInput): Pr
   if (!persona) throw new ApiError(400, "invalid_mock_persona", "Choose a demo persona allowed for this scenario.");
   if (!enabled) return { status: "disabled" };
   const source = output ? "override" : "fixture";
-  const adapter = new FixtureTsAdapter({ scenarioId, ordinal }, output ? [{ scenarioId, contextId, output }] : [], ccreRules);
+  const adapter = new FixtureTsAdapter({ scenarioId, ordinal }, output ? [{ scenarioId, contextId, output }] : [], ccreRules, portfolios);
   try {
-    const result = adapter.selectEligibleContent({ mid: persona.syntheticMid, context: contextId });
-    return { status: result.contentIds.length ? "ranked" : "empty", source, ...result };
+    const { contentIds, ccre } = await adapter.selectEligibleContent({ mid: persona.syntheticMid, context: contextId });
+    return { status: contentIds.length ? "ranked" : "empty", source, contentIds, ccre };
   } catch (error) {
     if (error instanceof TreatmentSelectorTimeout) return { status: "timeout", source };
     throw error;

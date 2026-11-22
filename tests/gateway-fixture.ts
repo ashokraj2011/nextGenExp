@@ -16,6 +16,7 @@ type Envelope = {
   eligible?: ReturnType<typeof modelBundle>;
   allowedQuestions: string[];
   canCreateRule?: boolean;
+  portfolioSnapshotIncluded?: boolean;
 };
 type RequestBody = {
   model: string;
@@ -55,14 +56,16 @@ function route(envelope: Envelope): ContextSelectionProposal {
   }
   const contexts = new Set<string>();
   if (/balance|ledger|available term/.test(text)) contexts.add("balance");
-  if (/portfolio|holdings|allocation/.test(text)) contexts.add("portsum");
+  if (/portfolio|protfolio|holdings|allocation/.test(text)) contexts.add("portsum");
   if (/transfer|app home|demo profile|app help|demo app/.test(text)) contexts.add("app-home");
   if (!contexts.size && /\b(that|those|again|more)\b/.test(text) && recent?.length) contexts.add(recent.at(-1)!.contextId);
   const ambiguous = contexts.size > 1 || (!contexts.size && /help|explain|show|learn|what/.test(text) && !/weather|recipe|stock price|bitcoin/.test(text));
   const status = ambiguous ? "clarify" : contexts.size === 1 ? "selected" : "no_match";
+  const asksForPortfolioValues = /\b(my|show|summarize|display)\b/.test(text) || /^(?:portfolio|protfolio) summary\W*$/.test(text);
+  const showPortfolio = asksForPortfolioValues && !/\b(explain|terms|labels)\b/.test(text) && !/^what(?: is|'s) (?:a|the)\b/.test(text);
   const task = /compare|difference|versus/.test(text) ? "compare"
     : /guide|steps|checklist|how do|walk/.test(text) ? "guide"
-    : /summary|how much|amount|show my/.test(text) ? "show" : "explain";
+    : (contexts.has("portsum") ? showPortfolio : /summary|how much|amount|show my/.test(text)) ? "show" : "explain";
   const contextId = status === "selected" ? [...contexts][0] : null;
   return {
     ...catalog,
@@ -97,6 +100,7 @@ function compose({ body, envelope }: GatewayCall): ExperienceProposal | ToolCall
     return choose("PznComparison", [get("Available balance"), get("Current balance")], "comparison");
   }
   if (envelope.selectedContextId === "portsum") {
+    if (envelope.portfolioSnapshotIncluded) return choose("PznContentCard", [get("Explore investing options")], "summary");
     return choose("PznContentCard", [get("Understanding the fictional portfolio")], "explanation");
   }
   if (envelope.selectedContextId === "app-home") {

@@ -42,5 +42,6 @@ export type TurnPayloads = {
   router: ModelStagePayloads | null;
   glossary: RegistryToolPayloads | null;
   treatment: TreatmentPayloads | null;
+  portfolio: RegistryToolPayloads | null;
   composer: ModelStagePayloads | null;
 };

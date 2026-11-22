@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { contextCatalogSchema, type ContextCatalog } from "../contracts/domain";
-import { normalizedIdsSchema, treatmentOverride, type MockCcreRule, type TreatmentOverride } from "../contracts/tool-setup";
+import { portfolioSnapshotSchema } from "../contracts/portfolio";
+import { mockCcreRuleSchema, normalizedIdsSchema, treatmentOverride, type MockCcreRule, type TreatmentOverride } from "../contracts/tool-setup";
+import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../portfolio-snapshot";
 import rawCatalog from "../../fixtures/contexts.json";
 import rawScenarios from "../../fixtures/treatment-scenarios.json";
 import host from "../../fixtures/host.json";
@@ -21,6 +23,7 @@ const catalog = contextCatalogSchema.parse(rawCatalog);
 export const tsFixtures = z.object({
   fixtureVersion: z.string(),
   base: z.record(normalizedIdsSchema),
+  defaultCcreRules: z.array(mockCcreRuleSchema.omit({ scenarioId: true })),
   scenarios: z.array(z.object({ scenarioId: z.string(), label: z.string(), rules: z.array(fixtureRule) }).strict()),
 }).strict().parse(rawScenarios);
 export const scenariosById = new Map(tsFixtures.scenarios.map((scenario) => [scenario.scenarioId, scenario]));
@@ -65,6 +68,7 @@ export class FixtureTsAdapter implements TsAdapter {
     private readonly state: FixtureState,
     private readonly overrides: readonly TreatmentOverride[] = [],
     private readonly ccreRules: readonly MockCcreRule[] = [],
+    private readonly portfolios: PortfolioSnapshotProvider = fixturePortfolioSnapshotProvider,
   ) {}
 
   async listContexts(signal?: AbortSignal): Promise<ContextCatalog> {
@@ -74,10 +78,10 @@ export class FixtureTsAdapter implements TsAdapter {
   }
 
   async getRankedEligibleIds(request: TreatmentRequest, signal?: AbortSignal): Promise<string[]> {
-    return this.selectEligibleContent(request, signal).contentIds;
+    return (await this.selectEligibleContent(request, signal)).contentIds;
   }
 
-  selectEligibleContent({ mid, context }: TreatmentRequest, signal?: AbortSignal) {
+  async selectEligibleContent({ mid, context }: TreatmentRequest, signal?: AbortSignal) {
     signal?.throwIfAborted();
     const persona = host.personas.find((persona) => (
       persona.syntheticMid === mid && persona.allowedScenarios.includes(this.state.scenarioId)
@@ -90,6 +94,21 @@ export class FixtureTsAdapter implements TsAdapter {
     const fixture = override ? undefined : fixtureRuleFor(this.state, context);
     if (override?.mode === "timeout" || fixture?.error) throw new TreatmentSelectorTimeout();
     const ids = override?.mode === "empty" ? [] : (override?.contentIds ?? fixture?.eligible ?? tsFixtures.base[context]);
-    return applyMockCcreRules([...ids], this.ccreRules, { ...this.state, contextId: context, personaId: persona.personaId });
+    const rules = this.ccreRules.filter((rule) => rule.scenarioId === this.state.scenarioId && rule.contextId === context);
+    const configuredTargets = new Set(rules.map(({ contentId }) => contentId));
+    const defaultRules = tsFixtures.defaultCcreRules
+      .filter((rule) => rule.contextId === context && !configuredTargets.has(rule.contentId))
+      .map((rule) => ({ ...rule, scenarioId: this.state.scenarioId }));
+    const activeRules = [...rules, ...defaultRules];
+    const needsPortfolio = activeRules.some(({ contentId, condition }) => (
+      ids.includes(contentId) && condition.kind === "attribute" && condition.namespaceId === "portfolio"
+    ));
+    const reading = needsPortfolio ? await this.portfolios.read(mid, signal) : null;
+    signal?.throwIfAborted();
+    const portfolio = reading ? portfolioSnapshotSchema.parse(reading) : null;
+    const result = applyMockCcreRules([...ids], activeRules, {
+      ...this.state, contextId: context, personaId: persona.personaId, portfolioCashCents: portfolio?.cashCents,
+    });
+    return { ...result, portfolio };
   }
 }

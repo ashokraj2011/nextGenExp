@@ -18,6 +18,7 @@ import {
 import { actionFor, testClient, testProject } from "./client";
 import { startFixtureGateway, type TestInterceptor } from "./gateway-fixture";
 import { mockRuleGlossary } from "../packages/rule-glossary";
+import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../packages/portfolio-snapshot";
 
 async function fixture(intercept?: TestInterceptor, opts: {
   noGateway?: boolean;
@@ -25,6 +26,7 @@ async function fixture(intercept?: TestInterceptor, opts: {
   preserve?: boolean;
   gatewayEnv?: NodeJS.ProcessEnv;
   authorize?: (headers: IncomingHttpHeaders) => boolean;
+  portfolioSnapshots?: PortfolioSnapshotProvider;
 } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "pzn-host-test-"));
   const gateway = await startFixtureGateway(intercept, opts.authorize);
@@ -36,6 +38,7 @@ async function fixture(intercept?: TestInterceptor, opts: {
     projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: opts.noGateway ? null : settings, mode: "test",
     selectionMode: opts.preserve ? "preserve_ts_rank" : "semantic_rerank",
     inspectorEnabled: opts.inspectorEnabled,
+    portfolioSnapshots: opts.portfolioSnapshots,
   } as const;
   let app = await startApp(options);
   const client = await testClient(app.url);
@@ -500,6 +503,63 @@ test("synthetic metrics require a successful real sfield tool call before displa
   assert.match(JSON.stringify(attempts[0].exchange?.response?.data), /toolCalls/);
   assert.deepEqual(attempts[1].exchange?.request.data, f.gateway.calls[2].body);
   assert.match(JSON.stringify(attempts[1].exchange?.response?.data), /PznMetricSummary/);
+});
+
+test("portfolio summaries combine the scoped snapshot with the cash treatment only when eligible", async (t) => {
+  const reads: string[] = [];
+  const f = await fixture(undefined, { portfolioSnapshots: {
+    async read(mid, signal) {
+      reads.push(mid);
+      return fixturePortfolioSnapshotProvider.read(mid, signal);
+    },
+  } });
+  t.after(() => f.close());
+  const { client, gateway } = f;
+  const question = "Let me know my portfolio summary.";
+  const offer = "portfolio_cash_investing";
+
+  for (const [personaId, mid, cashCents, matched] of [
+    ["demo-learner", "DEMO-MID-1001", 1_250_000, true],
+    ["demo-returning", "DEMO-MID-1002", 1_000_000, false],
+  ] as const) {
+    const conversation = await client.conversation("normal", personaId);
+    const { turn, trace } = await client.ask(conversation.id, question);
+    assert.equal(turn.status, "completed", JSON.stringify(trace));
+    assert.equal(trace.selectedContextId, "portsum");
+    assert.equal(trace.portfolioReadSucceeded, true);
+    assert.deepEqual(trace.components, matched ? ["PznPortfolioSnapshot", "PznContentCard"] : ["PznPortfolioSnapshot"]);
+    const [snapshot, recommendation] = turn.experience!.blocks;
+    assert.equal(snapshot.component, "PznPortfolioSnapshot");
+    assert.equal(snapshot.props.cashCents, cashCents);
+    if (matched) {
+      assert.equal(recommendation.component, "PznContentCard");
+      assert.match(recommendation.props.body, /You have \$12,500 in cash/);
+    }
+    const payloads = await client.request<TurnPayloads>("/api/debug/payloads/" + turn.id);
+    assert.deepEqual(payloads.treatment?.mockInput?.data, { mid, context: "portsum" });
+    assert.deepEqual(payloads.treatment?.result?.data, matched ? ["portfolio_explanation", offer] : ["portfolio_explanation"]);
+    assert.match(JSON.stringify(payloads.treatment?.ccre?.data), matched ? /"outcome":"matched"/ : /"outcome":"excluded"/);
+    assert.equal(payloads.portfolio?.tool, "portfolio.snapshot.read@1.0.0");
+    assert.equal(payloads.portfolio?.status, "succeeded");
+    assert.deepEqual(payloads.portfolio?.registryInput.data, { turnRef: turn.id, routeDecisionId: trace.routeDecisionId });
+    assert.deepEqual(payloads.portfolio?.result?.data, snapshot.props);
+    const composer = gateway.calls.at(-1)?.envelope;
+    assert.equal(composer?.portfolioSnapshotIncluded, true);
+    assert.equal(composer?.eligible?.candidates.some((candidate) => candidate.title === "Explore investing options"), matched);
+    assert.doesNotMatch(JSON.stringify(composer), /cashCents|1250000|DEMO-MID/);
+  }
+  assert.deepEqual(reads, ["DEMO-MID-1001", "DEMO-MID-1002"]);
+
+  const empty = await client.conversation("empty");
+  const summary = await client.ask(empty.id, question);
+  assert.deepEqual(summary.trace.components, ["PznPortfolioSnapshot"]);
+  assert.equal(summary.trace.composerRunId, null);
+  assert.equal(summary.turn.experience?.status, "ready");
+
+  await client.request("/api/admin/tools", { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, portfolio: false } });
+  const missing = await client.ask(empty.id, question);
+  assert.equal(missing.turn.failureCode, "portfolio_unavailable");
+  assert.equal(missing.turn.experience, undefined);
 });
 
 test("admission rejects unknown contexts, tampered input, duplicate payload changes, and foreign principals", async (t) => {

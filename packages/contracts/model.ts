@@ -27,6 +27,7 @@ export const turnInputSchema = closed({ turnRef: string });
 export const propensityInputSchema = closed({ turnRef: string, catalogSnapshotId: string });
 export const treatmentInputSchema = closed({ turnRef: string, routeDecisionId: string });
 export const glossaryInputSchema = closed({ turnRef: string, routerRunId: string });
+export const portfolioInputSchema = closed({ turnRef: string, routeDecisionId: string });
 export const balanceInputSchema = closed({});
 export const contextResultSchema = closed({
   schemaVersion: { type: "string", enum: ["1.0"] },
@@ -40,6 +41,11 @@ export const propensityResultSchema = closed({
   scores: array(closed({ contextId: string, score }), 24),
 });
 export const treatmentResultSchema = array(string, 12);
+const cents = { type: "integer", minimum: 0, maximum: 1_000_000_000_000 };
+export const portfolioResultSchema = closed({
+  fixtureVersion: string, asOf: string, currency: { type: "string", enum: ["USD"] },
+  cashCents: cents, equityCents: cents, fixedIncomeCents: cents,
+});
 const glossaryAttributeResultSchema = closed({
   id: string,
   label: string,

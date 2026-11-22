@@ -1,13 +1,14 @@
 import type { SelectionMode } from "./domain";
 import type { DisplayExperience } from "./surface";
 
-export type Progress = "accepted" | "catalog" | "routing" | "glossary" | "eligibility" | "composition" | "verifying";
+export type Progress = "accepted" | "catalog" | "routing" | "glossary" | "eligibility" | "portfolio" | "composition" | "verifying";
 export const progressLabels: Record<Progress, string> = {
   accepted: "Getting your request ready",
   catalog: "Checking available demo topics",
   routing: "Finding the right demo topic",
   glossary: "Loading the rule glossary",
   eligibility: "Finding eligible demo content",
+  portfolio: "Reading your demo portfolio",
   composition: "Preparing your response",
   verifying: "Checking the response",
 };
@@ -16,6 +17,7 @@ export const failureCopy = {
   route_rejected: "We couldn’t verify a demo topic for this request. Please try again.",
   glossary_unavailable: "The rule glossary is unavailable. Check CCRE glossary in Tool setup and try again.",
   ts_unavailable: "We couldn’t retrieve eligible demo content. Please try again.",
+  portfolio_unavailable: "The demo portfolio snapshot is unavailable. Please try again.",
   content_unavailable: "The eligible items are currently unavailable in the demo catalog. Please try again.",
   gateway_unavailable: "The model gateway is unavailable. Please try again.",
   verification_failed: "We couldn’t verify a response for this request. Please try again.",

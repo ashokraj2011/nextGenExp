@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import host from "../../fixtures/host.json";
 import type { BalanceProof, IntroKey } from "../contracts/domain";
+import { formatPortfolioAmount, type PortfolioSnapshot } from "../contracts/portfolio";
 import type { RuleGlossary } from "../contracts/rule-glossary";
 import {
-  MAX_SURFACE_BYTES, PZN_CATALOG_ID, ruleCreation, validatePznSurface, type DisplayBlock, type DisplayExperience, type RuleCreationProps,
+  MAX_SURFACE_BYTES, PZN_CATALOG_ID, portfolioSnapshot, ruleCreation, validatePznSurface, type DisplayBlock, type DisplayExperience, type RuleCreationProps,
 } from "../contracts/surface";
 import type { VerifiedExperience } from "./verify";
 
@@ -19,10 +20,11 @@ type ExperienceInput = {
   expiresAt: number;
   approved?: VerifiedExperience;
   proof?: BalanceProof | null;
+  portfolio?: PortfolioSnapshot;
 };
 
 export function compileExperience(input: ExperienceInput): CompiledExperience {
-  const intro = input.outcome === "eligible_empty"
+  const intro = input.portfolio ? host.introCopy.summary : input.outcome === "eligible_empty"
     ? "There is no eligible demo content available for this request."
     : host.introCopy[input.introKey];
   const blocks: DisplayBlock[] = (input.approved?.blocks ?? []).map(({ proposal, content }) => {
@@ -53,14 +55,24 @@ export function compileExperience(input: ExperienceInput): CompiledExperience {
           }),
         } };
       }
-      case "PznContentCard":
+      case "PznContentCard": {
+        if (primary.portfolioData === "cash") {
+          if (!input.portfolio) throw new Error("Verified portfolio snapshot is required");
+          const body = `You have ${formatPortfolioAmount(input.portfolio.cashCents)} in cash. ${primary.body}`;
+          return { component: proposal.component, props: { ...shared, description: primary.description, body, recommendation: true } };
+        }
         return { component: proposal.component, props: { ...shared, description: primary.description, body: primary.body } };
+      }
     }
   });
   const issued = (input.approved?.followUps ?? []).map((followUp, index) => ({
     ...followUp, actionId: makeId("action"), componentId: "follow_up_" + (index + 1),
   }));
-  return buildSurface({ status: input.status, outcome: input.outcome, intro, question: input.question, partial: input.partial, expiresAt: input.expiresAt }, blocks, issued);
+  if (input.portfolio) blocks.unshift({ component: portfolioSnapshot.name, props: input.portfolio });
+  return buildSurface({
+    status: input.portfolio ? "ready" : input.status, outcome: input.portfolio ? "ready" : input.outcome,
+    intro, question: input.portfolio ? null : input.question, partial: input.partial, expiresAt: input.expiresAt,
+  }, blocks, issued);
 }
 
 export function compileRuleCreation(props: RuleCreationProps & { glossary: RuleGlossary }, expiresAt: number): CompiledExperience {

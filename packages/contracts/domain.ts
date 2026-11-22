@@ -81,6 +81,7 @@ export const contentEntrySchema = z.object({
     toolId: z.literal("demo.balance.read"),
     metricKeys: z.array(metricValueSchema.shape.metricKey).min(1).max(2),
   }).strict().nullable(),
+  portfolioData: z.literal("cash").optional(),
   followUps: z.array(followUpSchema),
   sourceRef: z.string().startsWith("fixture:"),
   sourceLabel: z.string().min(1),

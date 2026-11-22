@@ -2,6 +2,7 @@ import { Catalog, ChildListSchema, CreateSurfaceMessageSchema, DynamicStringSche
 import type { CreateSurfaceMessage } from "@a2ui/web_core/v1_0";
 import { z } from "zod";
 import { comparisonFieldSchema, metricValueSchema, stepSchema } from "./domain";
+import { portfolioSnapshotSchema } from "./portfolio";
 import { ruleGlossarySchema } from "./rule-glossary";
 
 export const PZN_CATALOG_ID = "https://pzn.example.invalid/catalogs/v1.0/experience";
@@ -18,7 +19,7 @@ const shared = {
   disclosures: z.array(limitedText).min(1).max(8),
 };
 export const contentCard = { name: "PznContentCard", schema: z.object({
-  ...shared, description: limitedText, body: limitedText,
+  ...shared, description: limitedText, body: limitedText, recommendation: z.literal(true).optional(),
 }).strict() } as const;
 export const comparison = { name: "PznComparison", schema: z.object({
   ...shared, columns: z.array(z.object({ title: limitedText, fields: z.array(comparisonFieldSchema).min(1).max(12) }).strict()).length(2),
@@ -42,9 +43,10 @@ export const ruleCreation = { name: "PznRuleCreation", schema: z.object({
   scenarioId: demoKey, personaId: demoKey, glossary: ruleGlossarySchema.optional(),
 }).strict() } as const;
 export type RuleCreationProps = z.infer<typeof ruleCreation.schema>;
+export const portfolioSnapshot = { name: "PznPortfolioSnapshot", schema: portfolioSnapshotSchema } as const;
 
-export const catalogApis = [experienceRoot, contentCard, comparison, stepList, metricSummary, followUpButton, ruleCreation] as const;
-type BlockApi = typeof contentCard | typeof comparison | typeof stepList | typeof metricSummary;
+export const catalogApis = [experienceRoot, contentCard, comparison, stepList, metricSummary, portfolioSnapshot, followUpButton, ruleCreation] as const;
+type BlockApi = typeof contentCard | typeof comparison | typeof stepList | typeof metricSummary | typeof portfolioSnapshot;
 type ShapeFor<T extends BlockApi> = T extends BlockApi ? { component: T["name"]; props: z.infer<T["schema"]> } : never;
 export type DisplayBlock = ShapeFor<BlockApi> | { component: typeof ruleCreation.name; props: RuleCreationProps };
 export type DisplayAction = { actionId: string; componentId: string; label: string };

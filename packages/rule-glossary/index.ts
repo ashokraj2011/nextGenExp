@@ -1,8 +1,8 @@
 import host from "../../fixtures/host.json";
 import { glossaryAllowsCondition, ruleGlossarySchema, type GlossaryAttribute, type GlossaryCondition } from "../contracts/rule-glossary";
 
-type RuleInput = { personaId: string; ordinal: number };
-type AttributeDefinition = GlossaryAttribute & { read: (input: RuleInput) => GlossaryCondition["value"] };
+type RuleInput = { personaId: string; ordinal: number; portfolioCashCents?: number };
+type AttributeDefinition = GlossaryAttribute & { read: (input: RuleInput) => GlossaryCondition["value"] | undefined };
 
 const namespaces = [
   {
@@ -31,6 +31,16 @@ const namespaces = [
       },
     ],
   },
+  {
+    id: "portfolio", label: "Portfolio",
+    attributes: [
+      {
+        id: "cash_usd", label: "Cash balance (USD)", description: "The cash in the demo portfolio. Enter the threshold in whole US dollars.",
+        valueType: "integer", operators: ["eq", "ne", "gt", "gte", "lte"], options: [], minimum: 0,
+        read: ({ portfolioCashCents }) => portfolioCashCents === undefined ? undefined : portfolioCashCents / 100,
+      },
+    ],
+  },
 ] satisfies { id: string; label: string; attributes: AttributeDefinition[] }[];
 
 export const mockRuleGlossary = ruleGlossarySchema.parse({
@@ -46,9 +56,11 @@ export function matchesGlossaryCondition(condition: GlossaryCondition, input: Ru
   const read = namespaces.find(({ id }) => id === namespaceId)?.attributes.find(({ id }) => id === attributeId)?.read;
   if (!read) return false;
   const actual = read(input);
+  if (actual === undefined) return false;
   switch (operator) {
     case "eq": return actual === value;
     case "ne": return actual !== value;
+    case "gt": return typeof actual === "number" && typeof value === "number" && actual > value;
     case "gte": return typeof actual === "number" && typeof value === "number" && actual >= value;
     case "lte": return typeof actual === "number" && typeof value === "number" && actual <= value;
   }

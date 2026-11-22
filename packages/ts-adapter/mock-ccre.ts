@@ -1,7 +1,7 @@
 import type { MockCcreCondition, MockCcreEvaluation, MockCcreRule } from "../contracts/tool-setup";
 import { matchesGlossaryCondition } from "../rule-glossary";
 
-type RuleInput = { scenarioId: string; contextId: string; personaId: string; ordinal: number };
+type RuleInput = { scenarioId: string; contextId: string; personaId: string; ordinal: number; portfolioCashCents?: number };
 
 function matches(condition: MockCcreCondition, input: RuleInput): boolean {
   switch (condition.kind) {

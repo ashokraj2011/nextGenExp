@@ -3,6 +3,7 @@ import type {
   BalanceProof, CatalogSnapshot, ContentDecision, ContentEntry, Dated, ExperienceProposal, ProposalBlock, RouteDecision, Scope,
 } from "../contracts/domain";
 import { isContextProposal, isExperienceProposal } from "../contracts/model";
+import { isPortfolioSummary, type PortfolioSnapshot } from "../contracts/portfolio";
 import { contentCatalog, lookupContent } from "./content";
 
 export class Rejected extends Error {
@@ -68,7 +69,7 @@ export type VerifiedExperience = {
 const readyIntros = new Set(["explanation", "comparison", "steps", "summary"]);
 export function verifyExperience(
   value: unknown, decision: ContentDecision, route: RouteDecision, scope: Scope, composerRunId: string,
-  proof: BalanceProof | null, now: number,
+  proof: BalanceProof | null, now: number, portfolio?: PortfolioSnapshot,
 ): VerifiedExperience {
   requireCheck(isExperienceProposal(value), "SCHEMA_INVALID");
   checkFresh(decision, scope, now);
@@ -107,6 +108,7 @@ export function verifyExperience(
       const entry = lookupContent(candidate);
       requireCheck(entry, "CONTENT_MISSING_WITHDRAWN_OR_REVISED");
       requireCheck(entry.allowedComponents.includes(component), "COMPONENT_NOT_ALLOWED");
+      if (entry.portfolioData) requireCheck(portfolio && isPortfolioSummary(route), "PORTFOLIO_SNAPSHOT_REQUIRED");
       contentOrder.push(entry.contentId);
       return entry;
     });

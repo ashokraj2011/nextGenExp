@@ -182,6 +182,11 @@ try {
   assert.equal(await expression.innerText(), "conversation.turn_number >= 2");
   await ruleValue.fill("0");
   assert.equal(await ruleBlock.getByRole("button", { name: "Save rule", exact: true }).isDisabled(), true);
+  await namespace.selectOption("portfolio");
+  assert.equal(await attribute.inputValue(), "cash_usd");
+  await operator.selectOption("gt");
+  await ruleValue.fill("10000");
+  assert.equal(await expression.innerText(), "portfolio.cash_usd > 10000");
   await namespace.selectOption("customer");
   assert.equal(await expression.innerText(), 'customer.persona == "demo-learner"');
   await author.screenshot({ path: resolve(screenshots, "ccre-glossary-chat.png") });
@@ -210,6 +215,35 @@ try {
   await author.getByRole("button", { name: "Edit rule Available balance for learners", exact: true }).click();
   assert.equal(await author.getByLabel("Namespace", { exact: true }).inputValue(), "customer");
   assert.equal(await author.getByLabel("Value", { exact: true }).inputValue(), "demo-learner");
+
+  const portfolioPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  portfolioPage.setDefaultTimeout(12_000);
+  portfolioPage.on("pageerror", (error) => pageErrors.push(error.message));
+  await portfolioPage.goto(preview.url);
+  const portfolioQuestion = portfolioPage.getByLabel("Your question");
+  await portfolioQuestion.fill("Let me know my portfolio summary.");
+  await portfolioQuestion.press("Enter");
+  const snapshot = portfolioPage.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Portfolio snapshot" });
+  await snapshot.getByText("$12,500", { exact: true }).waitFor();
+  await portfolioPage.getByText("You have $12,500 in cash. Would you like to explore investing options?", { exact: true }).waitFor();
+  await portfolioPage.screenshot({ path: resolve(screenshots, "portfolio-learner-chat.png") });
+  await portfolioPage.getByRole("button", { name: "Open developer inspector" }).click();
+  await portfolioPage.getByText("Request and response payloads", { exact: true }).click();
+  await portfolioPage.getByText("Portfolio Snapshot · succeeded", { exact: true }).click();
+  assert.match(await portfolioPage.locator('pre[aria-label="Portfolio Snapshot tool response"]').innerText(), /"cashCents": 1250000/);
+  await portfolioPage.keyboard.press("Escape");
+  await portfolioPage.getByRole("link", { name: "Tool setup" }).click();
+  await portfolioPage.getByLabel("Context", { exact: true }).selectOption("portsum");
+  await portfolioPage.getByLabel("Demo persona", { exact: true }).selectOption("demo-returning");
+  await portfolioPage.getByRole("button", { name: "Run preview", exact: true }).click();
+  await portfolioPage.getByText("Cash above $10,000", { exact: true }).waitFor();
+  await portfolioPage.getByText("Excluded", { exact: true }).waitFor();
+  await portfolioPage.getByRole("button", { name: "Test in chat", exact: true }).click();
+  await portfolioQuestion.fill("Let me know my portfolio summary.");
+  await portfolioQuestion.press("Enter");
+  await snapshot.getByText("$10,000", { exact: true }).waitFor();
+  assert.equal(await portfolioPage.getByRole("heading", { name: "Explore investing options", exact: true }).count(), 0);
+  await portfolioPage.screenshot({ path: resolve(screenshots, "portfolio-returning-chat.png") });
   assert.deepEqual(pageErrors, []);
 
   const mobile = await browser.newPage({ viewport: { width: 360, height: 780 }, isMobile: true, deviceScaleFactor: 1, reducedMotion: "reduce", hasTouch: true });
@@ -228,6 +262,10 @@ try {
   assert.ok(visibility && visibility.y >= 57, "The new mobile response starts in view");
   await mobile.screenshot({ path: resolve(screenshots, "comparison-mobile.png") });
   const mobileMessage = mobile.getByLabel("Your question");
+  await mobileMessage.fill("Let me know my portfolio summary.");
+  await mobileMessage.press("Enter");
+  await mobile.locator('[data-renderer="a2ui"]').getByRole("heading", { name: "Portfolio snapshot", exact: true }).waitFor();
+  assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await mobileMessage.fill("Create a rule");
   await mobileMessage.press("Enter");
   const mobileRule = mobile.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Create a CCRE rule" });
@@ -255,7 +293,7 @@ try {
   await fallback.locator('[data-renderer="fallback"]').waitFor();
   await fallback.getByRole("heading", { name: "Compare demo definitions" }).waitFor();
   await fallback.getByText("Fictional demonstration only.", { exact: false }).waitFor();
-  console.log("Browser checks passed for A2UI actions, comparison, sources, follow-up, refresh, inspector, stop, retry UI, draft retention, steps, 360 px layout, tool setup, CCRE rules in chat and admin, and canonical renderer fallback.");
+  console.log("Browser checks passed for A2UI, portfolio snapshots and CCRE eligibility, chat controls, inspector, tool setup, 360 px layout, and canonical renderer fallback.");
 } finally {
   await browser?.close();
   await preview.close();

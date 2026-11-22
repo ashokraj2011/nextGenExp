@@ -10,6 +10,7 @@ import { type Bootstrap } from "../../packages/contracts/api";
 import { MAX_MESSAGE_LENGTH, type SelectionMode } from "../../packages/contracts/domain";
 import { mockCcreRuleSchema, toolSetupSchema, treatmentPreviewSchema } from "../../packages/contracts/tool-setup";
 import { tsFixtures } from "../../packages/ts-adapter";
+import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import type { GatewaySettings } from "./gateway";
 import { Runtime } from "./runtime";
 import { ApiError, Store, presentConversation } from "./store";
@@ -25,6 +26,7 @@ type Options = {
   mode?: "live" | "test";
   selectionMode?: SelectionMode;
   inspectorEnabled?: boolean;
+  portfolioSnapshots?: PortfolioSnapshotProvider;
 };
 const idPattern = /^[a-zA-Z0-9_-]{1,128}$/;
 const requestId = z.string().regex(idPattern);
@@ -92,10 +94,11 @@ export async function startApp(options: Options) {
   const now = Date.now;
   const selectionMode = options.selectionMode ?? "semantic_rerank";
   const inspectorEnabled = options.inspectorEnabled ?? true;
+  const portfolioSnapshots = options.portfolioSnapshots ?? fixturePortfolioSnapshotProvider;
   const store = new Store(join(options.dataDir, "app.sqlite"));
   let runtime: Runtime | null;
   try {
-    runtime = options.gateway ? await Runtime.open(store, join(options.dataDir, "sfield.sqlite"), options.gateway, now, inspectorEnabled) : null;
+    runtime = options.gateway ? await Runtime.open(store, join(options.dataDir, "sfield.sqlite"), options.gateway, now, inspectorEnabled, portfolioSnapshots) : null;
   } catch (error) {
     store.close();
     throw error;
@@ -179,7 +182,7 @@ export async function startApp(options: Options) {
         return json(res, setup);
       }
       if (id === "treatment-preview" && method === "POST") {
-        return json(res, await previewTreatmentSelector(await body(req, treatmentPreviewSchema, toolSetupLimit)));
+        return json(res, await previewTreatmentSelector(await body(req, treatmentPreviewSchema, toolSetupLimit), portfolioSnapshots));
       }
       if (id === "ccre-rules" && method === "POST") {
         const rule = await body(req, mockCcreRuleSchema, toolSetupLimit);
@@ -260,7 +263,7 @@ export async function startApp(options: Options) {
       const conversation = store.conversation(turn.scope.conversationId, principalId);
       if (id === "payloads") {
         const payloads = await runtime?.payloads(turn, conversation);
-        return json(res, payloads ?? { turnId: turn.public.id, router: null, glossary: null, treatment: null, composer: null });
+        return json(res, payloads ?? { turnId: turn.public.id, router: null, glossary: null, treatment: null, portfolio: null, composer: null });
       }
       return json(res, {
         turnId: turn.public.id, personaId: conversation.personaId, scenarioId: conversation.scenarioId, ordinal: turn.ordinal,
@@ -270,6 +273,8 @@ export async function startApp(options: Options) {
         contentDecisionId: turn.decision?.decisionId ?? null,
         catalogScopeId: turn.catalogScopeId ?? null, tsScopeId: turn.tsScopeId ?? null,
         glossaryScopeId: turn.glossaryScopeId ?? null,
+        portfolioScopeId: turn.portfolioScopeId ?? null,
+        portfolioReadSucceeded: Boolean(turn.portfolioSnapshot),
         routerRunId: turn.attempts.route?.runId ?? null, composerRunId: turn.attempts.compose?.runId ?? null,
         metricReadSucceeded: Boolean(turn.proof),
         ...turn.trace,

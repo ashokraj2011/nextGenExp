@@ -20,7 +20,7 @@ function StageDetails({ title, run, skipped }: { title: string; run: Trace["rout
 function TraceView({ trace }: { trace: Trace }) {
   const {
     catalog, propensity, selectedContextId, surface, sourcePageContext, routeDecisionId, contentDecisionId,
-    catalogScopeId, glossaryScopeId, glossaryVersion, tsScopeId, routerRunId, composerRunId, ts, finalOrder, components, failures,
+    catalogScopeId, glossaryScopeId, glossaryVersion, tsScopeId, portfolioScopeId, routerRunId, composerRunId, ts, finalOrder, components, failures,
   } = trace;
   const creatingRule = trace.routeOutcome === "create_rule";
   const elapsed = trace.markers.terminal === undefined ? null : trace.markers.terminal - trace.markers.accepted;
@@ -59,6 +59,7 @@ function TraceView({ trace }: { trace: Trace }) {
         <Detail label="Components">{components?.join(", ") || "None"}</Detail>
         {creatingRule && glossaryVersion && <Detail label="Glossary version"><code>{glossaryVersion}</code></Detail>}
         {!creatingRule && <Detail label="Synthetic balance read">{trace.metricReadSucceeded ? "Succeeded" : "No successful read"}</Detail>}
+        {portfolioScopeId && <Detail label="Portfolio Snapshot">{trace.portfolioReadSucceeded ? "Succeeded" : "Awaiting snapshot"}</Detail>}
       </dl>
       {ts && <>
         <dl className="trace-dl"><Detail label="TS response">{ts.source === "override" ? "Configured mock" : "Built-in fixture"}</Detail></dl>
@@ -87,6 +88,7 @@ function TraceView({ trace }: { trace: Trace }) {
           <Detail label="Catalog scope"><code>{catalogScopeId ?? "Pending"}</code></Detail>
           {glossaryScopeId && <Detail label="Glossary scope"><code>{glossaryScopeId}</code></Detail>}
           {!creatingRule && <Detail label="Selection scope"><code>{tsScopeId ?? "Pending"}</code></Detail>}
+          {portfolioScopeId && <Detail label="Portfolio scope"><code>{portfolioScopeId}</code></Detail>}
           <Detail label="Router run"><code>{routerRunId ?? "Pending"}</code></Detail>
           {!creatingRule && <Detail label="Composer run"><code>{composerRunId ?? "Pending"}</code></Detail>}
         </dl>

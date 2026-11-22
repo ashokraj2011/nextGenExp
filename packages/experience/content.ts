@@ -67,6 +67,7 @@ export function modelBundle(decision: ContentDecision) {
         comparisonFields: content.comparisonFields,
         steps: content.steps,
         requiresBalanceRead: content.metricSpec !== null,
+        ...(content.portfolioData && { requiresPortfolioSnapshot: true }),
         followUps: content.followUps.map(({ followUpId, label }) => ({ followUpId, label })),
       };
     }),

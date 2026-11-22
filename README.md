@@ -46,6 +46,16 @@ Open [PZN Lab test preview](http://127.0.0.1:4174). The **Test mode** badge iden
 
 Try **Compare two terms** for the A2UI comparison. **Guide me through a task** opens the canonical transfer checklist and a portfolio follow-up. To see the eligible set and route decisions, open **Inspector**. Its persona and scenario settings create a new conversation. Type “Show my synthetic demo balance summary” for the read-only metric example.
 
+### Portfolio Snapshot demo
+
+Ask **Let me know my portfolio summary** in **Normal eligibility**. The Context Router returns `portsum` with the `show` intent. sfield calls Treatment Selector with `{ context, mid }`. In this mock, its built-in CCRE rule adds **Explore investing options** to the eligible set when **Portfolio → Cash balance (USD) → Greater than → 10000** matches. A saved rule for the same scenario, context and treatment replaces that fixture rule.
+
+The **Portfolio Snapshot** provider supplies cash, equities, fixed income and the valuation date. sfield reads it through the scoped `portfolio.snapshot.read` tool and renders the values as an A2UI snapshot. The Experience Composer chooses supplemental content from the eligible set. The host displays the cash amount from the same snapshot used in eligibility.
+
+Demo learner sees **$12,500** in cash and the investing prompt. Demo returning visitor sees **$10,000** in cash and the snapshot alone. Use **Tool setup → Treatment Selector mock → Portfolio summary** to preview the rule for either persona. In **Inspector → Request and response payloads**, compare **Treatment Selector**, **Portfolio Snapshot**, and **Experience Composer**.
+
+The POC uses synthetic accounts and a fixture implementation of `PortfolioSnapshotProvider`. A deployed integration can supply a portfolio service through that interface and call the existing Treatment Selector with the same context and member ID.
+
 ### Inspect requests and responses
 
 Open **Inspector**, choose a **Turn trace**, and expand **Request and response payloads**. The Context Router and Experience Composer show the compiled Chat Completions request body, assembled assistant response, and individual gateway attempts. The Treatment Selector shows the sfield tool input, mock input and ranked IDs or tool error. The decoded views make structured messages readable alongside the full request and response data.

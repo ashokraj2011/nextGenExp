@@ -28,6 +28,11 @@ export const sfieldTools = {
     label: "CCRE glossary",
     description: "Lists the demo namespaces, attributes and operators available for authoring rules in chat.",
   },
+  portfolio: {
+    id: "portfolio.snapshot.read",
+    label: "Portfolio Snapshot",
+    description: "Reads the scoped demo member’s portfolio values for a portfolio-summary request.",
+  },
 } as const;
 export type ToolKey = keyof typeof sfieldTools;
 export const toolKeys = Object.keys(sfieldTools) as ToolKey[];
@@ -74,7 +79,8 @@ export type MockCcreEvaluation = {
 };
 export const toolSetupSchema = z.object({
   enabled: z.object({
-    catalog: z.boolean(), propensity: z.boolean(), selection: z.boolean(), balances: z.boolean(), glossary: z.boolean().optional(),
+    catalog: z.boolean(), propensity: z.boolean(), selection: z.boolean(), balances: z.boolean(),
+    glossary: z.boolean().optional(), portfolio: z.boolean().optional(),
   }).strict(),
   treatmentOverrides: z.array(treatmentOverrideSchema).max(64).refine((rules) => (
     new Set(rules.map(({ scenarioId, contextId }) => JSON.stringify([scenarioId, contextId]))).size === rules.length
@@ -85,7 +91,7 @@ export type ToolSetup = z.infer<typeof toolSetupSchema>;
 export type TreatmentOverride = z.infer<typeof treatmentOverrideSchema>;
 export type MockOutput = z.infer<typeof mockOutputSchema>;
 export const defaultToolSetup: ToolSetup = {
-  enabled: { catalog: true, propensity: true, selection: true, balances: true, glossary: true },
+  enabled: { catalog: true, propensity: true, selection: true, balances: true, glossary: true, portfolio: true },
   treatmentOverrides: [],
 };
 

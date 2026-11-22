@@ -2,6 +2,7 @@ import type { RunResult } from "@sfield/core";
 import demo from "../../fixtures/host.json";
 import { type FailureCode } from "../../packages/contracts/api";
 import { DECISION_TTL, TURN_DEADLINE, contextCatalogSchema, propensitySchema, type SelectionMode, type PropensityResult } from "../../packages/contracts/domain";
+import { isPortfolioSummary, portfolioSnapshotSchema } from "../../packages/contracts/portfolio";
 import { ruleGlossarySchema } from "../../packages/contracts/rule-glossary";
 import { FOLLOW_UP_EVENT, type DisplayExperience } from "../../packages/contracts/surface";
 import { normalizedIdsSchema, treatmentOverride } from "../../packages/contracts/tool-setup";
@@ -120,7 +121,7 @@ export class ExperienceService {
     this.controllers.set(id, controller);
     const timer = setTimeout(() => controller.abort(new TurnFailure("turn_timeout")), remains);
     timer.unref();
-    let stage: "catalog" | "route" | "glossary" | "ts" | "compose" = "catalog";
+    let stage: "catalog" | "route" | "glossary" | "ts" | "portfolio" | "compose" = "catalog";
     const current = () => {
       signal.throwIfAborted();
       return runtime.current(id);
@@ -214,7 +215,7 @@ export class ExperienceService {
 
         const ids = normalizedIdsSchema.parse(result.output);
         const { candidates, rejections } = resolveCandidates(ids);
-        const partial = Boolean(candidates.length && rejections.length);
+        const partial = Boolean((candidates.length || isPortfolioSummary(route)) && rejections.length);
         const now = this.now();
         this.store.update(id, (row) => {
           const override = treatmentOverride(row.toolSetup?.treatmentOverrides ?? [], conversation.scenarioId, route.contextId);
@@ -237,9 +238,37 @@ export class ExperienceService {
       }
       turn = current();
       const decision = turn.decision!;
+      const expiresAt = Math.min(decision.expiresAt, route.expiresAt);
+      if (isPortfolioSummary(route) && !turn.portfolioSnapshot) {
+        stage = "portfolio";
+        this.store.progress(id, "portfolio", this.now());
+        const result = await runtime.registry(turn, "portfolioScopeId", 1, signal, async (call) => (
+          call("portfolio", { ...asRef(turn), routeDecisionId: route.routeDecisionId })
+        ));
+        current();
+        if (result.status !== "succeeded") {
+          this.store.update(id, (row) => { row.trace.failures.push({ stage: "portfolio", code: result.error?.code ?? "PORTFOLIO_UNAVAILABLE" }); });
+          throw new TurnFailure("portfolio_unavailable");
+        }
+        const snapshot = portfolioSnapshotSchema.parse(result.output);
+        this.store.update(id, (row) => {
+          row.portfolioSnapshot = snapshot;
+          row.trace.markers.portfolioResolved = this.now();
+        });
+        turn = current();
+      }
+      const portfolio = isPortfolioSummary(route) ? turn.portfolioSnapshot : undefined;
       if (!decision.candidates.length) {
-        if (turn.trace.ts?.baseline.length) throw new TurnFailure("content_unavailable");
-        done("no_match", "eligible_empty", null);
+        if (portfolio) {
+          const result = compileExperience({
+            status: "ready", outcome: "ready", introKey: "summary", question: null, portfolio, expiresAt, partial: decision.partial,
+          });
+          this.store.update(id, (row) => { row.trace.components = result.display.blocks.map((block) => block.component); });
+          this.store.finish(id, { type: "completed", result }, this.now());
+        } else {
+          if (turn.trace.ts?.baseline.length) throw new TurnFailure("content_unavailable");
+          done("no_match", "eligible_empty", null);
+        }
         return;
       }
 
@@ -249,6 +278,7 @@ export class ExperienceService {
         inputType: "PznExperienceCompositionInput",
         request: turn.public.message, intent: route.intent,
         selectedContextId: route.contextId, eligible: modelBundle(decision),
+        ...(portfolio && { portfolioSnapshotIncluded: true }),
         allowedQuestions: demo.clarificationQuestions,
       }, signal, recovering);
 
@@ -264,13 +294,13 @@ export class ExperienceService {
       current();
       const resultForDisplay = compileExperience({
         status: verified.proposal.status, outcome: verified.proposal.status, introKey: verified.proposal.introKey,
-        question: verified.proposal.clarificationQuestion, partial: decision.partial && verified.proposal.status === "ready",
-        expiresAt: Math.min(decision.expiresAt, route.expiresAt), approved: verified, proof,
+        question: verified.proposal.clarificationQuestion, partial: decision.partial && Boolean(portfolio || verified.proposal.status === "ready"),
+        expiresAt, approved: verified, proof, portfolio,
       });
       this.store.update(id, (row) => {
         row.trace.markers.proposalValidated = this.now();
         row.trace.finalOrder = verified.contentOrder;
-        row.trace.components = verified.proposal.blocks.map((block) => block.component);
+        row.trace.components = resultForDisplay.display.blocks.map((block) => block.component);
       });
       this.store.finish(id, { type: "completed", result: resultForDisplay }, this.now());
     } catch (error) {
@@ -282,6 +312,7 @@ export class ExperienceService {
         : stage === "catalog" ? "catalog_unavailable"
         : stage === "glossary" ? "glossary_unavailable"
         : stage === "ts" ? "ts_unavailable"
+        : stage === "portfolio" ? "portfolio_unavailable"
         : error instanceof Rejected ? (stage === "route" ? "route_rejected" : "verification_failed")
         : "internal_error";
       this.store.update(id, (row) => { row.trace.failures.push({ stage, code: error instanceof Rejected ? error.code : mapped }); });

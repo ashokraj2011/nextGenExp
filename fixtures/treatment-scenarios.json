@@ -1,10 +1,25 @@
 {
-  "fixtureVersion": "pzn-ts-routed-v1",
+  "fixtureVersion": "pzn-ts-routed-v2",
   "base": {
     "balance": ["balance_education", "balance_available_definition", "balance_current_definition", "promotion_general", "balance_metric_template"],
-    "portsum": ["portfolio_explanation"],
+    "portsum": ["portfolio_explanation", "portfolio_cash_investing"],
     "app-home": ["transfer_checklist", "transfer_learning", "promotion_general"]
   },
+  "defaultCcreRules": [
+    {
+      "contextId": "portsum",
+      "contentId": "portfolio_cash_investing",
+      "name": "Cash above $10,000",
+      "condition": {
+        "kind": "attribute",
+        "glossaryVersion": "pzn-ccre-mock-v1",
+        "namespaceId": "portfolio",
+        "attributeId": "cash_usd",
+        "operator": "gt",
+        "value": 10000
+      }
+    }
+  ],
   "scenarios": [
     { "scenarioId": "normal", "label": "Normal eligibility", "rules": [] },
     { "scenarioId": "conflicting-propensity", "label": "Conflicting propensity", "rules": [] },

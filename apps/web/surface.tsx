@@ -7,10 +7,11 @@ import {
 import { ArrowUpRight, BookOpenText, ChartNoAxesColumnIncreasing, ChevronDown, Columns2, FileText, ListChecks } from "lucide-react";
 import { makeAssistantDataUI } from "@assistant-ui/react";
 import {
-  PZN_CATALOG_ID, FOLLOW_UP_EVENT, contentCard, comparison, stepList, metricSummary, experienceRoot, followUpButton, ruleCreation,
+  PZN_CATALOG_ID, FOLLOW_UP_EVENT, contentCard, comparison, stepList, metricSummary, experienceRoot, followUpButton, ruleCreation, portfolioSnapshot,
   validatePznSurface, type DisplayBlock, type DisplayExperience,
 } from "../../packages/contracts/surface";
 import { RuleCreationBlock } from "./rule-creation-block";
+import { PortfolioSnapshotBlock } from "./portfolio-snapshot";
 
 const icons = {
   PznContentCard: BookOpenText,
@@ -27,13 +28,15 @@ const blockLabels = {
 
 function ContentBlock({ block }: { block: DisplayBlock }) {
   if (block.component === ruleCreation.name) return <RuleCreationBlock {...block.props} />;
+  if (block.component === portfolioSnapshot.name) return <PortfolioSnapshotBlock {...block.props} />;
   const { component, props } = block;
   const Icon = icons[component];
+  const recommendation = block.component === "PznContentCard" && block.props.recommendation;
   return (
-    <section className={"content-card " + props.variant}>
-      <div className="content-kind"><Icon size={16} aria-hidden="true" />{blockLabels[component]}</div>
+    <section className={"content-card " + props.variant + (recommendation ? " portfolio-recommendation" : "")}>
+      <div className="content-kind"><Icon size={16} aria-hidden="true" />{recommendation ? "Suggested next step" : blockLabels[component]}</div>
       <h3>{props.title}</h3>
-      {block.component === "PznContentCard" && (block.props.variant === "expanded" ? (
+      {block.component === "PznContentCard" && (recommendation || block.props.variant === "expanded" ? (
         <p className="content-body">{block.props.body}</p>
       ) : (
         <>
@@ -118,6 +121,7 @@ const pznCatalog = new Catalog<ReactCatalogComponent>(PZN_CATALOG_ID, "1.0", [
   createComponentImplementation(comparison, ({ props }) => <ContentBlock block={{ component: comparison.name, props }} />),
   createComponentImplementation(stepList, ({ props }) => <ContentBlock block={{ component: stepList.name, props }} />),
   createComponentImplementation(metricSummary, ({ props }) => <ContentBlock block={{ component: metricSummary.name, props }} />),
+  createComponentImplementation(portfolioSnapshot, ({ props }) => <PortfolioSnapshotBlock {...props} />),
   createComponentImplementation(ruleCreation, ({ props }) => <RuleCreationBlock {...props} />),
   createComponentImplementation(followUpButton, ({ props, context }) => {
     const { enabled } = useContext(SurfaceActions);

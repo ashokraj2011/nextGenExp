@@ -1,0 +1,19 @@
+{
+  "fixtureVersion": "pzn-demo-portfolio-v1",
+  "asOf": "2026-11-22T00:00:00Z",
+  "currency": "USD",
+  "snapshots": [
+    {
+      "mid": "DEMO-MID-1001",
+      "cashCents": 1250000,
+      "equityCents": 2750000,
+      "fixedIncomeCents": 1000000
+    },
+    {
+      "mid": "DEMO-MID-1002",
+      "cashCents": 1000000,
+      "equityCents": 3000000,
+      "fixedIncomeCents": 1000000
+    }
+  ]
+}

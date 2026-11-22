@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "fixtureVersion": "pzn-demo-2026-11-v1",
-  "catalogVersion": "content-demo-v1",
+  "catalogVersion": "content-demo-v2",
   "dataClassification": "synthetic_demo_only",
   "entries": [
     {
@@ -276,6 +276,30 @@
         {
           "disclosureId": "demo_only",
           "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+        }
+      ]
+    },
+    {
+      "contentId": "portfolio_cash_investing",
+      "version": "v1",
+      "publicationStatus": "published",
+      "kind": "promotion",
+      "title": "Explore investing options",
+      "description": "An optional prompt about cash in the demo portfolio. The amount comes from Portfolio Snapshot.",
+      "body": "Would you like to explore investing options?",
+      "allowedComponents": ["PznContentCard"],
+      "comparisonGroup": null,
+      "comparisonFields": [],
+      "steps": [],
+      "metricSpec": null,
+      "portfolioData": "cash",
+      "followUps": [],
+      "sourceRef": "fixture:portfolio_cash_investing",
+      "sourceLabel": "Fictional PZN demo catalog",
+      "requiredDisclosures": [
+        {
+          "disclosureId": "demo_only",
+          "text": "Fictional investing prompt using synthetic portfolio data."
         }
       ]
     },

@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0",
-  "catalogVersion": "ts-contexts-demo-v1",
+  "catalogVersion": "ts-contexts-demo-v2",
   "contexts": [
     {
       "contextId": "balance",
@@ -11,7 +11,7 @@
     {
       "contextId": "portsum",
       "displayName": "Portfolio summary",
-      "description": "Explain the portfolio overview, its holdings and allocation labels, and how sample items are grouped. Its fixture contains definitions without live holdings or investments.",
+      "description": "Show a synthetic member's portfolio summary, including total value, cash, and asset allocation, or explain what portfolio terms and holdings labels mean.",
       "active": true
     },
     {

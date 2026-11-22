@@ -73,12 +73,12 @@ function TreatmentStage({ stage }: { stage: TreatmentPayloads | null }) {
   </details>;
 }
 
-function GlossaryStage({ stage }: { stage: RegistryToolPayloads }) {
+function ReadToolStage({ title, stage, payloadLabel = title }: { title: string; stage: RegistryToolPayloads; payloadLabel?: string }) {
   return <details className="trace-details payload-stage">
-    <summary>CCRE glossary · {stage.status}</summary>
+    <summary>{title} · {stage.status}</summary>
     <p><code>{stage.tool}</code></p>
-    <JsonBlock title="Glossary tool request" value={stage.registryInput} open />
-    <JsonBlock title={stage.error ? "Glossary tool error" : "Glossary tool response"} value={stage.error ?? stage.result} open />
+    <JsonBlock title={payloadLabel + " tool request"} value={stage.registryInput} open />
+    <JsonBlock title={payloadLabel + (stage.error ? " tool error" : " tool response")} value={stage.error ?? stage.result} open />
   </details>;
 }
 
@@ -102,8 +102,9 @@ export function PayloadInspector({ turn }: { turn: TurnView }) {
     {failed && <p role="alert">The turn payloads are unavailable. Reopen this section to retry.</p>}
     {payloads ? <>
       <ModelStage title="Context Router" stage={payloads.router} />
-      {payloads.glossary && <GlossaryStage stage={payloads.glossary} />}
+      {payloads.glossary && <ReadToolStage title="CCRE glossary" payloadLabel="Glossary" stage={payloads.glossary} />}
       <TreatmentStage stage={payloads.treatment} />
+      {payloads.portfolio && <ReadToolStage title="Portfolio Snapshot" stage={payloads.portfolio} />}
       <ModelStage title="Experience Composer" stage={payloads.composer} />
     </> : open && !failed && <p role="status">Loading turn payloads…</p>}
   </details>;

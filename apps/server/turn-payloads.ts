@@ -82,6 +82,16 @@ async function glossaryPayloads(sf: SField, inspection: Inspection, turn: TurnRe
   return call ? registryPayload(inspection, call) : null;
 }
 
+async function portfolioPayloads(sf: SField, inspection: Inspection, turn: TurnRecord) {
+  if (!turn.portfolioScopeId || !turn.route) return null;
+  const tool = `${sfieldTools.portfolio.id}@${toolVersion}`;
+  const call = (await sf.persistence.listCalls(turn.portfolioScopeId)).find((entry) => (
+    entry.toolRef === tool && entry.proposedArguments.turnRef === turn.public.id
+    && entry.proposedArguments.routeDecisionId === turn.route?.routeDecisionId
+  ));
+  return call ? registryPayload(inspection, call) : null;
+}
+
 async function treatmentPayloads(sf: SField, inspection: Inspection, turn: TurnRecord, conversation: ConversationRecord): Promise<TreatmentPayloads | null> {
   if (!turn.tsScopeId || !turn.route) return null;
   const tool = `${sfieldTools.selection.id}@${toolVersion}`;
@@ -103,11 +113,12 @@ async function treatmentPayloads(sf: SField, inspection: Inspection, turn: TurnR
 }
 
 export async function readTurnPayloads(sf: SField, store: Store, inspection: Inspection, turn: TurnRecord, conversation: ConversationRecord): Promise<TurnPayloads> {
-  const [router, glossary, treatment, composer] = await Promise.all([
+  const [router, glossary, treatment, portfolio, composer] = await Promise.all([
     modelPayloads(sf, store, inspection, turn, "route"),
     glossaryPayloads(sf, inspection, turn),
     treatmentPayloads(sf, inspection, turn, conversation),
+    portfolioPayloads(sf, inspection, turn),
     modelPayloads(sf, store, inspection, turn, "compose"),
   ]);
-  return { turnId: turn.public.id, router, glossary, treatment, composer };
+  return { turnId: turn.public.id, router, glossary, treatment, portfolio, composer };
 }

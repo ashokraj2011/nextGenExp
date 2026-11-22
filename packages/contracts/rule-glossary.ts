@@ -1,9 +1,9 @@
 import { z } from "zod";
 
-export const glossaryOperators = ["eq", "ne", "gte", "lte"] as const;
+export const glossaryOperators = ["eq", "ne", "gt", "gte", "lte"] as const;
 export const glossaryValueTypes = ["enum", "boolean", "integer"] as const;
-export const glossaryOperatorLabels = { eq: "Equals", ne: "Does not equal", gte: "At least", lte: "At most" } as const;
-const operatorSymbols = { eq: "==", ne: "!=", gte: ">=", lte: "<=" } as const;
+export const glossaryOperatorLabels = { eq: "Equals", ne: "Does not equal", gt: "Greater than", gte: "At least", lte: "At most" } as const;
+const operatorSymbols = { eq: "==", ne: "!=", gt: ">", gte: ">=", lte: "<=" } as const;
 
 const key = z.string().regex(/^[a-z][a-z0-9_-]*$/).max(64);
 const label = z.string().min(1).max(100);

@@ -174,6 +174,22 @@ button { color: inherit; }
 .compare-grid { margin: 15px 0 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .compare-column { padding: 13px 14px; border: 1px solid #e2ebed; border-radius: 11px; background: #f7f9f9; }
 .content-card h4 { font-size: .98rem; font-weight: 680; line-height: 1.35; }
+.portfolio-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; }
+.portfolio-heading p { color: var(--muted); font-size: .79rem; }
+.portfolio-values {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px 16px;
+  margin: 14px 0; padding: 12px 0; border-block: 1px solid var(--line);
+}
+.portfolio-values dt { color: var(--muted); font-size: .81rem; font-weight: 600; }
+.portfolio-values dd { font-size: clamp(.95rem, 2.5vw, 1.4rem); font-weight: 695; font-variant-numeric: tabular-nums; }
+.portfolio-allocation-bar { display: flex; height: 8px; margin-top: 7px; overflow: hidden; border-radius: 6px; background: var(--line); }
+.portfolio-allocation { display: flex; gap: 4px 15px; flex-wrap: wrap; list-style: none; margin: 8px 0 0; padding: 0; }
+.portfolio-allocation li { display: inline-flex; gap: 5px; align-items: center; font-size: .79rem; color: var(--soft-ink); }
+.portfolio-allocation li > span { width: 8px; height: 8px; border-radius: 2px; }
+.portfolio-snapshot .equities { background: #247a72; }
+.portfolio-snapshot .fixed-income { background: #6b8fb0; }
+.portfolio-snapshot .cash { background: #d6a657; }
+.portfolio-recommendation { border-color: #c4ddd6; background: #f8fdfb; }
 .compare-column dl { display: grid; gap: 9px; margin-top: 10px; }
 .compare-column dt, .metric-grid dt { color: var(--muted); font-size: .8rem; font-weight: 585; }
 .compare-column dd { margin-top: 2px; color: var(--soft-ink); font-size: .91rem; }
