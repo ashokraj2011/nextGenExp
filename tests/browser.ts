@@ -494,7 +494,6 @@ try {
   await goalPage.getByRole("button", { name: "Open call logs", exact: true }).click();
   await goalPage.getByText("Goal Progress · succeeded", { exact: true }).click();
   assert.match(await goalPage.locator('pre[aria-label="Goal Progress tool response"]').innerText(), /"targetCents": 5000000/);
-  assert.deepEqual(pageErrors, []);
 
   const mobile = await browser.newPage({ viewport: { width: 360, height: 780 }, isMobile: true, deviceScaleFactor: 1, reducedMotion: "reduce", hasTouch: true });
   mobile.setDefaultTimeout(12_000);
@@ -586,7 +585,72 @@ try {
   await fallback.getByLabel("Your question").fill("Show my home-buying goal.");
   await fallback.getByLabel("Your question").press("Enter");
   await fallback.locator('[data-renderer="fallback"]').getByRole("img", { name: /Down payment savings/ }).waitFor();
-  console.log("Browser checks passed for the chat homepage, Help, planning overview, goal growth graph, personalization, chat controls, logs, tool setup, and renderer fallback.");
+
+  const signInPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  signInPage.on("pageerror", (error) => pageErrors.push(error.message));
+  await signInPage.goto(preview.url + "/chat");
+  await signInPage.getByRole("link", { name: "Sign in", exact: true }).click();
+  const signIn = signInPage.getByRole("heading", { name: "Sign in", exact: true });
+  await signIn.waitFor();
+  assert.equal(new URL(signInPage.url()).pathname, "/login");
+  const accounts = signInPage.getByRole("list", { name: "Available profiles", exact: true });
+  await accounts.waitFor();
+  assert.deepEqual(await accounts.getByRole("button").evaluateAll((buttons) => buttons.map((button) => button.getAttribute("aria-label"))), [
+    "Sign in as Alice Morgan", "Sign in as Jordan Lee", "Sign in as Marcus Reed",
+  ]);
+  await signInPage.screenshot({ path: resolve(screenshots, "sign-in-desktop.png") });
+
+  const signInAs = (name: string) => accounts.getByRole("button", { name: "Sign in as " + name, exact: true }).click();
+  const currentProfile = (name: string) => signInPage.getByRole("button", { name: "Profiles, current profile " + name, exact: true });
+  const history = signInPage.getByRole("navigation", { name: "Recent conversations", exact: true });
+  const signOut = signInPage.getByRole("button", { name: "Sign out", exact: true });
+  const askAsProfile = async (prompt: string) => {
+    await signInPage.getByLabel("Your question", { exact: true }).fill(prompt);
+    await signInPage.getByRole("button", { name: "Send", exact: true }).click();
+  };
+  const portfolioPrompt = "Let me know my portfolio summary.";
+  const jordanCash = signInPage.getByRole("region", { name: "Portfolio snapshot", exact: true }).getByText("$10,000", { exact: true });
+  await signInAs("Jordan Lee");
+  await currentProfile("Jordan Lee").waitFor();
+  await askAsProfile(portfolioPrompt);
+  await jordanCash.waitFor();
+  await signInPage.reload();
+  await currentProfile("Jordan Lee").waitFor();
+  await jordanCash.waitFor();
+
+  await signOut.click();
+  await signIn.waitFor();
+  await signInPage.goto(preview.url + "/chat");
+  await signIn.waitFor();
+  assert.equal(new URL(signInPage.url()).pathname, "/login");
+  await signInAs("Marcus Reed");
+  await currentProfile("Marcus Reed").waitFor();
+  assert.doesNotMatch(await history.innerText(), /portfolio summary/i);
+  await askAsProfile("what is next");
+  await signInPage.getByRole("heading", { name: "Fund your account", exact: true }).waitFor();
+
+  await signOut.click();
+  await signInAs("Alice Morgan");
+  await currentProfile("Alice Morgan").waitFor();
+  assert.match(await history.innerText(), /New conversations appear here/);
+  await signOut.click();
+  await signInAs("Jordan Lee");
+  await jordanCash.waitFor();
+  assert.doesNotMatch(await history.innerText(), /what is next/i);
+
+  await signInPage.getByRole("link", { name: "Tool setup", exact: true }).click();
+  await signInPage.getByLabel("Demo profile", { exact: true }).selectOption("demo-new-account");
+  await signInPage.getByRole("button", { name: "Test in chat", exact: true }).click();
+  await currentProfile("Marcus Reed").waitFor();
+  assert.doesNotMatch(await history.innerText(), /portfolio summary/i);
+
+  const mobileSignIn = await browser.newPage({ viewport: { width: 360, height: 780 }, reducedMotion: "reduce" });
+  await mobileSignIn.goto(preview.url + "/login");
+  await mobileSignIn.getByRole("button", { name: "Sign in as Marcus Reed", exact: true }).waitFor();
+  assert.equal(await mobileSignIn.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await mobileSignIn.screenshot({ path: resolve(screenshots, "sign-in-mobile.png") });
+  assert.deepEqual(pageErrors, []);
+  console.log("Browser checks passed for profile sign-in, the chat homepage, Help, personalization, logs, tool setup, and renderer fallback.");
 } finally {
   await browser?.close();
   await preview.close();

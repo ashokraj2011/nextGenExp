@@ -58,6 +58,8 @@ The original hero photograph in `apps/web/assets/coastal-planning.jpg` was gener
 
 ### Demo profiles
 
+Open `/login` or choose **Sign in** in the chat navigation to open a local profile. Signing in as **Alice Morgan**, **Jordan Lee**, or **Marcus Reed** opens their last conversation or starts on the chat welcome screen. The conversation list shows that profile’s history. The selection is saved for the browser tab. **Sign out** returns to profile selection.
+
 Click the customer name in the chat header to compare **Alice Morgan**, **Jordan Lee**, and **Marcus Reed**. Each profile shows the customer’s focus, portfolio cash, beneficiary status, and funding status from the demo fixtures. **Start chat** opens a new conversation for that customer in **Standard rules**.
 
 For a short demo, run **Learn about retirement** for both customers. Open **Logs → Treatment Selector** to show why Alice sees the beneficiary reminder and Jordan sees the lesson alone. Then ask both for a portfolio summary to show how the same cash threshold applies at $12,500 and $10,000.

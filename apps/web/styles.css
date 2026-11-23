@@ -93,7 +93,14 @@ button { color: inherit; }
 .conversation-link:hover, .conversation-link[aria-current] { color: white; background: #325244; }
 .conversation-link[aria-current] { border-color: #557668; font-weight: 590; }
 .conversation-link[aria-current] svg { color: #a6e7d4; }
-.rail-footer { display: flex; align-items: center; gap: 9px; margin: auto 4px 0; padding: 15px 4px 2px; border-top: 1px solid #446256; color: #c1d3c7; font-size: 0.74rem; white-space: nowrap; }
+.rail-footer { display: grid; gap: 8px; margin: auto 4px 0; padding: 14px 4px 0; border-top: 1px solid #446256; color: #c1d3c7; font-size: 0.74rem; white-space: nowrap; }
+.rail-footer p { display: flex; align-items: center; gap: 9px; }
+.rail-account {
+  display: inline-flex; align-items: center; gap: 8px; justify-self: start; min-height: 37px; margin-left: -5px;
+  padding: 6px; border: 0; border-radius: 7px; background: transparent; text-decoration: none; color: #e8f1e9;
+  font-size: .83rem; font-weight: 610;
+}
+.rail-account:hover { background: var(--nav-light); text-decoration: underline; text-underline-offset: 3px; }
 .demo-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #4b9c8a; flex: 0 0 auto; }
 .rail-footer .demo-dot { background: #92deca; }
 .rail-menu, .rail-close, .rail-scrim { display: none !important; }

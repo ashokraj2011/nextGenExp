@@ -10,7 +10,7 @@ import {
 } from "../../packages/contracts/tool-setup";
 import { api, toolSetupErrorMessage as messageFor } from "./api";
 import { CcreRuleEditor } from "./ccre-rule-editor";
-import { rememberActiveConversation } from "./conversation-storage";
+import { readProfileSession, rememberActiveConversation, saveProfileSession } from "./conversation-storage";
 import { TreatmentPreviewResult } from "./treatment-preview";
 import "./admin.css";
 
@@ -170,6 +170,9 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
         return;
       }
       const conversation = await api.newConversation(personaId, scenarioId);
+      if (readProfileSession() !== null && !saveProfileSession(conversation.personaId)) {
+        throw new Error("Couldn’t open this profile in the chat. Please try again.");
+      }
       rememberActiveConversation(conversation.id);
       location.assign("/chat");
     } catch (error) {

@@ -2,14 +2,15 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useAui, useAuiState, useExternalStoreRuntime, type ThreadMessageLike } from "@assistant-ui/react";
 import { CreateSurfaceMessageSchema, type ActionMessage } from "@a2ui/web_core/v1_0";
-import { BookOpenText, ChevronDown, CircleHelp, Columns2, FileText, GraduationCap, House, ListChecks, MapPin, Menu, MessageSquare, PanelRight, Plus, RotateCcw, Settings2, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { BookOpenText, ChevronDown, CircleHelp, Columns2, FileText, GraduationCap, House, ListChecks, LogIn, LogOut, MapPin, Menu, MessageSquare, PanelRight, Plus, RotateCcw, Settings2, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { failureCopy, progressLabels, type Bootstrap, type Conversation, type ConversationView, type TurnView, type TurnAccepted, type Progress } from "../../packages/contracts/api";
 import { MAX_MESSAGE_LENGTH } from "../../packages/contracts/domain";
 import { api } from "./api";
-import { readActiveConversation, rememberActiveConversation } from "./conversation-storage";
+import { readActiveConversation, readProfileSession, rememberActiveConversation, saveProfileSession } from "./conversation-storage";
 import { Inspector } from "./inspector";
 import { CallLogs } from "./call-logs";
 import { DemoProfiles, ProfileAvatar } from "./demo-profiles";
+import { LabMark } from "./lab-mark";
 import { planningTopics } from "./planning-topics";
 import { BasicSmoke, ExperienceControls, ExperienceDataUI, installA2uiStyles } from "./surface";
 
@@ -29,10 +30,6 @@ type ConversationOperations = {
   feedback: (turnId: string, experienceId: string, value: "helpful" | "unhelpful") => void;
 };
 const ConversationControls = createContext<ConversationOperations>({ pending: false, retry: () => undefined, feedback: () => undefined, anchorTurn: () => undefined });
-function LabMark({ small = false }: { small?: boolean }) {
-  return <span aria-hidden="true" className={"lab-mark" + (small ? " small" : "")}><i /><i /><i /><i /></span>;
-}
-
 function Welcome({ testMode, configured, disabled }: { testMode: boolean; configured: boolean; disabled: boolean }) {
   const aui = useAui();
   return <section className="welcome">
@@ -203,8 +200,10 @@ function App() {
     return {
       topic: planningTopics.find(({ id }) => id === query.get("topic")),
       showProfiles: query.get("view") === "profiles",
+      profileId: readProfileSession(),
     };
   });
+  const [signedInProfileId, setSignedInProfileId] = useState(entry.profileId);
   const [configuration, setConfiguration] = useState<Bootstrap>();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversation, setConversation] = useState<ConversationView>();
@@ -224,7 +223,8 @@ function App() {
   const latest = conversation?.turns.at(-1);
   const activeTurnId = latest?.status === "working" ? latest.id : undefined;
   const profilesById = new Map(configuration?.personas.map((persona) => [persona.personaId, persona]));
-  const activeProfile = profilesById.get(conversation?.personaId ?? configuration?.defaultPersonaId ?? "");
+  const activeProfile = profilesById.get(conversation?.personaId ?? signedInProfileId ?? configuration?.defaultPersonaId ?? "");
+  const visibleConversations = signedInProfileId ? conversations.filter((row) => row.personaId === signedInProfileId) : conversations;
   const remember = (row: Conversation) => setConversations((list) => (
     [row, ...list.filter((item) => item.id !== row.id)].sort((a, b) => b.updatedAt - a.updatedAt)
   ));
@@ -239,8 +239,13 @@ function App() {
     let mounted = true;
     void api.bootstrap().then(async (data) => {
       if (!mounted) return;
+      if (entry.profileId && !data.personas.some(({ personaId }) => personaId === entry.profileId)) {
+        location.replace("/login");
+        return;
+      }
       setConversations(data.conversations);
-      const preferred = data.conversations.find((row) => row.id === readActiveConversation()) ?? data.conversations[0];
+      const matching = entry.profileId ? data.conversations.filter((row) => row.personaId === entry.profileId) : data.conversations;
+      const preferred = matching.find((row) => row.id === readActiveConversation()) ?? matching[0];
       if (preferred) {
         const restored = await api.conversation(preferred.id);
         if (!mounted) return;
@@ -256,6 +261,14 @@ function App() {
     }).catch((error: unknown) => { if (mounted) setNotice(messageFor(error)); });
     return () => { mounted = false; };
   }, [entry]);
+
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted && readProfileSession() !== signedInProfileId) location.reload();
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, [signedInProfileId]);
 
   useEffect(() => {
     if (!railOpen) return;
@@ -346,7 +359,7 @@ function App() {
   const send = async (message: string) => {
     if (!configuration) return;
     await exclusive(async () => {
-      const target = conversation ?? await api.newConversation(configuration.defaultPersonaId, configuration.defaultScenarioId);
+      const target = conversation ?? await api.newConversation(signedInProfileId ?? configuration.defaultPersonaId, configuration.defaultScenarioId);
       if (!conversation) choose(target);
       try {
         accept(await api.send(target.id, message, requestId(target.id + ":" + message)), target);
@@ -358,8 +371,17 @@ function App() {
     });
   };
   const startConversation = async (personaId: string, scenarioId: string) => exclusive(async () => {
-    choose(await api.newConversation(personaId, scenarioId));
+    const row = await api.newConversation(personaId, scenarioId);
+    if (signedInProfileId && signedInProfileId !== row.personaId) {
+      if (!saveProfileSession(row.personaId)) throw new Error("Couldn’t switch profiles in this tab. Please try again.");
+      setSignedInProfileId(row.personaId);
+    }
+    choose(row);
   });
+  const signOut = () => {
+    if (saveProfileSession(null)) location.replace("/login");
+    else setNotice("Couldn’t sign out in this tab. Please try again.");
+  };
   const openLogs = (turnId?: string) => setPanel({ kind: "logs", turnId });
   const closePanel = () => {
     const triggers = { profiles: profilesTrigger, inspector: inspectorTrigger, logs: logsTrigger };
@@ -376,12 +398,12 @@ function App() {
         <button className="icon-button rail-close" ref={railClose} aria-label="Close conversation navigation" onClick={() => setRailOpen(false)}><X size={20} /></button>
       </div>
       <button className="new-conversation" disabled={pending || !configuration} onClick={() => {
-        if (configuration) void startConversation(conversation?.personaId ?? configuration.defaultPersonaId, conversation?.scenarioId ?? configuration.defaultScenarioId);
+        if (configuration) void startConversation(conversation?.personaId ?? signedInProfileId ?? configuration.defaultPersonaId, conversation?.scenarioId ?? configuration.defaultScenarioId);
       }}><Plus size={18} aria-hidden="true" />New conversation</button>
       <div className="rail-section">
         <h2>Conversations</h2>
         <nav aria-label="Recent conversations">
-          {conversations.length ? conversations.map((row) => (
+          {visibleConversations.length ? visibleConversations.map((row) => (
             <button className="conversation-link" key={row.id} aria-current={conversation?.id === row.id ? "page" : undefined} disabled={pending}
               title={row.title} onClick={() => void exclusive(async () => choose(await api.conversation(row.id)))}>
               <MessageSquare size={16} aria-hidden="true" />
@@ -393,7 +415,12 @@ function App() {
           )) : <p>New conversations appear here.</p>}
         </nav>
       </div>
-      <div className="rail-footer"><span className="demo-dot" />Preview workspace</div>
+      <div className="rail-footer">
+        <p><span className="demo-dot" />Preview workspace</p>
+        {signedInProfileId
+          ? <button type="button" className="rail-account" onClick={signOut}><LogOut size={16} aria-hidden="true" />Sign out</button>
+          : <a className="rail-account" href="/login"><LogIn size={16} aria-hidden="true" />Sign in</a>}
+      </div>
     </aside>
     <main className="workspace" inert={railOpen}>
       <header className="topbar">
