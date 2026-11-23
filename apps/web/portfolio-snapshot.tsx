@@ -16,7 +16,7 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
   return <section className="content-card portfolio-snapshot" aria-labelledby={title}>
     <header className="portfolio-heading">
       <h3 id={title}>Portfolio snapshot</h3>
-      <p>Demo data as of <time dateTime={asOf}>{asOfFormat.format(new Date(asOf))}</time></p>
+      <p>As of <time dateTime={asOf}>{asOfFormat.format(new Date(asOf))}</time></p>
     </header>
     <dl className="portfolio-values">
       <div><dt>Total value</dt><dd>{formatPortfolioAmount(total)}</dd></div>

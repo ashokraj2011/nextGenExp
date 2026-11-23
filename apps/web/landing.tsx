@@ -20,10 +20,10 @@ export function Landing() {
       <section className="planning-hero" aria-labelledby="planning-title">
         <div className="planning-hero-copy">
           <h1 id="planning-title">Plan for <em>what’s next.</em></h1>
-          <p>Review your portfolio, explore retirement, and see next steps based on the demo profile you choose.</p>
+          <p>Review your portfolio, explore retirement, and find a next step based on your profile.</p>
           <div className="planning-hero-actions">
             <a className="planning-primary" href="/chat">Start a conversation <ArrowRight size={17} aria-hidden="true" /></a>
-            <a className="planning-secondary" href="/chat?view=profiles">Compare demo profiles</a>
+            <a className="planning-secondary" href="/chat?view=profiles">Compare profiles</a>
           </div>
         </div>
         <div className="planning-hero-media">

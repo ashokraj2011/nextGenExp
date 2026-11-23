@@ -162,7 +162,7 @@ function compose({ body, envelope }: GatewayCall): ExperienceProposal | ToolCall
     };
   };
   if (envelope.selectedContextId === "balance" && envelope.intent?.task === "show") {
-    const template = get("Synthetic balance summary");
+    const template = get("Balance summary");
     const tool = body.tools?.find(({ function: definition }) => definition.name.includes("balance"));
     if (template && tool && !body.messages.some((message) => message.role === "tool")) {
       return { id: "call_pzn_fixture", type: "function", function: { name: tool.function.name, arguments: "{}" } };
@@ -174,7 +174,7 @@ function compose({ body, envelope }: GatewayCall): ExperienceProposal | ToolCall
   }
   if (envelope.selectedContextId === "portsum") {
     if (envelope.portfolioSnapshotIncluded) return choose("PznContentCard", [get("Explore investing options")], "summary");
-    return choose("PznContentCard", [get("Understanding the fictional portfolio")], "explanation");
+    return choose("PznContentCard", [get("Understanding your portfolio")], "explanation");
   }
   if (envelope.selectedContextId === "goals" && envelope.goalProgressIncluded) {
     return choose("PznGoalProgress", [get("Home down payment")], "summary");
@@ -192,13 +192,13 @@ function compose({ body, envelope }: GatewayCall): ExperienceProposal | ToolCall
     return { ...choose("PznContentCard", [get("Fund your account")], "next_step"), followUpIds: [] };
   }
   if (envelope.selectedContextId === "app-home") {
-    if (envelope.intent?.task === "guide") return choose("PznStepList", [get("Fictional transfer checklist")], "steps");
-    return choose("PznContentCard", [get("Learn about the fictional transfer")], "explanation");
+    if (envelope.intent?.task === "guide") return choose("PznStepList", [get("Transfer checklist")], "steps");
+    return choose("PznContentCard", [get("How transfers work")], "explanation");
   }
   if (/explain the available|available-balance term/.test(text)) {
-    return choose("PznContentCard", [get("Available balance") ?? get("Understanding the demo balance")], "explanation");
+    return choose("PznContentCard", [get("Available balance") ?? get("Understanding your balances")], "explanation");
   }
-  return choose("PznContentCard", [get("Understanding the demo balance")], "explanation");
+  return choose("PznContentCard", [get("Understanding your balances")], "explanation");
 }
 
 export async function startFixtureGateway(

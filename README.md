@@ -50,7 +50,7 @@ Try **Compare two terms** for the A2UI comparison. **Guide me through a task** o
 
 Chat opens at `/` and `/chat`. The **PZN Lab** link returns to the homepage. **Help** at `/help` shows the chat sequence and each component’s role, with interactive turn walkthroughs, sample payloads, and downloadable runtime contracts. Its **sfield** section shows who calls each registered tool and how the Portfolio Snapshot provider plugs in. **Proposal** shows the version 2 Treatment Selector response used by the funding workflow demo.
 
-The planning overview is at `/planning`. **Portfolio**, **Retirement**, and **Balances** open chat with a question you can edit before sending. **Compare demo profiles** opens the profile picker in chat.
+The planning overview is at `/planning`. **Portfolio**, **Retirement**, and **Balances** open chat with a question you can edit before sending. **Compare profiles** opens the profile picker in chat.
 
 The original hero photograph in `apps/web/assets/coastal-planning.jpg` was generated with ImageGen using this prompt.
 

@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "fixtureVersion": "pzn-demo-2026-11-v1",
-  "catalogVersion": "content-demo-v5",
+  "catalogVersion": "content-demo-v6",
   "dataClassification": "synthetic_demo_only",
   "entries": [
     {
@@ -10,7 +10,7 @@
       "publicationStatus": "published",
       "kind": "metric_template",
       "title": "Home down payment",
-      "description": "Show demo savings progress toward the home down payment target, including growth over time.",
+      "description": "See how your savings have grown toward your down payment target.",
       "body": "The host renders this template with the verified goal target and monthly savings history.",
       "allowedComponents": ["PznGoalProgress"],
       "comparisonGroup": null,
@@ -19,17 +19,17 @@
       "metricSpec": null,
       "followUps": [],
       "sourceRef": "fixture:home_down_payment_progress",
-      "sourceLabel": "Demo content catalog",
-      "requiredDisclosures": [{ "disclosureId": "demo_only", "text": "Savings and targets use synthetic demo data." }]
+      "sourceLabel": "Content catalog",
+      "requiredDisclosures": [{ "disclosureId": "demo_only", "text": "Figures are for illustration." }]
     },
     {
       "contentId": "balance_education",
       "version": "v1",
       "publicationStatus": "published",
       "kind": "education",
-      "title": "Understanding the demo balance labels",
-      "description": "A beginner explanation of the fictional balance labels, without account-opening promotion.",
-      "body": "This demo uses two invented labels to illustrate an explanation experience. The available label describes demo units ready to use; the current label describes the demo ledger total. Actual product definitions are outside this POC.",
+      "title": "Understanding your balances",
+      "description": "See what available balance and current balance mean.",
+      "body": "Your available balance is the amount marked ready to use. Your current balance is the total recorded in the ledger.",
       "allowedComponents": [
         "PznContentCard"
       ],
@@ -40,21 +40,21 @@
       "followUps": [
         {
           "followUpId": "fu_compare_balances",
-          "label": "Compare demo balance terms",
-          "userMessage": "Compare the two fictional balance definitions."
+          "label": "Compare balance terms",
+          "userMessage": "Compare available and current balance."
         },
         {
           "followUpId": "fu_explain_available",
           "label": "Explain available balance",
-          "userMessage": "Explain the available-balance term in this fictional demo."
+          "userMessage": "Explain the available-balance term."
         }
       ],
       "sourceRef": "fixture:balance_education",
-      "sourceLabel": "Demo content catalog",
+      "sourceLabel": "Content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
-          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+          "text": "For illustration."
         }
       ]
     },
@@ -63,9 +63,9 @@
       "version": "v1",
       "publicationStatus": "published",
       "kind": "education",
-      "title": "Available balance: demo definition",
-      "description": "Defines the fictional available-balance term and supports a comparison with the demo current-balance definition.",
-      "body": "In this fictional scenario, available balance means the demo units marked ready to use by the synthetic service.",
+      "title": "Available balance",
+      "description": "The amount marked ready to use.",
+      "body": "Check your available balance to see how much is ready to use.",
       "allowedComponents": [
         "PznContentCard",
         "PznComparison"
@@ -74,13 +74,13 @@
       "comparisonFields": [
         {
           "fieldId": "meaning",
-          "label": "Meaning in this demo",
-          "value": "Demo units marked ready to use"
+          "label": "Meaning",
+          "value": "Amount marked ready to use"
         },
         {
           "fieldId": "purpose",
-          "label": "Purpose in this demo",
-          "value": "Illustrate a ready-to-use amount"
+          "label": "What it helps you check",
+          "value": "How much you can use now"
         }
       ],
       "steps": [],
@@ -88,16 +88,16 @@
       "followUps": [
         {
           "followUpId": "fu_compare_balances",
-          "label": "Compare demo balance terms",
-          "userMessage": "Compare the two fictional balance definitions."
+          "label": "Compare balance terms",
+          "userMessage": "Compare available and current balance."
         }
       ],
       "sourceRef": "fixture:balance_available_definition",
-      "sourceLabel": "Demo content catalog",
+      "sourceLabel": "Content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
-          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+          "text": "For illustration."
         }
       ]
     },
@@ -106,9 +106,9 @@
       "version": "v1",
       "publicationStatus": "published",
       "kind": "education",
-      "title": "Current balance: demo definition",
-      "description": "Defines the fictional current-balance term using the same canonical comparison fields as the available-balance definition.",
-      "body": "In this fictional scenario, current balance means the synthetic ledger total. It is a demonstration definition, not a real product rule.",
+      "title": "Current balance",
+      "description": "The total recorded in the ledger.",
+      "body": "Check your current balance to see the total recorded in the ledger.",
       "allowedComponents": [
         "PznContentCard",
         "PznComparison"
@@ -117,13 +117,13 @@
       "comparisonFields": [
         {
           "fieldId": "meaning",
-          "label": "Meaning in this demo",
-          "value": "Synthetic ledger total"
+          "label": "Meaning",
+          "value": "Total recorded in the ledger"
         },
         {
           "fieldId": "purpose",
-          "label": "Purpose in this demo",
-          "value": "Illustrate a ledger-view amount"
+          "label": "What it helps you check",
+          "value": "The current recorded total"
         }
       ],
       "steps": [],
@@ -132,15 +132,15 @@
         {
           "followUpId": "fu_explain_available",
           "label": "Explain available balance",
-          "userMessage": "Explain the available-balance term in this fictional demo."
+          "userMessage": "Explain the available-balance term."
         }
       ],
       "sourceRef": "fixture:balance_current_definition",
-      "sourceLabel": "Demo content catalog",
+      "sourceLabel": "Content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
-          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+          "text": "For illustration."
         }
       ]
     },
@@ -149,9 +149,9 @@
       "version": "v1",
       "publicationStatus": "published",
       "kind": "education",
-      "title": "Learn about the fictional transfer flow",
-      "description": "Educational overview for a customer researching the demo transfer flow before starting anything.",
-      "body": "The fictional flow has three stages: explore the demo guide, review the synthetic checklist, and stop at a preview. This POC does not submit a transfer.",
+      "title": "How transfers work",
+      "description": "Learn what to check before starting a transfer.",
+      "body": "See how to choose the accounts, review the amount, and check the transfer details in a preview.",
       "allowedComponents": [
         "PznContentCard"
       ],
@@ -162,16 +162,16 @@
       "followUps": [
         {
           "followUpId": "fu_transfer_steps",
-          "label": "See demo transfer steps",
-          "userMessage": "Show the fictional transfer checklist."
+          "label": "See transfer steps",
+          "userMessage": "Show the transfer checklist."
         }
       ],
       "sourceRef": "fixture:transfer_learning",
-      "sourceLabel": "Demo content catalog",
+      "sourceLabel": "Content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
-          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+          "text": "For illustration."
         }
       ]
     },
@@ -180,9 +180,9 @@
       "version": "v1",
       "publicationStatus": "published",
       "kind": "education",
-      "title": "Fictional transfer checklist",
-      "description": "A registered step-list example with host-owned steps and no transaction execution.",
-      "body": "Use the approved demo steps below. The sequence ends at a preview and cannot submit a real request.",
+      "title": "Transfer checklist",
+      "description": "Review the details that go into a transfer.",
+      "body": "Follow these steps to review a transfer.",
       "allowedComponents": [
         "PznContentCard",
         "PznStepList"
@@ -192,18 +192,18 @@
       "steps": [
         {
           "stepId": "learn",
-          "title": "Read the demo overview",
-          "body": "Open the approved fictional overview."
+          "title": "Choose the accounts",
+          "body": "Identify the account you’re transferring from and the account receiving the money."
         },
         {
           "stepId": "review",
-          "title": "Review synthetic details",
-          "body": "Inspect only the sample values supplied by this demo."
+          "title": "Review the amount",
+          "body": "Check the amount you want to move."
         },
         {
           "stepId": "preview",
-          "title": "Stop at the preview",
-          "body": "The POC has no submission or transaction capability."
+          "title": "Review the transfer preview",
+          "body": "Check the amount and both accounts together."
         }
       ],
       "metricSpec": null,
@@ -211,15 +211,15 @@
         {
           "followUpId": "fu_portfolio_terms",
           "label": "Explain portfolio terms",
-          "userMessage": "Explain the fictional portfolio example."
+          "userMessage": "Explain the portfolio overview."
         }
       ],
       "sourceRef": "fixture:transfer_checklist",
-      "sourceLabel": "Demo content catalog",
+      "sourceLabel": "Content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
-          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+          "text": "For illustration."
         }
       ]
     },
@@ -228,9 +228,9 @@
       "version": "v1",
       "publicationStatus": "published",
       "kind": "promotion",
-      "title": "Explore the fictional starter experience",
-      "description": "A synthetic promotional card used to test whether semantic ranking respects a learning-only request.",
-      "body": "This is an invented promotional message for the demonstration. It offers no rate, reward, account, or real service.",
+      "title": "Explore your account",
+      "description": "An optional introduction to account features.",
+      "body": "Explore your balances, portfolio, and transfer options.",
       "allowedComponents": [
         "PznContentCard"
       ],
@@ -242,15 +242,15 @@
         {
           "followUpId": "fu_explain_available",
           "label": "Explain available balance",
-          "userMessage": "Explain the available-balance term in this fictional demo."
+          "userMessage": "Explain the available-balance term."
         }
       ],
       "sourceRef": "fixture:promotion_general",
-      "sourceLabel": "Demo content catalog",
+      "sourceLabel": "Content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
-          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+          "text": "For illustration."
         }
       ]
     },
@@ -259,9 +259,9 @@
       "version": "v1",
       "publicationStatus": "published",
       "kind": "education",
-      "title": "Understanding the fictional portfolio view",
-      "description": "Explains the labels in a synthetic portfolio example without retrieving or displaying real holdings.",
-      "body": "The fictional portfolio view groups sample items to demonstrate explanatory content. It contains no real holdings, valuations, or recommendations.",
+      "title": "Understanding your portfolio",
+      "description": "Learn what the holdings and allocation labels mean.",
+      "body": "Holdings are what the account contains. Allocation shows how the portfolio’s value is split across its holdings and cash.",
       "allowedComponents": [
         "PznContentCard",
         "PznComparison"
@@ -270,13 +270,13 @@
       "comparisonFields": [
         {
           "fieldId": "meaning",
-          "label": "Meaning in this demo",
-          "value": "An invented grouping of sample items"
+          "label": "Meaning",
+          "value": "A grouping of account holdings"
         },
         {
           "fieldId": "purpose",
-          "label": "Purpose in this demo",
-          "value": "Explain a fictional portfolio label"
+          "label": "What it helps you check",
+          "value": "How assets are grouped in the portfolio"
         }
       ],
       "steps": [],
@@ -285,15 +285,15 @@
         {
           "followUpId": "fu_explain_available",
           "label": "Explain available balance",
-          "userMessage": "Explain the available-balance term in this fictional demo."
+          "userMessage": "Explain the available-balance term."
         }
       ],
       "sourceRef": "fixture:portfolio_explanation",
-      "sourceLabel": "Demo content catalog",
+      "sourceLabel": "Content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
-          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+          "text": "For illustration."
         }
       ]
     },
@@ -303,7 +303,7 @@
       "publicationStatus": "published",
       "kind": "promotion",
       "title": "Explore investing options",
-      "description": "An optional prompt about cash in the demo portfolio. The amount comes from Portfolio Snapshot.",
+      "description": "Explore options for cash in your portfolio.",
       "body": "Would you like to explore investing options?",
       "allowedComponents": ["PznContentCard"],
       "comparisonGroup": null,
@@ -313,11 +313,11 @@
       "portfolioData": "cash",
       "followUps": [],
       "sourceRef": "fixture:portfolio_cash_investing",
-      "sourceLabel": "Demo content catalog",
+      "sourceLabel": "Content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
-          "text": "Fictional investing prompt using synthetic portfolio data."
+          "text": "Figures are for illustration."
         }
       ]
     },
@@ -336,11 +336,11 @@
       "metricSpec": null,
       "followUps": [],
       "sourceRef": "fixture:retirement_learning",
-      "sourceLabel": "Demo content catalog",
+      "sourceLabel": "Content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
-          "text": "Fictional demonstration only."
+          "text": "General information."
         }
       ]
     },
@@ -350,8 +350,8 @@
       "publicationStatus": "published",
       "kind": "education",
       "title": "Update your beneficiaries",
-      "description": "Your demo account has no beneficiary details on file.",
-      "body": "Your demo account has no beneficiary details on file. Review the steps to see how you could add a beneficiary.",
+      "description": "You have no beneficiary details on file.",
+      "body": "You have no beneficiary details on file. Here’s where to review or add a designation.",
       "allowedComponents": ["PznContentCard", "PznStepList"],
       "comparisonGroup": null,
       "comparisonFields": [],
@@ -359,12 +359,12 @@
         {
           "stepId": "open_beneficiary_settings",
           "title": "Open beneficiary settings",
-          "body": "In the demo flow, open Account settings and choose Beneficiaries."
+          "body": "Open Account settings and choose Beneficiaries."
         },
         {
           "stepId": "add_beneficiary",
           "title": "Choose Add beneficiary",
-          "body": "The demo shows where you would add a person or organization and specify their share."
+          "body": "Find where to name a person or organization and enter their share."
         },
         {
           "stepId": "review_beneficiary",
@@ -377,15 +377,15 @@
         {
           "followUpId": "fu_beneficiary_steps",
           "label": "See beneficiary update steps",
-          "userMessage": "Show me the demo steps to update my beneficiaries."
+          "userMessage": "Show me the steps to update my beneficiaries."
         }
       ],
       "sourceRef": "fixture:beneficiary_update",
-      "sourceLabel": "Demo content catalog",
+      "sourceLabel": "Content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
-          "text": "This guide previews the steps using a synthetic account."
+          "text": "The walkthrough ends at review."
         }
       ]
     },
@@ -396,7 +396,7 @@
       "kind": "education",
       "title": "Update your mailing address",
       "description": "A walkthrough for changing the address where account correspondence is sent.",
-      "body": "Follow the address-change walkthrough using sample details.",
+      "body": "Review the steps for changing where your account mail goes.",
       "allowedComponents": ["PznStepList"],
       "comparisonGroup": null,
       "comparisonFields": [],
@@ -414,15 +414,15 @@
         {
           "stepId": "review_address",
           "title": "Review the change",
-          "body": "Check the sample address and which account correspondence would go there."
+          "body": "Check the new address and which account mail will go there."
         }
       ],
       "metricSpec": null,
       "followUps": [],
       "sourceRef": "fixture:address_update_guide",
-      "sourceLabel": "Demo content catalog",
+      "sourceLabel": "Content catalog",
       "requiredDisclosures": [
-        { "disclosureId": "demo_only", "text": "This walkthrough uses a sample account and ends at review." }
+        { "disclosureId": "demo_only", "text": "The walkthrough ends at review." }
       ]
     },
     {
@@ -431,8 +431,8 @@
       "publicationStatus": "published",
       "kind": "education",
       "title": "Fund your account",
-      "description": "A suggested next step for a demo account awaiting its first deposit.",
-      "body": "See how to make a deposit using a bank transfer.",
+      "description": "See how to make your first deposit.",
+      "body": "Your account is ready for its first deposit. See how to add money using a bank transfer.",
       "allowedComponents": ["PznContentCard"],
       "recommendation": true,
       "comparisonGroup": null,
@@ -442,14 +442,14 @@
       "followUps": [
         {
           "followUpId": "fu_transfer_steps",
-          "label": "See demo transfer steps",
-          "userMessage": "Show the fictional transfer checklist."
+          "label": "See transfer steps",
+          "userMessage": "Show the transfer checklist."
         }
       ],
       "sourceRef": "fixture:fund_account",
-      "sourceLabel": "Demo content catalog",
+      "sourceLabel": "Content catalog",
       "requiredDisclosures": [
-        { "disclosureId": "demo_only", "text": "Demo transfer preview." }
+        { "disclosureId": "demo_only", "text": "The preview ends at review." }
       ]
     },
     {
@@ -457,9 +457,9 @@
       "version": "v1",
       "publicationStatus": "published",
       "kind": "metric_template",
-      "title": "Synthetic balance summary",
-      "description": "A metric-summary template. Rendering requires a successful host-scoped demo.balance.read proof for this exact decision.",
-      "body": "The host fills this template with synthetic values only after the registered demo read succeeds. No values are supplied by model output.",
+      "title": "Balance summary",
+      "description": "See your available balance and current balance together.",
+      "body": "Shows the amounts and the time they were last read.",
       "allowedComponents": [
         "PznMetricSummary"
       ],
@@ -476,16 +476,16 @@
       "followUps": [
         {
           "followUpId": "fu_compare_balances",
-          "label": "Compare demo balance terms",
-          "userMessage": "Compare the two fictional balance definitions."
+          "label": "Compare balance terms",
+          "userMessage": "Compare available and current balance."
         }
       ],
       "sourceRef": "fixture:balance_metric_template",
-      "sourceLabel": "Demo content catalog",
+      "sourceLabel": "Content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
-          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+          "text": "For illustration."
         }
       ]
     },
@@ -494,9 +494,9 @@
       "version": "v1",
       "publicationStatus": "published",
       "kind": "promotion",
-      "title": "Fictional restricted transfer offer",
-      "description": "An intentionally relevant but blocked synthetic promotion. It is catalog-valid but excluded from the blocked-item TS scenario.",
-      "body": "This invented offer exists only to test eligibility enforcement. It has no real terms, reward, rate, or action.",
+      "title": "Restricted transfer offer",
+      "description": "A transfer offer limited to eligible accounts.",
+      "body": "This offer requires eligibility before it can be shown.",
       "allowedComponents": [
         "PznContentCard"
       ],
@@ -506,11 +506,11 @@
       "metricSpec": null,
       "followUps": [],
       "sourceRef": "fixture:promotion_blocked",
-      "sourceLabel": "Demo content catalog",
+      "sourceLabel": "Content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
-          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+          "text": "For illustration."
         }
       ]
     },
@@ -519,9 +519,9 @@
       "version": "v1",
       "publicationStatus": "withdrawn",
       "kind": "education",
-      "title": "Withdrawn fictional explanation",
-      "description": "A withdrawn fixture for testing catalog-resolution failures.",
-      "body": "This fictional item must not be rendered because its catalog publication status is withdrawn.",
+      "title": "Withdrawn explanation",
+      "description": "An explanation that is no longer published.",
+      "body": "This explanation was withdrawn.",
       "allowedComponents": [
         "PznContentCard"
       ],
@@ -531,11 +531,11 @@
       "metricSpec": null,
       "followUps": [],
       "sourceRef": "fixture:withdrawn_education",
-      "sourceLabel": "Demo content catalog",
+      "sourceLabel": "Content catalog",
       "requiredDisclosures": [
         {
           "disclosureId": "demo_only",
-          "text": "Fictional demonstration only. This is synthetic content, not real account data, an offer, or financial guidance."
+          "text": "For illustration."
         }
       ]
     }

@@ -1,5 +1,5 @@
 {
-  "fixtureVersion": "pzn-host-v1.2",
+  "fixtureVersion": "pzn-host-v1.3",
   "defaultPersonaId": "demo-learner",
   "defaultScenarioId": "normal",
   "personas": [
@@ -41,17 +41,17 @@
     }
   ],
   "clarificationQuestions": [
-    "This is a demo with sample data. You can compare balances, view a portfolio summary, see a home-buying savings graph, learn about retirement, update a mailing address, or walk through a transfer. What would you like to try?",
+    "I can help you compare balances, review your portfolio, track your home-buying goal, learn about retirement, or walk through an address change or transfer. What would you like to do?",
     "Would you like an explanation, a comparison, or a step-by-step guide?",
     "Would you like a short explanation or a detailed one?"
   ],
   "introCopy": {
-    "explanation": "Here’s how this works in the demo.",
-    "comparison": "Here’s how the terms compare in the demo.",
-    "steps": "Here are the steps in this demo.",
-    "summary": "Here’s a summary using sample data.",
-    "next_step": "Here’s a suggested next step for your demo account.",
+    "explanation": "Here’s how it works.",
+    "comparison": "Here’s how the terms compare.",
+    "steps": "Here are the steps.",
+    "summary": "Here’s your summary.",
+    "next_step": "Here’s what you can do next.",
     "clarification": "A little more detail will help me answer.",
-    "no_match": "I couldn’t find a match for this request in the demo."
+    "no_match": "I couldn’t find anything that answers that request."
   }
 }

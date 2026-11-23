@@ -225,7 +225,7 @@ test("CCRE mock rules filter ranked treatments the same way in preview and chat"
   assert.deepEqual(payloads.treatment?.ccre?.data, excluded.ccre);
   assert.ok(!JSON.stringify(payloads).includes(rule.source!));
   const composer = f.gateway.calls.at(-1)?.envelope.eligible;
-  assert.deepEqual(composer?.candidates.map(({ title }) => title), ["Current balance: demo definition"]);
+  assert.deepEqual(composer?.candidates.map(({ title }) => title), ["Current balance"]);
 
   const restarted = await f.restart();
   assert.deepEqual((await restarted.request<ToolSetupView>(path)).setup.ccreRules, [rule]);
@@ -384,7 +384,7 @@ test("two-stage completion persists source-rich comparison, scopes, SSE replay, 
   const [block] = exp.blocks;
   assert.equal(block.component, "PznComparison");
   assert.equal(block.props.sources.length, 2);
-  assert.ok(block.props.disclosures[0].includes("Fictional demonstration only"));
+  assert.deepEqual(block.props.disclosures, ["For illustration."]);
   const seq = events.match(/id: (\d+)\nevent: turn\.accepted/)![1];
   const replay = await (await client.response("/api/turns/" + turn.id + "/events", undefined, { "Last-Event-ID": seq })).text();
   assert.doesNotMatch(replay, /event: turn\.accepted/);
@@ -643,7 +643,7 @@ test("the address guide can launch the funding workflow only when Treatment Sele
     } satisfies TreatmentPreviewInput);
     assert.deepEqual(preview, { status: "ranked", source: "fixture", contentIds: expected, ccre });
 
-    assert.deepEqual(experience.actions.map(({ label }) => label), matched ? ["Preview funding", "See demo transfer steps"] : []);
+    assert.deepEqual(experience.actions.map(({ label }) => label), matched ? ["Preview funding", "See transfer steps"] : []);
     if (matched) {
       const path = "/api/experiences/" + experience.experienceId + "/actions";
       const envelope = actionFor(experience);
@@ -672,7 +672,7 @@ test("the address guide can launch the funding workflow only when Treatment Sele
       assert.deepEqual(calls[1].registryInput.data, { turnRef: funding.turnId, methodId: "bank_transfer" });
       assert.deepEqual(calls[1].result?.data, {
         status: "preview", amountCents: 25_000, currency: "USD",
-        method: { methodId: "bank_transfer", label: "Bank transfer", from: "Sample linked bank", to: "Demo investment account" },
+        method: { methodId: "bank_transfer", label: "Bank transfer", from: "Linked bank account", to: "Investment account" },
       });
       assert.equal((await client.request<TurnAccepted>(path, request, 202)).turnId, funding.turnId);
       assert.equal((await client.response(path, { ...request, clientRequestId: randomUUID() })).status, 409);

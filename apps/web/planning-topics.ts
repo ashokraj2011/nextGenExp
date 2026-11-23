@@ -5,7 +5,7 @@ export const planningTopics = [
     id: "portfolio",
     name: "Portfolio",
     title: "Review your portfolio",
-    description: "See your demo cash, holdings, and allocation.",
+    description: "See your cash, holdings, and allocation.",
     prompt: "Let me know my portfolio summary.",
     Icon: ChartPie,
   },

@@ -14,9 +14,9 @@ import { planningTopics } from "./planning-topics";
 import { BasicSmoke, ExperienceControls, ExperienceDataUI, installA2uiStyles } from "./surface";
 
 const starters = [
-  { Icon: BookOpenText, label: "Explain a concept", message: "Explain the demo balance labels." },
+  { Icon: BookOpenText, label: "Explain a concept", message: "Explain the balance labels." },
   { Icon: Columns2, label: "Compare two terms", message: "Compare available and current balance." },
-  { Icon: ListChecks, label: "Guide me through a task", message: "Walk me through the demo transfer steps." },
+  { Icon: ListChecks, label: "Guide me through a task", message: "Walk me through the transfer steps." },
   { Icon: GraduationCap, label: "Learn about retirement", message: "I'd like to learn about retirement." },
   { Icon: House, label: "Home-buying goal", message: "Show my home-buying goal and savings progress." },
   { Icon: MapPin, label: "Update mailing address", message: "I need to update my mailing address." },
@@ -38,7 +38,7 @@ function Welcome({ testMode, configured, disabled }: { testMode: boolean; config
   return <section className="welcome">
     <div className="welcome-mark"><LabMark /></div>
     <h2>What would you like to explore?</h2>
-    <p className="welcome-subtitle">Explore demo finances and track progress toward a home-buying goal.</p>
+    <p className="welcome-subtitle">Review your finances and track progress toward a home-buying goal.</p>
     <div className="starters">
       {starters.map(({ Icon, label, message }) => (
         <button key={label} type="button" className="starter" disabled={disabled} onClick={() => aui.thread().append(message)}>
@@ -192,7 +192,7 @@ function Chat({ conversation, configuration, pending, draft, onDraft, onSend, on
 }
 
 function messageFor(error: unknown) {
-  return error instanceof Error && error.name !== "TypeError" ? error.message : "Couldn’t reach the demo. Your draft is still here.";
+  return error instanceof Error && error.name !== "TypeError" ? error.message : "Couldn’t connect. Your draft is still here.";
 }
 
 type Panel = { kind: "profiles" } | { kind: "inspector" } | { kind: "logs"; turnId?: string };
@@ -393,7 +393,7 @@ function App() {
           )) : <p>New conversations appear here.</p>}
         </nav>
       </div>
-      <div className="rail-footer"><span className="demo-dot" />Fictional demo workspace</div>
+      <div className="rail-footer"><span className="demo-dot" />Preview workspace</div>
     </aside>
     <main className="workspace" inert={railOpen}>
       <header className="topbar">
@@ -403,7 +403,7 @@ function App() {
           <div className="assistant-heading">
             <h1>Your assistant</h1>
             {activeProfile && <button ref={profilesTrigger} className="demo-profile-trigger" type="button" aria-haspopup="dialog"
-              aria-label={"Demo profiles, current profile " + activeProfile.displayName} title="Switch demo profile"
+              aria-label={"Profiles, current profile " + activeProfile.displayName} title="Switch profile"
               onClick={() => setPanel({ kind: "profiles" })}>
               <ProfileAvatar name={activeProfile.displayName} />
               <span>{activeProfile.displayName}</span><ChevronDown className="profile-chevron" size={14} aria-hidden="true" />
@@ -411,7 +411,7 @@ function App() {
           </div>
         </div>
         <div className="topbar-actions">
-          {configuration?.mode === "test" && <span className="test-label" title="Uses sample model responses">Test mode</span>}
+          {configuration?.mode === "test" && <span className="test-label" title="Uses preset model responses">Test mode</span>}
           {configuration?.openAiModel && <span className="test-label" title={configuration.openAiModel}>Live model</span>}
           {configuration?.inspectorEnabled && <a className="tool-setup-trigger inspector-trigger icon-button" aria-label="Tool setup" href="/admin">
             <Settings2 size={18} aria-hidden="true" /><span>Tool setup</span></a>}

@@ -142,8 +142,8 @@ const goalRoute = routeProposal("show_home_goal", "Show progress toward a home d
 const retirementRoute = routeProposal("retirement_learning", "Explain retirement planning basics.");
 const balanceCard: ProposalBlock = { blockId: "b1", component: "PznMetricSummary", candidateIds: ["candidate_balance"], variant: "compact" };
 const balanceComposer = composer(
-  summaryPrompt, "balance", "show_balance", { topic: "Show demo balances", task: "show", summary: balanceRoute.summary },
-  [{ candidateId: "candidate_balance", title: "Synthetic balance summary", tsRank: 5 }], [balanceCard],
+  summaryPrompt, "balance", "show_balance", { topic: "Show balances", task: "show", summary: balanceRoute.summary },
+  [{ candidateId: "candidate_balance", title: "Balance summary", tsRank: 5 }], [balanceCard],
   "The composer gets the checked request and matching content. It asks the balance tool for the figures, then chooses a balance summary card.",
   "summary", ["fu_compare_balances"],
 );
@@ -331,7 +331,7 @@ export const helpFlows: Flow[] = [
             dataModel: { intro: host.introCopy.summary },
             components: [
               { id: "root", component: "PznExperience", intro: { "@path": "/intro" }, children: ["block_1"], actionCount: 0, question: null, partial: false },
-              { id: "block_1", component: "PznMetricSummary", title: "Synthetic balance summary", variant: "compact", observedAt: demoBalance.observedAt, values: demoBalance.values },
+              { id: "block_1", component: "PznMetricSummary", title: "Balance summary", variant: "compact", observedAt: demoBalance.observedAt, values: demoBalance.values },
             ],
           },
         } },

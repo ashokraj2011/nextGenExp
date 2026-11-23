@@ -13,53 +13,53 @@
       "effect": "none",
       "meta": {
         "attempts": 1,
-        "durationMs": 4,
-        "bytes": 1754
+        "durationMs": 2,
+        "bytes": 1650
       },
       "output": {
         "schemaVersion": "1.0",
-        "catalogVersion": "ts-contexts-demo-v6",
+        "catalogVersion": "ts-contexts-demo-v7",
         "contexts": [
           {
             "contextId": "balance",
             "displayName": "Balances",
-            "description": "Balance labels, their definitions and comparisons, and synthetic available or current balance summaries. Use for requests about balances. Transfers and portfolio allocation are separate topics.",
+            "description": "Balance labels, their definitions and comparisons, and available or current balance summaries. Use for requests about balances. Transfers and portfolio allocation are separate topics.",
             "active": true
           },
           {
             "contextId": "portsum",
             "displayName": "Portfolio summary",
-            "description": "Show a synthetic member's portfolio summary, including total value, cash, and asset allocation, or explain what portfolio terms and holdings labels mean.",
+            "description": "Show a portfolio summary, including total value, cash, and asset allocation, or explain what portfolio terms and holdings labels mean.",
             "active": true
           },
           {
             "contextId": "learning",
             "displayName": "Learning",
-            "description": "Education about retirement planning basics and beneficiary designations. Includes learning what a beneficiary is and how to review or add one in the demo.",
+            "description": "Education about retirement planning basics and beneficiary designations. Includes learning what a beneficiary is and how to review or add one.",
             "active": true
           },
           {
             "contextId": "goals",
             "displayName": "Home-buying goal",
-            "description": "Review the synthetic home down payment target, progress and historical savings growth.",
+            "description": "Review the home down payment target, progress, and savings growth.",
             "active": true
           },
           {
             "contextId": "address-update",
             "displayName": "Address update",
-            "description": "Guide a customer through changing the mailing or residential address on their demo account. Treatment Selector can recommend funding after the guide if the account is unfunded.",
+            "description": "Guide a customer through changing the mailing or residential address on their account. Treatment Selector can recommend funding after the guide if the account is unfunded.",
             "active": true
           },
           {
             "contextId": "app-home",
             "displayName": "App home",
-            "description": "General demo app help, entry points and supported capabilities. Includes learning about the fictional transfer flow and guiding a transfer preview. Use for explicit app help or transfer requests.",
+            "description": "General app help and available features. Includes learning about transfers and walking through a transfer preview. Use for explicit app help or transfer requests.",
             "active": true
           },
           {
             "contextId": "next-step",
             "displayName": "Suggested next step",
-            "description": "Find a relevant next action for the demo account when the customer asks what to do next without naming a specific task.",
+            "description": "Find a relevant next action for the account when the customer asks what to do next without naming a specific task.",
             "active": true
           }
         ]
@@ -93,7 +93,7 @@
       "effect": "none",
       "meta": {
         "attempts": 1,
-        "durationMs": 1,
+        "durationMs": 2,
         "bytes": 373
       },
       "output": {
@@ -136,7 +136,7 @@
   "router": {
     "request": {
       "message": {
-        "text": "{\"inputType\":\"PznContextRoutingInput\",\"catalogSnapshotId\":\"catalog_demo\",\"catalog\":{\"schemaVersion\":\"1.0\",\"catalogVersion\":\"ts-contexts-demo-v6\",\"contexts\":[{\"contextId\":\"balance\",\"displayName\":\"Balances\",\"description\":\"Balance labels, their definitions and comparisons, and synthetic available or current balance summaries. Use for requests about balances. Transfers and portfolio allocation are separate topics.\",\"active\":true},{\"contextId\":\"portsum\",\"displayName\":\"Portfolio summary\",\"description\":\"Show a synthetic member's portfolio summary, including total value, cash, and asset allocation, or explain what portfolio terms and holdings labels mean.\",\"active\":true},{\"contextId\":\"learning\",\"displayName\":\"Learning\",\"description\":\"Education about retirement planning basics and beneficiary designations. Includes learning what a beneficiary is and how to review or add one in the demo.\",\"active\":true},{\"contextId\":\"goals\",\"displayName\":\"Home-buying goal\",\"description\":\"Review the synthetic home down payment target, progress and historical savings growth.\",\"active\":true},{\"contextId\":\"address-update\",\"displayName\":\"Address update\",\"description\":\"Guide a customer through changing the mailing or residential address on their demo account. Treatment Selector can recommend funding after the guide if the account is unfunded.\",\"active\":true},{\"contextId\":\"app-home\",\"displayName\":\"App home\",\"description\":\"General demo app help, entry points and supported capabilities. Includes learning about the fictional transfer flow and guiding a transfer preview. Use for explicit app help or transfer requests.\",\"active\":true},{\"contextId\":\"next-step\",\"displayName\":\"Suggested next step\",\"description\":\"Find a relevant next action for the demo account when the customer asks what to do next without naming a specific task.\",\"active\":true}]},\"intentCatalog\":[{\"intentId\":\"explain_balance\",\"label\":\"Understand balances\",\"contextId\":\"balance\",\"task\":\"explain\",\"description\":\"Learn what an available, current, or ledger balance means.\"},{\"intentId\":\"compare_balances\",\"label\":\"Compare balances\",\"contextId\":\"balance\",\"task\":\"compare\",\"description\":\"Compare the meaning of two demo balance labels.\"},{\"intentId\":\"show_balance\",\"label\":\"Show demo balances\",\"contextId\":\"balance\",\"task\":\"show\",\"description\":\"Retrieve the actual synthetic available or current balance amounts.\"},{\"intentId\":\"explain_portfolio\",\"label\":\"Understand portfolios\",\"contextId\":\"portsum\",\"task\":\"explain\",\"description\":\"Learn what the portfolio view, holdings, or allocation labels mean.\"},{\"intentId\":\"show_portfolio\",\"label\":\"Show portfolio summary\",\"contextId\":\"portsum\",\"task\":\"show\",\"description\":\"Show the customer's synthetic portfolio value, cash, holdings, or allocation.\"},{\"intentId\":\"show_home_goal\",\"label\":\"Show home-buying goal\",\"contextId\":\"goals\",\"task\":\"show\",\"description\":\"Open the demo's Goals view to see the home down payment target, current savings, remaining gap, or savings history. Includes short requests such as 'goals' and questions about the status of the existing goal.\"},{\"intentId\":\"retirement_learning\",\"label\":\"Learn about retirement\",\"contextId\":\"learning\",\"task\":\"explain\",\"description\":\"Learn about retirement planning or beneficiary designations, including a confirmed interest in retirement when leaving work.\"},{\"intentId\":\"beneficiary_update_steps\",\"label\":\"Review beneficiary update steps\",\"contextId\":\"learning\",\"task\":\"guide\",\"description\":\"See the demo steps to review or add a beneficiary.\"},{\"intentId\":\"update_address\",\"label\":\"Update mailing address\",\"contextId\":\"address-update\",\"task\":\"guide\",\"description\":\"Walk through a mailing or residential address change in the demo, including when a customer has moved or needs account correspondence sent to a new address.\"},{\"intentId\":\"learn_transfers\",\"label\":\"Learn about the demo app\",\"contextId\":\"app-home\",\"task\":\"explain\",\"description\":\"Get explicit demo app help or learn about the fictional transfer flow.\"},{\"intentId\":\"guide_transfer\",\"label\":\"Walk through a transfer\",\"contextId\":\"app-home\",\"task\":\"guide\",\"description\":\"See the steps for the fictional transfer preview.\"},{\"intentId\":\"suggest_next_step\",\"label\":\"Suggest a next step\",\"contextId\":\"next-step\",\"task\":\"guide\",\"description\":\"Find a personalized next action for the demo account. Includes open-ended requests such as 'what is next' and 'what should I do now?'.\"},{\"intentId\":\"create_rule\",\"label\":\"Create an eligibility rule\",\"contextId\":null,\"task\":\"create_rule\",\"description\":\"An explicit request to create or add a Treatment Selector rule.\"}],\"propensity\":{\"version\":\"pzn-propensity-demo-v1\",\"classification\":\"synthetic_advisory\",\"status\":\"available\",\"scores\":[{\"contextId\":\"balance\",\"score\":0.42},{\"contextId\":\"portsum\",\"score\":0.36},{\"contextId\":\"learning\",\"score\":0.32},{\"contextId\":\"goals\",\"score\":0.35},{\"contextId\":\"address-update\",\"score\":0.78},{\"contextId\":\"app-home\",\"score\":0.6},{\"contextId\":\"next-step\",\"score\":null}]},\"allowedQuestions\":[\"This is a demo with sample data. You can compare balances, view a portfolio summary, see a home-buying savings graph, learn about retirement, update a mailing address, or walk through a transfer. What would you like to try?\",\"Would you like an explanation, a comparison, or a step-by-step guide?\",\"Would you like a short explanation or a detailed one?\",\"Are you looking for general retirement planning information?\",\"Would you like general retirement planning information as you leave your job?\",\"Did you mean your portfolio summary?\"],\"canCreateRule\":true,\"recent\":[],\"request\":\"I moved and need to update my address.\"}"
+        "text": "{\"inputType\":\"PznContextRoutingInput\",\"catalogSnapshotId\":\"catalog_demo\",\"catalog\":{\"schemaVersion\":\"1.0\",\"catalogVersion\":\"ts-contexts-demo-v7\",\"contexts\":[{\"contextId\":\"balance\",\"displayName\":\"Balances\",\"description\":\"Balance labels, their definitions and comparisons, and available or current balance summaries. Use for requests about balances. Transfers and portfolio allocation are separate topics.\",\"active\":true},{\"contextId\":\"portsum\",\"displayName\":\"Portfolio summary\",\"description\":\"Show a portfolio summary, including total value, cash, and asset allocation, or explain what portfolio terms and holdings labels mean.\",\"active\":true},{\"contextId\":\"learning\",\"displayName\":\"Learning\",\"description\":\"Education about retirement planning basics and beneficiary designations. Includes learning what a beneficiary is and how to review or add one.\",\"active\":true},{\"contextId\":\"goals\",\"displayName\":\"Home-buying goal\",\"description\":\"Review the home down payment target, progress, and savings growth.\",\"active\":true},{\"contextId\":\"address-update\",\"displayName\":\"Address update\",\"description\":\"Guide a customer through changing the mailing or residential address on their account. Treatment Selector can recommend funding after the guide if the account is unfunded.\",\"active\":true},{\"contextId\":\"app-home\",\"displayName\":\"App home\",\"description\":\"General app help and available features. Includes learning about transfers and walking through a transfer preview. Use for explicit app help or transfer requests.\",\"active\":true},{\"contextId\":\"next-step\",\"displayName\":\"Suggested next step\",\"description\":\"Find a relevant next action for the account when the customer asks what to do next without naming a specific task.\",\"active\":true}]},\"intentCatalog\":[{\"intentId\":\"explain_balance\",\"label\":\"Understand balances\",\"contextId\":\"balance\",\"task\":\"explain\",\"description\":\"Learn what an available, current, or ledger balance means.\"},{\"intentId\":\"compare_balances\",\"label\":\"Compare balances\",\"contextId\":\"balance\",\"task\":\"compare\",\"description\":\"Compare what available balance and current balance mean.\"},{\"intentId\":\"show_balance\",\"label\":\"Show balances\",\"contextId\":\"balance\",\"task\":\"show\",\"description\":\"Show the available or current balance amounts.\"},{\"intentId\":\"explain_portfolio\",\"label\":\"Understand portfolios\",\"contextId\":\"portsum\",\"task\":\"explain\",\"description\":\"Learn what the portfolio view, holdings, or allocation labels mean.\"},{\"intentId\":\"show_portfolio\",\"label\":\"Show portfolio summary\",\"contextId\":\"portsum\",\"task\":\"show\",\"description\":\"Show the customer's portfolio value, cash, holdings, or allocation.\"},{\"intentId\":\"show_home_goal\",\"label\":\"Show home-buying goal\",\"contextId\":\"goals\",\"task\":\"show\",\"description\":\"Show the home down payment target, current savings, remaining gap, or savings history. Includes short requests such as 'goals' and questions about the status of the existing goal.\"},{\"intentId\":\"retirement_learning\",\"label\":\"Learn about retirement\",\"contextId\":\"learning\",\"task\":\"explain\",\"description\":\"Learn about retirement planning or beneficiary designations, including a confirmed interest in retirement when leaving work.\"},{\"intentId\":\"beneficiary_update_steps\",\"label\":\"Review beneficiary update steps\",\"contextId\":\"learning\",\"task\":\"guide\",\"description\":\"See the steps to review or add a beneficiary.\"},{\"intentId\":\"update_address\",\"label\":\"Update mailing address\",\"contextId\":\"address-update\",\"task\":\"guide\",\"description\":\"Walk through a mailing or residential address change, including when a customer has moved or needs account correspondence sent to a new address.\"},{\"intentId\":\"learn_transfers\",\"label\":\"Learn about the app\",\"contextId\":\"app-home\",\"task\":\"explain\",\"description\":\"Get app help or learn how transfers work.\"},{\"intentId\":\"guide_transfer\",\"label\":\"Walk through a transfer\",\"contextId\":\"app-home\",\"task\":\"guide\",\"description\":\"See the steps for a transfer preview.\"},{\"intentId\":\"suggest_next_step\",\"label\":\"Suggest a next step\",\"contextId\":\"next-step\",\"task\":\"guide\",\"description\":\"Find a personalized next action for the account. Includes open-ended requests such as 'what is next' and 'what should I do now?'.\"},{\"intentId\":\"create_rule\",\"label\":\"Create an eligibility rule\",\"contextId\":null,\"task\":\"create_rule\",\"description\":\"An explicit request to create or add a Treatment Selector rule.\"}],\"propensity\":{\"version\":\"pzn-propensity-demo-v1\",\"classification\":\"synthetic_advisory\",\"status\":\"available\",\"scores\":[{\"contextId\":\"balance\",\"score\":0.42},{\"contextId\":\"portsum\",\"score\":0.36},{\"contextId\":\"learning\",\"score\":0.32},{\"contextId\":\"goals\",\"score\":0.35},{\"contextId\":\"address-update\",\"score\":0.78},{\"contextId\":\"app-home\",\"score\":0.6},{\"contextId\":\"next-step\",\"score\":null}]},\"allowedQuestions\":[\"I can help you compare balances, review your portfolio, track your home-buying goal, learn about retirement, or walk through an address change or transfer. What would you like to do?\",\"Would you like an explanation, a comparison, or a step-by-step guide?\",\"Would you like a short explanation or a detailed one?\",\"Are you looking for general retirement planning information?\",\"Would you like general retirement planning information as you leave your job?\",\"Did you mean your portfolio summary?\"],\"canCreateRule\":true,\"recent\":[],\"request\":\"I moved and need to update my address.\"}"
       },
       "inputs": {
         "turnRef": "turn_demo",
@@ -160,13 +160,13 @@
         "tokensReported": true,
         "costMicroUsd": 0,
         "costLabel": "unpriced",
-        "activeMs": 25,
-        "elapsedMs": 34
+        "activeMs": 18,
+        "elapsedMs": 22
       },
       "output": {
         "schemaVersion": "1.1",
         "catalogSnapshotId": "catalog_demo",
-        "catalogVersion": "ts-contexts-demo-v6",
+        "catalogVersion": "ts-contexts-demo-v7",
         "summary": "Deterministic test intent.",
         "replyText": null,
         "status": "selected",
@@ -190,7 +190,7 @@
       "effect": "none",
       "meta": {
         "attempts": 1,
-        "durationMs": 3,
+        "durationMs": 2,
         "bytes": 198
       },
       "output": {
@@ -216,7 +216,7 @@
   "composer": {
     "request": {
       "message": {
-        "text": "{\"inputType\":\"PznExperienceCompositionInput\",\"request\":\"I moved and need to update my address.\",\"intent\":{\"topic\":\"Update mailing address\",\"task\":\"guide\",\"summary\":\"Deterministic test intent.\"},\"selectedIntentId\":\"update_address\",\"selectedContextId\":\"address-update\",\"eligible\":{\"decisionId\":\"decision_demo\",\"partial\":false,\"selectionMode\":\"semantic_rerank\",\"candidates\":[{\"candidateId\":\"candidate_address\",\"tsRank\":1,\"kind\":\"education\",\"title\":\"Update your mailing address\",\"description\":\"A walkthrough for changing the address where account correspondence is sent.\",\"body\":\"Follow the address-change walkthrough using sample details.\",\"allowedComponents\":[\"PznStepList\"],\"comparisonGroup\":null,\"comparisonFields\":[],\"steps\":[{\"stepId\":\"open_profile\",\"title\":\"Open your profile settings\",\"body\":\"Go to Contact information and find the mailing address on file.\"},{\"stepId\":\"edit_address\",\"title\":\"Edit the mailing address\",\"body\":\"Choose Edit and review where you would enter the new street address, city, state, and postal code.\"},{\"stepId\":\"review_address\",\"title\":\"Review the change\",\"body\":\"Check the sample address and which account correspondence would go there.\"}],\"requiresBalanceRead\":false,\"followUps\":[]}]},\"allowedQuestions\":[\"This is a demo with sample data. You can compare balances, view a portfolio summary, see a home-buying savings graph, learn about retirement, update a mailing address, or walk through a transfer. What would you like to try?\",\"Would you like an explanation, a comparison, or a step-by-step guide?\",\"Would you like a short explanation or a detailed one?\"]}"
+        "text": "{\"inputType\":\"PznExperienceCompositionInput\",\"request\":\"I moved and need to update my address.\",\"intent\":{\"topic\":\"Update mailing address\",\"task\":\"guide\",\"summary\":\"Deterministic test intent.\"},\"selectedIntentId\":\"update_address\",\"selectedContextId\":\"address-update\",\"eligible\":{\"decisionId\":\"decision_demo\",\"partial\":false,\"selectionMode\":\"semantic_rerank\",\"candidates\":[{\"candidateId\":\"candidate_address\",\"tsRank\":1,\"kind\":\"education\",\"title\":\"Update your mailing address\",\"description\":\"A walkthrough for changing the address where account correspondence is sent.\",\"body\":\"Review the steps for changing where your account mail goes.\",\"allowedComponents\":[\"PznStepList\"],\"comparisonGroup\":null,\"comparisonFields\":[],\"steps\":[{\"stepId\":\"open_profile\",\"title\":\"Open your profile settings\",\"body\":\"Go to Contact information and find the mailing address on file.\"},{\"stepId\":\"edit_address\",\"title\":\"Edit the mailing address\",\"body\":\"Choose Edit and review where you would enter the new street address, city, state, and postal code.\"},{\"stepId\":\"review_address\",\"title\":\"Review the change\",\"body\":\"Check the new address and which account mail will go there.\"}],\"requiresBalanceRead\":false,\"followUps\":[]}]},\"allowedQuestions\":[\"I can help you compare balances, review your portfolio, track your home-buying goal, learn about retirement, or walk through an address change or transfer. What would you like to do?\",\"Would you like an explanation, a comparison, or a step-by-step guide?\",\"Would you like a short explanation or a detailed one?\"]}"
       },
       "inputs": {
         "turnRef": "turn_demo",
@@ -240,8 +240,8 @@
         "tokensReported": true,
         "costMicroUsd": 0,
         "costLabel": "unpriced",
-        "activeMs": 5,
-        "elapsedMs": 10
+        "activeMs": 4,
+        "elapsedMs": 7
       },
       "output": {
         "schemaVersion": "1.0",

@@ -58,7 +58,7 @@ export class ExperienceService {
 
   createConversation(principalId: string, personaId: string, scenarioId: string) {
     const persona = demo.personas.find((entry) => entry.personaId === personaId);
-    if (!persona?.allowedScenarios.includes(scenarioId)) throw new ApiError(400, "demo_scope_invalid", "Select an available demo persona and scenario.");
+    if (!persona?.allowedScenarios.includes(scenarioId)) throw new ApiError(400, "demo_scope_invalid", "Select an available profile and scenario.");
     return this.store.createConversation(principalId, personaId, scenarioId, this.now());
   }
 
@@ -90,7 +90,7 @@ export class ExperienceService {
     if (latest?.public.id !== turn.public.id || conversation.personaId !== turn.scope.personaId
       || !turn.public.experience || turn.public.experience.expiresAt <= this.now()
       || turn.decision?.routeDecisionId !== turn.route?.routeDecisionId) {
-      throw new ApiError(409, "action_stale", "Ask a fresh question to get current demo content.");
+      throw new ApiError(409, "action_stale", "Ask again to get an updated response.");
     }
     const workflow = signed.workflow && { recommendation: signed.workflow, sourceExperienceId: experienceId };
     return this.submit(conversation, signed.userMessage, requestId, origin, undefined, workflow);

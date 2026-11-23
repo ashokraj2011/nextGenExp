@@ -32,7 +32,7 @@ type ExperienceInput = {
 
 export function compileExperience(input: ExperienceInput): CompiledExperience {
   const intro = input.portfolio ? host.introCopy.summary : input.outcome === "eligible_empty"
-    ? "This demo has no content to show for this request."
+    ? "I don’t have anything to show for that request."
     : host.introCopy[input.introKey];
   const blocks: DisplayBlock[] = (input.approved?.blocks ?? []).map(({ proposal, content }) => {
     const primary = content[0];
@@ -45,7 +45,7 @@ export function compileExperience(input: ExperienceInput): CompiledExperience {
     switch (proposal.component) {
       case "PznComparison":
         return { component: proposal.component, props: {
-          ...shared, title: "Compare demo definitions",
+          ...shared, title: "Compare balance definitions",
           columns: content.map((entry) => ({ title: entry.title, fields: entry.comparisonFields })),
         } };
       case "PznStepList":
@@ -94,7 +94,7 @@ export function compileExperience(input: ExperienceInput): CompiledExperience {
 
 export function compileFundingPreview(preview: FundingPreview, expiresAt: number): CompiledExperience {
   return buildSurface({
-    status: "ready", outcome: "ready", intro: "Your sample funding preview is ready.",
+    status: "ready", outcome: "ready", intro: "Your funding preview is ready.",
     question: null, partial: false, expiresAt,
   }, [{ component: fundingPreview.name, props: preview }], []);
 }

@@ -27,7 +27,7 @@ const blockLabels = {
   PznContentCard: "Explanation",
   PznComparison: "Comparison",
   PznStepList: "Step-by-step guide",
-  PznMetricSummary: "Sample balances",
+  PznMetricSummary: "Account balances",
   PznGoalProgress: "Home-buying goal",
 };
 
@@ -39,7 +39,7 @@ function FundingPreviewBlock({ amountCents, method }: FundingPreview) {
       <div className="compare-column"><dt>From</dt><dd>{method.from}</dd></div>
       <div className="compare-column"><dt>To</dt><dd>{method.to}</dd></div>
     </dl>
-    <div className="content-footer"><p className="disclosure">Sample transfer. The preview ends at review.</p></div>
+    <div className="content-footer"><p className="disclosure">The preview ends at review.</p></div>
   </section>;
 }
 
@@ -64,7 +64,7 @@ function ContentBlock({ block }: { block: DisplayBlock }) {
         </>
       ))}
       {block.component === "PznComparison" && (
-        <div className="compare-grid" aria-label="Demo definitions">
+        <div className="compare-grid" aria-label="Balance definitions">
           {block.props.columns.map(({ title, fields }) => (
             <section className="compare-column" key={title}>
               <h4>{title}</h4>
@@ -89,7 +89,7 @@ function ContentBlock({ block }: { block: DisplayBlock }) {
             {block.props.values.map(({ metricKey, displayValue }) => (
               <div key={metricKey}>
                 <dt>{metricKey === "available" ? "Available balance" : "Current balance"}</dt>
-                <dd>{displayValue} <span>demo units</span></dd>
+                <dd>{displayValue} <span>units</span></dd>
               </div>
             ))}
           </dl>

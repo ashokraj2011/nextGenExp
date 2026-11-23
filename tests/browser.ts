@@ -167,22 +167,22 @@ try {
   await logs.waitFor({ state: "hidden" });
   await page.screenshot({ path: resolve(screenshots, "welcome-desktop.png") });
   await page.getByRole("button", { name: /Compare two terms/ }).click();
-  await page.getByRole("heading", { name: "Compare demo definitions" }).waitFor();
+  await page.getByRole("heading", { name: "Compare balance definitions" }).waitFor();
   await page.locator('[data-renderer="a2ui"]').waitFor();
-  await page.getByText("Fictional demonstration only.", { exact: false }).waitFor();
+  await page.getByText("For illustration.", { exact: true }).waitFor();
   await page.screenshot({ path: resolve(screenshots, "comparison-desktop.png") });
 
   await page.getByText("View sources", { exact: true }).click();
-  await page.getByText("Demo content catalog · v1", { exact: true }).first().waitFor();
+  await page.getByText("Content catalog · v1", { exact: true }).first().waitFor();
   await page.getByRole("button", { name: "Helpful", exact: true }).click();
   await page.getByRole("button", { name: "Helpful", exact: true, pressed: true }).waitFor();
   await page.getByRole("button", { name: "Explain available balance", exact: true }).click();
-  await page.getByRole("heading", { name: "Available balance: demo definition", exact: true, level: 3 }).waitFor();
+  await page.getByRole("heading", { name: "Available balance", exact: true, level: 3 }).waitFor();
   assert.equal(await page.locator('[data-renderer="a2ui"]').count(), 2);
   assert.equal(await page.getByRole("button", { name: "Explain available balance", exact: true }).isDisabled(), true);
 
   await page.reload();
-  await page.getByRole("heading", { name: "Available balance: demo definition", exact: true, level: 3 }).waitFor();
+  await page.getByRole("heading", { name: "Available balance", exact: true, level: 3 }).waitFor();
   assert.equal(await page.getByRole("button", { name: "Helpful", exact: true, pressed: true }).count(), 1);
   await page.getByRole("button", { name: "Open developer inspector" }).click();
   const inspector = page.getByRole("dialog", { name: "Developer inspector" });
@@ -225,19 +225,19 @@ try {
   await page.route(abortPattern, (route) => route.abort(), { times: 1 });
   await input.fill("Explain the fictional portfolio view.");
   await input.press("Enter");
-  await page.getByText("Couldn’t reach the demo. Your draft is still here.", { exact: true }).waitFor();
+  await page.getByText("Couldn’t connect. Your draft is still here.", { exact: true }).waitFor();
   assert.equal(await input.inputValue(), "Explain the fictional portfolio view.");
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  await page.getByRole("heading", { name: "Understanding the fictional portfolio view" }).waitFor();
+  await page.getByRole("heading", { name: "Understanding your portfolio" }).waitFor();
 
   await page.getByRole("button", { name: "New conversation", exact: true }).click();
   await page.getByRole("button", { name: /Guide me through a task/ }).click();
-  await page.getByRole("heading", { name: "Fictional transfer checklist" }).waitFor();
+  await page.getByRole("heading", { name: "Transfer checklist" }).waitFor();
   assert.deepEqual(await page.locator(".steps-list h4").allTextContents(), [
-    "Read the demo overview", "Review synthetic details", "Stop at the preview",
+    "Choose the accounts", "Review the amount", "Review the transfer preview",
   ]);
   await page.getByRole("button", { name: "Explain portfolio terms", exact: true }).click();
-  await page.getByRole("heading", { name: "Understanding the fictional portfolio view" }).waitFor();
+  await page.getByRole("heading", { name: "Understanding your portfolio" }).waitFor();
 
   await page.getByRole("link", { name: "Tool setup" }).click();
   await page.getByRole("heading", { name: "Tool setup", level: 1 }).waitFor();
@@ -267,7 +267,7 @@ try {
   const chatWithMock = page.getByLabel("Your question");
   await chatWithMock.fill("Explain the fictional portfolio view.");
   await chatWithMock.press("Enter");
-  await page.getByText("This demo has no content to show for this request.", { exact: true }).waitFor();
+  await page.getByText("I don’t have anything to show for that request.", { exact: true }).waitFor();
 
   await page.getByRole("link", { name: "Tool setup" }).click();
   await page.getByRole("button", { name: "Create rule", exact: true }).click();
@@ -289,7 +289,7 @@ try {
   await page.screenshot({ path: resolve(screenshots, "ccre-rule-preview.png"), fullPage: true });
   await page.getByRole("button", { name: "Save and test in chat", exact: true }).click();
   await page.getByRole("button", { name: /Compare two terms/ }).click();
-  await page.getByText("I couldn’t find a match for this request in the demo.", { exact: true }).waitFor();
+  await page.getByText("I couldn’t find anything that answers that request.", { exact: true }).waitFor();
   await logsButton.click();
   await page.getByText("Treatment Selector · succeeded", { exact: true }).click();
   await page.getByText("Mock CCRE evaluation", { exact: true }).click();
@@ -350,7 +350,7 @@ try {
   await author.keyboard.press("Escape");
   await authorMessage.fill("Compare available and current balance.");
   await authorMessage.press("Enter");
-  await author.getByRole("heading", { name: "Compare demo definitions" }).waitFor();
+  await author.getByRole("heading", { name: "Compare balance definitions" }).waitFor();
   await ruleBlock.getByRole("link", { name: "Open Tool setup" }).click();
   await author.getByRole("list", { name: "CCRE rules for this context" }).getByText("Available balance for learners", { exact: true }).waitFor();
   await author.getByRole("button", { name: "Edit rule Available balance for learners", exact: true }).click();
@@ -361,10 +361,10 @@ try {
   portfolioPage.setDefaultTimeout(12_000);
   portfolioPage.on("pageerror", (error) => pageErrors.push(error.message));
   await portfolioPage.goto(preview.url + "/planning");
-  await portfolioPage.getByRole("link", { name: "Compare demo profiles", exact: true }).click();
-  const aliceProfileTrigger = portfolioPage.getByRole("button", { name: "Demo profiles, current profile Alice Morgan", exact: true });
-  const jordanProfileTrigger = portfolioPage.getByRole("button", { name: "Demo profiles, current profile Jordan Lee", exact: true });
-  const demoProfiles = portfolioPage.getByRole("dialog", { name: "Demo profiles", exact: true });
+  await portfolioPage.getByRole("link", { name: "Compare profiles", exact: true }).click();
+  const aliceProfileTrigger = portfolioPage.getByRole("button", { name: "Profiles, current profile Alice Morgan", exact: true });
+  const jordanProfileTrigger = portfolioPage.getByRole("button", { name: "Profiles, current profile Jordan Lee", exact: true });
+  const demoProfiles = portfolioPage.getByRole("dialog", { name: "Profiles", exact: true });
   const aliceProfile = demoProfiles.getByRole("article", { name: "Alice Morgan", exact: true });
   const jordanProfile = demoProfiles.getByRole("article", { name: "Jordan Lee", exact: true });
   await aliceProfile.getByText("$12,500", { exact: true }).waitFor();
@@ -520,20 +520,20 @@ try {
   await mobile.getByLabel("Select a contract", { exact: true }).selectOption("render");
   await mobile.getByRole("heading", { name: "A2UI surfaces and actions", exact: true }).waitFor();
   await mobile.getByRole("link", { name: "Back to chat", exact: true }).click();
-  await mobile.getByRole("button", { name: "Demo profiles, current profile Alice Morgan", exact: true }).click();
-  const mobileProfiles = mobile.getByRole("dialog", { name: "Demo profiles", exact: true });
+  await mobile.getByRole("button", { name: "Profiles, current profile Alice Morgan", exact: true }).click();
+  const mobileProfiles = mobile.getByRole("dialog", { name: "Profiles", exact: true });
   await mobileProfiles.getByRole("heading", { name: "Jordan Lee", exact: true }).waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  await mobileProfiles.getByRole("button", { name: "Close demo profiles", exact: true }).click();
+  await mobileProfiles.getByRole("button", { name: "Close profiles", exact: true }).click();
   await mobile.getByRole("button", { name: "Show conversations" }).click();
   await mobile.getByRole("button", { name: "Close conversation navigation" }).click();
   await mobile.getByRole("button", { name: /Compare two terms/ }).click();
-  await mobile.getByRole("heading", { name: "Compare demo definitions" }).waitFor();
+  await mobile.getByRole("heading", { name: "Compare balance definitions" }).waitFor();
   const columns = await mobile.locator(".compare-column").evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().left));
   assert.equal(columns[0], columns[1]);
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.equal(await mobile.getByLabel("Your question").isVisible(), true);
-  const visibility = await mobile.getByRole("heading", { name: "Compare demo definitions" }).boundingBox();
+  const visibility = await mobile.getByRole("heading", { name: "Compare balance definitions" }).boundingBox();
   assert.ok(visibility && visibility.y >= 57, "The new mobile response starts in view");
   await mobile.screenshot({ path: resolve(screenshots, "comparison-mobile.png") });
   await mobileMessage.fill("Let me know my portfolio summary.");
@@ -575,8 +575,8 @@ try {
   await fallback.goto(preview.url + "/chat");
   await fallback.getByRole("button", { name: /Compare two terms/ }).click();
   await fallback.locator('[data-renderer="fallback"]').waitFor();
-  await fallback.getByRole("heading", { name: "Compare demo definitions" }).waitFor();
-  await fallback.getByText("Fictional demonstration only.", { exact: false }).waitFor();
+  await fallback.getByRole("heading", { name: "Compare balance definitions" }).waitFor();
+  await fallback.getByText("For illustration.", { exact: true }).waitFor();
   await fallback.getByLabel("Your question").fill("Show my home-buying goal.");
   await fallback.getByLabel("Your question").press("Enter");
   await fallback.locator('[data-renderer="fallback"]').getByRole("img", { name: /Down payment savings/ }).waitFor();

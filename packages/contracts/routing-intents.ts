@@ -8,17 +8,17 @@ type IntentDefinition = { intentId: string; label: string; description: string }
 
 export const routingIntents = [
   { intentId: "explain_balance", label: "Understand balances", contextId: "balance", task: "explain", description: "Learn what an available, current, or ledger balance means." },
-  { intentId: "compare_balances", label: "Compare balances", contextId: "balance", task: "compare", description: "Compare the meaning of two demo balance labels." },
-  { intentId: "show_balance", label: "Show demo balances", contextId: "balance", task: "show", description: "Retrieve the actual synthetic available or current balance amounts." },
+  { intentId: "compare_balances", label: "Compare balances", contextId: "balance", task: "compare", description: "Compare what available balance and current balance mean." },
+  { intentId: "show_balance", label: "Show balances", contextId: "balance", task: "show", description: "Show the available or current balance amounts." },
   { intentId: "explain_portfolio", label: "Understand portfolios", contextId: "portsum", task: "explain", description: "Learn what the portfolio view, holdings, or allocation labels mean." },
-  { intentId: "show_portfolio", label: "Show portfolio summary", contextId: "portsum", task: "show", description: "Show the customer's synthetic portfolio value, cash, holdings, or allocation." },
-  { intentId: "show_home_goal", label: "Show home-buying goal", contextId: "goals", task: "show", description: "Open the demo's Goals view to see the home down payment target, current savings, remaining gap, or savings history. Includes short requests such as 'goals' and questions about the status of the existing goal." },
+  { intentId: "show_portfolio", label: "Show portfolio summary", contextId: "portsum", task: "show", description: "Show the customer's portfolio value, cash, holdings, or allocation." },
+  { intentId: "show_home_goal", label: "Show home-buying goal", contextId: "goals", task: "show", description: "Show the home down payment target, current savings, remaining gap, or savings history. Includes short requests such as 'goals' and questions about the status of the existing goal." },
   { intentId: "retirement_learning", label: "Learn about retirement", contextId: "learning", task: "explain", description: "Learn about retirement planning or beneficiary designations, including a confirmed interest in retirement when leaving work." },
-  { intentId: "beneficiary_update_steps", label: "Review beneficiary update steps", contextId: "learning", task: "guide", description: "See the demo steps to review or add a beneficiary." },
-  { intentId: "update_address", label: "Update mailing address", contextId: "address-update", task: "guide", description: "Walk through a mailing or residential address change in the demo, including when a customer has moved or needs account correspondence sent to a new address." },
-  { intentId: "learn_transfers", label: "Learn about the demo app", contextId: "app-home", task: "explain", description: "Get explicit demo app help or learn about the fictional transfer flow." },
-  { intentId: "guide_transfer", label: "Walk through a transfer", contextId: "app-home", task: "guide", description: "See the steps for the fictional transfer preview." },
-  { intentId: "suggest_next_step", label: "Suggest a next step", contextId: "next-step", task: "guide", description: "Find a personalized next action for the demo account. Includes open-ended requests such as 'what is next' and 'what should I do now?'." },
+  { intentId: "beneficiary_update_steps", label: "Review beneficiary update steps", contextId: "learning", task: "guide", description: "See the steps to review or add a beneficiary." },
+  { intentId: "update_address", label: "Update mailing address", contextId: "address-update", task: "guide", description: "Walk through a mailing or residential address change, including when a customer has moved or needs account correspondence sent to a new address." },
+  { intentId: "learn_transfers", label: "Learn about the app", contextId: "app-home", task: "explain", description: "Get app help or learn how transfers work." },
+  { intentId: "guide_transfer", label: "Walk through a transfer", contextId: "app-home", task: "guide", description: "See the steps for a transfer preview." },
+  { intentId: "suggest_next_step", label: "Suggest a next step", contextId: "next-step", task: "guide", description: "Find a personalized next action for the account. Includes open-ended requests such as 'what is next' and 'what should I do now?'." },
   { intentId: "create_rule", label: "Create an eligibility rule", contextId: null, task: "create_rule", description: "An explicit request to create or add a Treatment Selector rule." },
 ] as const satisfies readonly IntentDefinition[];
 

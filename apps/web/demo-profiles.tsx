@@ -23,7 +23,7 @@ export function DemoProfiles({ personas, activePersonaId, pending, close, startC
     else setFailed(true);
   }
 
-  return <DeveloperDrawer title="Demo profiles" icon={<UsersRound size={17} />} closeLabel="Close demo profiles" close={close} wide>
+  return <DeveloperDrawer title="Profiles" icon={<UsersRound size={17} />} closeLabel="Close profiles" close={close} wide>
     <div className="profile-grid">
       {personas.map(({ personaId, displayName, profile }) => {
         const active = activePersonaId === personaId;
