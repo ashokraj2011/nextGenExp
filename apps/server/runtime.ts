@@ -1,3 +1,4 @@
+import { dirname, resolve } from "node:path";
 import { defineTool, estimateJsonTokens, estimateTokens, SField, ToolError } from "@sfield/core";
 import type { ConfigDocument, DefineToolInput, JsonObject, Principal, RunRecord, RunResult, ToolHandlerContext, Verifier } from "@sfield/core";
 import { SqlitePersistence } from "@sfield/store-sqlite";
@@ -27,6 +28,8 @@ import { fixtureGoalProgressProvider, type GoalProgressProvider } from "../../pa
 import { contentCatalog, lookupContent, modelBundle, readDemoBalance, resolveCandidates } from "../../packages/experience/content";
 import { checkFresh, Rejected, requireCheck, verifyContextProposal, verifyExperience, verifyRoute } from "../../packages/experience/verify";
 import { makeId } from "../../packages/experience/compile";
+import type { GatewayExchange } from "../../packages/contracts/inspector";
+import { configureCopilotAcp } from "./copilot-acp";
 import { configureGateway, type GatewaySettings } from "./gateway";
 import { stageAgent, type ConversationRecord, type Stage, type StageAttempt, type Store, type TurnRecord } from "./store";
 import { readTurnPayloads } from "./turn-payloads";
@@ -169,7 +172,10 @@ export class Runtime {
     store: Store, path: string, settings: GatewaySettings, now: () => number,
     inspectorEnabled = false, portfolioSnapshots = fixturePortfolioSnapshotProvider, goalProgressProvider = fixtureGoalProgressProvider,
   ) {
-    const gateway = configureGateway(settings, inspectorEnabled ? (id, exchange) => store.saveGatewayExchange(id, exchange) : undefined);
+    const record = inspectorEnabled ? (id: string, exchange: GatewayExchange) => store.saveGatewayExchange(id, exchange) : undefined;
+    const gateway = settings.profile === "copilot_acp"
+      ? await configureCopilotAcp(settings, resolve(dirname(path), "copilot-cli"), record)
+      : configureGateway(settings, record);
     const runtime = new Runtime(store, now, gateway.inspection, portfolioSnapshots, goalProgressProvider);
     runtime.sf = await SField.create({
       deployment: "durable_single", config: runtimeConfig(settings, gateway.model),

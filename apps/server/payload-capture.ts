@@ -1,5 +1,5 @@
 import { Scrubber } from "@sfield/core";
-import type { CompiledModelRequest, JsonValue, ModelStreamEvent, NeutralMessage } from "@sfield/core";
+import type { CompiledModelRequest, JsonObject, JsonValue, ModelStreamEvent, NeutralMessage } from "@sfield/core";
 import type { GatewayExchange, InspectorPayload } from "../../packages/contracts/inspector";
 
 const payloadLimit = 96 * 1024;
@@ -41,11 +41,15 @@ export function createPayloadCapture(secrets: string[], customFields: string[]) 
     return bytes > payloadLimit ? { bytes } : { bytes, data: scrubNestedJson(scrubber.scrubValue(data)) };
   }
 
-  function exchange(request: CompiledModelRequest, outcome: ModelOutcome | undefined, source: GatewayExchange["source"]): GatewayExchange {
-    const bytes = Buffer.byteLength(request.body);
+  function exchange(
+    request: CompiledModelRequest, outcome: ModelOutcome | undefined, source: GatewayExchange["source"],
+    wire?: { request?: JsonObject; acpResponse?: JsonObject },
+  ): GatewayExchange {
+    const requestBody = wire?.request ? JSON.stringify(wire.request) : request.body;
+    const bytes = Buffer.byteLength(requestBody);
     let capturedRequest: InspectorPayload = { bytes };
     if (bytes <= payloadLimit) {
-      const body = JSON.parse(request.body);
+      const body = JSON.parse(requestBody);
       for (const field of customFields) if (Object.hasOwn(body, field)) body[field] = "[REDACTED]";
       capturedRequest = { ...payload(body), bytes };
     }
@@ -53,10 +57,14 @@ export function createPayloadCapture(secrets: string[], customFields: string[]) 
       message: assistantResponse(outcome.message),
       stopReason: outcome.stopReason,
       usage: { ...outcome.usage },
-    } : outcome?.type === "error" ? { error: { ...outcome.error } } : undefined;
+      ...(wire?.acpResponse && { acp: wire.acpResponse }),
+    } : outcome?.type === "error" ? {
+      error: { ...outcome.error }, ...(wire?.acpResponse && { acp: wire.acpResponse }),
+    } : undefined;
+    const path = new URL(request.url).pathname;
     return {
       source, method: request.method,
-      path: source === "recorded" ? scrubber.scrubText(new URL(request.url).pathname) : undefined,
+      path: source === "recorded" ? scrubber.scrubText(request.method === "JSON-RPC" ? path.slice(1) : path) : undefined,
       request: capturedRequest,
       response: response === undefined ? undefined : payload(response),
     };

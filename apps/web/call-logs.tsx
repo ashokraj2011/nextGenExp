@@ -22,22 +22,34 @@ function decodeJson(text: unknown): InspectorPayload | undefined {
   catch { return undefined; }
 }
 
+function object(value: JsonValue | undefined) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : undefined;
+}
+
+function decodedChatInput(exchange: GatewayExchange) {
+  const body = object(exchange.request.data);
+  const prompt = object(body?.params)?.prompt;
+  const messages = exchange.method === "JSON-RPC" && Array.isArray(prompt)
+    ? object(decodeJson(object(prompt[0])?.text)?.data)?.messages : body?.messages;
+  const user = Array.isArray(messages) ? messages.map(object).find((message) => message?.role === "user") : undefined;
+  if (Array.isArray(user?.parts)) {
+    return decodeJson(user.parts.map(object).find((part) => part?.type === "text")?.text);
+  }
+  return decodeJson(user?.content);
+}
+
 function ModelExchange({ exchange, error }: { exchange: GatewayExchange; error?: InspectorPayload }) {
-  const body = exchange.request.data;
-  const messages = body && typeof body === "object" && !Array.isArray(body) ? body.messages : undefined;
-  const userMessage = Array.isArray(messages) ? messages.find((message) => (
-    message && typeof message === "object" && !Array.isArray(message) && message.role === "user"
-  )) : undefined;
-  const input = userMessage && typeof userMessage === "object" && !Array.isArray(userMessage) ? decodeJson(userMessage.content) : undefined;
+  const input = decodedChatInput(exchange);
+  const acp = exchange.method === "JSON-RPC";
   const response = exchange.response?.data;
   const message = response && typeof response === "object" && !Array.isArray(response) ? response.message : undefined;
   const output = message && typeof message === "object" && !Array.isArray(message) ? decodeJson(message.content) : undefined;
   return <>
     {exchange.path && <p><code>{exchange.method} {exchange.path}</code></p>}
     {exchange.source === "verified" && <p>Request body verified against the saved digest.</p>}
-    <JsonBlock title="Gateway request body" value={exchange.request} />
+    <JsonBlock title={acp ? "ACP request" : "Gateway request body"} value={exchange.request} />
     {input && <JsonBlock title="Decoded chat input" value={input} />}
-    <JsonBlock title={error ? "Gateway error" : "Gateway response"} value={exchange.response ?? error} />
+    <JsonBlock title={acp ? error ? "ACP error" : "ACP response" : error ? "Gateway error" : "Gateway response"} value={exchange.response ?? error} />
     {output && <JsonBlock title="Decoded model output" value={output} open />}
   </>;
 }

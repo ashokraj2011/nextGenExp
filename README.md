@@ -153,9 +153,34 @@ npm run start:openai
 
 Open the assistant and check for the **Live model** badge. Treatment Selector, CCRE, and portfolio reads use the demo fixtures. The preview defaults to port **4175** and stores its local state in `.pzn-data/openai`. Use `npm run eval:openai` to run the live API smoke cases. [Open the live preview](http://127.0.0.1:4175/)
 
+### GitHub Copilot ACP
+
+Install GitHub Copilot CLI with ACP support and sign in with a Copilot-enabled account. The app starts the CLI in ACP mode and exchanges JSON-RPC messages over standard input and output. [Copilot CLI ACP reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/acp-server)
+
+~~~sh
+copilot login
+~~~
+
+Set the provider in `.env`.
+
+~~~dotenv
+LLM_PROVIDER=copilot_acp
+~~~
+
+Leave `LLM_MODEL` empty for Copilot's automatic model selection, or enter a model available to your Copilot account. Set `COPILOT_ACP_COMMAND` to the executable path if the server cannot find `copilot` on its PATH. On Windows, use the path to the native `copilot.exe` if your installation uses a command shim.
+
+PZN Lab uses a CLI profile under `.pzn-data/copilot/copilot-cli` by default. If the CLI stores its login in a profile file on your machine, set `COPILOT_HOME` to that directory when you run `copilot login`. With a custom `PZN_DATA_DIR`, use its `copilot-cli` subdirectory. For headless sign-in, supply `COPILOT_GITHUB_TOKEN` through the server environment. [Copilot CLI authentication](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference#authentication)
+
+~~~sh
+npm run build
+npm start
+~~~
+
+Open [chat](http://127.0.0.1:4173/chat) and look for the **Copilot ACP** badge. Try Marcus Reed's “I moved and need to update my address.” In **Logs**, expand **Context Router** and **Experience Composer** to see the ACP prompts and replies. sfield runs PZN Lab tools, including Treatment Selector and scoped balance reads. Chat and settings for this provider are stored under `.pzn-data/copilot` unless you set `PZN_DATA_DIR`.
+
 ### Office gateway
 
-Copy `.env.example` to `.env` or set the same values in the server environment. Set `LLM_BASE_URL` to the gateway prefix before `/chat/completions` and `LLM_MODEL` to the gateway model alias. Set `LLM_API_KEY` for Bearer authentication. Set `LLM_CONTEXT_WINDOW`, `LLM_MAX_OUTPUT_TOKENS`, and any `LLM_QUIRKS` from the gateway’s tested capabilities.
+Copy `.env.example` to `.env` or set the same values in the server environment. Use `LLM_PROVIDER=gateway` for the office gateway. Set `LLM_BASE_URL` to the gateway prefix before `/chat/completions` and `LLM_MODEL` to the gateway model alias. Set `LLM_API_KEY` for Bearer authentication. Set `LLM_CONTEXT_WINDOW`, `LLM_MAX_OUTPUT_TOKENS`, and any `LLM_QUIRKS` from the gateway’s tested capabilities.
 
 If your gateway requires additional headers or request metadata, add JSON objects to your server environment.
 

@@ -1,9 +1,10 @@
 import { digestJson, EnvSecretResolver, OpenAICompatibleProvider, Scrubber, stableBody } from "@sfield/core";
 import type { JsonObject, JsonValue, ModelBinding, ModelProvider, ModelStreamEvent, OpenAIQuirk, SFieldOptions, SFieldPlugin } from "@sfield/core";
 import type { GatewayExchange } from "../../packages/contracts/inspector";
+import { copilotEnvironment, type CopilotAcpSettings } from "./copilot-acp-client";
 import { createPayloadCapture } from "./payload-capture";
 
-export type GatewaySettings = {
+export type HttpGatewaySettings = {
   profile?: "openai";
   baseUrl: string;
   model: string;
@@ -14,6 +15,8 @@ export type GatewaySettings = {
   headers?: Record<string, string>;
   bodyFields?: JsonObject;
 };
+
+export type GatewaySettings = HttpGatewaySettings | CopilotAcpSettings;
 
 const headerVariable = "LLM_GATEWAY_HEADERS_JSON";
 const bodyVariable = "LLM_GATEWAY_BODY_JSON";
@@ -65,13 +68,24 @@ function modelLimits(contextSetting?: string, outputSetting?: string) {
 }
 
 export function gatewayFromEnv(env: NodeJS.ProcessEnv = process.env, profile: "gateway" | "openai" = "gateway"): GatewaySettings | null {
-  if (profile === "openai") {
+  const provider = profile === "openai" ? "openai" : env.LLM_PROVIDER?.trim().toLowerCase() || "gateway";
+  if (provider === "openai") {
     const apiKey = env.OPENAI_API_KEY?.trim();
     if (!apiKey) throw new Error("Set OPENAI_API_KEY in the server environment or .env.openai before using OpenAI API mode.");
     return {
-      profile, baseUrl: openAiBaseUrl, apiKey, model: env.OPENAI_MODEL?.trim() || "gpt-4.1-mini",
+      profile: "openai", baseUrl: openAiBaseUrl, apiKey, model: env.OPENAI_MODEL?.trim() || "gpt-4.1-mini",
       ...modelLimits(env.OPENAI_CONTEXT_WINDOW, env.OPENAI_MAX_OUTPUT_TOKENS),
     };
+  }
+  if (provider === "copilot_acp" || provider === "copilot-acp") {
+    return {
+      profile: "copilot_acp", model: env.LLM_MODEL?.trim() || "auto",
+      command: env.COPILOT_ACP_COMMAND?.trim() || "copilot", env: copilotEnvironment(env),
+      ...modelLimits(env.LLM_CONTEXT_WINDOW, env.LLM_MAX_OUTPUT_TOKENS),
+    };
+  }
+  if (provider !== "gateway" && provider !== "openai_compatible") {
+    throw new Error("LLM_PROVIDER must be gateway, openai, or copilot_acp.");
   }
   const baseUrl = env.LLM_BASE_URL?.trim();
   const model = env.LLM_MODEL?.trim();
@@ -133,14 +147,14 @@ function openAiRequestBody(compiledBody: string) {
   return stableBody({ ...body, max_completion_tokens: max_tokens });
 }
 
-type GatewayConfiguration = {
+export type GatewayConfiguration = {
   model: JsonObject;
   options: Pick<SFieldOptions, "env" | "bindings" | "plugins" | "secrets">;
   inspection?: ReturnType<typeof createPayloadCapture> & { compile: ModelProvider["compile"] };
 };
 
 export function configureGateway(
-  settings: GatewaySettings, record?: (attemptId: string, exchange: GatewayExchange) => void,
+  settings: HttpGatewaySettings, record?: (attemptId: string, exchange: GatewayExchange) => void,
 ): GatewayConfiguration {
   const env = { LLM_API_KEY: settings.apiKey };
   const directOpenAi = settings.profile === "openai";

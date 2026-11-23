@@ -69,6 +69,7 @@ export type Bootstrap = {
   mode: "live" | "test";
   gatewayConfigured: boolean;
   openAiModel?: string;
+  copilotModel?: string;
   selectionMode: SelectionMode;
   inspectorEnabled: boolean;
 };

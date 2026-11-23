@@ -83,7 +83,7 @@ for (const selectionMode of modes) {
     }
     console.log(JSON.stringify({
       mode: selectionMode, verification: smoke ? "gateway_smoke" : "live_prompt_evaluation", concurrency,
-      provider: useOpenAi ? "openai" : "gateway", model: gateway.model,
+      provider: gateway.profile ?? "gateway", model: gateway.model,
       contextChoice: ratio(results.filter(({ expectedRoute }) => !["no_match", "clarify", "reply"].includes(expectedRoute)).map(({ routeMatches }) => routeMatches)),
       clarification: ratio(results.filter(({ expectedRoute }) => expectedRoute === "clarify").map(({ routeMatches, outcomeMatches }) => routeMatches && outcomeMatches)),
       unsupported: ratio(results.filter(({ expectedRoute }) => expectedRoute === "no_match").map(({ routeMatches, outcomeMatches }) => routeMatches && outcomeMatches)),

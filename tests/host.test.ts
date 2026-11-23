@@ -42,7 +42,9 @@ async function fixture(intercept?: TestInterceptor, opts: {
   }) : gateway.settings;
   const options = {
     projectRoot: fileURLToPath(testProject), dataDir: dir,
-    gateway: opts.noGateway || !settings ? null : opts.openAiProfile ? { ...settings, profile: "openai" as const } : settings, mode: "test",
+    gateway: opts.noGateway || !settings ? null
+      : opts.openAiProfile && settings.profile !== "copilot_acp" ? { ...settings, profile: "openai" as const } : settings,
+    mode: "test",
     selectionMode: opts.preserve ? "preserve_ts_rank" : "semantic_rerank",
     inspectorEnabled: opts.inspectorEnabled,
     portfolioSnapshots: opts.portfolioSnapshots,
@@ -1350,6 +1352,7 @@ test("direct OpenAI and office gateway use their own credentials and request set
     contextWindow: 16384, maxOutputTokens: 2048,
   });
   const office = gatewayFromEnv(env);
+  assert.ok(office && office.profile !== "copilot_acp");
   assert.equal(office?.baseUrl, env.LLM_BASE_URL);
   assert.equal(office?.apiKey, env.LLM_API_KEY);
   assert.equal(office?.model, env.LLM_MODEL);

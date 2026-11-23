@@ -90,7 +90,8 @@ export async function startApp(options: Options) {
   const now = Date.now;
   const selectionMode = options.selectionMode ?? "semantic_rerank";
   const inspectorEnabled = options.inspectorEnabled ?? true;
-  const sessionCookie = options.gateway?.profile === "openai" ? "pzn_openai_session" : "pzn_session";
+  const profile = options.gateway?.profile;
+  const sessionCookie = profile === "openai" ? "pzn_openai_session" : profile === "copilot_acp" ? "pzn_copilot_session" : "pzn_session";
   const sessionPattern = new RegExp("(?:^|;\\s*)" + sessionCookie + "=(local_[a-f0-9]{32})(?:;|$)");
   const portfolioSnapshots = options.portfolioSnapshots ?? fixturePortfolioSnapshotProvider;
   const goalProgressProvider = options.goalProgressProvider ?? fixtureGoalProgressProvider;
@@ -169,6 +170,7 @@ export async function startApp(options: Options) {
         defaultPersonaId: demo.defaultPersonaId, defaultScenarioId: demo.defaultScenarioId,
         gatewayConfigured: Boolean(runtime), mode, selectionMode, inspectorEnabled,
         ...(options.gateway?.profile === "openai" && { openAiModel: options.gateway.model }),
+        ...(options.gateway?.profile === "copilot_acp" && { copilotModel: options.gateway.model }),
       };
       return json(res, state);
     }

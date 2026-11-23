@@ -8,7 +8,7 @@ export type InspectorPayload = {
 
 export type GatewayExchange = {
   source: "recorded" | "verified";
-  method: "POST";
+  method: "POST" | "JSON-RPC";
   path?: string;
   request: InspectorPayload;
   response?: InspectorPayload;

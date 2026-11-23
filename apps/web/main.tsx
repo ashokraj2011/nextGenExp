@@ -440,6 +440,7 @@ function App() {
         <div className="topbar-actions">
           {configuration?.mode === "test" && <span className="test-label" title="Uses preset model responses">Test mode</span>}
           {configuration?.openAiModel && <span className="test-label" title={configuration.openAiModel}>Live model</span>}
+          {configuration?.copilotModel && <span className="test-label" title={configuration.copilotModel}>Copilot ACP</span>}
           {configuration?.inspectorEnabled && <a className="tool-setup-trigger inspector-trigger icon-button" aria-label="Tool setup" href="/admin">
             <Settings2 size={18} aria-hidden="true" /><span>Tool setup</span></a>}
           {configuration?.inspectorEnabled && <button className="inspector-trigger icon-button" ref={inspectorTrigger} type="button" aria-label="Open developer inspector"

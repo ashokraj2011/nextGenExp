@@ -91,7 +91,7 @@ export interface NeutralModelRequest {
 export interface CompiledModelRequest {
   provider: string;
   url: string;
-  method: "POST";
+  method: "POST" | "JSON-RPC";
   /** Non-secret headers. Secret headers are resolved at dispatch and never stored. */
   headers: Record<string, string>;
   /** Byte-stable body (§13.6). */

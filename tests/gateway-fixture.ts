@@ -1,6 +1,6 @@
 import { createServer, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { GatewaySettings } from "../apps/server/gateway";
+import type { HttpGatewaySettings } from "../apps/server/gateway";
 import type { ComponentName, ContextSelectionProposal, ExperienceProposal, Intent } from "../packages/contracts/domain";
 import { isSubjectlessSummaryRequest, leavingWorkQuestion, portfolioSummaryQuestion, retirementQuestion, type RoutingHistoryEntry, type RoutingIntent, type RoutingIntentId } from "../packages/contracts/routing-intents";
 import type { modelBundle } from "../packages/experience/content";
@@ -264,7 +264,7 @@ export async function startFixtureGateway(
     })().catch(() => { response.writeHead(500).end(); });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const settings: GatewaySettings = {
+  const settings: HttpGatewaySettings = {
     baseUrl: "http://127.0.0.1:" + (server.address() as AddressInfo).port + "/v1",
     apiKey: testKey, model: "pzn-automated-fixture", contextWindow: 16384, maxOutputTokens: 1500,
   };
