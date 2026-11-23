@@ -1,6 +1,12 @@
+import type { EvaluationRow } from "../../packages/contracts/evaluation";
+import { axeBudget, experienceAgentId, type ExecutionBudget } from "../../packages/contracts/agentic";
+import { availableFundingOptions, fundingPreviewFrom } from "../../packages/capabilities";
+import { AgenticExecution } from "./agentic-execution";
+import { axeAgentConfig } from "./agentic-model";
+import { axeToolAction, ExperienceAgent } from "./experience-agent";
 import { dirname, resolve } from "node:path";
 import { ASK_USER, defineTool, estimateJsonTokens, estimateTokens, SField, ToolError } from "@sfield/core";
-import type { ConfigDocument, DefineToolInput, JsonObject, Principal, RunRecord, RunResult, ToolHandlerContext, Verifier } from "@sfield/core";
+import type { ConfigDocument, DefineToolInput, JsonObject, JsonValue, Principal, RunRecord, RunResult, ToolHandlerContext, Verifier } from "@sfield/core";
 import { SqlitePersistence } from "@sfield/store-sqlite";
 import host from "../../fixtures/host.json";
 import { MAX_MESSAGE_LENGTH, metricReadingSchema, TURN_DEADLINE, type BalanceProof } from "../../packages/contracts/domain";
@@ -138,7 +144,7 @@ function checkModelCapacity(settings: GatewaySettings) {
   }
 }
 
-function runtimeConfig(settings: GatewaySettings, model: JsonObject): ConfigDocument {
+function runtimeConfig(settings: GatewaySettings, model: JsonObject, budget: ExecutionBudget): ConfigDocument {
   checkModelCapacity(settings);
   const readOnly = { preset: "read_only" };
   const context = { output_reserve_tokens: settings.maxOutputTokens };
@@ -147,6 +153,7 @@ function runtimeConfig(settings: GatewaySettings, model: JsonObject): ConfigDocu
     version: 1,
     models: { default: model },
     agents: {
+      [experienceAgentId]: axeAgentConfig(context, memory, budget),
       "context-router": {
         instructions: routeInstructions,
         tools: [], memory, context, policy: readOnly,
@@ -177,35 +184,42 @@ function runtimeConfig(settings: GatewaySettings, model: JsonObject): ConfigDocu
 export class Runtime {
   private sf!: SField;
   readonly funding: FundingAgent;
+  readonly experiences: ExperienceAgent;
   private constructor(
     private readonly store: Store,
     private readonly now: () => number,
     private readonly inspection: ReturnType<typeof configureGateway>["inspection"],
     private readonly portfolioSnapshots: PortfolioSnapshotProvider,
     private readonly goalProgressProvider: GoalProgressProvider,
+    readonly goalBudget: ExecutionBudget,
   ) {
     this.funding = new FundingAgent(store, () => this.sf, now);
+    const execution = new AgenticExecution(store, () => this.sf, now, (turnId) => this.current(turnId), portfolioSnapshots, goalProgressProvider, goalBudget);
+    this.experiences = new ExperienceAgent(execution, () => this.sf);
   }
 
   static async open(
     store: Store, path: string, settings: GatewaySettings, now: () => number,
-    inspectorEnabled = false, portfolioSnapshots = fixturePortfolioSnapshotProvider, goalProgressProvider = fixtureGoalProgressProvider,
+    inspectorEnabled = false, portfolioSnapshots = fixturePortfolioSnapshotProvider, goalProgressProvider = fixtureGoalProgressProvider, goalBudget: ExecutionBudget = axeBudget,
   ) {
     const record = inspectorEnabled ? (id: string, exchange: GatewayExchange) => store.saveGatewayExchange(id, exchange) : undefined;
     const gateway = settings.profile === "copilot_acp"
       ? await configureCopilotAcp(settings, resolve(dirname(path), "copilot-cli"), record)
       : configureGateway(settings, record);
-    const runtime = new Runtime(store, now, gateway.inspection, portfolioSnapshots, goalProgressProvider);
+    const runtime = new Runtime(store, now, gateway.inspection, portfolioSnapshots, goalProgressProvider, goalBudget);
+    const agentTools = [...runtime.experiences.tools(), ...runtime.experiences.execution.tools()];
+    const agentActions = new Set(agentTools.map(({ ref }) => axeToolAction(ref)));
     runtime.sf = await SField.create({
-      deployment: "durable_single", config: runtimeConfig(settings, gateway.model),
+      deployment: "durable_single", config: runtimeConfig(settings, gateway.model, goalBudget),
       persistence: new SqlitePersistence({ path }),
       namespace: sfieldNamespace,
       ...gateway.options,
       authorizer: {
         async authorize({ principal, action, effect, agentId }) {
-          const allowed = actions.has(action) || (agentId === fundingAgentId && action === ASK_USER.policy.action);
+          const allowed = actions.has(action) || agentActions.has(action)
+            || ((agentId === fundingAgentId || agentId === experienceAgentId) && action === ASK_USER.policy.action);
           return principal.tenantId === "pzn-local" && principal.roles.includes("pzn-demo") && allowed && effect === "read"
-            ? { decision: "allow", evidenceId: makeId("auth"), expiresAt: new Date(now() + TURN_DEADLINE).toISOString() }
+            ? { decision: "allow", evidenceId: makeId("auth"), expiresAt: new Date(now() + axeBudget.activeSeconds * 1000).toISOString() }
             : { decision: "deny", code: "TOOL_DENIED", reason: "The demo permits scoped fixture reads." };
         },
       },
@@ -215,16 +229,18 @@ export class Runtime {
           id: "pzn-funding-model-tools", point: "beforeModelDispatch", timeoutMs: 1_000, onFailure: "fail",
           seesProtectedContent: false, buildIdentity: "pzn-funding-tools-v1",
           async beforeModelDispatch({ request, runId }) {
-            return { request: await runtime.funding.narrow(request, runId) };
+            return { request: await runtime.experiences.narrow(request, runId) ?? await runtime.funding.narrow(request, runId) };
           },
         },
         {
           id: "pzn-funding-tool-input", point: "prepareTool", timeoutMs: 1_000, onFailure: "fail",
           seesProtectedContent: false, buildIdentity: "pzn-funding-input-v1",
-          prepareTool: ({ toolRef, inputs, runId }) => runtime.funding.prepare(toolRef, inputs, runId),
+          async prepareTool({ toolRef, inputs, runId, principal }) {
+            return await runtime.experiences.prepare(toolRef, runId, principal) ?? runtime.funding.prepare(toolRef, inputs, runId);
+          },
         },
       ],
-      tools: runtime.tools(),
+      tools: [...runtime.tools(), ...agentTools],
       verifiers: {
         contextSelection: runtime.verifier("contextSelection", "route"),
         experience: runtime.verifier("experience", "compose"),
@@ -249,6 +265,48 @@ export class Runtime {
     return this.inspection && readTurnPayloads(this.sf, this.store, this.inspection, turn, conversation);
   }
 
+  async evaluation(principalId: string): Promise<EvaluationRow[]> {
+    const turns = this.store.recentCompletedTurns(principalId);
+    const items = await Promise.all(turns.map(async (turn) => {
+      const ids = new Set([
+        turn.agentRunId, ...turn.agentExecutionIds ?? [], ...Object.values(turn.attempts).map(({ runId }) => runId),
+        turn.catalogScopeId, turn.tsScopeId, turn.portfolioScopeId, turn.goalScopeId, turn.glossaryScopeId,
+        turn.workflowScopeId, turn.fundingRun?.id,
+      ].filter((id): id is string => Boolean(id)));
+      const results = await Promise.all([...ids].map(async (id) => {
+        const run = await this.sf.persistence.getRun(id);
+        if (run?.subjectId !== principalId || run.tenantId !== "pzn-local") return;
+        const calls = await this.sf.persistence.listCalls(id);
+        const phases = turn.fundingRun?.id === id ? turn.fundingRun : undefined;
+        const modelCalls = phases && phases.through ? phases.through.attempts - phases.after.attempts : run.usage.modelCalls;
+        const toolCalls = phases ? calls.slice(phases.after.calls, phases.through?.calls).length : calls.length;
+        const tokens = phases ? (await this.sf.persistence.listModelAttempts(id)).slice(phases.after.attempts, phases.through?.attempts)
+          .reduce((sum, attempt) => sum + (attempt.usage?.inputTokens ?? 0) + (attempt.usage?.outputTokens ?? 0), 0) : run.usage.totalTokens;
+        return { modelCalls, toolCalls, tokens };
+      }));
+      return {
+        path: turn.agentRunId ? "goal" : "fast", completed: turn.public.status === "completed",
+        ms: (turn.trace.markers.terminal ?? turn.public.createdAt) - turn.public.createdAt,
+        modelCalls: results.reduce((sum, row) => sum + (row?.modelCalls ?? 0), 0),
+        toolCalls: results.reduce((sum, row) => sum + (row?.toolCalls ?? 0), 0),
+        tokens: results.reduce((sum, row) => sum + (row?.tokens ?? 0), 0),
+      };
+    }));
+    return (["fast", "goal"] as const).map((path) => {
+      const rows = items.filter((item) => item.path === path);
+      const ordered = rows.map(({ ms }) => ms).sort((a, b) => a - b);
+      return { path, turns: rows.length, completed: rows.filter(({ completed }) => completed).length, medianMs: ordered[Math.floor(ordered.length / 2)] ?? null,
+        modelCalls: rows.reduce((sum, row) => sum + row.modelCalls, 0), toolCalls: rows.reduce((sum, row) => sum + row.toolCalls, 0),
+        tokens: rows.reduce((sum, row) => sum + row.tokens, 0) };
+    });
+  }
+
+  decisionTrace(turn: TurnRecord) {
+    const events = this.store.axe.list("decision_trace_events", turn.scope, turn.public.id);
+    const evidence = this.store.axe.list("evidence_records", turn.scope, turn.public.id);
+    return this.inspection?.payload(JSON.parse(JSON.stringify({ events, evidence })) as JsonValue).data;
+  }
+
   get chat() {
     return this.sf.chat;
   }
@@ -256,7 +314,8 @@ export class Runtime {
   current(id: string): TurnRecord {
     const turn = this.store.turn(id);
     requireCheck(turn?.public.status === "working" && this.store.latestTurn(turn.scope.conversationId)?.public.id === id, "TURN_INACTIVE");
-    requireCheck(turn.public.createdAt <= this.now() && turn.public.createdAt + TURN_DEADLINE > this.now(), "TURN_EXPIRED");
+    const deadline = this.experiences.shouldHandle(turn) ? this.goalBudget.activeSeconds * 1000 : TURN_DEADLINE;
+    requireCheck(turn.public.createdAt <= this.now() && turn.public.createdAt + deadline > this.now(), "TURN_EXPIRED");
     return turn;
   }
 
@@ -291,7 +350,7 @@ export class Runtime {
   private treatmentAdapter(turn: TurnRecord, conversation: ConversationRecord) {
     return new FixtureTsAdapter(
       { scenarioId: conversation.scenarioId, ordinal: turn.ordinal },
-      turn.toolSetup?.treatmentOverrides, turn.toolSetup?.ccreRules, this.portfolioSnapshots,
+      turn.toolSetup?.treatmentOverrides, turn.toolSetup?.ccreRules, this.portfolioSnapshots, this.store.axe.fundingStatus(turn.scope),
     );
   }
 
@@ -318,6 +377,10 @@ export class Runtime {
         } catch { /* Diagnostic storage cannot change the tool result. */ }
       }
     }
+  }
+
+  private effectiveFundingStatus(persona: typeof host.personas[number], principalId: string) {
+    return this.store.axe.fundingStatus({ principalId, personaId: persona.personaId }) ?? persona.accountFundingStatus;
   }
 
   private tools() {
@@ -368,31 +431,23 @@ export class Runtime {
       read("fundingOptions", {
         inputs: fundingReadInputSchema, outputs: fundingOptionsResultSchema,
         handler: async ({ turnRef }, ctx) => {
-          const { persona, agentGuided } = await this.scopedFundingTurn(turnRef, ctx, "fundingOptions");
-          if (agentGuided) requireCheck(persona.accountFundingStatus === "unfunded", "ACCOUNT_ALREADY_FUNDED");
-          return {
-            methods: [
-              { methodId: "bank_transfer", label: "Bank transfer", from: "Linked bank account", to: "Investment account" },
-              ...(agentGuided ? [{
-                methodId: "account_transfer", label: "Transfer from another account", from: "Cash management account", to: "Investment account",
-              }] : []),
-            ],
-            amountCents: 25_000, currency: "USD",
-          };
+          const scoped = await this.scopedFundingTurn(turnRef, ctx, "fundingOptions");
+          requireCheck(this.effectiveFundingStatus(scoped.persona, ctx.principal.subjectId) === "unfunded", "ACCOUNT_ALREADY_FUNDED");
+          return availableFundingOptions(scoped.agentGuided);
         },
       }, fundingToolVersion),
       read("fundingStatus", {
         inputs: fundingReadInputSchema, outputs: fundingStatusResultSchema,
         handler: async ({ turnRef }, ctx) => {
           const { persona } = await this.scopedFundingTurn(turnRef, ctx, "fundingStatus");
-          return { accountFundingStatus: persona.accountFundingStatus };
+          return { accountFundingStatus: this.effectiveFundingStatus(persona, ctx.principal.subjectId) };
         },
       }, fundingToolVersion),
       read("fundingPreview", {
         inputs: fundingPreviewInputSchema, outputs: fundingPreviewResultSchema,
         handler: async ({ turnRef, methodId }, ctx) => {
-          const { persona, agentGuided } = await this.scopedFundingTurn(turnRef, ctx, "fundingPreview");
-          if (agentGuided) requireCheck(persona.accountFundingStatus === "unfunded", "ACCOUNT_ALREADY_FUNDED");
+          const { persona } = await this.scopedFundingTurn(turnRef, ctx, "fundingPreview");
+          requireCheck(this.effectiveFundingStatus(persona, ctx.principal.subjectId) === "unfunded", "ACCOUNT_ALREADY_FUNDED");
           const read = (await this.sf.persistence.listCalls(ctx.runId)).find((call) => (
             call.toolRef === toolRefs.fundingOptions && call.invocation?.normalizedInputs.turnRef === turnRef && call.result?.status === "succeeded"
           ));
@@ -401,7 +456,7 @@ export class Runtime {
           const method = options.methods.find((item) => item.methodId === methodId);
           requireCheck(method, "FUNDING_METHOD_NOT_AVAILABLE");
           ctx.signal.throwIfAborted();
-          return { status: "preview", method, amountCents: options.amountCents, currency: options.currency };
+          return fundingPreviewFrom(options, method.methodId, options.amountCents);
         },
       }, fundingToolVersion),
       read("portfolio", {
@@ -502,9 +557,22 @@ export class Runtime {
       contextId: turn.route.contextId, composerRunId: runId, expiresAt: turn.decision.expiresAt,
     } : null;
     if (proof) this.store.update(turn.public.id, (current) => { current.proof = proof; });
-    const verified = verifyExperience(
-      output, turn.decision, turn.route, turn.scope, runId, proof, this.now(), turn.portfolioSnapshot, turn.goalProgress,
+    const verify = (proposal: unknown) => verifyExperience(
+      proposal, turn.decision!, turn.route!, turn.scope, runId, proof, this.now(), turn.portfolioSnapshot, turn.goalProgress,
     );
+    let verified = verify(output);
+    if (turn.trace.intentId === "compare_balances" && !verified.blocks.some(({ proposal }) => proposal.component === "PznComparison")) {
+      const compare = turn.decision.candidates.filter((candidate) => lookupContent(candidate)?.allowedComponents.includes("PznComparison"));
+      if (compare.length === 2) {
+        const layout = {
+          ...verified.proposal, status: "ready", introKey: "comparison", clarificationQuestion: null, replyText: null,
+          blocks: [{ blockId: "balance_comparison", component: "PznComparison", candidateIds: compare.map(({ candidateId }) => candidateId), variant: "expanded" }],
+          followUpIds: [],
+        };
+        verified = verify(layout);
+        this.store.update(turn.public.id, (current) => { current.trace.markers.comparisonLayoutApplied = this.now(); });
+      }
+    }
     return { verified, proof, unsuccessfulRead: turn.trace.intentId === "show_balance" && !proof && calls.some((call) => call.toolRef === toolRefs.balances) };
   }
 

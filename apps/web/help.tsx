@@ -144,6 +144,7 @@ export function Help() {
         <a className="help-home" href="/">PZN Lab</a>
         <nav aria-label="Help sections">
           <a href="#architecture">Architecture</a>
+          <a href="#goal-planning">Multi-step requests</a>
           <a href="#sfield">sfield</a>
           <a href="#walkthroughs">Walkthroughs</a>
           <a href="#proposal">Proposal</a>
@@ -166,6 +167,22 @@ export function Help() {
           <a className="help-section-link" href="#walkthroughs">See a walkthrough <ArrowUpRight size={14} aria-hidden="true" /></a>
         </div>
         <InteractionDiagram onSelect={setExchange} />
+      </section>
+      <section id="goal-planning" className="help-section" aria-labelledby="goal-planning-title">
+        <div className="help-section-heading">
+          <div>
+            <h2 id="goal-planning-title">How chat handles a multi-step request</h2>
+            <p>As Alice, ask “I want to buy a house in two years. Show me how close I am and help me explore a savings plan.”</p>
+          </div>
+          <a className="help-section-link" href="/chat">Open chat <ArrowUpRight size={14} aria-hidden="true" /></a>
+        </div>
+        <ol className="help-goal-flow">
+          <li><strong>Understand the goal</strong><p>sfield gives the Experience Agent the request and recent chat. The agent looks up relevant capabilities and proposes which steps can run together.</p></li>
+          <li><strong>Check eligibility</strong><p>The app sends the member ID and each relevant topic to Treatment Selector. CCRE rules determine which capabilities and content are eligible.</p></li>
+          <li><strong>Read and calculate</strong><p>sfield reads the savings goal and portfolio independently. Once goal progress is verified, the calculator projects savings using the selected amount and timeframe.</p></li>
+          <li><strong>Build the response</strong><p>The app turns verified results into approved A2UI components. Changing the contribution runs the calculation again and updates the chart.</p></li>
+        </ol>
+        <p className="help-goal-note">Open <strong>Inspector</strong> for the goal, plan and evidence. Open <strong>Logs</strong> for the model, Treatment Selector and tool exchanges. Use <strong>Tool setup → Capability Studio</strong> to check and publish capability versions.</p>
       </section>
       <SfieldHelp selectContract={setContractId} />
       <section id="walkthroughs" className="help-section" aria-labelledby="walkthroughs-title">

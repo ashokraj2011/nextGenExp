@@ -5,6 +5,8 @@ import { comparisonFieldSchema, metricValueSchema, stepSchema } from "./domain";
 import { fundingOptionsSchema, fundingPreviewSchema } from "./funding-workflow";
 import { goalProgressSchema } from "./goal-progress";
 import { portfolioSnapshotSchema } from "./portfolio";
+import { contributionSchema, projectionSchema } from "../capabilities/calculations";
+import { inputFieldSchema } from "./agentic";
 import { ruleGlossarySchema } from "./rule-glossary";
 
 export const PZN_CATALOG_ID = "https://pzn.example.invalid/catalogs/v1.0/experience";
@@ -41,6 +43,7 @@ export const experienceRoot = { name: "PznExperience", schema: z.object({
   intro: DynamicStringSchema,
   question: limitedText.nullable(),
   partial: z.boolean(),
+  layout: z.enum(["stack", "dashboard"]).optional(),
 }).strict() } as const;
 export const followUpButton = { name: "PznFollowUp", schema: z.object({ actionId: id, label: limitedText }).strict() } as const;
 const demoKey = z.string().regex(/^[a-z][a-z0-9-]*$/).max(128);
@@ -52,12 +55,27 @@ export const portfolioSnapshot = { name: "PznPortfolioSnapshot", schema: portfol
 export const fundingPreview = { name: "PznFundingPreview", schema: fundingPreviewSchema } as const;
 export const fundingOptions = { name: "PznFundingOptions", schema: fundingOptionsSchema } as const;
 
+export const savingsChart = { name: "PznSavingsChart", schema: projectionSchema } as const;
+export const savingsMetric = { name: "PznSavingsMetric", schema: contributionSchema } as const;
+export const factSummary = { name: "PznFactSummary", schema: z.object({
+  title: limitedText, body: limitedText, facts: z.array(z.object({ label: limitedText, value: limitedText }).strict()).max(12),
+}).strict() } as const;
+export const capabilityForm = { name: "PznCapabilityForm", schema: z.object({
+  title: limitedText, submitLabel: limitedText, actionId: id, saveActionId: id.optional(),
+  fields: z.array(z.object({
+    field: inputFieldSchema, value: z.union([z.string(), z.number().int()]).optional(),
+    choices: z.array(z.object({ id, label: limitedText }).strict()).max(8).optional(),
+  }).strict()).min(1).max(8),
+}).strict() } as const;
+export type CapabilityFormProps = z.infer<typeof capabilityForm.schema>;
+
 export const catalogApis = [
   experienceRoot, contentCard, comparison, stepList, metricSummary, goalProgressCard, portfolioSnapshot,
-  fundingPreview, fundingOptions, followUpButton, ruleCreation,
+  fundingPreview, fundingOptions, followUpButton, ruleCreation, savingsChart, savingsMetric, factSummary, capabilityForm,
 ] as const;
 type BlockApi = typeof contentCard | typeof comparison | typeof stepList | typeof metricSummary | typeof goalProgressCard
-  | typeof portfolioSnapshot | typeof fundingPreview | typeof fundingOptions;
+  | typeof portfolioSnapshot | typeof fundingPreview | typeof fundingOptions
+  | typeof savingsChart | typeof savingsMetric | typeof factSummary | typeof capabilityForm;
 type ShapeFor<T extends BlockApi> = T extends BlockApi ? { component: T["name"]; props: z.infer<T["schema"]> } : never;
 export type DisplayBlock = ShapeFor<BlockApi> | { component: typeof ruleCreation.name; props: RuleCreationProps };
 export type DisplayAction = { actionId: string; componentId: string; label: string };
@@ -72,6 +90,7 @@ export type DisplayExperience = {
   blocks: DisplayBlock[];
   actions: DisplayAction[];
   expiresAt: number;
+  layout?: "stack" | "dashboard";
   a2uiVersion: "1.0";
   messages: [CreateSurfaceMessage];
 };

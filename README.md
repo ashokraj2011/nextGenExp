@@ -85,6 +85,22 @@ npm run chat:harness -- --provider openai --trace /tmp/pzn-openai-chat.json
 
 The default uses the local model fixture. Choose `openai`, `gateway`, or `copilot_acp` to use the corresponding server configuration. The automated history tests in `npm test` check persistence, scope isolation, and importing a saved chat.
 
+### Multi-step goals and Capability Studio
+
+PZN Lab uses a standalone sfield Experience Agent for requests that need several capabilities, direct funding previews, and resumable plans. Existing balance comparisons, single-topic explanations, and other straightforward requests use the existing chat flow.
+
+1. Select **Alice Morgan** and ask “I want to buy a house in two years. Show me how close I am and help me explore a savings plan.” Review goal progress and portfolio cash. Change the monthly contribution or timeframe, select **Recalculate**, and optionally select **Save savings plan**.
+2. Select **Marcus Reed** and ask “I moved recently and want to deposit $500 into my investment account.” Enter an eligible funding method or use the form. The address preparation remains available independently. Ask “Change it to $750” to issue a fresh preview.
+3. Restart the server while waiting for a method, reopen the same conversation, and say “Continue where we left off” or choose a method. The app reads the saved plan, checks current eligibility, and refreshes the tool data in a linked sfield execution.
+4. In **Tool setup → Capability Studio**, select a profile and capability, validate the manifest, and run a preview in chat. To try an additional capability, select **Required monthly savings** or ask “How much do I need to save each month to reach my house deposit target?” A published version uses registered read and calculation tools and a version-specific Treatment Selector reference.
+5. In Capability Studio, select Marcus and **Simulate first deposit**. Then ask “What is next?” in chat. Treatment Selector evaluates the updated account status. The event simulator records one first deposit per profile in the current local session.
+
+The Experience Agent receives a capability shortlist and returns a structured plan. The host checks versions, dependencies and customer inputs. Treatment Selector returns recommendations and the host issues a short-lived grant for each authorized capability. sfield governs tool execution. The compiler connects verified evidence to approved A2UI components and issues scoped actions for form submissions. The app stores plans, grants, evidence, journey checkpoints, and experience revisions in SQLite alongside the separate sfield store.
+
+**Inspector** shows the decision trace and verified Experience IR. **Evaluation** in Capability Studio summarizes latency, model calls, tool calls, and tokens for the current session. **Logs** shows model calls, per-context Treatment Selector requests and responses, and tool results. Set `PZN_INSPECTOR=off` to turn off local administration and diagnostic endpoints. Funding and address forms stop at review in this POC.
+
+Run `npm run eval:agentic -- --openai` with the server’s OpenAI key to evaluate the multi-step scenarios and measure them alongside fast-path requests. Omit `--openai` to use the configured gateway or Copilot ACP provider.
+
 ### Intent routing and clarification
 
 sfield sends the latest message, up to four recent turns, and the available intent catalog to the Context Router. History includes clarification questions, assistant reply text, and titles of previously displayed cards. For demo content requests, the LLM selects an intent ID. The host verifies the choice and maps it to a task and Treatment Selector context.

@@ -461,7 +461,7 @@ function App() {
           if (conversation) void exclusive(async () => accept(await api.retry(id, requestId("retry:" + id)), conversation));
         }}
         onFollowUp={(id, envelope) => {
-          if (conversation) void exclusive(async () => accept(await api.followUp(id, envelope, requestId("action:" + String(envelope.action.context.actionId))), conversation));
+          if (conversation) void exclusive(async () => accept(await api.followUp(id, envelope, requestId("action:" + String(envelope.action.context.actionId) + ":" + JSON.stringify(envelope.action.context.values ?? null))), conversation));
         }}
         onFeedback={(turnId, expId, value) => {
           void api.event(expId, value).then(() => api.turn(turnId)).then(upsert).catch((error) => setNotice(messageFor(error)));

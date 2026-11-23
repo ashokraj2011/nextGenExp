@@ -1,3 +1,6 @@
+import type { CapabilityManifest, CapabilityRef, OutputKind } from "../../packages/contracts/agentic";
+import type { AgenticTrace } from "./decision-trace";
+import type { EvaluationRow } from "../../packages/contracts/evaluation";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import type { Bootstrap, ConversationView, TurnAccepted, TurnView } from "../../packages/contracts/api";
 import type { TurnPayloads } from "../../packages/contracts/inspector";
@@ -27,6 +30,7 @@ async function request<T>(path: string, payload?: unknown) {
 
 type Stage = { state: string; elapsedMs: number; modelCalls: number; totalTokens: number; tokensReported: boolean; errorCode?: string };
 export type Trace = {
+  agentic?: AgenticTrace;
   turnId: string;
   ordinal: number;
   surface: string;
@@ -61,6 +65,17 @@ export type Trace = {
 };
 export const api = {
   bootstrap: () => request<Bootstrap>("/api/bootstrap"),
+  evaluation: () => request<{ mode: "live" | "test"; rows: EvaluationRow[] }>("/api/admin/evaluation"),
+  capabilities: () => request<{ manifests: CapabilityManifest[]; tools: { ref: string; label: string; output: OutputKind; invariant: string }[] }>("/api/admin/capabilities"),
+  publishCapability: (manifest: unknown, validate: boolean) => request<CapabilityManifest>(
+    "/api/admin/" + (validate ? "capability-validation" : "capabilities"), manifest,
+  ),
+  previewCapability: (capability: CapabilityRef, personaId: string, message: string) => request<TurnAccepted & { conversation: ConversationView }>(
+    "/api/admin/capability-preview", { capability, personaId, message },
+  ),
+  simulateFirstDeposit: (personaId: string, eventId: string) => request<{ accepted: boolean; fundingStatus: "funded" }>(
+    "/api/admin/customer-events", { personaId, eventId, type: "account.first_deposit.completed" },
+  ),
   toolSetup: () => requestJson<ToolSetupView>("/api/admin/tools"),
   saveToolSetup: (setup: ToolSetup, revision?: string) => requestJson<ToolSetup>("/api/admin/tools", setup, revision),
   createCcreRule: (rule: MockCcreRule) => request<MockCcreRule>("/api/admin/ccre-rules", rule),

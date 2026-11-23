@@ -1,3 +1,4 @@
+import { conversationalTextAllowed } from "./chat-policy";
 import host from "../../fixtures/host.json";
 import type {
   BalanceProof, CatalogSnapshot, ContentDecision, ContentEntry, Dated, ExperienceProposal, ProposalBlock, RouteDecision, Scope,
@@ -39,6 +40,7 @@ export function verifyContextProposal(value: unknown, catalog: CatalogSnapshot, 
   if (value.status === "reply") {
     requireCheck(value.clarificationQuestion === null, "ROUTE_STATUS_SHAPE_INVALID");
     requireCheck(replyText, "CHAT_REPLY_REQUIRED");
+    requireCheck(conversationalTextAllowed(replyText), "UNGROUNDED_CHAT_CLAIM");
     return { status: "reply" as const, intentId: null, replyText };
   }
   requireCheck((value.intentId === "create_rule") === (value.status === "create_rule"), "ROUTE_INTENT_MISMATCH");
@@ -101,6 +103,7 @@ export function verifyExperience(
 
   const { status, blocks, clarificationQuestion, introKey, followUpIds } = value;
   requireCheck(status === "no_match" || value.replyText == null, "REPLY_TEXT_NOT_ALLOWED");
+  requireCheck(!value.replyText || conversationalTextAllowed(value.replyText), "UNGROUNDED_CHAT_CLAIM");
   if (!decision.candidates.length && !portfolio) {
     requireCheck(status === "no_match" && value.replyText?.trim(), "EMPTY_ELIGIBILITY_REPLY_REQUIRED");
   }

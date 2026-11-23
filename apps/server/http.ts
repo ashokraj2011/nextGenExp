@@ -1,4 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { capabilityIdSchema, capabilityRef, customerEventSchema, versionSchema, type ExecutionBudget } from "../../packages/contracts/agentic";
+import { capabilityTools } from "../../packages/capabilities";
+import { CapabilityRegistry } from "./capability-registry";
+import { simulateCustomerEvent } from "./event-simulator";
+import { makeId } from "../../packages/experience/compile";
 import { ChatHarness, newId } from "@sfield/core";
 import { SqlitePersistence } from "@sfield/store-sqlite";
 import { readFile, stat } from "node:fs/promises";
@@ -31,6 +36,7 @@ type Options = {
   inspectorEnabled?: boolean;
   portfolioSnapshots?: PortfolioSnapshotProvider;
   goalProgressProvider?: GoalProgressProvider;
+  goalBudget?: ExecutionBudget;
 };
 const beneficiaryStatusSchema = z.enum(["missing", "on_file"]);
 const accountFundingStatusSchema = z.enum(["funded", "unfunded"]);
@@ -109,12 +115,13 @@ export async function startApp(options: Options) {
     },
   })));
   const store = new Store(join(options.dataDir, "app.sqlite"));
+  const registry = new CapabilityRegistry(store);
   const sfieldPath = join(options.dataDir, "sfield.sqlite");
   const offline = options.gateway ? undefined : new SqlitePersistence({ path: sfieldPath });
   let runtime: Runtime | null;
   try {
     runtime = options.gateway
-      ? await Runtime.open(store, sfieldPath, options.gateway, now, inspectorEnabled, portfolioSnapshots, goalProgressProvider)
+      ? await Runtime.open(store, sfieldPath, options.gateway, now, inspectorEnabled, portfolioSnapshots, goalProgressProvider, options.goalBudget)
       : null;
     await offline?.init({ namespace: sfieldNamespace, ownerId: newId("owner") });
   } catch (error) {
@@ -172,7 +179,9 @@ export async function startApp(options: Options) {
     if (resource === "bootstrap" && method === "GET" && !id) {
       const state: Bootstrap = {
         conversations: store.conversations(principalId),
-        personas,
+        personas: personas.map((entry) => ({
+          ...entry, profile: { ...entry.profile, accountFundingStatus: store.axe.fundingStatus({ principalId, personaId: entry.personaId }) ?? entry.profile.accountFundingStatus },
+        })),
         scenarios: tsFixtures.scenarios.map(({ scenarioId, label }) => ({ scenarioId, label })),
         defaultPersonaId: demo.defaultPersonaId, defaultScenarioId: demo.defaultScenarioId,
         gatewayConfigured: Boolean(runtime), mode, selectionMode, inspectorEnabled,
@@ -183,6 +192,32 @@ export async function startApp(options: Options) {
     }
     if (resource === "admin" && inspectorEnabled && !operation) {
       const toolSetupLimit = 768 * 1024;
+      if (id === "evaluation" && method === "GET") {
+        return json(res, { mode, rows: await runtime?.evaluation(principalId) ?? [] });
+      }
+      if (id === "capabilities" && method === "GET") {
+        return json(res, { manifests: registry.list(principalId),
+          tools: capabilityTools.map(({ ref, label, output, invariant }) => ({ ref, label, output, invariant })) });
+      }
+      if ((id === "capabilities" || id === "capability-validation") && method === "POST") {
+        return json(res, registry.publish(principalId, await body(req, z.unknown(), 48 * 1024), id === "capability-validation"));
+      }
+      if (id === "capability-preview" && method === "POST") {
+        if (!runtime) throw new ApiError(409, "model_unavailable", "Connect a model to run a capability preview.");
+        const input = await body(req, z.object({
+          capability: z.object({ id: capabilityIdSchema, version: versionSchema }).strict(),
+          personaId: z.string().regex(idPattern), message: z.string().trim().min(1).max(1600),
+        }).strict());
+        if (!registry.get(principalId, capabilityRef(input.capability))) {
+          throw new ApiError(404, "capability_unavailable", "Publish or select a known capability version.");
+        }
+        const conversation = experience.createConversation(principalId, input.personaId, demo.defaultScenarioId);
+        const turn = experience.submit(conversation, input.message, makeId("request"), "capability_preview", undefined, undefined, { capability: input.capability });
+        return json(res, { conversation: presentConversation(conversation), ...turn }, 202);
+      }
+      if (id === "customer-events" && method === "POST") {
+        return json(res, simulateCustomerEvent(store, principalId, await body(req, customerEventSchema), now()));
+      }
       if (id === "tools" && method === "GET") {
         const setup = store.toolSetup(principalId);
         res.setHeader("ETag", toolSetupTag(setup));
@@ -304,6 +339,7 @@ export async function startApp(options: Options) {
         goalReadSucceeded: Boolean(turn.goalProgress),
         routerRunId: turn.attempts.route?.runId ?? null, composerRunId: turn.attempts.compose?.runId ?? null,
         metricReadSucceeded: Boolean(turn.proof),
+        ...(turn.agentRunId && { agentic: runtime?.decisionTrace(turn) }),
         ...turn.trace,
       });
     }

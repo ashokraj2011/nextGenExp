@@ -1,3 +1,5 @@
+import { CapabilityStudio } from "./capability-studio";
+import "./agentic.css";
 import { useEffect, useState } from "react";
 import { ArrowDown, ArrowLeft, ArrowUp, FlaskConical, MessageSquare, Trash2 } from "lucide-react";
 import {
@@ -352,6 +354,7 @@ export function AdminPage() {
         <h1>Tool setup</h1>
         {error ? <p role="alert">{error}</p> : <p role="status">Loading tool settings…</p>}
       </div>}
+      {loaded && <CapabilityStudio />}
     </main>
   </div>;
 }

@@ -1,7 +1,8 @@
+import { experienceAgentId } from "../../packages/contracts/agentic";
 import { ASK_USER } from "@sfield/core";
 import type { CallRecord, JsonValue, ModelAttemptRecord, RunRecord, SField } from "@sfield/core";
 import host from "../../fixtures/host.json";
-import type { WorkflowPayloads, ModelStagePayloads, RegistryToolPayloads, TreatmentPayloads, TurnPayloads } from "../../packages/contracts/inspector";
+import type { AgenticPayloads, WorkflowPayloads, ModelStagePayloads, RegistryToolPayloads, TreatmentPayloads, TurnPayloads } from "../../packages/contracts/inspector";
 import { fundingAgentId, fundingToolKey, resolveFundingWorkflow, treatmentRecommendationsVersion } from "../../packages/contracts/funding-workflow";
 import { sfieldTools, toolVersion } from "../../packages/contracts/tool-setup";
 import type { configureGateway } from "./gateway";
@@ -177,8 +178,38 @@ async function workflowPayloads(sf: SField, store: Store, inspection: Inspection
   return { recommendation, definition: definition && inspection.payload(definition), calls };
 }
 
+async function experiencePayloads(sf: SField, store: Store, inspection: Inspection, turn: TurnRecord): Promise<AgenticPayloads | undefined> {
+  const root = turn.agentRunId && await sf.persistence.getRun(turn.agentRunId);
+  if (!root || root.subjectId !== turn.scope.principalId || root.tenantId !== "pzn-local") return;
+  const standalone = root.kind === "standalone" && root.agentId === experienceAgentId && root.request.inputs?.turnRef === turn.public.id;
+  const ids = new Set([...(standalone ? [root.runId] : []), ...turn.agentExecutionIds ?? []]);
+  const gathered = await Promise.all([...ids].map((id) => sf.persistence.listCalls(id)));
+  const calls = gathered.flat().sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((call) => {
+    const payload = registryPayload(inspection, call);
+    const request = call.invocation?.normalizedInputs ?? call.proposedArguments;
+    if (Object.hasOwn(request, "lease")) {
+      const { lease: _lease, parameters, ...rest } = request;
+      let parsed = parameters;
+      if (typeof parameters === "string") {
+        try { parsed = JSON.parse(parameters) as JsonValue; } catch { /* Keep the captured string. */ }
+      }
+      payload.registryInput = inspection.payload({ ...rest, parameters: parsed ?? null });
+    }
+    const serialized = call.result?.output;
+    if (serialized && typeof serialized === "object" && !Array.isArray(serialized) && typeof serialized.data === "string") {
+      try { return { ...payload, result: inspection.payload(JSON.parse(serialized.data) as JsonValue) }; }
+      catch { return payload; }
+    }
+    return payload;
+  });
+  const model = standalone ? {
+    attempts: (await sf.persistence.listModelAttempts(root.runId)).map((attempt) => modelAttemptPayload(store, inspection, attempt)),
+  } : null;
+  return { runId: root.runId, model, calls };
+}
+
 export async function readTurnPayloads(sf: SField, store: Store, inspection: Inspection, turn: TurnRecord, conversation: ConversationRecord): Promise<TurnPayloads> {
-  const [topicScores, router, glossary, treatment, portfolio, goal, composer, workflow] = await Promise.all([
+  const [topicScores, router, glossary, treatment, portfolio, goal, composer, workflow, agentic] = await Promise.all([
     topicScoresPayloads(sf, inspection, turn),
     modelPayloads(sf, store, inspection, turn, "route"),
     glossaryPayloads(sf, inspection, turn),
@@ -187,6 +218,7 @@ export async function readTurnPayloads(sf: SField, store: Store, inspection: Ins
     routeReadPayloads(sf, inspection, turn, turn.goalScopeId, "goal"),
     modelPayloads(sf, store, inspection, turn, "compose"),
     workflowPayloads(sf, store, inspection, turn),
+    experiencePayloads(sf, store, inspection, turn),
   ]);
-  return { turnId: turn.public.id, topicScores, router, glossary, treatment, portfolio, goal, composer, workflow };
+  return { turnId: turn.public.id, topicScores, router, glossary, treatment, portfolio, goal, composer, workflow, ...(agentic && { agentic }) };
 }

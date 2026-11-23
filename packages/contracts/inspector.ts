@@ -71,7 +71,13 @@ export type WorkflowPayloads = {
   };
 };
 
+export type AgenticPayloads = {
+  runId: string;
+  model: ModelStagePayloads | null;
+  calls: RegistryToolPayloads[];
+};
 export type TurnPayloads = {
+  agentic?: AgenticPayloads;
   turnId: string;
   topicScores: TreatmentPayloads | null;
   router: ModelStagePayloads | null;

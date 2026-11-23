@@ -426,6 +426,31 @@
       ]
     },
     {
+      "contentId": "account_first_deposit_complete",
+      "version": "v1",
+      "publicationStatus": "published",
+      "kind": "education",
+      "title": "Your first deposit is on file",
+      "description": "Review the account after your first deposit.",
+      "body": "You can review your account activity and portfolio summary to see where the deposit is held.",
+      "allowedComponents": [
+        "PznContentCard"
+      ],
+      "comparisonGroup": null,
+      "comparisonFields": [],
+      "steps": [],
+      "metricSpec": null,
+      "followUps": [],
+      "sourceRef": "fixture:account_first_deposit_complete",
+      "sourceLabel": "Content catalog",
+      "requiredDisclosures": [
+        {
+          "disclosureId": "demo_only",
+          "text": "The preview ends at review."
+        }
+      ]
+    },
+    {
       "contentId": "fund_account",
       "version": "v1",
       "publicationStatus": "published",

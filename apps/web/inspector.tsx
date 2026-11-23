@@ -1,3 +1,4 @@
+import { DecisionTrace } from "./decision-trace";
 import { useEffect, useState, type ReactNode } from "react";
 import { Code2, FileText } from "lucide-react";
 import type { Bootstrap, ConversationView, TurnView } from "../../packages/contracts/api";
@@ -22,6 +23,7 @@ function TraceView({ trace }: { trace: Trace }) {
     catalog, propensity, selectedContextId, surface, sourcePageContext, routeDecisionId, contentDecisionId,
     catalogScopeId, glossaryScopeId, glossaryVersion, tsScopeId, portfolioScopeId, routerRunId, composerRunId, ts, finalOrder, components, failures,
   } = trace;
+  if (trace.agentic) return <DecisionTrace trace={trace.agentic} />;
   const creatingRule = trace.routeOutcome === "create_rule";
   const elapsed = trace.markers.terminal === undefined ? null : trace.markers.terminal - trace.markers.accepted;
   return <div className="trace-view">

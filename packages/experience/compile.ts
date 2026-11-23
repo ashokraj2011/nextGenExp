@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { AgentAction } from "../contracts/agentic";
 import host from "../../fixtures/host.json";
 import type { BalanceProof, IntroKey } from "../contracts/domain";
 import { fundingPreviewWorkflow, type FundingOptions, type FundingPreview, type WorkflowRecommendation } from "../contracts/funding-workflow";
@@ -13,7 +14,7 @@ import type { VerifiedExperience } from "./verify";
 
 export const makeId = (prefix: string) => prefix + "_" + randomUUID().replaceAll("-", "");
 export type IssuedAction = DisplayExperience["actions"][number] & {
-  userMessage: string; followUpId: string; workflow?: WorkflowRecommendation;
+  userMessage: string; followUpId: string; workflow?: WorkflowRecommendation; agentAction?: AgentAction;
 };
 export type CompiledExperience = { display: DisplayExperience; issued: IssuedAction[] };
 type ExperienceInput = {
@@ -119,14 +120,14 @@ export function compileChatReply(text: string, outcome: "reply" | "no_match" | "
   }, [], []);
 }
 
-function buildSurface(
-  displayFields: Pick<DisplayExperience, "status" | "outcome" | "intro" | "question" | "partial" | "expiresAt">,
+export function buildSurface(
+  displayFields: Pick<DisplayExperience, "status" | "outcome" | "intro" | "question" | "partial" | "expiresAt" | "layout">,
   blocks: DisplayBlock[],
   issued: IssuedAction[],
 ): CompiledExperience {
   const experienceId = makeId("exp");
   const { intro, question, partial } = displayFields;
-  const actions = issued.map(({ actionId, componentId, label }) => ({ actionId, componentId, label }));
+  const actions = issued.filter(({ agentAction }) => !agentAction).map(({ actionId, componentId, label }) => ({ actionId, componentId, label }));
   const nodes = [
     ...blocks.map((block, index) => ({ id: "block_" + (index + 1), component: block.component, ...block.props })),
     ...actions.map(({ actionId, componentId, label }) => ({ id: componentId, component: "PznFollowUp", actionId, label })),
@@ -138,6 +139,7 @@ function buildSurface(
       components: [{
         id: "root", component: "PznExperience", intro: { "@path": "/intro" },
         children: nodes.map((node) => node.id), actionCount: actions.length, question, partial,
+        ...(displayFields.layout && { layout: displayFields.layout }),
       }, ...nodes],
     },
   }, experienceId);

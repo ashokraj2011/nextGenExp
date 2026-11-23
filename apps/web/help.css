@@ -554,3 +554,22 @@
     padding-bottom: 8px;
   }
 }
+
+.help-goal-flow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+  padding: 0;
+  list-style-position: inside;
+}
+.help-goal-flow > li {
+  min-width: 0;
+  padding: 15px 16px;
+  border: 1px solid #d8e3d6;
+  border-radius: 12px;
+  background: #f6f9f4;
+}
+.help-goal-flow p, .help-goal-note { margin: .5rem 0 0; line-height: 1.55; }
+@media (max-width: 900px) { .help-goal-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 540px) { .help-goal-flow { grid-template-columns: minmax(0, 1fr); } }

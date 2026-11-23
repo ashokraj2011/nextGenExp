@@ -1,3 +1,5 @@
+import { CapabilityForm, FactSummary, SavingsChart, SavingsMetric, formEnvelope } from "./agentic-experience";
+import "./agentic.css";
 import { Component, createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { A2uiSurface, createComponentImplementation, MarkdownComponentContext, type ReactCatalogComponent } from "@a2ui/react";
 import {
@@ -10,7 +12,7 @@ import type { FundingOptions, FundingPreview } from "../../packages/contracts/fu
 import { formatPortfolioAmount } from "../../packages/contracts/portfolio";
 import {
   PZN_CATALOG_ID, FOLLOW_UP_EVENT, contentCard, comparison, stepList, metricSummary, experienceRoot, followUpButton, ruleCreation, portfolioSnapshot,
-  fundingOptions, fundingPreview, goalProgressCard, validatePznSurface, type DisplayBlock, type DisplayExperience,
+  capabilityForm, factSummary, savingsChart, savingsMetric, fundingOptions, fundingPreview, goalProgressCard, validatePznSurface, type DisplayBlock, type DisplayExperience,
 } from "../../packages/contracts/surface";
 import { RuleCreationBlock } from "./rule-creation-block";
 import { PortfolioSnapshotBlock } from "./portfolio-snapshot";
@@ -32,8 +34,10 @@ const blockLabels = {
 };
 
 function FundingPreviewBlock({ amountCents, method }: FundingPreview) {
+  const { enabled } = useContext(SurfaceActions);
   return <section className="content-card" aria-label="Funding preview">
     <h3>Funding preview</h3>
+    {!enabled && <p className="disclosure">Earlier preview</p>}
     <p className="content-body">{formatPortfolioAmount(amountCents)} by {method.label.toLowerCase()}</p>
     <dl className="compare-grid">
       <div className="compare-column"><dt>From</dt><dd>{method.from}</dd></div>
@@ -58,7 +62,13 @@ function FundingOptionsBlock({ methods }: FundingOptions) {
   </section>;
 }
 
-function ContentBlock({ block }: { block: DisplayBlock }) {
+function ContentBlock({ block, form }: { block: DisplayBlock; form?: { experienceId: string; componentId: string; enabled: boolean } }) {
+  const controls = useContext(ExperienceControls);
+  if (block.component === savingsChart.name) return <SavingsChart {...block.props} />;
+  if (block.component === savingsMetric.name) return <SavingsMetric {...block.props} />;
+  if (block.component === factSummary.name) return <FactSummary {...block.props} />;
+  if (block.component === capabilityForm.name) return form && <CapabilityForm props={block.props} enabled={form.enabled}
+    dispatch={(id, values) => controls.followUp(form.experienceId, formEnvelope(form.experienceId, form.componentId, id, values))} />;
   if (block.component === ruleCreation.name) return <RuleCreationBlock {...block.props} />;
   if (block.component === portfolioSnapshot.name) return <PortfolioSnapshotBlock {...block.props} />;
   if (block.component === fundingPreview.name) return <FundingPreviewBlock {...block.props} />;
@@ -145,7 +155,7 @@ const pznCatalog = new Catalog<ReactCatalogComponent>(PZN_CATALOG_ID, "1.0", [
     const content = children.slice(0, count);
     const followUps = children.slice(count);
     return (
-      <div className="experience-flow" data-renderer="a2ui">
+      <div className={"experience-flow" + (props.layout === "dashboard" ? " axe-dashboard" : "")} data-renderer="a2ui">
         <Introduction intro={props.intro} question={props.question} partial={props.partial} />
         {content.map(({ id, basePath }) => <div className="surface-child" key={id}>{buildChild(id, basePath)}</div>)}
         {followUps.length > 0 && <div className="follow-up-list">{followUps.map(({ id, basePath }) => <div key={id}>{buildChild(id, basePath)}</div>)}</div>}
@@ -161,6 +171,14 @@ const pznCatalog = new Catalog<ReactCatalogComponent>(PZN_CATALOG_ID, "1.0", [
   createComponentImplementation(fundingPreview, ({ props }) => <FundingPreviewBlock {...props} />),
   createComponentImplementation(fundingOptions, ({ props }) => <FundingOptionsBlock {...props} />),
   createComponentImplementation(ruleCreation, ({ props }) => <RuleCreationBlock {...props} />),
+  createComponentImplementation(savingsChart, ({ props }) => <SavingsChart {...props} />),
+  createComponentImplementation(savingsMetric, ({ props }) => <SavingsMetric {...props} />),
+  createComponentImplementation(factSummary, ({ props }) => <FactSummary {...props} />),
+  createComponentImplementation(capabilityForm, ({ props, context }) => {
+    const { enabled } = useContext(SurfaceActions);
+    return <CapabilityForm props={props} enabled={enabled}
+      dispatch={(actionId, values) => void context.dispatchAction({ event: { name: FOLLOW_UP_EVENT, context: { actionId, values } } }).catch(() => undefined)} />;
+  }),
   createComponentImplementation(followUpButton, ({ props, context }) => {
     const { enabled } = useContext(SurfaceActions);
     return <button className="follow-up" type="button" disabled={!enabled} onClick={() => {
@@ -239,7 +257,7 @@ function CanonicalFallback({ experience, enabled }: { experience: DisplayExperie
   useEffect(() => rendered.current(experienceId, true), [experienceId]);
   return <div className="experience-flow" data-renderer="fallback">
     <Introduction intro={experience.intro} question={experience.question} partial={experience.partial} />
-    {experience.blocks.map((block, index) => <ContentBlock key={index} block={block} />)}
+    {experience.blocks.map((block, index) => <ContentBlock key={index} block={block} form={{ experienceId, componentId: "block_" + (index + 1), enabled }} />)}
     {experience.actions.length > 0 && <div className="follow-up-list">
       {experience.actions.map(({ actionId, componentId, label }) => (
         <button key={actionId} type="button" className="follow-up" disabled={!enabled} onClick={() => (

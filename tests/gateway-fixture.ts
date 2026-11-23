@@ -3,10 +3,13 @@ import type { AddressInfo } from "node:net";
 import type { HttpGatewaySettings } from "../apps/server/gateway";
 import type { ComponentName, ContextSelectionProposal, ExperienceProposal, Intent } from "../packages/contracts/domain";
 import { isSubjectlessSummaryRequest, leavingWorkQuestion, portfolioSummaryQuestion, retirementQuestion, type RoutingHistoryEntry, type RoutingIntent, type RoutingIntentId } from "../packages/contracts/routing-intents";
+import { capabilityRef, type CapabilityRef } from "../packages/contracts/agentic";
+import type { CapabilityDescriptor } from "../apps/server/capability-registry";
 import type { modelBundle } from "../packages/experience/content";
 
 type Envelope = {
-  inputType: "PznContextRoutingInput" | "PznExperienceCompositionInput" | "PznFundingInput";
+  inputType: "PznContextRoutingInput" | "PznExperienceCompositionInput" | "PznFundingInput" | "PznExperienceGoalInput";
+  requestedCapability?: CapabilityRef;
   request: string;
   catalogSnapshotId?: string;
   catalog?: { catalogVersion: string; contexts: { contextId: string }[] };
@@ -43,7 +46,7 @@ function fromMessage(body: RequestBody): Envelope | undefined {
     if (message.role !== "user" || !message.content) continue;
     try {
       const value = JSON.parse(message.content);
-      if (["PznContextRoutingInput", "PznExperienceCompositionInput", "PznFundingInput"].includes(value?.inputType)) return value;
+      if (["PznContextRoutingInput", "PznExperienceCompositionInput", "PznFundingInput", "PznExperienceGoalInput"].includes(value?.inputType)) return value;
     } catch { /* Runtime repair instructions are ordinary text. */ }
   }
   return undefined;
@@ -200,7 +203,7 @@ function compose({ body, envelope }: GatewayCall): ExperienceProposal | ToolCall
     return choose("PznStepList", [get("Update your mailing address")], "steps");
   }
   if (envelope.selectedContextId === "next-step") {
-    return { ...choose("PznContentCard", [get("Fund your account")], "next_step"), followUpIds: [] };
+    return { ...choose("PznContentCard", [get("Fund your account") ?? get("Your first deposit is on file")], "next_step"), followUpIds: [] };
   }
   if (envelope.selectedContextId === "app-home") {
     if (envelope.intent?.task === "guide") return choose("PznStepList", [get("Transfer checklist")], "steps");
@@ -233,6 +236,75 @@ function funding({ envelope, body }: GatewayCall): ResponseData | ToolCall {
   if (method && tool("funding_preview_build")) return call("funding_preview_build", { methodId: method });
   if (tool("ask_user")) return call("ask_user", { question: "Which funding method would you like to preview?", response_type: "string" });
   return finish(results.some(({ methods }) => Array.isArray(methods)) ? "options" : "unavailable");
+}
+
+
+function planExperience({ body, envelope }: GatewayCall): ResponseData | ToolCall {
+  const data = body.messages.filter(({ role }) => role === "tool").flatMap(({ content }) => {
+    try {
+      const value = JSON.parse(content ?? "{}");
+      return [typeof value.data === "string" ? JSON.parse(value.data) : value];
+    } catch { return []; }
+  });
+  const tool = (name: string) => body.tools?.some(({ function: spec }) => spec.name === name);
+  const call = (name: string, args: object): ToolCall => ({
+    id: "call_fixture_" + name + "_" + data.length, type: "function", function: { name, arguments: JSON.stringify(args) },
+  });
+  const discovery = data.findLast((result) => Array.isArray(result.capabilities));
+  const request = envelope.request.toLowerCase();
+  const buyHome = /home|house|down payment/.test(request);
+  if (!discovery && tool("capability_discover")) {
+    const contexts = [
+      ...(buyHome || /savings plan|monthly savings|save each month/.test(request) ? ["goals"] : []),
+      ...(/plans?|portfolio|cash/.test(request) || (buyHome && /savings plan/.test(request)) ? ["portsum"] : []),
+      ...(/(?:make|want to) (?:a )?deposit|\bdeposit \$|fund|linked bank/.test(request) ? ["next-step"] : []),
+      ...(/moved|address/.test(request) ? ["address-update"] : []),
+      ...(/retirement|beneficiar/.test(request) ? ["learning"] : []),
+      ...(/balance/.test(request) ? ["balance"] : []),
+    ].slice(0, 4);
+    return call("capability_discover", { goal: envelope.request.slice(0, 360), contextIds: envelope.requestedCapability ? [] : contexts, requiredOutputs: [], limit: 10 });
+  }
+  const available = (discovery?.capabilities ?? []) as CapabilityDescriptor[];
+  const results = data.findLast((result) => Array.isArray(result.results));
+  if (!results && available.length && tool("experience_plan_execute")) {
+    const ids = new Set<string>();
+    const explicit = envelope.requestedCapability && capabilityRef(envelope.requestedCapability);
+    const selected = explicit && available.find((item) => capabilityRef(item) === explicit);
+    if (selected) ids.add(selected.id);
+    else {
+      if (buyHome || /savings plan|save each month|monthly savings/.test(request)) ids.add("goal.progress");
+      if (/portfolio|cash/.test(request) || (buyHome && /savings plan/.test(request))) ids.add("portfolio.summary");
+      if (/account balances|my balance|balance summary/.test(request)) ids.add("balance.summary");
+      if (/(?:make|want to) (?:a )?deposit|\bdeposit \$|fund|linked bank/.test(request)) ids.add("account.funding.preview");
+      if (/moved|address/.test(request)) ids.add("account.address.prepare");
+      if (/retir/.test(request)) ids.add("retirement.education");
+      if (/retir|beneficiar/.test(request)) ids.add("beneficiary.review");
+      if (/save each month|need to save|reach .*target|monthly savings needed/.test(request)) ids.add("goal.savings.required-contribution");
+      else if (/savings plan|monthly savings|savings projection/.test(request)) ids.add("goal.savings.simulate");
+      for (const item of available) if (item.id.startsWith("custom.") && request.includes(item.supportedGoals[0].toLowerCase())) ids.add(item.id);
+    }
+    for (const item of available.filter((entry) => ids.has(entry.id))) {
+      for (const output of item.requires) {
+        const producer = available.find((entry) => entry.outputs.includes(output));
+        if (producer) ids.add(producer.id);
+      }
+    }
+    const items = available.filter((item) => ids.has(item.id) && (!selected || item.id !== selected.id || item.version === selected.version))
+      .filter((item, index, array) => array.findIndex((other) => other.id === item.id) === index);
+    const stepId = (item: CapabilityDescriptor) => item.id.replaceAll(/[.\-]/g, "_");
+    const steps = items.map((item) => ({
+      id: stepId(item), capabilityId: item.id, version: item.version, required: item.id !== "beneficiary.review",
+      dependsOn: [...new Set(item.requires.flatMap((output) => {
+        const producer = items.find((entry) => entry.outputs.includes(output));
+        return producer ? [stepId(producer)] : [];
+      }))],
+    }));
+    if (steps.length && !data.some((entry) => entry.code === "PLAN_MISSING_EVIDENCE_DEPENDENCY")) {
+      return call("experience_plan_execute", { objective: selected ? selected.title : "Complete the requested account and planning goals", intentType: "planning", steps });
+    }
+  }
+  if (tool("ask_user")) return call("ask_user", { question: "Which funding method would you like to preview?", response_type: "string" });
+  return { disposition: results ? "show" : "pass", layout: "dashboard", sections: [] };
 }
 
 export async function startFixtureGateway(
@@ -270,7 +342,7 @@ export async function startFixtureGateway(
       }
 
       const result = override?.json ?? (envelope.inputType === "PznContextRoutingInput" ? route(envelope)
-        : envelope.inputType === "PznFundingInput" ? funding(call) : compose(call));
+        : envelope.inputType === "PznFundingInput" ? funding(call) : envelope.inputType === "PznExperienceGoalInput" ? planExperience(call) : compose(call));
       response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
       const write = (payload: unknown) => response.write("data: " + JSON.stringify(payload) + "\n\n");
       if ("function" in result && "id" in result) {

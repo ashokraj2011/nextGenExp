@@ -1,3 +1,6 @@
+import type { AgentLaunch } from "../../packages/contracts/agentic";
+import { cancelsJourney, explicitInputs } from "./agentic-inputs";
+import { AgenticStore } from "./agentic-store";
 import { EventEmitter } from "node:events";
 import { SqliteDatabase } from "@sfield/store-sqlite";
 import type { UsageSummary } from "@sfield/core";
@@ -63,6 +66,10 @@ export type FundingRun = {
 export type TurnRecord = {
   public: TurnView;
   historyStatus?: TurnStatus;
+  agentLaunch?: AgentLaunch;
+  agentRunId?: string;
+  agentJourneyId?: string;
+  agentExecutionIds?: string[];
   scope: Scope;
   ordinal: number;
   requestId: string;
@@ -109,10 +116,12 @@ function inaccessible(): never {
 
 export class Store {
   private readonly db: SqliteDatabase;
+  readonly axe: AgenticStore;
   private readonly events = new EventEmitter().setMaxListeners(0);
   constructor(path: string) {
     this.db = new SqliteDatabase(path);
     this.db.open();
+    this.axe = new AgenticStore(this.db);
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS local_sessions (id TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS tool_setups (
@@ -216,6 +225,14 @@ export class Store {
       .map((row) => parse<TurnRecord>(row)!);
   }
 
+  recentCompletedTurns(principalId: string) {
+    return this.db.all<{ record: string }>(`
+      SELECT turns.record FROM turns JOIN conversations ON conversations.id=turns.conversation_id
+      WHERE conversations.principal_id=? AND turns.status IN ('completed', 'failed')
+      ORDER BY turns.rowid DESC LIMIT 40
+    `, principalId).map((row) => parse<TurnRecord>(row)!);
+  }
+
   workingTurns() {
     return this.db.all<{ record: string }>("SELECT record FROM turns WHERE status = 'working' ORDER BY rowid")
       .map((row) => parse<TurnRecord>(row)!);
@@ -248,7 +265,7 @@ export class Store {
 
   accept(input: {
     conversation: ConversationRecord; requestId: string; origin: string; message: string; selectionMode: SelectionMode; now: number;
-    retry?: TurnRecord; workflow?: WorkflowLaunch;
+    retry?: TurnRecord; workflow?: WorkflowLaunch; agentLaunch?: AgentLaunch;
   }) {
     let created = false;
     const turn = this.db.tx(() => {
@@ -264,7 +281,10 @@ export class Store {
       const id = makeId("turn");
       const setup = this.toolSetup(conversation.principalId);
       const workflowDefinition = setup.fundingWorkflow ?? defaultAgentFundingWorkflow;
-      const paused = origin === "message" && latest?.workflow ? latest.fundingRun : undefined;
+      const fundingInput = typeof explicitInputs(message).methodId === "string"
+        && !/\b(?:compare|balance|portfolio|retire|address|goal|savings)\b/i.test(message);
+      const paused = origin === "message" && latest?.workflow && (fundingInput || cancelsJourney(message))
+        ? latest.fundingRun : undefined;
       const continuation = paused?.through && paused.waiting && paused.waiting.expiresAt > now ? {
         id: paused.id, rootTurnId: paused.rootTurnId, after: paused.through, answerTo: paused.waiting.requestId,
       } : undefined;
@@ -280,6 +300,7 @@ export class Store {
         ordinal: retry?.ordinal ?? (latest?.ordinal ?? 0) + 1,
         requestId, origin, selectionMode, attempts: {},
         workflow: launch,
+        agentLaunch: input.agentLaunch ?? retry?.agentLaunch,
         fundingRun: continuation,
         toolSetup: continuation ? latest?.toolSetup : setup.fundingWorkflow ? setup : { ...setup, fundingWorkflow: workflowDefinition },
         trace: { surface: "chat", sourcePageContext: null, selectionMode, markers: { accepted: now }, failures: [] },
@@ -362,6 +383,10 @@ export class Store {
       if (type === "rendered" || type === "render_fallback") {
         turn.trace.markers.displayed ??= now;
         if (type === "render_fallback") turn.trace.markers.renderFallback = now;
+        if (turn.agentRunId) this.axe.trace(turn.scope, {
+          type: "experience.rendered", at: now, runId: turn.agentRunId, turnId: turn.public.id, journeyId: turn.agentJourneyId,
+          detail: { experienceId, renderer: type === "rendered" ? "a2ui" : "fallback" },
+        });
       } else {
         turn.public.feedback = type;
         turn.trace.markers.feedback = now;

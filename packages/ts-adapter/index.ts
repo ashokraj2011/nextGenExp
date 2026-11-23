@@ -9,6 +9,8 @@ import rawScenarios from "../../fixtures/treatment-scenarios.json";
 import host from "../../fixtures/host.json";
 import { applyMockCcreRules } from "./mock-ccre";
 import { scoreContexts } from "./propensity";
+import { normalizeRecommendations, type Recommendation, type TreatmentV3 } from "./recommendations";
+import agenticRecommendations from "../../fixtures/agentic-recommendations.json";
 
 const rejectionSchema = z.object({
   contentId: z.string(), stage: z.enum(["simulated_ccre", "catalog_resolution"]), reasonCode: z.string(),
@@ -76,6 +78,7 @@ export class FixtureTsAdapter implements TsAdapter {
     private readonly overrides: readonly TreatmentOverride[] = [],
     private readonly ccreRules: readonly MockCcreRule[] = [],
     private readonly portfolios: PortfolioSnapshotProvider = fixturePortfolioSnapshotProvider,
+    private readonly fundingStatus?: "funded" | "unfunded",
   ) {}
 
   private personaFor(mid: string) {
@@ -111,7 +114,8 @@ export class FixtureTsAdapter implements TsAdapter {
     const override = treatmentOverride(this.overrides, this.state.scenarioId, context)?.output;
     const fixture = override ? undefined : fixtureRuleFor(this.state, context);
     if (override?.mode === "timeout" || fixture?.error) throw new TreatmentSelectorTimeout();
-    const ids = override?.mode === "empty" ? [] : (override?.contentIds ?? fixture?.eligible ?? tsFixtures.base[context]);
+    let ids = override?.mode === "empty" ? [] : (override?.contentIds ?? fixture?.eligible ?? tsFixtures.base[context]);
+    if (!override && !fixture && context === "next-step" && this.fundingStatus === "funded") ids = [...ids, "account_first_deposit_complete"];
     const rules = this.ccreRules.filter((rule) => rule.scenarioId === this.state.scenarioId && rule.contextId === context);
     const configuredTargets = new Set(rules.map(({ contentId }) => contentId));
     const defaultRules = tsFixtures.defaultCcreRules
@@ -125,7 +129,7 @@ export class FixtureTsAdapter implements TsAdapter {
     signal?.throwIfAborted();
     const portfolio = reading ? portfolioSnapshotSchema.parse(reading) : null;
     const result = applyMockCcreRules([...ids], activeRules, {
-      ...this.state, contextId: context, personaId: persona.personaId, portfolioCashCents: portfolio?.cashCents,
+      ...this.state, contextId: context, personaId: persona.personaId, portfolioCashCents: portfolio?.cashCents, fundingStatus: this.fundingStatus,
     });
     const recommendations: TreatmentRecommendations = {
       schemaVersion: "2.0",
@@ -137,5 +141,22 @@ export class FixtureTsAdapter implements TsAdapter {
       ],
     };
     return { ...result, portfolio, recommendations };
+  }
+
+  async selectRecommendations(request: TreatmentRequest, signal?: AbortSignal) {
+    const selection = await this.selectEligibleContent(request, signal);
+    const eligible = new Set(selection.contentIds);
+    const recommendations = normalizeRecommendations(selection.recommendations);
+    const funding = recommendations.find((entry) => entry.kind === "workflow" && entry.id === "account.funding.preview");
+    const extensions: Omit<Extract<Recommendation, { kind: "capability" | "workflow" }>, "rank">[] = agenticRecommendations
+      .filter(({ context, requiresContentIds }) => context === request.context && requiresContentIds.every((id) => eligible.has(id)))
+      .map(({ id }) => ({ kind: "capability", id, version: "1.0.0" }));
+    if (funding && !this.fundingStatus) extensions.push({ kind: "workflow", id: funding.id, version: "2.0.0" });
+    const response: TreatmentV3 = {
+      schemaVersion: "3.0", recommendations: [...recommendations, ...extensions.map((entry, index) => (
+        { ...entry, rank: recommendations.length + index + 1 }
+      ))],
+    };
+    return { ...selection, response };
   }
 }

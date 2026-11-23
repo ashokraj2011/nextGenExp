@@ -1,4 +1,6 @@
-import type { ChatHarness, RunResult } from "@sfield/core";
+import { inputValuesSchema, type AgentLaunch } from "../../packages/contracts/agentic";
+import { fieldValueValid } from "./agentic-inputs";
+import { digestJson, type ChatHarness, type RunResult } from "@sfield/core";
 import demo from "../../fixtures/host.json";
 import { type FailureCode } from "../../packages/contracts/api";
 import { DECISION_TTL, TURN_DEADLINE, contextCatalogSchema, propensitySchema, type SelectionMode, type PropensityResult } from "../../packages/contracts/domain";
@@ -11,7 +13,7 @@ import type { ContextRoutingInput, ExperienceCompositionInput } from "../../pack
 import { isPortfolioSummary, portfolioSnapshotSchema } from "../../packages/contracts/portfolio";
 import { ruleGlossarySchema } from "../../packages/contracts/rule-glossary";
 import {
-  availableRoutingIntents, demoExperiencesQuestion, resolveSummaryFollowUp, routingQuestions,
+  availableRoutingIntents, demoExperiencesQuestion, explicitBalanceComparison, resolveSummaryFollowUp, routingQuestions,
 } from "../../packages/contracts/routing-intents";
 import { FOLLOW_UP_EVENT, type DisplayExperience } from "../../packages/contracts/surface";
 import { normalizedIdsSchema, treatmentOverride } from "../../packages/contracts/tool-setup";
@@ -79,9 +81,9 @@ export class ExperienceService {
     return current;
   }
 
-  submit(conversation: ConversationRecord, message: string, requestId: string, origin = "message", retry?: TurnRecord, workflow?: WorkflowLaunch) {
+  submit(conversation: ConversationRecord, message: string, requestId: string, origin = "message", retry?: TurnRecord, workflow?: WorkflowLaunch, agentLaunch?: AgentLaunch) {
     const { turn, created } = this.store.accept({
-      conversation, message, requestId, origin, retry, workflow, selectionMode: this.selectionMode, now: this.now(),
+      conversation, message, requestId, origin, retry, workflow, agentLaunch, selectionMode: this.selectionMode, now: this.now(),
     });
     if (created) this.schedule(turn);
     return this.accepted(turn);
@@ -101,7 +103,33 @@ export class ExperienceService {
       throw new ApiError(400, "action_invalid", "This follow-up is unavailable.");
     }
     const conversation = this.store.conversation(turn.scope.conversationId, principalId);
-    const origin = (signed.workflow ? "workflow:" : "follow_up:") + signed.actionId;
+    const origin = (signed.agentAction ? "experience_action:" : signed.workflow ? "workflow:" : "follow_up:") + signed.actionId;
+    const submit = (launch?: AgentLaunch, actionOrigin = origin) => this.submit(conversation, signed.userMessage, requestId, actionOrigin, undefined,
+      signed.workflow && { recommendation: signed.workflow, sourceExperienceId: experienceId }, launch);
+    const agentAction = signed.agentAction;
+    if (agentAction) {
+      const values = inputValuesSchema.safeParse(action.context.values);
+      const manifest = this.runtime?.experiences.registry.get(principalId, agentAction.capability);
+      if (!values.success || !manifest || Object.keys(values.data).some((key) => !agentAction.fieldIds.includes(key))) {
+        throw new ApiError(400, "action_input_invalid", "Review the form values and try again.");
+      }
+      const invalidField = manifest.inputs.some((field) => field.type !== "choice"
+        && !fieldValueValid(field, values.data[field.id]));
+      const malformedChoice = manifest.inputs.some((field) => field.type === "choice"
+        && (field.required || values.data[field.id] !== undefined) && typeof values.data[field.id] !== "string");
+      if (invalidField || malformedChoice) throw new ApiError(400, "action_input_invalid", "Review the form values and try again.");
+      const digest = digestJson(values.data);
+      const actionOrigin = origin + ":" + digest;
+      const existing = this.store.existingRequest(conversation.id, requestId, signed.userMessage, actionOrigin);
+      if (existing) return this.accepted(existing);
+      const journey = this.store.axe.get("journeys", turn.scope, agentAction.journeyId);
+      if (turn.public.experience?.expiresAt === undefined || turn.public.experience.expiresAt <= this.now()
+        || this.store.latestTurn(conversation.id)?.public.id !== turn.public.id || journey?.threadId !== conversation.id
+        || journey.revision !== agentAction.revision || journey.turnId !== turn.public.id) {
+        throw new ApiError(409, "action_stale", "Open the latest plan to make this change.");
+      }
+      return submit({ action: agentAction, values: values.data, sourceExperienceId: experienceId }, actionOrigin);
+    }
     const existing = this.store.existingRequest(conversation.id, requestId, signed.userMessage, origin);
     if (existing) return this.accepted(existing);
     const latest = this.store.latestTurn(conversation.id);
@@ -110,8 +138,7 @@ export class ExperienceService {
       || turn.decision?.routeDecisionId !== turn.route?.routeDecisionId) {
       throw new ApiError(409, "action_stale", "Ask again to get an updated response.");
     }
-    const workflow = signed.workflow && { recommendation: signed.workflow, sourceExperienceId: experienceId };
-    return this.submit(conversation, signed.userMessage, requestId, origin, undefined, workflow);
+    return submit();
   }
 
   cancel(turn: TurnRecord) {
@@ -157,7 +184,8 @@ export class ExperienceService {
   private async execute(id: string, recovering: boolean) {
     const initial = this.store.turn(id);
     if (this.closing || initial?.public.status !== "working") return;
-    const deadline = initial.public.createdAt + TURN_DEADLINE;
+    const goalTurn = this.runtime?.experiences.shouldHandle(initial) && !initial.workflow;
+    const deadline = initial.public.createdAt + (goalTurn ? this.runtime!.goalBudget.activeSeconds * 1_000 : TURN_DEADLINE);
     const remains = deadline - this.now();
     if (remains <= 0) {
       this.store.finish(id, { type: "failed", code: recovering ? "restarted" : "turn_timeout" }, this.now());
@@ -174,7 +202,7 @@ export class ExperienceService {
     this.controllers.set(id, controller);
     const timer = setTimeout(() => controller.abort(new TurnFailure("turn_timeout")), remains);
     timer.unref();
-    let stage: "catalog" | "route" | "glossary" | "ts" | "portfolio" | "goal" | "compose" | "workflow" = "catalog";
+    let stage: "catalog" | "route" | "glossary" | "ts" | "portfolio" | "goal" | "compose" | "workflow" | "experience" = "catalog";
     let emptyEligibility = false;
     const current = () => {
       signal.throwIfAborted();
@@ -189,6 +217,20 @@ export class ExperienceService {
       this.store.finish(id, { type: "completed", result }, this.now());
     };
     try {
+      runtime.experiences.execution.world.rememberPreference(initial);
+      if (goalTurn) {
+        stage = "experience";
+        this.store.progress(id, "planning", this.now());
+        const conversation = this.store.conversation(initial.scope.conversationId, initial.scope.principalId);
+        const recent = await this.history.recent(conversation, initial.ordinal);
+        const result = await runtime.experiences.respond(current(), principalFor(initial.scope.principalId), recent, signal);
+        if (result) {
+          this.store.update(id, (row) => { row.trace.components = result.display.blocks.map(({ component }) => component); });
+          this.store.finish(id, { type: "completed", result }, this.now());
+          return;
+        }
+        stage = "catalog";
+      }
       if (initial.workflow) {
         stage = "workflow";
         if (await this.runFundingPreview(runtime, current(), initial.workflow, signal)) return;
@@ -223,18 +265,21 @@ export class ExperienceService {
         this.store.update(id, (row) => { row.trace.routeRun = traceFor(result); });
         completed(result, "route");
         const modelProposal = verifyContextProposal(result.output, catalog, turn.scope, this.now(), this.canCreateRule);
-        const useSummaryReference = summaryFollowUp && modelProposal.intentId !== summaryFollowUp.intentId;
-        const proposal = useSummaryReference ? {
+        const literalComparison = explicitBalanceComparison(turn.public.message, intentCatalog);
+        const established = summaryFollowUp ?? literalComparison;
+        const applyEstablished = established && modelProposal.intentId !== established.intentId;
+        const proposal = applyEstablished ? {
           status: "selected" as const,
-          intentId: summaryFollowUp.intentId,
-          contextId: summaryFollowUp.contextId,
-          intent: { topic: summaryFollowUp.label, task: summaryFollowUp.task, summary: "Show the summary of the established conversation topic." },
+          intentId: established.intentId,
+          contextId: established.contextId,
+          intent: { topic: established.label, task: established.task,
+            summary: summaryFollowUp ? "Show the summary of the established conversation topic." : "Compare the requested balance definitions." },
         } : modelProposal;
         this.store.update(id, (row) => {
           row.trace.routeOutcome = proposal.status;
           row.trace.intentId = proposal.intentId;
           if (proposal.status === "clarify") row.trace.possibleIntentId = proposal.possibleIntentId;
-          if (useSummaryReference) row.trace.markers.summaryReferenceApplied = this.now();
+          if (applyEstablished) row.trace.markers[summaryFollowUp ? "summaryReferenceApplied" : "comparisonReferenceApplied"] = this.now();
           row.trace.markers.routeValidated = this.now();
         });
         if (proposal.status === "create_rule") {
@@ -304,9 +349,10 @@ export class ExperienceService {
           ? recommendations.flatMap((item) => item.kind === "content" ? [item.id] : [])
           : result.output);
         const { candidates: resolved, rejections } = resolveCandidates(ids);
+        const noPromotions = runtime.experiences.execution.world.exclusions(turn);
         const candidates = resolved.filter((candidate) => {
           const content = lookupContent(candidate);
-          return Boolean(content?.portfolioData) === showPortfolio
+          return (!noPromotions || content?.kind !== "promotion") && Boolean(content?.portfolioData) === showPortfolio
             && Boolean(content?.allowedComponents.includes("PznGoalProgress")) === showGoal
             && (!content?.metricSpec || showBalance);
         });
@@ -363,7 +409,7 @@ export class ExperienceService {
         this.store.finish(id, { type: "completed", result }, this.now());
         return;
       }
-      if (emptyEligibility && turn.trace.ts?.baseline.length) throw new TurnFailure("content_unavailable");
+      if (emptyEligibility && turn.trace.ts?.baseline.length && !runtime.experiences.execution.world.exclusions(turn)) throw new TurnFailure("content_unavailable");
       if (showGoal && !emptyEligibility && !turn.goalProgress) {
         stage = "goal";
         this.store.progress(id, "goal", this.now());
@@ -434,10 +480,18 @@ export class ExperienceService {
         : stage === "portfolio" ? "portfolio_unavailable"
         : stage === "goal" ? "goal_unavailable"
         : stage === "workflow" ? "workflow_unavailable"
+        : stage === "experience" ? "experience_unavailable"
         : error instanceof Rejected ? (stage === "route" ? "route_rejected" : "verification_failed")
         : "internal_error";
       this.store.update(id, (row) => { row.trace.failures.push({ stage, code: error instanceof Rejected ? error.code : mapped }); });
       const now = this.now();
+      if (stage === "experience" && mapped === "turn_timeout") {
+        const partial = runtime.experiences.partial(this.store.turn(id)!);
+        if (partial) {
+          this.store.finish(id, { type: "completed", result: partial }, now);
+          return;
+        }
+      }
       if (emptyEligibility && stage === "compose" && !signal.aborted && now < deadline) {
         const result = compileChatReply(demo.introCopy.no_match, "eligible_empty", now);
         this.store.finish(id, { type: "completed", result }, now);

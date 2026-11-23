@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startApp } from "./http";
+import { agenticBudgetFromEnv } from "./agentic-budget";
 import { gatewayFromEnv } from "./gateway";
 
 const projectRoot = fileURLToPath(new URL("../../", import.meta.url));
@@ -14,7 +15,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("PZN_PO
 const defaultDataDir = profile === "openai" ? ".pzn-data/openai" : profile === "copilot_acp" ? ".pzn-data/copilot" : ".pzn-data";
 const app = await startApp({
   projectRoot, dataDir: resolve(projectRoot, process.env.PZN_DATA_DIR ?? defaultDataDir), gateway,
-  selectionMode: mode, port, dev: process.argv.includes("--dev"), inspectorEnabled: process.env.PZN_INSPECTOR !== "off",
+  selectionMode: mode, port, goalBudget: agenticBudgetFromEnv(process.env.PZN_AXE_BUDGET_JSON), dev: process.argv.includes("--dev"), inspectorEnabled: process.env.PZN_INSPECTOR !== "off",
 });
 console.log("Financial planning demo  " + app.url);
 if (gateway?.profile === "openai") console.log("OpenAI API model " + gateway.model);

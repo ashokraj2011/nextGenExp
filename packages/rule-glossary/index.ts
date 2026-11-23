@@ -1,7 +1,7 @@
 import host from "../../fixtures/host.json";
 import { glossaryAllowsCondition, ruleGlossarySchema, type GlossaryAttribute, type GlossaryCondition } from "../contracts/rule-glossary";
 
-type RuleInput = { personaId: string; ordinal: number; portfolioCashCents?: number };
+type RuleInput = { personaId: string; ordinal: number; portfolioCashCents?: number; fundingStatus?: "funded" | "unfunded" };
 type AttributeDefinition = GlossaryAttribute & { read: (input: RuleInput) => GlossaryCondition["value"] | undefined };
 
 const namespaces = [
@@ -34,7 +34,7 @@ const namespaces = [
         id: "funding_status", label: "Funding status", description: "Whether the demo account has received its first deposit.",
         valueType: "enum", operators: ["eq", "ne"], minimum: null,
         options: [{ value: "unfunded", label: "Unfunded" }, { value: "funded", label: "Funded" }],
-        read: ({ personaId }) => host.personas.find((persona) => persona.personaId === personaId)?.accountFundingStatus,
+        read: ({ personaId, fundingStatus }) => fundingStatus ?? host.personas.find((persona) => persona.personaId === personaId)?.accountFundingStatus,
       },
     ],
   },

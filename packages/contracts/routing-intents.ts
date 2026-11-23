@@ -47,6 +47,13 @@ export type RoutingHistoryEntry = {
   displayedContent?: string[];
 };
 
+export function explicitBalanceComparison(request: string, intents: readonly RoutingIntent[]) {
+  const text = request.toLowerCase();
+  const asksToCompare = /\b(?:compare|difference|versus|vs)\b/.test(text);
+  return asksToCompare && /\bavailable\b/.test(text) && /\bcurrent\b/.test(text) && /\bbalances?\b/.test(text)
+    ? intents.find((intent): intent is Extract<RoutingIntent, { intentId: "compare_balances" }> => intent.intentId === "compare_balances") : undefined;
+}
+
 export function isSubjectlessSummaryRequest(request: string) {
   const text = request.toLowerCase().trim().replace(/\s+/g, " ").replace(/[.!?]+$/, "")
     .replace(/^(?:please,? |(?:can|could|would) (?:you|i) )/, "").replace(/,? please$/, "");

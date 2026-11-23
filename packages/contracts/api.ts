@@ -1,8 +1,9 @@
 import type { SelectionMode } from "./domain";
 import type { DisplayExperience } from "./surface";
 
-export type Progress = "accepted" | "catalog" | "routing" | "glossary" | "eligibility" | "portfolio" | "goal" | "composition" | "verifying" | "workflow";
+export type Progress = "accepted" | "catalog" | "routing" | "glossary" | "eligibility" | "portfolio" | "goal" | "composition" | "verifying" | "workflow" | "planning";
 export const progressLabels: Record<Progress, string> = {
+  planning: "Putting your request together",
   accepted: "Getting your request ready",
   catalog: "Checking available topics",
   routing: "Finding the right topic",
@@ -15,6 +16,7 @@ export const progressLabels: Record<Progress, string> = {
   workflow: "Preparing your funding preview",
 };
 export const failureCopy = {
+  experience_unavailable: "I couldn’t finish this plan. Try again to refresh it.",
   catalog_unavailable: "We couldn’t load the available topics. Please try again.",
   route_rejected: "We couldn’t confirm the topic for this request. Please try again.",
   glossary_unavailable: "We couldn’t load the rule fields. Check CCRE glossary in Tool setup and try again.",

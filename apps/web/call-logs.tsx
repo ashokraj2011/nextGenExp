@@ -125,8 +125,14 @@ function TurnPayloadLog({ turn }: { turn: TurnView }) {
       <button className="secondary-button" type="button" onClick={() => setReload((attempt) => attempt + 1)}>Retry loading logs</button>
     </div>}
     {payloads ? <>
+      {payloads.agentic && <details className="trace-details payload-stage" open>
+        <summary>Experience Agent and tools</summary>
+        <p>Run <code>{payloads.agentic.runId}</code></p>
+        {payloads.agentic.model && <ModelStage title="Experience Agent model" stage={payloads.agentic.model} />}
+        {payloads.agentic.calls.map((call, i) => <ReadToolStage key={call.tool + ":" + i} title={call.tool} stage={call} />)}
+      </details>}
       {payloads.workflow && <WorkflowStage workflow={payloads.workflow} />}
-      {(!payloads.workflow || payloads.topicScores || payloads.router) && <>
+      {((!payloads.workflow && !payloads.agentic) || payloads.topicScores || payloads.router) && <>
         {payloads.topicScores && <TreatmentStage stage={payloads.topicScores} scoring />}
         <ModelStage title="Context Router" stage={payloads.router} />
         {payloads.glossary && <ReadToolStage title="CCRE glossary" payloadLabel="Glossary" stage={payloads.glossary} />}

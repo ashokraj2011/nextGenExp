@@ -1,0 +1,45 @@
+.axe-dashboard {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 12px;
+}
+.axe-dashboard > :not(.surface-child), .axe-dashboard > .surface-child:has(.axe-chart), .axe-dashboard > .surface-child:has(.axe-form) {
+  grid-column: 1 / -1;
+}
+.axe-chart figure { margin: .75rem 0; }
+.axe-chart svg { display: block; max-height: 14rem; width: 100%; background: #f5f9f3; border: 1px solid #dce7db; border-radius: 10px; }
+.axe-chart figcaption { display: flex; justify-content: space-between; font-size: .875rem; color: #50635a; padding-top: .4rem; }
+.axe-amount { font-size: clamp(1.35rem, 2.5vw, 1.9rem); font-weight: 700; margin: .5rem 0; }
+.axe-amount small { font-size: .875rem; font-weight: 500; }
+.axe-facts { display: grid; gap: .55rem; padding: 0; margin: .8rem 0; }
+.axe-facts > div { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.axe-facts dd { margin: 0; font-weight: 600; text-align: right; }
+.axe-form fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.axe-fields { display: grid; gap: .9rem; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); }
+.axe-field { display: grid; gap: .4rem; align-content: start; }
+.axe-field label { font-weight: 600; font-size: .9rem; }
+.axe-field :is(input, select) { box-sizing: border-box; width: 100%; min-width: 0; color: inherit; font: inherit; }
+.axe-field :is(input:not([type="range"]), select), .axe-studio textarea {
+  border: 1px solid #aebeb3;
+  border-radius: 8px;
+  padding: .6rem .7rem;
+  background: white;
+}
+.axe-field input[type="range"] { accent-color: #286447; }
+.axe-field output { font-weight: 650; color: #286447; }
+.axe-form-actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: .9rem; }
+.axe-studio { margin-top: 1.25rem; }
+.axe-studio textarea { display: block; width: 100%; min-height: 16rem; box-sizing: border-box; font-family: ui-monospace, monospace; }
+.axe-studio .axe-fields { margin: .7rem 0; }
+.axe-trace pre { overflow: auto; max-height: 20rem; font-size: .78rem; white-space: pre; }
+.axe-trace ol { padding-left: 1.4rem; }
+@media (max-width: 680px) { .axe-dashboard { grid-template-columns: minmax(0, 1fr); } }
+.axe-studio-controls { border: 0; padding: 0; margin: 0; min-width: 0; }
+.axe-studio-controls details { margin: 1rem 0; }
+.axe-studio-controls .axe-field + .axe-field { margin-top: 0; }
+.axe-evaluation { margin-top: 1.25rem; }
+.axe-evaluation-table { overflow-x: auto; margin: .75rem 0; }
+.axe-evaluation table { border-collapse: collapse; width: 100%; font-size: .86rem; white-space: nowrap; }
+.axe-evaluation th, .axe-evaluation td { border-bottom: 1px solid #dce6dc; padding: .55rem; text-align: right; }
+.axe-evaluation th:first-child { text-align: left; }
