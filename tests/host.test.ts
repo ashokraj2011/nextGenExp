@@ -11,6 +11,7 @@ import type { IncomingHttpHeaders } from "node:http";
 import { startApp } from "../apps/server/http";
 import type { Bootstrap, TurnAccepted, TurnView, ConversationView } from "../packages/contracts/api";
 import type { TurnPayloads } from "../packages/contracts/inspector";
+import { fundingPreviewWorkflow, treatmentRecommendationsSchema } from "../packages/contracts/funding-workflow";
 import type { GlossaryCondition } from "../packages/contracts/rule-glossary";
 import { demoExperiencesQuestion, leavingWorkQuestion, portfolioSummaryQuestion, retirementQuestion } from "../packages/contracts/routing-intents";
 import {
@@ -584,7 +585,7 @@ test("portfolio summaries combine the scoped snapshot with the cash treatment on
   assert.equal(missing.turn.experience, undefined);
 });
 
-test("the address guide includes the funding suggestion only when Treatment Selector returns it", async (t) => {
+test("the address guide can launch the funding workflow only when Treatment Selector recommends it", async (t) => {
   const f = await fixture();
   t.after(() => f.close());
   const { client, gateway } = f;
@@ -627,7 +628,13 @@ test("the address guide includes the funding suggestion only when Treatment Sele
     assert.deepEqual(gateway.calls.at(-2)?.envelope.propensity, trace.propensity);
     assert.equal(trace.propensity?.scores.find(({ contextId: id }) => id === contextId)?.score, matched ? 0.78 : null);
     assert.deepEqual(logs.treatment?.mockInput?.data, { mid, context: contextId });
-    assert.deepEqual(logs.treatment?.result?.data, expected);
+    assert.equal(logs.treatment?.tool, "treatments.eligible@2.0.0");
+    const recommendations = treatmentRecommendationsSchema.parse(logs.treatment?.result?.data);
+    assert.deepEqual(recommendations.recommendations, [
+      ...expected.map((id) => ({ kind: "content", id })),
+      ...(matched ? [fundingPreviewWorkflow.recommendation] : []),
+    ]);
+    assert.equal(logs.workflow, null);
     assert.deepEqual(logs.treatment?.ccre?.data, ccre);
     assert.deepEqual(gateway.calls.at(-1)?.envelope.eligible?.candidates.map(({ title }) => title),
       ["Update your mailing address"]);
@@ -636,10 +643,43 @@ test("the address guide includes the funding suggestion only when Treatment Sele
     } satisfies TreatmentPreviewInput);
     assert.deepEqual(preview, { status: "ranked", source: "fixture", contentIds: expected, ccre });
 
-    assert.deepEqual(experience.actions.map(({ label }) => label), matched ? ["See demo transfer steps"] : []);
+    assert.deepEqual(experience.actions.map(({ label }) => label), matched ? ["Preview funding", "See demo transfer steps"] : []);
     if (matched) {
-      const transfer = await client.request<TurnAccepted>("/api/experiences/" + experience.experienceId + "/actions", {
-        clientRequestId: randomUUID(), envelope: actionFor(experience),
+      const path = "/api/experiences/" + experience.experienceId + "/actions";
+      const envelope = actionFor(experience);
+      const modelCalls = gateway.calls.length;
+      assert.equal((await client.response(path, {
+        clientRequestId: randomUUID(),
+        envelope: { ...envelope, action: { ...envelope.action, context: { actionId: "action_forged" } } },
+      })).status, 400);
+      const request = { clientRequestId: randomUUID(), envelope };
+      const funding = await client.request<TurnAccepted>(path, request, 202);
+      const fundedPreview = await client.wait(funding);
+      assert.equal(fundedPreview.turn.status, "completed");
+      assert.equal(fundedPreview.turn.message, "Preview funding");
+      const block = fundedPreview.turn.experience?.blocks[0];
+      assert.equal(block?.component, "PznFundingPreview");
+      assert.equal(block?.props.amountCents, 25_000);
+      assert.equal(gateway.calls.length, modelCalls);
+      const workflowLogs = await client.request<TurnPayloads>("/api/debug/payloads/" + funding.turnId);
+      assert.deepEqual(workflowLogs.workflow?.recommendation, fundingPreviewWorkflow.recommendation);
+      assert.equal(workflowLogs.treatment, null);
+      const calls = workflowLogs.workflow?.calls ?? [];
+      assert.deepEqual(calls.map(({ tool, status }) => [tool, status]), [
+        ["funding.options.read@1.0.0", "succeeded"], ["funding.preview.build@1.0.0", "succeeded"],
+      ]);
+      assert.deepEqual(calls[0].registryInput.data, { turnRef: funding.turnId });
+      assert.deepEqual(calls[1].registryInput.data, { turnRef: funding.turnId, methodId: "bank_transfer" });
+      assert.deepEqual(calls[1].result?.data, {
+        status: "preview", amountCents: 25_000, currency: "USD",
+        method: { methodId: "bank_transfer", label: "Bank transfer", from: "Sample linked bank", to: "Demo investment account" },
+      });
+      assert.equal((await client.request<TurnAccepted>(path, request, 202)).turnId, funding.turnId);
+      assert.equal((await client.response(path, { ...request, clientRequestId: randomUUID() })).status, 409);
+
+      const fresh = (await client.ask(chat.id, prompt)).turn.experience!;
+      const transfer = await client.request<TurnAccepted>("/api/experiences/" + fresh.experienceId + "/actions", {
+        clientRequestId: randomUUID(), envelope: actionFor(fresh, 1),
       }, 202);
       const next = await client.wait(transfer);
       assert.equal(next.trace.intentId, "guide_transfer");

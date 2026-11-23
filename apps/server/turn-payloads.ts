@@ -1,6 +1,7 @@
 import type { CallRecord, JsonValue, ModelAttemptRecord, RunRecord, SField } from "@sfield/core";
 import host from "../../fixtures/host.json";
-import type { ModelStagePayloads, RegistryToolPayloads, TreatmentPayloads, TurnPayloads } from "../../packages/contracts/inspector";
+import type { WorkflowPayloads, ModelStagePayloads, RegistryToolPayloads, TreatmentPayloads, TurnPayloads } from "../../packages/contracts/inspector";
+import { treatmentRecommendationsVersion } from "../../packages/contracts/funding-workflow";
 import { sfieldTools, toolVersion } from "../../packages/contracts/tool-setup";
 import type { configureGateway } from "./gateway";
 import { assistantResponse } from "./payload-capture";
@@ -107,9 +108,9 @@ async function topicScoresPayloads(sf: SField, inspection: Inspection, turn: Tur
 
 async function treatmentPayloads(sf: SField, inspection: Inspection, turn: TurnRecord, conversation: ConversationRecord): Promise<TreatmentPayloads | null> {
   if (!turn.tsScopeId || !turn.route) return null;
-  const tool = `${sfieldTools.selection.id}@${toolVersion}`;
+  const tools = [toolVersion, treatmentRecommendationsVersion].map((version) => `${sfieldTools.selection.id}@${version}`);
   const call = (await sf.persistence.listCalls(turn.tsScopeId)).find((entry) => (
-    entry.toolRef === tool && entry.proposedArguments.turnRef === turn.public.id
+    tools.includes(entry.toolRef) && entry.proposedArguments.turnRef === turn.public.id
     && entry.proposedArguments.routeDecisionId === turn.route?.routeDecisionId
   ));
   if (!call) return null;
@@ -125,8 +126,19 @@ async function treatmentPayloads(sf: SField, inspection: Inspection, turn: TurnR
   };
 }
 
+async function workflowPayloads(sf: SField, inspection: Inspection, turn: TurnRecord): Promise<WorkflowPayloads | null> {
+  if (!turn.workflow) return null;
+  const recorded = turn.workflowScopeId ? await sf.persistence.listCalls(turn.workflowScopeId) : [];
+  const calls = (["fundingOptions", "fundingPreview"] as const).flatMap((key) => {
+    const { id, label } = sfieldTools[key];
+    const call = recorded.find((entry) => entry.toolRef === `${id}@${toolVersion}` && entry.proposedArguments.turnRef === turn.public.id);
+    return call ? [{ ...registryPayload(inspection, call), label }] : [];
+  });
+  return { recommendation: turn.workflow.recommendation, calls };
+}
+
 export async function readTurnPayloads(sf: SField, store: Store, inspection: Inspection, turn: TurnRecord, conversation: ConversationRecord): Promise<TurnPayloads> {
-  const [topicScores, router, glossary, treatment, portfolio, goal, composer] = await Promise.all([
+  const [topicScores, router, glossary, treatment, portfolio, goal, composer, workflow] = await Promise.all([
     topicScoresPayloads(sf, inspection, turn),
     modelPayloads(sf, store, inspection, turn, "route"),
     glossaryPayloads(sf, inspection, turn),
@@ -134,6 +146,7 @@ export async function readTurnPayloads(sf: SField, store: Store, inspection: Ins
     routeReadPayloads(sf, inspection, turn, turn.portfolioScopeId, "portfolio"),
     routeReadPayloads(sf, inspection, turn, turn.goalScopeId, "goal"),
     modelPayloads(sf, store, inspection, turn, "compose"),
+    workflowPayloads(sf, inspection, turn),
   ]);
-  return { turnId: turn.public.id, topicScores, router, glossary, treatment, portfolio, goal, composer };
+  return { turnId: turn.public.id, topicScores, router, glossary, treatment, portfolio, goal, composer, workflow };
 }

@@ -3,10 +3,12 @@ import type { ConfigDocument, DefineToolInput, JsonObject, Principal, RunRecord,
 import { SqlitePersistence } from "@sfield/store-sqlite";
 import host from "../../fixtures/host.json";
 import { MAX_MESSAGE_LENGTH, metricReadingSchema, TURN_DEADLINE, type BalanceProof } from "../../packages/contracts/domain";
+import { fundingOptionsSchema, isFundingPreviewWorkflow, treatmentRecommendationsVersion } from "../../packages/contracts/funding-workflow";
 import { goalProgressSchema, isHomeGoalSummary } from "../../packages/contracts/goal-progress";
 import {
   balanceInputSchema, balanceResultSchema, compositionOutputSchema, contextResultSchema, portfolioInputSchema, portfolioResultSchema,
   glossaryInputSchema, glossaryResultSchema, goalProgressInputSchema, goalProgressResultSchema,
+  fundingOptionsResultSchema, fundingPreviewInputSchema, fundingPreviewResultSchema, treatmentRecommendationsResultSchema,
   propensityInputSchema, propensityResultSchema, routingOutputSchema,
   treatmentInputSchema, treatmentResultSchema, turnInputSchema,
 } from "../../packages/contracts/model";
@@ -31,10 +33,13 @@ const toolRefs = {
   catalog: `${sfieldTools.catalog.id}@${toolVersion}`,
   propensity: `${sfieldTools.propensity.id}@${toolVersion}`,
   selection: `${sfieldTools.selection.id}@${toolVersion}`,
+  recommendations: `${sfieldTools.selection.id}@${treatmentRecommendationsVersion}`,
   balances: `${sfieldTools.balances.id}@${toolVersion}`,
   glossary: `${sfieldTools.glossary.id}@${toolVersion}`,
   portfolio: `${sfieldTools.portfolio.id}@${toolVersion}`,
   goal: `${sfieldTools.goal.id}@${toolVersion}`,
+  fundingOptions: `${sfieldTools.fundingOptions.id}@${toolVersion}`,
+  fundingPreview: `${sfieldTools.fundingPreview.id}@${toolVersion}`,
 } as const;
 const registryPurposes = {
   catalogScopeId: "pzn-context-discovery",
@@ -42,10 +47,11 @@ const registryPurposes = {
   glossaryScopeId: "pzn-ccre-glossary",
   portfolioScopeId: "pzn-portfolio-snapshot",
   goalScopeId: "pzn-goal-progress",
+  workflowScopeId: "pzn-funding-preview",
 } as const;
 const registryBoundaries = {
   catalog: "catalogScopeId", propensity: "catalogScopeId", selection: "tsScopeId", glossary: "glossaryScopeId", portfolio: "portfolioScopeId",
-  goal: "goalScopeId",
+  goal: "goalScopeId", fundingOptions: "workflowScopeId", fundingPreview: "workflowScopeId",
 } as const;
 export function principalFor(id: string): Principal {
   return { tenantId: "pzn-local", subjectId: id, roles: ["pzn-demo", "pzn-developer"], attributes: {} };
@@ -199,6 +205,9 @@ export class Runtime {
     requireCheck(conversation.personaId === turn.scope.personaId, "PERSONA_MISMATCH");
     const persona = host.personas.find((entry) => entry.personaId === conversation.personaId);
     requireCheck(persona && persona.allowedScenarios.includes(conversation.scenarioId), "PERSONA_MISMATCH");
+    if (boundary === "workflowScopeId") {
+      requireCheck(turn.workflow && isFundingPreviewWorkflow(turn.workflow.recommendation), "FUNDING_WORKFLOW_REQUIRED");
+    }
     requireToolEnabled(turn, key);
     return { turn, conversation, persona };
   }
@@ -210,11 +219,36 @@ export class Runtime {
     );
   }
 
+  private async selectTreatment({ turnRef, routeDecisionId }: JsonObject, ctx: ToolHandlerContext) {
+    const { turn, conversation, persona } = this.scopedRegistryTurn(turnRef, ctx, "selection");
+    requireCheck(turn.route?.routeDecisionId === routeDecisionId && turn.route && turn.catalog && turn.attempts.route, "ROUTE_REQUIRED");
+    verifyRoute(turn.route, turn.catalog, turn.scope, turn.attempts.route.runId, this.now());
+    const input = { mid: persona.syntheticMid, context: turn.route.contextId };
+    let ccre: MockCcreEvaluation | undefined;
+    try {
+      const result = await this.treatmentAdapter(turn, conversation).selectEligibleContent(input, ctx.signal);
+      if (isPortfolioSummary(turn.route)) {
+        requireCheck(this.store.update(turn.public.id, (row) => { row.portfolioForRule = result.portfolio ?? undefined; }), "TURN_INACTIVE");
+      }
+      ccre = result.ccre;
+      return result;
+    } finally {
+      if (this.inspection) {
+        try {
+          this.store.update(turn.public.id, (row) => {
+            row.treatmentMockInput = input;
+            row.treatmentCcre = ccre;
+          });
+        } catch { /* Diagnostic storage cannot change the tool result. */ }
+      }
+    }
+  }
+
   private tools() {
-    const read = (key: ToolKey, definition: Omit<DefineToolInput, "id" | "description" | "version" | "policy">) => {
+    const read = (key: ToolKey, definition: Omit<DefineToolInput, "id" | "description" | "version" | "policy">, version: string = toolVersion) => {
       const { id, description } = sfieldTools[key];
       return defineTool({
-        ...definition, id, description, version: toolVersion,
+        ...definition, id, description, version,
         policy: {
           action: id, effect: "read", requiresApproval: false, maxAttempts: 1, timeoutMs: 5_000,
           classification: "public", maxOutputBytes: 48_000,
@@ -249,30 +283,35 @@ export class Runtime {
       }),
       read("selection", {
         inputs: treatmentInputSchema, outputs: treatmentResultSchema,
-        handler: async ({ turnRef, routeDecisionId }, ctx) => {
-          const { turn, conversation, persona } = this.scopedRegistryTurn(turnRef, ctx, "selection");
-          requireCheck(turn.route?.routeDecisionId === routeDecisionId && turn.route && turn.catalog && turn.attempts.route, "ROUTE_REQUIRED");
-          verifyRoute(turn.route, turn.catalog, turn.scope, turn.attempts.route.runId, this.now());
-          const input = { mid: persona.syntheticMid, context: turn.route.contextId };
-          let ccre: MockCcreEvaluation | undefined;
-          try {
-            const result = await this.treatmentAdapter(turn, conversation).selectEligibleContent(input, ctx.signal);
-            const { portfolio } = result;
-            if (isPortfolioSummary(turn.route)) {
-              requireCheck(this.store.update(turn.public.id, (row) => { row.portfolioForRule = portfolio ?? undefined; }), "TURN_INACTIVE");
-            }
-            ccre = result.ccre;
-            return result.contentIds;
-          } finally {
-            if (this.inspection) {
-              try {
-                this.store.update(turn.public.id, (row) => {
-                  row.treatmentMockInput = input;
-                  row.treatmentCcre = ccre;
-                });
-              } catch { /* Diagnostic storage cannot change the tool result. */ }
-            }
-          }
+        handler: async (input, ctx) => (await this.selectTreatment(input, ctx)).contentIds,
+      }),
+      read("selection", {
+        inputs: treatmentInputSchema, outputs: treatmentRecommendationsResultSchema,
+        handler: async (input, ctx) => (await this.selectTreatment(input, ctx)).recommendations,
+      }, treatmentRecommendationsVersion),
+      read("fundingOptions", {
+        inputs: turnInputSchema, outputs: fundingOptionsResultSchema,
+        handler: ({ turnRef }, ctx) => {
+          this.scopedRegistryTurn(turnRef, ctx, "fundingOptions");
+          return {
+            methods: [{ methodId: "bank_transfer", label: "Bank transfer", from: "Sample linked bank", to: "Demo investment account" }],
+            amountCents: 25_000, currency: "USD",
+          };
+        },
+      }),
+      read("fundingPreview", {
+        inputs: fundingPreviewInputSchema, outputs: fundingPreviewResultSchema,
+        handler: async ({ turnRef, methodId }, ctx) => {
+          this.scopedRegistryTurn(turnRef, ctx, "fundingPreview");
+          const read = (await this.sf.persistence.listCalls(ctx.runId)).find((call) => (
+            call.toolRef === toolRefs.fundingOptions && call.proposedArguments.turnRef === turnRef && call.result?.status === "succeeded"
+          ));
+          requireCheck(read, "FUNDING_OPTIONS_REQUIRED");
+          const options = fundingOptionsSchema.parse(read.result?.output);
+          const method = options.methods.find((item) => item.methodId === methodId);
+          requireCheck(method, "FUNDING_METHOD_NOT_AVAILABLE");
+          ctx.signal.throwIfAborted();
+          return { status: "preview", method, amountCents: options.amountCents, currency: options.currency };
         },
       }),
       read("portfolio", {

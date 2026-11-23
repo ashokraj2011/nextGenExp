@@ -7,6 +7,7 @@ import treatmentFixture from "../../fixtures/treatment-scenarios.json";
 import host from "../../fixtures/host.json";
 import marcusCalls from "../../fixtures/marcus-sfield-exchanges.json";
 import type { ContextSelectionProposal, ExperienceProposal, Intent, ProposalBlock } from "../../packages/contracts/domain";
+import { fundingPreviewWorkflow } from "../../packages/contracts/funding-workflow";
 import { portfolioSummaryQuestion, type RoutingIntentId } from "../../packages/contracts/routing-intents";
 import { mockRuleGlossary } from "../../packages/rule-glossary";
 
@@ -92,13 +93,13 @@ function router(description: string, value: object, proposal: ContextSelectionPr
   };
 }
 
-function treatment(context: string, contentIds: string[], description: string, memberId = mid): FlowStep {
+function treatment(context: string, response: string[] | typeof marcusCalls.treatment.response.output, description: string, memberId = mid): FlowStep {
   return {
-    id: "treatment", title: "Treatment Selector", role: "Finds matching content", description,
+    id: "treatment", title: "Treatment Selector", role: "Finds eligible treatments", description,
     input: { label: "Tool request and what Treatment Selector receives", value: {
       registryInput: { turnRef, routeDecisionId }, adapterInput: { mid: memberId, context },
     } },
-    output: { label: "Matching content IDs in order", value: contentIds },
+    output: { label: Array.isArray(response) ? "Matching content IDs in order" : "Content and workflow recommendations", value: response },
     contracts: ["treatment", "rules", "domain"],
   };
 }
@@ -155,10 +156,12 @@ balanceComposer.tool = {
 balanceComposer.contracts = [...balanceComposer.contracts, "balance"];
 
 const addressContext = "address-update";
-const addressContentIds = marcusCalls.treatment.response.output;
+const addressTreatments = marcusCalls.treatment.response.output;
+const addressContentIds = addressTreatments.recommendations.filter(({ kind }) => kind === "content").map(({ id }) => id);
 const addressCandidateId = "candidate_address";
 const addressExperienceId = "exp_demo";
-const addressFollowUp = { actionId: "action_demo", componentId: "follow_up_1", label: "See demo transfer steps" };
+const addressFollowUp = { actionId: "action_demo_funding", componentId: "follow_up_1", label: fundingPreviewWorkflow.label };
+const addressActions = [addressFollowUp, { actionId: "action_demo_transfer", componentId: "follow_up_2", label: "See demo transfer steps" }];
 const addressBlocks = [
   { component: "PznStepList", props: { title: "Update your mailing address" } },
   { component: "PznContentCard", props: { title: "Fund your account", recommendation: true } },
@@ -174,8 +177,8 @@ const addressSteps = {
     contracts: ["router", "gateway"],
   },
   treatment: treatment(
-    addressContext, addressContentIds,
-    "Treatment Selector gets Marcus’s demo member ID and the topic. His account is waiting for a first deposit, so the rule adds fund_account to the address guide.",
+    addressContext, addressTreatments,
+    "Treatment Selector gets Marcus’s demo member ID and the topic. The unfunded-account rule makes the funding card eligible, which also qualifies Marcus for the funding preview workflow.",
     newAccount.syntheticMid,
   ),
   composer: {
@@ -186,15 +189,18 @@ const addressSteps = {
     contracts: ["composer", "domain"],
   },
   render: render(
-    "Chat shows the address guide and the funding card. The button opens the transfer walkthrough.",
-    { label: "Verified inputs · excerpt", value: { selectedCandidateId: addressCandidateId, eligibleFundingCard: "fund_account" } },
-    { label: "DisplayExperience · excerpt", value: { status: "ready", blocks: addressBlocks, actions: [addressFollowUp] } },
+    "Chat shows the address guide, the funding card, and the Preview funding button.",
+    { label: "Verified inputs · excerpt", value: {
+      selectedCandidateId: addressCandidateId, eligibleFundingCard: "fund_account", workflow: fundingPreviewWorkflow.recommendation,
+    } },
+    { label: "DisplayExperience · excerpt", value: { status: "ready", blocks: addressBlocks, actions: addressActions } },
   ),
 } satisfies Record<string, FlowStep>;
 
 export const addressUpdateExample = {
   persona: newAccount.displayName,
   prompt: addressPrompt,
+  treatmentResponse: addressTreatments,
   handoffs: {
     discovery: {
       description: "Before the first model call, the app uses sfield to ask Treatment Selector for the supported topics and then for Marcus’s scores. It saves both for his turn.",
@@ -221,7 +227,7 @@ export const addressUpdateExample = {
     treatment: {
       calls: [{
         title: "Treatment Selector",
-        description: "The app sends the turn ID and checked route ID. The tool uses those IDs to look up Marcus’s demo member ID and the Address update topic, then returns the content IDs from Treatment Selector.",
+        description: "The app sends the turn ID and checked route ID. The tool looks up Marcus’s demo member ID and the Address update topic, then returns the content and workflow recommendations from Treatment Selector.",
         exchange: marcusCalls.treatment,
       }],
     },
@@ -251,7 +257,7 @@ export const addressUpdateExample = {
     },
     composer: addressSteps.composer,
     surface: {
-      description: "The app tells chat the answer is ready. It sends the address steps, the funding card, and the transfer button.",
+      description: "The app tells chat the answer is ready. It sends the address steps, the funding card, and the available follow-up buttons.",
       input: { label: "Listen for chat updates", value: { method: "GET", path: "/api/turns/" + turnRef + "/events", headers: { Accept: "text/event-stream" } } },
       output: { label: "experience.ready · event excerpt", value: {
         type: "experience.ready",
@@ -264,9 +270,13 @@ export const addressUpdateExample = {
               surfaceId: addressExperienceId, catalogId: "https://pzn.example.invalid/catalogs/v1.0/experience",
               dataModel: { intro: host.introCopy.steps },
               components: [
-                { id: "root", component: "PznExperience", intro: { "@path": "/intro" }, children: ["block_1", "block_2", addressFollowUp.componentId], actionCount: 1, question: null, partial: false },
+                {
+                  id: "root", component: "PznExperience", intro: { "@path": "/intro" },
+                  children: ["block_1", "block_2", ...addressActions.map(({ componentId }) => componentId)],
+                  actionCount: addressActions.length, question: null, partial: false,
+                },
                 ...addressBlocks.map(({ component, props }, index) => ({ id: "block_" + (index + 1), component, ...props })),
-                { id: addressFollowUp.componentId, component: "PznFollowUp", actionId: addressFollowUp.actionId, label: addressFollowUp.label },
+                ...addressActions.map(({ componentId, actionId, label }) => ({ id: componentId, component: "PznFollowUp", actionId, label })),
               ],
             },
           }],
@@ -274,7 +284,7 @@ export const addressUpdateExample = {
       } },
     },
     followUp: {
-      description: "Marcus clicks See demo transfer steps. The app checks that the button is valid and starts a new request for the transfer checklist.",
+      description: "Marcus clicks Preview funding. The app checks the offer and starts a new chat turn. sfield reads the funding options and builds the preview. Choose Preview funding in Logs to see both calls.",
       input: { label: "POST /api/experiences/" + addressExperienceId + "/actions", value: {
         clientRequestId: "request_demo_follow_up",
         envelope: {
@@ -287,7 +297,7 @@ export const addressUpdateExample = {
       } },
       output: { label: "HTTP 202 · TurnAccepted excerpt", value: {
         turnId: "turn_demo_follow_up", eventsUrl: "/api/turns/turn_demo_follow_up/events",
-        turn: { id: "turn_demo_follow_up", message: "Show the fictional transfer checklist.", status: "working", progress: "accepted" },
+        turn: { id: "turn_demo_follow_up", message: addressFollowUp.label, status: "working", progress: "accepted" },
       } },
     },
   } satisfies Record<string, Pick<FlowStep, "description" | "input" | "output">>,

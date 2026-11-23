@@ -5,6 +5,7 @@ import type { CatalogSnapshot, ContentDecision, PropensityResult, RouteDecision,
 import type { Conversation, FailureCode, Progress, PublicEvent, PublicEventType, TurnView } from "../../packages/contracts/api";
 import type { GatewayExchange } from "../../packages/contracts/inspector";
 import type { GoalProgress } from "../../packages/contracts/goal-progress";
+import type { WorkflowLaunch } from "../../packages/contracts/funding-workflow";
 import type { PortfolioSnapshot } from "../../packages/contracts/portfolio";
 import type { RoutingIntentId } from "../../packages/contracts/routing-intents";
 import { defaultToolSetup, type MockCcreEvaluation, type ToolSetup, type TreatmentSource } from "../../packages/contracts/tool-setup";
@@ -65,6 +66,8 @@ export type TurnRecord = {
   portfolioSnapshot?: PortfolioSnapshot;
   goalScopeId?: string;
   goalProgress?: GoalProgress;
+  workflow?: WorkflowLaunch;
+  workflowScopeId?: string;
   treatmentScores?: { scopeId: string; input: ContextScoresRequest };
   treatmentMockInput?: { mid: string; context: string };
   treatmentCcre?: MockCcreEvaluation;
@@ -221,7 +224,8 @@ export class Store {
   }
 
   accept(input: {
-    conversation: ConversationRecord; requestId: string; origin: string; message: string; selectionMode: SelectionMode; now: number; retry?: TurnRecord;
+    conversation: ConversationRecord; requestId: string; origin: string; message: string; selectionMode: SelectionMode; now: number;
+    retry?: TurnRecord; workflow?: WorkflowLaunch;
   }) {
     let created = false;
     const turn = this.db.tx(() => {
@@ -240,6 +244,7 @@ export class Store {
         scope: { turnId: id, principalId: conversation.principalId, conversationId: conversation.id, personaId: conversation.personaId },
         ordinal: retry?.ordinal ?? (latest?.ordinal ?? 0) + 1,
         requestId, origin, selectionMode, attempts: {},
+        workflow: retry?.workflow ?? input.workflow,
         toolSetup: this.toolSetup(conversation.principalId),
         trace: { surface: "chat", sourcePageContext: null, selectionMode, markers: { accepted: now }, failures: [] },
       };

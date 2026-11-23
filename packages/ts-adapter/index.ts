@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { contextCatalogSchema, type ContextCatalog, type PropensityResult } from "../contracts/domain";
+import { workflowRecommendationSchema, type TreatmentRecommendations } from "../contracts/funding-workflow";
 import { portfolioSnapshotSchema } from "../contracts/portfolio";
 import { mockCcreRuleSchema, normalizedIdsSchema, treatmentOverride, type MockCcreRule, type TreatmentOverride } from "../contracts/tool-setup";
 import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../portfolio-snapshot";
@@ -24,6 +25,9 @@ const catalog = contextCatalogSchema.parse(rawCatalog);
 export const tsFixtures = z.object({
   fixtureVersion: z.string(),
   base: z.record(normalizedIdsSchema),
+  workflowRecommendations: z.array(z.object({
+    contextId: z.string(), requiresContentIds: normalizedIdsSchema, recommendation: workflowRecommendationSchema,
+  }).strict()).max(12),
   defaultCcreRules: z.array(mockCcreRuleSchema.omit({ scenarioId: true })),
   scenarios: z.array(z.object({ scenarioId: z.string(), label: z.string(), rules: z.array(fixtureRule) }).strict()),
 }).strict().parse(rawScenarios);
@@ -123,6 +127,15 @@ export class FixtureTsAdapter implements TsAdapter {
     const result = applyMockCcreRules([...ids], activeRules, {
       ...this.state, contextId: context, personaId: persona.personaId, portfolioCashCents: portfolio?.cashCents,
     });
-    return { ...result, portfolio };
+    const recommendations: TreatmentRecommendations = {
+      schemaVersion: "2.0",
+      recommendations: [
+        ...result.contentIds.map((id) => ({ kind: "content" as const, id })),
+        ...tsFixtures.workflowRecommendations.filter(({ contextId, requiresContentIds }) => (
+          contextId === context && requiresContentIds.every((id) => result.contentIds.includes(id))
+        )).map(({ recommendation }) => recommendation),
+      ],
+    };
+    return { ...result, portfolio, recommendations };
   }
 }

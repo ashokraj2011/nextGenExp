@@ -276,7 +276,10 @@ export async function startApp(options: Options) {
       const conversation = store.conversation(turn.scope.conversationId, principalId);
       if (id === "payloads") {
         const payloads = await runtime?.payloads(turn, conversation);
-        return json(res, payloads ?? { turnId: turn.public.id, router: null, glossary: null, treatment: null, portfolio: null, goal: null, composer: null });
+        return json(res, payloads ?? {
+          turnId: turn.public.id, topicScores: null, router: null, glossary: null, treatment: null,
+          portfolio: null, goal: null, composer: null, workflow: null,
+        });
       }
       return json(res, {
         turnId: turn.public.id, personaId: conversation.personaId, scenarioId: conversation.scenarioId, ordinal: turn.ordinal,

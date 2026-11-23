@@ -2,6 +2,7 @@ import { Catalog, ChildListSchema, CreateSurfaceMessageSchema, DynamicStringSche
 import type { CreateSurfaceMessage } from "@a2ui/web_core/v1_0";
 import { z } from "zod";
 import { comparisonFieldSchema, metricValueSchema, stepSchema } from "./domain";
+import { fundingPreviewSchema } from "./funding-workflow";
 import { goalProgressSchema } from "./goal-progress";
 import { portfolioSnapshotSchema } from "./portfolio";
 import { ruleGlossarySchema } from "./rule-glossary";
@@ -48,9 +49,13 @@ export const ruleCreation = { name: "PznRuleCreation", schema: z.object({
 }).strict() } as const;
 export type RuleCreationProps = z.infer<typeof ruleCreation.schema>;
 export const portfolioSnapshot = { name: "PznPortfolioSnapshot", schema: portfolioSnapshotSchema } as const;
+export const fundingPreview = { name: "PznFundingPreview", schema: fundingPreviewSchema } as const;
 
-export const catalogApis = [experienceRoot, contentCard, comparison, stepList, metricSummary, goalProgressCard, portfolioSnapshot, followUpButton, ruleCreation] as const;
-type BlockApi = typeof contentCard | typeof comparison | typeof stepList | typeof metricSummary | typeof goalProgressCard | typeof portfolioSnapshot;
+export const catalogApis = [
+  experienceRoot, contentCard, comparison, stepList, metricSummary, goalProgressCard, portfolioSnapshot, fundingPreview, followUpButton, ruleCreation,
+] as const;
+type BlockApi = typeof contentCard | typeof comparison | typeof stepList | typeof metricSummary | typeof goalProgressCard
+  | typeof portfolioSnapshot | typeof fundingPreview;
 type ShapeFor<T extends BlockApi> = T extends BlockApi ? { component: T["name"]; props: z.infer<T["schema"]> } : never;
 export type DisplayBlock = ShapeFor<BlockApi> | { component: typeof ruleCreation.name; props: RuleCreationProps };
 export type DisplayAction = { actionId: string; componentId: string; label: string };

@@ -6,9 +6,11 @@ import {
 } from "@a2ui/web_core/v1_0";
 import { ArrowUpRight, BookOpenText, ChartNoAxesColumnIncreasing, ChevronDown, Columns2, FileText, House, ListChecks } from "lucide-react";
 import { makeAssistantDataUI } from "@assistant-ui/react";
+import type { FundingPreview } from "../../packages/contracts/funding-workflow";
+import { formatPortfolioAmount } from "../../packages/contracts/portfolio";
 import {
   PZN_CATALOG_ID, FOLLOW_UP_EVENT, contentCard, comparison, stepList, metricSummary, experienceRoot, followUpButton, ruleCreation, portfolioSnapshot,
-  goalProgressCard, validatePznSurface, type DisplayBlock, type DisplayExperience,
+  fundingPreview, goalProgressCard, validatePznSurface, type DisplayBlock, type DisplayExperience,
 } from "../../packages/contracts/surface";
 import { RuleCreationBlock } from "./rule-creation-block";
 import { PortfolioSnapshotBlock } from "./portfolio-snapshot";
@@ -29,9 +31,22 @@ const blockLabels = {
   PznGoalProgress: "Home-buying goal",
 };
 
+function FundingPreviewBlock({ amountCents, method }: FundingPreview) {
+  return <section className="content-card" aria-label="Funding preview">
+    <h3>Funding preview</h3>
+    <p className="content-body">{formatPortfolioAmount(amountCents)} by {method.label.toLowerCase()}</p>
+    <dl className="compare-grid">
+      <div className="compare-column"><dt>From</dt><dd>{method.from}</dd></div>
+      <div className="compare-column"><dt>To</dt><dd>{method.to}</dd></div>
+    </dl>
+    <div className="content-footer"><p className="disclosure">Sample transfer. The preview ends at review.</p></div>
+  </section>;
+}
+
 function ContentBlock({ block }: { block: DisplayBlock }) {
   if (block.component === ruleCreation.name) return <RuleCreationBlock {...block.props} />;
   if (block.component === portfolioSnapshot.name) return <PortfolioSnapshotBlock {...block.props} />;
+  if (block.component === fundingPreview.name) return <FundingPreviewBlock {...block.props} />;
   const { component, props } = block;
   const Icon = icons[component];
   const recommendation = block.component === "PznContentCard" && block.props.recommendation;
@@ -127,6 +142,7 @@ const pznCatalog = new Catalog<ReactCatalogComponent>(PZN_CATALOG_ID, "1.0", [
   createComponentImplementation(metricSummary, ({ props }) => <ContentBlock block={{ component: metricSummary.name, props }} />),
   createComponentImplementation(goalProgressCard, ({ props }) => <ContentBlock block={{ component: goalProgressCard.name, props }} />),
   createComponentImplementation(portfolioSnapshot, ({ props }) => <PortfolioSnapshotBlock {...props} />),
+  createComponentImplementation(fundingPreview, ({ props }) => <FundingPreviewBlock {...props} />),
   createComponentImplementation(ruleCreation, ({ props }) => <RuleCreationBlock {...props} />),
   createComponentImplementation(followUpButton, ({ props, context }) => {
     const { enabled } = useContext(SurfaceActions);

@@ -49,6 +49,20 @@ export const propensityResultSchema = closed({
   scores: array(closed({ contextId: string, score }), 24),
 });
 export const treatmentResultSchema = array(string, 12);
+export const treatmentRecommendationsResultSchema = closed({
+  schemaVersion: { type: "string", enum: ["2.0"] },
+  recommendations: array({
+    ...closed({ kind: { type: "string", enum: ["content", "workflow"] }, id: string, version: string }),
+    required: ["kind", "id"],
+  }, 24),
+});
+const fundingMethodResult = closed({ methodId: string, label: string, from: string, to: string });
+const fundingAmounts = { amountCents: { type: "integer", minimum: 1 }, currency: { type: "string", enum: ["USD"] } };
+export const fundingOptionsResultSchema = closed({ methods: { ...array(fundingMethodResult, 4), minItems: 1 }, ...fundingAmounts });
+export const fundingPreviewInputSchema = closed({ turnRef: string, methodId: string });
+export const fundingPreviewResultSchema = closed({
+  status: { type: "string", enum: ["preview"] }, method: fundingMethodResult, ...fundingAmounts,
+});
 const cents = { type: "integer", minimum: 0, maximum: 1_000_000_000_000 };
 export const portfolioResultSchema = closed({
   fixtureVersion: string, asOf: string, currency: { type: "string", enum: ["USD"] },

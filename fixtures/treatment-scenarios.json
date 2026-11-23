@@ -1,5 +1,5 @@
 {
-  "fixtureVersion": "pzn-ts-routed-v5",
+  "fixtureVersion": "pzn-ts-routed-v6",
   "base": {
     "balance": ["balance_education", "balance_available_definition", "balance_current_definition", "promotion_general", "balance_metric_template"],
     "portsum": ["portfolio_explanation", "portfolio_cash_investing"],
@@ -8,6 +8,13 @@
     "address-update": ["address_update_guide", "fund_account"],
     "app-home": ["transfer_checklist", "transfer_learning", "promotion_general"]
   },
+  "workflowRecommendations": [
+    {
+      "contextId": "address-update",
+      "requiresContentIds": ["address_update_guide", "fund_account"],
+      "recommendation": { "kind": "workflow", "id": "account.funding.preview", "version": "1.0.0" }
+    }
+  ],
   "defaultCcreRules": [
     {
       "contextId": "portsum",

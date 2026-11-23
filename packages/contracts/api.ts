@@ -1,7 +1,7 @@
 import type { SelectionMode } from "./domain";
 import type { DisplayExperience } from "./surface";
 
-export type Progress = "accepted" | "catalog" | "routing" | "glossary" | "eligibility" | "portfolio" | "goal" | "composition" | "verifying";
+export type Progress = "accepted" | "catalog" | "routing" | "glossary" | "eligibility" | "portfolio" | "goal" | "composition" | "verifying" | "workflow";
 export const progressLabels: Record<Progress, string> = {
   accepted: "Getting your request ready",
   catalog: "Checking available demo topics",
@@ -12,6 +12,7 @@ export const progressLabels: Record<Progress, string> = {
   goal: "Reading your home-buying goal",
   composition: "Preparing your response",
   verifying: "Checking the response",
+  workflow: "Preparing your sample funding preview",
 };
 export const failureCopy = {
   catalog_unavailable: "We couldn’t load the demo topics. Please try again.",
@@ -20,6 +21,7 @@ export const failureCopy = {
   ts_unavailable: "We couldn’t check which content fits this request. Please try again.",
   portfolio_unavailable: "The demo portfolio snapshot is unavailable. Please try again.",
   goal_unavailable: "The demo home-buying goal is unavailable. Please try again.",
+  workflow_unavailable: "The demo funding preview is unavailable. Please try again.",
   content_unavailable: "The matching content is unavailable. Please try again.",
   gateway_unavailable: "We couldn’t reach the model. Please try again.",
   verification_failed: "We couldn’t check the reply. Please try again.",

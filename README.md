@@ -48,7 +48,7 @@ Try **Compare two terms** for the A2UI comparison. **Guide me through a task** o
 
 ### Help and planning overview
 
-Chat opens at `/` and `/chat`. The **PZN Lab** link returns to the homepage. **Help** at `/help` shows the chat sequence and each component’s role, with interactive turn walkthroughs, sample payloads, and downloadable runtime contracts. Its **sfield** section shows who calls each registered tool and how the Portfolio Snapshot provider plugs in. **Proposal** shows how Treatment Selector could recommend registered actions and workflows alongside content.
+Chat opens at `/` and `/chat`. The **PZN Lab** link returns to the homepage. **Help** at `/help` shows the chat sequence and each component’s role, with interactive turn walkthroughs, sample payloads, and downloadable runtime contracts. Its **sfield** section shows who calls each registered tool and how the Portfolio Snapshot provider plugs in. **Proposal** shows the version 2 Treatment Selector response used by the funding workflow demo.
 
 The planning overview is at `/planning`. **Portfolio**, **Retirement**, and **Balances** open chat with a question you can edit before sending. **Compare demo profiles** opens the profile picker in chat.
 
@@ -103,11 +103,13 @@ Use **Tool setup → Treatment Selector test settings → Learning → Run previ
 
 Start a chat as **Marcus Reed**, a new account holder awaiting his first deposit. Choose **Update mailing address** or ask “I moved and need to update my address.” The Context Router selects `update_address`. sfield calls Treatment Selector with Marcus’s synthetic member ID and the `address-update` context. The mock returns `address_update_guide` and evaluates **Account → Funding status → Equals → Unfunded** to determine whether it can also return `fund_account`.
 
-Chat displays the address-change walkthrough followed by **Fund your account**. **See demo transfer steps** opens the existing walkthrough. The same address request as **Jordan Lee** shows the guide alone because he has already funded his account. **Tool setup → Address update → Run preview** compares the rules for both profiles. **Logs → Treatment Selector → Mock CCRE evaluation** shows the result for the current turn. **Help → Address update** shows the input and output at each step.
+When both cards are eligible, Treatment Selector also returns `account.funding.preview@1.0.0`. Chat displays the address guide and **Fund your account**. Click **Preview funding** to start a separate turn. sfield runs **Funding options** and **Build funding preview**, then chat shows a sample $250 bank transfer that ends at review.
+
+Open **Logs → Treatment Selector** on the address turn to see the CCRE evaluation and the workflow recommendation. Select **Preview funding** in **Logs** to inspect both workflow calls. Ask the same address question as **Jordan Lee** to see the guide for an already funded account. **Tool setup → Address update → Run preview** compares the rules for both profiles.
 
 ### Inspect requests and responses
 
-Open **Logs** in the chat header and choose a **Chat message**. The Context Router and Experience Composer show the compiled Chat Completions request body, assembled assistant response, and individual gateway attempts. Treatment Selector shows the sfield tool input, mock input, rule evaluation, and ranked IDs or tool error. Portfolio Snapshot shows its tool request and returned values. In **Inspector**, select a **Chat message** and click **Open call logs** to open the logs for that turn.
+Open **Logs** in the chat header and choose a **Chat message**. The Context Router and Experience Composer show the compiled Chat Completions request body, assembled assistant response, and individual gateway attempts. Treatment Selector shows the sfield tool input, mock input, rule evaluation, and recommendations. Portfolio Snapshot and the funding workflow show their tool requests and results. In **Inspector**, select a **Chat message** and click **Open call logs** to open the logs for that turn.
 
 Capture is local to the inspector and saved in SQLite. Gateway headers are excluded, and configured metadata values and known credentials are redacted. For older turns, the inspector verifies a reconstructed gateway body against the saved digest when possible and can show the saved agent input and responses. Set `PZN_INSPECTOR=off` to disable inspector access and new payload capture.
 

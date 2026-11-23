@@ -1,16 +1,20 @@
 import { randomUUID } from "node:crypto";
 import host from "../../fixtures/host.json";
 import type { BalanceProof, IntroKey } from "../contracts/domain";
+import { fundingPreviewWorkflow, type FundingPreview, type WorkflowRecommendation } from "../contracts/funding-workflow";
 import type { GoalProgress } from "../contracts/goal-progress";
 import { formatPortfolioAmount, type PortfolioSnapshot } from "../contracts/portfolio";
 import type { RuleGlossary } from "../contracts/rule-glossary";
 import {
-  MAX_SURFACE_BYTES, PZN_CATALOG_ID, portfolioSnapshot, ruleCreation, validatePznSurface, type DisplayBlock, type DisplayExperience, type RuleCreationProps,
+  MAX_SURFACE_BYTES, PZN_CATALOG_ID, fundingPreview, portfolioSnapshot, ruleCreation, validatePznSurface,
+  type DisplayBlock, type DisplayExperience, type RuleCreationProps,
 } from "../contracts/surface";
 import type { VerifiedExperience } from "./verify";
 
 export const makeId = (prefix: string) => prefix + "_" + randomUUID().replaceAll("-", "");
-export type IssuedAction = DisplayExperience["actions"][number] & { userMessage: string; followUpId: string };
+export type IssuedAction = DisplayExperience["actions"][number] & {
+  userMessage: string; followUpId: string; workflow?: WorkflowRecommendation;
+};
 export type CompiledExperience = { display: DisplayExperience; issued: IssuedAction[] };
 type ExperienceInput = {
   status: DisplayExperience["status"];
@@ -23,6 +27,7 @@ type ExperienceInput = {
   proof?: BalanceProof | null;
   portfolio?: PortfolioSnapshot;
   goalProgress?: GoalProgress;
+  workflow?: WorkflowRecommendation;
 };
 
 export function compileExperience(input: ExperienceInput): CompiledExperience {
@@ -73,14 +78,25 @@ export function compileExperience(input: ExperienceInput): CompiledExperience {
       }
     }
   });
-  const issued = (input.approved?.followUps ?? []).map((followUp, index) => ({
-    ...followUp, actionId: makeId("action"), componentId: "follow_up_" + (index + 1),
+  const workflow = input.workflow && {
+    followUpId: input.workflow.id, label: fundingPreviewWorkflow.label,
+    userMessage: fundingPreviewWorkflow.label, workflow: input.workflow,
+  };
+  const issued = [...(workflow ? [workflow] : []), ...(input.approved?.followUps ?? [])].slice(0, 3).map((action, index) => ({
+    ...action, actionId: makeId("action"), componentId: "follow_up_" + (index + 1),
   }));
   if (input.portfolio) blocks.unshift({ component: portfolioSnapshot.name, props: input.portfolio });
   return buildSurface({
     status: input.portfolio ? "ready" : input.status, outcome: input.portfolio ? "ready" : input.outcome,
     intro, question: input.portfolio ? null : input.question, partial: input.partial, expiresAt: input.expiresAt,
   }, blocks, issued);
+}
+
+export function compileFundingPreview(preview: FundingPreview, expiresAt: number): CompiledExperience {
+  return buildSurface({
+    status: "ready", outcome: "ready", intro: "Your sample funding preview is ready.",
+    question: null, partial: false, expiresAt,
+  }, [{ component: fundingPreview.name, props: preview }], []);
 }
 
 export function compileRuleCreation(props: RuleCreationProps & { glossary: RuleGlossary }, expiresAt: number): CompiledExperience {

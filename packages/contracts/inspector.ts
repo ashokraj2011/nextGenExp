@@ -1,4 +1,5 @@
 import type { JsonValue } from "@sfield/core";
+import type { WorkflowRecommendation } from "./funding-workflow";
 
 export type InspectorPayload = {
   bytes: number;
@@ -37,6 +38,11 @@ export type TreatmentPayloads = RegistryToolPayloads & {
   ccre?: InspectorPayload;
 };
 
+export type WorkflowPayloads = {
+  recommendation: WorkflowRecommendation;
+  calls: (RegistryToolPayloads & { label: string })[];
+};
+
 export type TurnPayloads = {
   turnId: string;
   topicScores: TreatmentPayloads | null;
@@ -46,4 +52,5 @@ export type TurnPayloads = {
   portfolio: RegistryToolPayloads | null;
   goal: RegistryToolPayloads | null;
   composer: ModelStagePayloads | null;
+  workflow: WorkflowPayloads | null;
 };

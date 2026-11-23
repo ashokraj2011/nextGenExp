@@ -166,7 +166,7 @@
   },
   "treatment": {
     "request": {
-      "toolRef": "treatments.eligible@1.0.0",
+      "toolRef": "treatments.eligible@2.0.0",
       "inputs": {
         "turnRef": "turn_demo",
         "routeDecisionId": "route_demo"
@@ -174,18 +174,32 @@
     },
     "response": {
       "callId": "call_demo_treatment",
-      "toolRef": "treatments.eligible@1.0.0",
+      "toolRef": "treatments.eligible@2.0.0",
       "status": "succeeded",
       "effect": "none",
       "meta": {
         "attempts": 1,
         "durationMs": 1,
-        "bytes": 39
+        "bytes": 198
       },
-      "output": [
-        "address_update_guide",
-        "fund_account"
-      ]
+      "output": {
+        "schemaVersion": "2.0",
+        "recommendations": [
+          {
+            "kind": "content",
+            "id": "address_update_guide"
+          },
+          {
+            "kind": "content",
+            "id": "fund_account"
+          },
+          {
+            "kind": "workflow",
+            "id": "account.funding.preview",
+            "version": "1.0.0"
+          }
+        ]
+      }
     }
   },
   "composer": {

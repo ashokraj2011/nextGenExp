@@ -2,6 +2,10 @@ import type { RunResult } from "@sfield/core";
 import demo from "../../fixtures/host.json";
 import { type FailureCode } from "../../packages/contracts/api";
 import { DECISION_TTL, TURN_DEADLINE, contextCatalogSchema, propensitySchema, type SelectionMode, type PropensityResult } from "../../packages/contracts/domain";
+import {
+  fundingOptionsSchema, fundingPreviewSchema, fundingPreviewWorkflow, isFundingPreviewWorkflow, treatmentRecommendationsSchema,
+  type WorkflowLaunch,
+} from "../../packages/contracts/funding-workflow";
 import { goalProgressSchema, isHomeGoalSummary } from "../../packages/contracts/goal-progress";
 import type { ContextRoutingInput, ExperienceCompositionInput } from "../../packages/contracts/model-inputs";
 import { isPortfolioSummary, portfolioSnapshotSchema } from "../../packages/contracts/portfolio";
@@ -15,7 +19,7 @@ import { FOLLOW_UP_EVENT, type DisplayExperience } from "../../packages/contract
 import { normalizedIdsSchema, treatmentOverride } from "../../packages/contracts/tool-setup";
 import { activeContextCatalog, fixtureRejections, tsFixtures } from "../../packages/ts-adapter";
 import { contentCatalog, lookupContent, modelBundle, resolveCandidates } from "../../packages/experience/content";
-import { compileChatReply, compileExperience, compileRuleCreation, makeId } from "../../packages/experience/compile";
+import { compileChatReply, compileExperience, compileFundingPreview, compileRuleCreation, makeId } from "../../packages/experience/compile";
 import { verifyContextProposal, verifyRoute, requireCheck, Rejected } from "../../packages/experience/verify";
 import { ApiError, Store, type ConversationRecord, type Stage, type TurnRecord } from "./store";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
@@ -36,6 +40,13 @@ function traceFor(result: RunResult) {
   return { state: result.state, errorCode: result.error?.code, elapsedMs, modelCalls, providerAttempts, toolCalls, totalTokens, tokensReported };
 }
 
+function fundingRecommendation(turn: TurnRecord, contentOrder: readonly string[]) {
+  if (turn.route?.contextId === fundingPreviewWorkflow.contextId
+    && fundingPreviewWorkflow.requiredContentIds.every((id) => contentOrder.includes(id))) {
+    return turn.decision?.workflowRecommendations?.find(isFundingPreviewWorkflow);
+  }
+}
+
 export class ExperienceService {
   private readonly controllers = new Map<string, AbortController>();
   private readonly jobs = new Map<string, Promise<void>>();
@@ -52,8 +63,10 @@ export class ExperienceService {
     return this.store.createConversation(principalId, personaId, scenarioId, this.now());
   }
 
-  submit(conversation: ConversationRecord, message: string, requestId: string, origin = "message", retry?: TurnRecord) {
-    const { turn, created } = this.store.accept({ conversation, message, requestId, origin, retry, selectionMode: this.selectionMode, now: this.now() });
+  submit(conversation: ConversationRecord, message: string, requestId: string, origin = "message", retry?: TurnRecord, workflow?: WorkflowLaunch) {
+    const { turn, created } = this.store.accept({
+      conversation, message, requestId, origin, retry, workflow, selectionMode: this.selectionMode, now: this.now(),
+    });
     if (created) this.schedule(turn);
     return this.accepted(turn);
   }
@@ -71,7 +84,7 @@ export class ExperienceService {
       throw new ApiError(400, "action_invalid", "This follow-up is unavailable.");
     }
     const conversation = this.store.conversation(turn.scope.conversationId, principalId);
-    const origin = "follow_up:" + signed.actionId;
+    const origin = (signed.workflow ? "workflow:" : "follow_up:") + signed.actionId;
     const existing = this.store.existingRequest(conversation.id, requestId, signed.userMessage, origin);
     if (existing) return this.accepted(existing);
     const latest = this.store.latestTurn(conversation.id);
@@ -80,7 +93,8 @@ export class ExperienceService {
       || turn.decision?.routeDecisionId !== turn.route?.routeDecisionId) {
       throw new ApiError(409, "action_stale", "Ask a fresh question to get current demo content.");
     }
-    return this.submit(conversation, signed.userMessage, requestId, origin);
+    const workflow = signed.workflow && { recommendation: signed.workflow, sourceExperienceId: experienceId };
+    return this.submit(conversation, signed.userMessage, requestId, origin, undefined, workflow);
   }
 
   cancel(turn: TurnRecord) {
@@ -128,7 +142,7 @@ export class ExperienceService {
     this.controllers.set(id, controller);
     const timer = setTimeout(() => controller.abort(new TurnFailure("turn_timeout")), remains);
     timer.unref();
-    let stage: "catalog" | "route" | "glossary" | "ts" | "portfolio" | "goal" | "compose" = "catalog";
+    let stage: "catalog" | "route" | "glossary" | "ts" | "portfolio" | "goal" | "compose" | "workflow" = "catalog";
     const current = () => {
       signal.throwIfAborted();
       return runtime.current(id);
@@ -142,6 +156,11 @@ export class ExperienceService {
       this.store.finish(id, { type: "completed", result }, this.now());
     };
     try {
+      if (initial.workflow) {
+        stage = "workflow";
+        await this.runFundingPreview(runtime, current(), initial.workflow, signal);
+        return;
+      }
       if (!initial.catalog || !initial.propensity) await this.discover(runtime, current(), signal);
       const catalog = current().catalog!;
       const conversation = this.store.conversation(initial.scope.conversationId, initial.scope.principalId);
@@ -158,6 +177,7 @@ export class ExperienceService {
             const experience = previous.public.experience;
             const titles = experience?.blocks.map(({ component, props }) => {
               if ("title" in props) return props.title;
+              if (component === "PznFundingPreview") return "Funding preview";
               return component === "PznPortfolioSnapshot" ? "Portfolio snapshot" : "Rule editor";
             }) ?? [];
             return {
@@ -252,8 +272,9 @@ export class ExperienceService {
       const showGoal = isHomeGoalSummary(route);
       if (!turn.decision) {
         this.store.progress(id, "eligibility", this.now());
+        const withWorkflows = route.contextId === fundingPreviewWorkflow.contextId;
         const result = await runtime.registry(turn, "tsScopeId", 1, signal, async (call) => (
-          call("selection", { ...asRef(turn), routeDecisionId: route.routeDecisionId })
+          call(withWorkflows ? "recommendations" : "selection", { ...asRef(turn), routeDecisionId: route.routeDecisionId })
         ));
         current();
         if (result.status !== "succeeded") {
@@ -261,7 +282,10 @@ export class ExperienceService {
           throw new TurnFailure("ts_unavailable");
         }
 
-        const ids = normalizedIdsSchema.parse(result.output);
+        const recommendations = withWorkflows ? treatmentRecommendationsSchema.parse(result.output).recommendations : undefined;
+        const ids = normalizedIdsSchema.parse(recommendations
+          ? recommendations.flatMap((item) => item.kind === "content" ? [item.id] : [])
+          : result.output);
         const { candidates: resolved, rejections } = resolveCandidates(ids);
         const candidates = resolved.filter((candidate) => {
           const content = lookupContent(candidate);
@@ -286,6 +310,7 @@ export class ExperienceService {
             decisionId: makeId("decision"), scope: row.scope, routeDecisionId: route.routeDecisionId, contextId: route.contextId,
             catalogVersion: contentCatalog.catalogVersion, issuedAt: now, expiresAt: now + DECISION_TTL,
             selectionMode: row.selectionMode, partial, candidates, composerRunId: null,
+            workflowRecommendations: recommendations?.filter((item) => item.kind === "workflow"),
           };
         });
       }
@@ -369,6 +394,7 @@ export class ExperienceService {
         status: verified.proposal.status, outcome: verified.proposal.status, introKey: verified.proposal.introKey,
         question: verified.proposal.clarificationQuestion, partial: decision.partial && Boolean(portfolio || verified.proposal.status === "ready"),
         expiresAt, approved: verified, proof, portfolio, goalProgress,
+        workflow: fundingRecommendation(latest, verified.contentOrder),
       });
       this.store.update(id, (row) => {
         row.trace.markers.proposalValidated = this.now();
@@ -387,6 +413,7 @@ export class ExperienceService {
         : stage === "ts" ? "ts_unavailable"
         : stage === "portfolio" ? "portfolio_unavailable"
         : stage === "goal" ? "goal_unavailable"
+        : stage === "workflow" ? "workflow_unavailable"
         : error instanceof Rejected ? (stage === "route" ? "route_rejected" : "verification_failed")
         : "internal_error";
       this.store.update(id, (row) => { row.trace.failures.push({ stage, code: error instanceof Rejected ? error.code : mapped }); });
@@ -395,6 +422,30 @@ export class ExperienceService {
       clearTimeout(timer);
       this.controllers.delete(id);
     }
+  }
+
+  private async runFundingPreview(runtime: Runtime, turn: TurnRecord, launch: WorkflowLaunch, signal: AbortSignal) {
+    const { turn: source } = this.store.experience(launch.sourceExperienceId, turn.scope.principalId);
+    requireCheck(isFundingPreviewWorkflow(launch.recommendation)
+      && source.scope.conversationId === turn.scope.conversationId && source.scope.personaId === turn.scope.personaId
+      && source.public.experience && source.public.experience.expiresAt > this.now()
+      && fundingRecommendation(source, source.trace.finalOrder ?? []), "FUNDING_WORKFLOW_NOT_OFFERED");
+    const id = turn.public.id;
+    this.store.progress(id, "workflow", this.now());
+    const preview = await runtime.registry(turn, "workflowScopeId", 2, signal, async (call) => {
+      const options = await call("fundingOptions", asRef(turn));
+      if (options.status !== "succeeded") throw new Rejected(options.error?.code ?? "FUNDING_OPTIONS_UNAVAILABLE");
+      const { methods } = fundingOptionsSchema.parse(options.output);
+      const result = await call("fundingPreview", { ...asRef(turn), methodId: methods[0].methodId });
+      if (result.status !== "succeeded") throw new Rejected(result.error?.code ?? "FUNDING_PREVIEW_UNAVAILABLE");
+      return fundingPreviewSchema.parse(result.output);
+    });
+    signal.throwIfAborted();
+    runtime.current(id);
+    const now = this.now();
+    const result = compileFundingPreview(preview, now + DECISION_TTL);
+    this.store.update(id, (row) => { row.trace.components = result.display.blocks.map(({ component }) => component); });
+    this.store.finish(id, { type: "completed", result }, now);
   }
 
   private async discover(runtime: Runtime, turn: TurnRecord, signal: AbortSignal) {

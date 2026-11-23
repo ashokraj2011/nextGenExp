@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowUpRight, BookOpenText, Braces, Database, Download, GitBranch, House, LayoutGrid, ListFilter, MessageSquare, Sparkles } from "lucide-react";
 import { DeveloperDrawer } from "./developer-drawer";
-import { currentTreatmentExample, ExchangePath, InteractionDiagram, proposedTreatmentExample, TreatmentProposalDiagram, type DiagramExchange } from "./help-architecture";
+import { ExchangePath, InteractionDiagram, treatmentExample, TreatmentProposalDiagram, type DiagramExchange } from "./help-architecture";
 import { contractList, helpContracts, type ContractFile } from "./help-contracts";
 import { addressUpdateExample, helpFlows, type FlowStep, type HandoffExample, type PayloadExample } from "./help-flow";
 import { SfieldHelp } from "./help-sfield";
@@ -222,17 +222,17 @@ export function Help() {
       <section id="proposal" className="help-section" aria-labelledby="proposal-title">
         <div className="help-section-heading help-reference-heading">
           <h2 id="proposal-title">Treatment Selector proposal</h2>
-          <p>Let Treatment Selector recommend content, actions, and multi-step tasks.</p>
+          <p>The address update demo uses Treatment Selector to recommend content and a funding workflow.</p>
         </div>
         <div className="help-proposal">
           <TreatmentProposalDiagram />
           <details className="help-tool-exchange">
-            <summary>Compare the current and proposed responses</summary>
-            <p>Both examples use the same request to Treatment Selector for Marcus’s address update.</p>
-            <p><code>{JSON.stringify(currentTreatmentExample.request)}</code></p>
+            <summary>Compare content IDs and the workflow response</summary>
+            <p>Treatment Selector receives Marcus’s demo member ID and the Address update topic.</p>
+            <p><code>{JSON.stringify(treatmentExample.request)}</code></p>
             <PayloadExamples examples={[
-              { direction: "Current response", label: "Content IDs in order", source: JSON.stringify(currentTreatmentExample.response, null, 2) },
-              { direction: "Proposed response", label: "Content, actions, and workflows", source: proposedTreatmentExample },
+              { direction: "Content IDs", label: "Version 1", source: JSON.stringify(treatmentExample.contentIds, null, 2) },
+              { direction: "Address update response", label: "Version 2", source: JSON.stringify(treatmentExample.response, null, 2) },
             ]} />
           </details>
         </div>

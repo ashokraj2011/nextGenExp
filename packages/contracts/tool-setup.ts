@@ -16,7 +16,7 @@ export const sfieldTools = {
   selection: {
     id: "treatments.eligible",
     label: "Treatment Selector",
-    description: "Returns ranked eligible content IDs for the selected context.",
+    description: "Returns the eligible treatments for the selected topic.",
   },
   balances: {
     id: "demo.balance.read",
@@ -37,6 +37,16 @@ export const sfieldTools = {
     id: "goal.progress.read",
     label: "Goal Progress",
     description: "Reads the scoped demo member’s down payment target and savings history for an eligible home-buying goal.",
+  },
+  fundingOptions: {
+    id: "funding.options.read",
+    label: "Funding options",
+    description: "Reads the sample transfer method and amount for the approved funding preview.",
+  },
+  fundingPreview: {
+    id: "funding.preview.build",
+    label: "Build funding preview",
+    description: "Builds a preview from the funding options read for this turn.",
   },
 } as const;
 export type ToolKey = keyof typeof sfieldTools;
@@ -86,6 +96,7 @@ export const toolSetupSchema = z.object({
   enabled: z.object({
     catalog: z.boolean(), propensity: z.boolean(), selection: z.boolean(), balances: z.boolean(),
     glossary: z.boolean().optional(), portfolio: z.boolean().optional(), goal: z.boolean().optional(),
+    fundingOptions: z.boolean().optional(), fundingPreview: z.boolean().optional(),
   }).strict(),
   treatmentOverrides: z.array(treatmentOverrideSchema).max(64).refine((rules) => (
     new Set(rules.map(({ scenarioId, contextId }) => JSON.stringify([scenarioId, contextId]))).size === rules.length
@@ -96,7 +107,10 @@ export type ToolSetup = z.infer<typeof toolSetupSchema>;
 export type TreatmentOverride = z.infer<typeof treatmentOverrideSchema>;
 export type MockOutput = z.infer<typeof mockOutputSchema>;
 export const defaultToolSetup: ToolSetup = {
-  enabled: { catalog: true, propensity: true, selection: true, balances: true, glossary: true, portfolio: true, goal: true },
+  enabled: {
+    catalog: true, propensity: true, selection: true, balances: true, glossary: true, portfolio: true, goal: true,
+    fundingOptions: true, fundingPreview: true,
+  },
   treatmentOverrides: [],
 };
 

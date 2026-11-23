@@ -42,7 +42,7 @@ const exchanges = [
   { path: [host, sfield, model], label: "Message, recent chat, and request options", example: cases.router, handoff: handoffs.router },
   { path: [model, sfield, host], label: "Likely request or follow-up question", reply: true, example: cases.router },
   { path: [host, sfield, selector], label: "Topic and member ID", example: cases.treatment, handoff: handoffs.treatment },
-  { path: [selector, sfield, host], label: "Matching content IDs in order", reply: true, example: cases.treatment },
+  { path: [selector, sfield, host], label: "Matching content and workflow", reply: true, example: cases.treatment },
   { path: [host, data], label: "Look up content by ID", example: cases.content },
   { path: [data, host], label: "Matching content for this request", reply: true, example: cases.content },
   { path: [host, sfield, model], label: "Customer’s request and matching content", example: cases.composer, handoff: handoffs.composer },
@@ -118,31 +118,19 @@ export function InteractionDiagram({ onSelect }: { onSelect: (exchange: DiagramE
   </figure>;
 }
 
-export const currentTreatmentExample = {
+export const treatmentExample = {
   request: {
     mid: hostFixture.personas.find(({ personaId }) => personaId === "demo-new-account")!.syntheticMid,
     context: "address-update",
   },
-  response: treatmentFixture.base["address-update"],
+  contentIds: treatmentFixture.base["address-update"],
+  response: addressUpdateExample.treatmentResponse,
 };
-const proposedRecommendations = [
-  ...currentTreatmentExample.response.map((id) => ({ kind: "content", id })),
-  { kind: "action", id: "funding.options.read", version: "1.0.0" },
-  { kind: "workflow", id: "account.funding.preview", version: "1.0.0" },
-];
-export const proposedTreatmentExample = [
-  "{",
-  '  "schemaVersion": "2.0",',
-  '  "recommendations": [',
-  proposedRecommendations.map((item) => "    " + JSON.stringify(item)).join(",\n"),
-  "  ]",
-  "}",
-].join("\n");
 
 const recommendations = [
   { title: "Content", Icon: BookOpenText, description: "Show the address guide and the Fund your account card." },
-  { title: "Action", Icon: Zap, description: "Use one tool, for example to check how the customer can fund the account." },
-  { title: "Workflow", Icon: GitBranch, description: "Guide the customer through a few steps and show a funding preview." },
+  { title: "Action", Icon: Zap, description: "A single-tool recommendation could show the available funding methods." },
+  { title: "Workflow", Icon: GitBranch, description: "Read the sample funding options and build a preview when Marcus clicks." },
 ];
 
 export function TreatmentProposalDiagram() {
@@ -157,7 +145,7 @@ export function TreatmentProposalDiagram() {
       <li className="help-proposal-entity">
         <span className="help-entity-icon"><Network size={18} aria-hidden="true" /></span>
         <h3>PZN app server + sfield</h3>
-        <p>Find the right tool, check what it needs and what the customer can do, then run it when its conditions are met.</p>
+        <p>The app checks the recommendation and offers it in chat. When Marcus clicks, sfield runs the workflow’s approved tools.</p>
         <ArrowRight className="help-proposal-arrow" size={22} aria-hidden="true" />
       </li>
       <li className="help-proposal-choices">
@@ -169,6 +157,6 @@ export function TreatmentProposalDiagram() {
         ))}
       </li>
     </ol>
-    <figcaption>In this proposal, Marcus chooses <strong>Preview funding</strong> to start the steps in chat. If a step would change his account, chat asks him to confirm first.</figcaption>
+    <figcaption>In the address update demo, Marcus chooses <strong>Preview funding</strong> to see a sample transfer. Open <strong>Logs</strong> on that turn to see both sfield calls.</figcaption>
   </figure>;
 }

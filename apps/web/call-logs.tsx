@@ -3,7 +3,7 @@ import { FileText } from "lucide-react";
 import type { JsonValue } from "@sfield/core";
 import type { TurnView } from "../../packages/contracts/api";
 import type {
-  GatewayExchange, InspectorPayload, ModelStagePayloads, RegistryToolPayloads, TreatmentPayloads, TurnPayloads,
+  GatewayExchange, InspectorPayload, ModelStagePayloads, RegistryToolPayloads, TreatmentPayloads, TurnPayloads, WorkflowPayloads,
 } from "../../packages/contracts/inspector";
 import { api } from "./api";
 import { DeveloperDrawer } from "./developer-drawer";
@@ -88,6 +88,16 @@ function ReadToolStage({ title, stage, payloadLabel = title }: { title: string; 
   </details>;
 }
 
+function WorkflowStage({ workflow }: { workflow: WorkflowPayloads }) {
+  const { recommendation, calls } = workflow;
+  return <details className="trace-details payload-stage" open>
+    <summary>Funding preview workflow</summary>
+    <p><code>{recommendation.id}@{recommendation.version}</code></p>
+    {calls.length ? calls.map((call) => <ReadToolStage key={call.tool} title={call.label} stage={call} />)
+      : <p>No workflow calls recorded for this turn.</p>}
+  </details>;
+}
+
 function TurnPayloadLog({ turn }: { turn: TurnView }) {
   const [payloads, setPayloads] = useState<TurnPayloads>();
   const [failed, setFailed] = useState(false);
@@ -111,7 +121,7 @@ function TurnPayloadLog({ turn }: { turn: TurnView }) {
       <p role="alert">The call logs are unavailable.</p>
       <button className="secondary-button" type="button" onClick={() => setReload((attempt) => attempt + 1)}>Retry loading logs</button>
     </div>}
-    {payloads ? <>
+    {payloads?.workflow ? <WorkflowStage workflow={payloads.workflow} /> : payloads ? <>
       {payloads.topicScores && <TreatmentStage stage={payloads.topicScores} scoring />}
       <ModelStage title="Context Router" stage={payloads.router} />
       {payloads.glossary && <ReadToolStage title="CCRE glossary" payloadLabel="Glossary" stage={payloads.glossary} />}

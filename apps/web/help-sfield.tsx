@@ -4,11 +4,13 @@ import { sfieldTools, toolKeys, toolVersion, type ToolKey } from "../../packages
 const usage = {
   catalog: { caller: "App · Before the first model call", contract: "discovery", description: "Gets the active topics from the mock Treatment Selector." },
   propensity: { caller: "App · Before the first model call", contract: "discovery", description: "Asks Treatment Selector for the customer’s scores for the active topics." },
-  selection: { caller: "App · Finds matching content", contract: "treatment", description: "Returns the IDs of matching content in order." },
+  selection: { caller: "App · Finds eligible treatments", contract: "treatment", description: "Returns eligible content and the funding workflow for the address demo when its rule matches." },
   balances: { caller: "Experience Composer", contract: "balance", description: "Looks up the customer’s sample balances." },
   glossary: { caller: "App · Creates a rule", contract: "glossary", description: "Lists the fields and comparisons you can use in a rule." },
   portfolio: { caller: "App · Summarizes a portfolio", contract: "portfolio", description: "Looks up what the demo customer holds in their portfolio." },
   goal: { caller: "App · Shows goal progress", contract: "goal", description: "Looks up the down payment target and monthly savings." },
+  fundingOptions: { caller: "Funding preview workflow", contract: "funding", description: "Reads the sample funding method and amount." },
+  fundingPreview: { caller: "Funding preview workflow", contract: "funding", description: "Builds a sample preview using the method read for this turn." },
 } satisfies Record<ToolKey, { caller: string; contract: string; description: string }>;
 
 export function SfieldHelp({ selectContract }: { selectContract: (id: string) => void }) {

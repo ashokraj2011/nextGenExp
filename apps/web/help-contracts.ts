@@ -3,6 +3,7 @@ import httpInputsSource from "../../packages/contracts/http-inputs.ts?raw";
 import modelInputsSource from "../../packages/contracts/model-inputs.ts?raw";
 import routingSource from "../../packages/contracts/routing-intents.ts?raw";
 import domainSource from "../../packages/contracts/domain.ts?raw";
+import fundingWorkflowSource from "../../packages/contracts/funding-workflow.ts?raw";
 import toolSetupSource from "../../packages/contracts/tool-setup.ts?raw";
 import glossarySource from "../../packages/contracts/rule-glossary.ts?raw";
 import portfolioSource from "../../packages/contracts/portfolio.ts?raw";
@@ -23,6 +24,7 @@ import {
   propensityResultSchema, treatmentInputSchema, treatmentResultSchema, glossaryInputSchema, glossaryResultSchema,
   portfolioInputSchema, portfolioResultSchema, balanceInputSchema, balanceResultSchema,
   goalProgressInputSchema, goalProgressResultSchema,
+  treatmentRecommendationsResultSchema, fundingOptionsResultSchema, fundingPreviewInputSchema, fundingPreviewResultSchema,
 } from "../../packages/contracts/model-schemas";
 
 export type ContractFile = { name: string; source: string };
@@ -108,9 +110,10 @@ export const helpContracts = [
       {
         id: "treatment",
         title: "Treatment Selector",
-        description: "The tool uses the message and the checked topic to send Treatment Selector a demo member ID and topic. Treatment Selector returns matching content IDs in order.",
+        description: "The tool sends Treatment Selector a demo member ID and the checked topic. Address update uses version 2 to return content and any eligible workflow.",
         files: [
           jsonFile("treatment-selector.tool.json", { input: treatmentInputSchema, output: treatmentResultSchema }),
+          jsonFile("treatment-recommendations.tool.json", { input: treatmentInputSchema, output: treatmentRecommendationsResultSchema }),
           { name: "ts-adapter.ts", source: treatmentAdapterSource },
           { name: "treatment-scenarios.json", source: treatmentFixtureSource },
         ],
@@ -151,6 +154,18 @@ export const helpContracts = [
           jsonFile("goal-progress.tool.json", { input: goalProgressInputSchema, output: goalProgressResultSchema }),
           { name: "goal-progress.ts", source: goalSource },
           { name: "goal-progress-provider.ts", source: goalProviderSource },
+        ],
+      },
+      {
+        id: "funding",
+        title: "Funding preview workflow",
+        description: "After the customer clicks Preview funding, sfield reads the funding options and uses the selected method to build a sample preview.",
+        files: [
+          jsonFile("funding-preview.tools.json", {
+            "funding.options.read": { input: turnInputSchema, output: fundingOptionsResultSchema },
+            "funding.preview.build": { input: fundingPreviewInputSchema, output: fundingPreviewResultSchema },
+          }),
+          { name: "funding-workflow.ts", source: fundingWorkflowSource },
         ],
       },
       {
