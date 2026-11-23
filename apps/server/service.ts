@@ -284,6 +284,7 @@ export class ExperienceService {
       let turn = current();
       const route = turn.route!;
       verifyRoute(route, catalog, turn.scope, turn.attempts.route?.runId ?? null, this.now());
+      const showBalance = turn.trace.intentId === "show_balance";
       const showPortfolio = isPortfolioSummary(route);
       const showGoal = isHomeGoalSummary(route);
       if (!turn.decision) {
@@ -306,7 +307,8 @@ export class ExperienceService {
         const candidates = resolved.filter((candidate) => {
           const content = lookupContent(candidate);
           return Boolean(content?.portfolioData) === showPortfolio
-            && Boolean(content?.allowedComponents.includes("PznGoalProgress")) === showGoal;
+            && Boolean(content?.allowedComponents.includes("PznGoalProgress")) === showGoal
+            && (!content?.metricSpec || showBalance);
         });
         const partial = Boolean((candidates.length || showPortfolio) && rejections.length);
         const now = this.now();

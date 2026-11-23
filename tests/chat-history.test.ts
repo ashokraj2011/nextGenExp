@@ -35,6 +35,9 @@ test("sfield reloads the transcript and scopes it by user, browser session, and 
   const thread = await alice.conversation();
   const first = (await alice.ask(thread.id, request)).turn;
   assert.equal(first.experience?.blocks[0]?.component, "PznComparison");
+  const comparison = gateway.calls.find(({ envelope }) => envelope.inputType === "PznExperienceCompositionInput");
+  assert.ok(comparison?.envelope.eligible);
+  assert.equal(comparison.envelope.eligible.candidates.some(({ title }) => title === "Balance summary"), false);
   const sameUserOtherThread = await alice.conversation();
   const jordan = await alice.conversation("normal", "demo-returning");
   const otherBrowser = await testClient(app.url);

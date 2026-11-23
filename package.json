@@ -17,7 +17,7 @@
     "test": "node --import tsx --test tests/*.test.ts",
     "test:browser": "node --import tsx tests/browser.ts",
     "test:preview": "node --import tsx tests/test-preview.ts",
-    "chat:harness": "npm run build:sfield && node --import tsx --test tests/chat-history.test.ts",
+    "chat:harness": "npm run build:sfield && node --import tsx apps/harness/chat.ts",
     "eval:live": "node --env-file-if-exists=.env --import tsx tests/evaluate-live.ts",
     "eval:openai": "node --env-file-if-exists=.env.openai --import tsx tests/evaluate-live.ts --openai --smoke",
     "build:sfield": "tsc -b vendor/sfield/packages/store-sqlite",

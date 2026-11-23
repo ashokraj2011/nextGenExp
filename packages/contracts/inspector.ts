@@ -14,6 +14,27 @@ export type GatewayExchange = {
   response?: InspectorPayload;
 };
 
+function object(value: JsonValue | undefined) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : undefined;
+}
+
+function parseJson(text: JsonValue | undefined): JsonValue | undefined {
+  if (typeof text !== "string") return undefined;
+  try { return JSON.parse(text) as JsonValue; }
+  catch { return undefined; }
+}
+
+/** Decode the chat envelope from the recorded HTTP or ACP request. */
+export function decodeChatInput(exchange: GatewayExchange) {
+  const body = object(exchange.request.data);
+  const prompt = object(body?.params)?.prompt;
+  const messages = exchange.method === "JSON-RPC" && Array.isArray(prompt)
+    ? object(parseJson(object(prompt[0])?.text))?.messages : body?.messages;
+  const user = Array.isArray(messages) ? messages.map(object).find((message) => message?.role === "user") : undefined;
+  if (Array.isArray(user?.parts)) return parseJson(user.parts.map(object).find((part) => part?.type === "text")?.text);
+  return parseJson(user?.content);
+}
+
 export type ModelStagePayloads = {
   attempts: {
     id: string;

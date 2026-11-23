@@ -70,13 +70,20 @@ sfield saves the transcript in `sfield.sqlite` for each profile, browser session
 
 For host integrations, open a thread with `sf.chat.open({ tenantId, userId, sessionId, threadId })`. Use the identifiers from the host session and thread. The returned handle exposes `append` and `history`. Supply the same message ID when retrying a write.
 
-Run the chat harness with the local model fixture.
+The chat harness starts PZN Lab in a temporary data directory. Its default loop compares balances as Alice Morgan, restarts the app, reopens the same thread, and sends “show me the summary.” It prints the saved sfield transcript and the chat context sent to the router.
 
 ~~~sh
 npm run chat:harness
 ~~~
 
-The harness checks history across a restart, separate profiles and browser sessions, separate threads, and importing a saved chat.
+Use `--interactive` to enter your own messages. Enter `/reopen` to restart and reopen the thread, `/logs` to see the last turn’s calls, or `/quit` to exit. Use `--profile` to choose a profile ID and `--trace` to save the stored messages, model requests and replies, Treatment Selector result, and chat output to a new JSON file.
+
+~~~sh
+npm run chat:harness -- --interactive
+npm run chat:harness -- --provider openai --trace /tmp/pzn-openai-chat.json
+~~~
+
+The default uses the local model fixture. Choose `openai`, `gateway`, or `copilot_acp` to use the corresponding server configuration. The automated history tests in `npm test` check persistence, scope isolation, and importing a saved chat.
 
 ### Intent routing and clarification
 

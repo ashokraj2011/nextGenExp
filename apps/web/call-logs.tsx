@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from "react";
 import { FileText } from "lucide-react";
 import type { JsonValue } from "@sfield/core";
 import type { TurnView } from "../../packages/contracts/api";
+import { decodeChatInput } from "../../packages/contracts/inspector";
 import type {
   GatewayExchange, InspectorPayload, ModelStagePayloads, RegistryToolPayloads, TreatmentPayloads, TurnPayloads, WorkflowPayloads,
 } from "../../packages/contracts/inspector";
@@ -22,24 +23,8 @@ function decodeJson(text: unknown): InspectorPayload | undefined {
   catch { return undefined; }
 }
 
-function object(value: JsonValue | undefined) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : undefined;
-}
-
-function decodedChatInput(exchange: GatewayExchange) {
-  const body = object(exchange.request.data);
-  const prompt = object(body?.params)?.prompt;
-  const messages = exchange.method === "JSON-RPC" && Array.isArray(prompt)
-    ? object(decodeJson(object(prompt[0])?.text)?.data)?.messages : body?.messages;
-  const user = Array.isArray(messages) ? messages.map(object).find((message) => message?.role === "user") : undefined;
-  if (Array.isArray(user?.parts)) {
-    return decodeJson(user.parts.map(object).find((part) => part?.type === "text")?.text);
-  }
-  return decodeJson(user?.content);
-}
-
 function ModelExchange({ exchange, error }: { exchange: GatewayExchange; error?: InspectorPayload }) {
-  const input = decodedChatInput(exchange);
+  const input = decodeChatInput(exchange);
   const acp = exchange.method === "JSON-RPC";
   const response = exchange.response?.data;
   const message = response && typeof response === "object" && !Array.isArray(response) ? response.message : undefined;
@@ -48,7 +33,7 @@ function ModelExchange({ exchange, error }: { exchange: GatewayExchange; error?:
     {exchange.path && <p><code>{exchange.method} {exchange.path}</code></p>}
     {exchange.source === "verified" && <p>Request body verified against the saved digest.</p>}
     <JsonBlock title={acp ? "ACP request" : "Gateway request body"} value={exchange.request} />
-    {input && <JsonBlock title="Decoded chat input" value={input} />}
+    {input !== undefined && <JsonBlock title="Decoded chat input" value={{ bytes: 0, data: input }} />}
     <JsonBlock title={acp ? error ? "ACP error" : "ACP response" : error ? "Gateway error" : "Gateway response"} value={exchange.response ?? error} />
     {output && <JsonBlock title="Decoded model output" value={output} open />}
   </>;
