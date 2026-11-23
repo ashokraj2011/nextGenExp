@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import host from "../../fixtures/host.json";
+import { fundingWorkflowIssue } from "../../packages/contracts/funding-workflow";
 import { glossaryAllowsCondition } from "../../packages/contracts/rule-glossary";
 import {
   MAX_CCRE_RULES, type MockCcreRule, type MockOutput, type ToolSetup, type ToolSetupView, type TreatmentPreview, type TreatmentPreviewInput,
@@ -62,6 +63,8 @@ function validateCcreRule(rule: MockCcreRule) {
 }
 
 export function validateToolSetup(setup: ToolSetup) {
+  const workflowIssue = setup.fundingWorkflow && fundingWorkflowIssue(setup.fundingWorkflow.steps);
+  if (workflowIssue) throw new ApiError(400, "invalid_funding_workflow", workflowIssue);
   for (const { scenarioId, contextId, output } of setup.treatmentOverrides) validateMock(scenarioId, contextId, output);
   for (const rule of setup.ccreRules ?? []) validateCcreRule(rule);
 }

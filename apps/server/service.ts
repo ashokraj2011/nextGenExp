@@ -3,8 +3,8 @@ import demo from "../../fixtures/host.json";
 import { type FailureCode } from "../../packages/contracts/api";
 import { DECISION_TTL, TURN_DEADLINE, contextCatalogSchema, propensitySchema, type SelectionMode, type PropensityResult } from "../../packages/contracts/domain";
 import {
-  fundingOptionsSchema, fundingPreviewSchema, fundingPreviewWorkflow, isFundingPreviewWorkflow, treatmentRecommendationsSchema,
-  type WorkflowLaunch,
+  fundingOptionsSchema, fundingPreviewSchema, fundingPreviewWorkflow, fundingStatusSchema, fundingToolKey,
+  fundingWorkflowIssue, resolveFundingWorkflow, treatmentRecommendationsSchema, type WorkflowLaunch,
 } from "../../packages/contracts/funding-workflow";
 import { goalProgressSchema, isHomeGoalSummary } from "../../packages/contracts/goal-progress";
 import type { ContextRoutingInput, ExperienceCompositionInput } from "../../packages/contracts/model-inputs";
@@ -43,7 +43,7 @@ function traceFor(result: RunResult) {
 function fundingRecommendation(turn: TurnRecord, contentOrder: readonly string[]) {
   if (turn.route?.contextId === fundingPreviewWorkflow.contextId
     && fundingPreviewWorkflow.requiredContentIds.every((id) => contentOrder.includes(id))) {
-    return turn.decision?.workflowRecommendations?.find(isFundingPreviewWorkflow);
+    return turn.decision?.workflowRecommendations?.find((item) => resolveFundingWorkflow(item, turn.toolSetup?.fundingWorkflow));
   }
 }
 
@@ -426,19 +426,29 @@ export class ExperienceService {
 
   private async runFundingPreview(runtime: Runtime, turn: TurnRecord, launch: WorkflowLaunch, signal: AbortSignal) {
     const { turn: source } = this.store.experience(launch.sourceExperienceId, turn.scope.principalId);
-    requireCheck(isFundingPreviewWorkflow(launch.recommendation)
+    const definition = resolveFundingWorkflow(launch.recommendation, turn.toolSetup?.fundingWorkflow);
+    requireCheck(definition && !fundingWorkflowIssue(definition.steps)
       && source.scope.conversationId === turn.scope.conversationId && source.scope.personaId === turn.scope.personaId
       && source.public.experience && source.public.experience.expiresAt > this.now()
       && fundingRecommendation(source, source.trace.finalOrder ?? []), "FUNDING_WORKFLOW_NOT_OFFERED");
     const id = turn.public.id;
     this.store.progress(id, "workflow", this.now());
-    const preview = await runtime.registry(turn, "workflowScopeId", 2, signal, async (call) => {
-      const options = await call("fundingOptions", asRef(turn));
-      if (options.status !== "succeeded") throw new Rejected(options.error?.code ?? "FUNDING_OPTIONS_UNAVAILABLE");
-      const { methods } = fundingOptionsSchema.parse(options.output);
-      const result = await call("fundingPreview", { ...asRef(turn), methodId: methods[0].methodId });
-      if (result.status !== "succeeded") throw new Rejected(result.error?.code ?? "FUNDING_PREVIEW_UNAVAILABLE");
-      return fundingPreviewSchema.parse(result.output);
+    const preview = await runtime.registry(turn, "workflowScopeId", definition.steps.length, signal, async (call) => {
+      const outputs = new Map<string, unknown>();
+      for (const ref of definition.steps) {
+        const tool = fundingToolKey(ref);
+        requireCheck(tool, "UNKNOWN_FUNDING_WORKFLOW_TOOL");
+        const input = tool === "fundingPreview"
+          ? { ...asRef(turn), methodId: fundingOptionsSchema.parse(outputs.get("fundingOptions")).methods[0].methodId }
+          : asRef(turn);
+        const result = await call(tool, input);
+        if (result.status !== "succeeded") throw new Rejected(result.error?.code ?? "FUNDING_STEP_UNAVAILABLE");
+        if (tool === "fundingStatus") {
+          requireCheck(fundingStatusSchema.parse(result.output).accountFundingStatus === "unfunded", "ACCOUNT_ALREADY_FUNDED");
+        }
+        outputs.set(tool, result.output);
+      }
+      return fundingPreviewSchema.parse(outputs.get("fundingPreview"));
     });
     signal.throwIfAborted();
     runtime.current(id);

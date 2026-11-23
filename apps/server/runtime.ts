@@ -3,12 +3,14 @@ import type { ConfigDocument, DefineToolInput, JsonObject, Principal, RunRecord,
 import { SqlitePersistence } from "@sfield/store-sqlite";
 import host from "../../fixtures/host.json";
 import { MAX_MESSAGE_LENGTH, metricReadingSchema, TURN_DEADLINE, type BalanceProof } from "../../packages/contracts/domain";
-import { fundingOptionsSchema, isFundingPreviewWorkflow, treatmentRecommendationsVersion } from "../../packages/contracts/funding-workflow";
+import {
+  fundingOptionsSchema, fundingToolRef, fundingToolVersion, resolveFundingWorkflow, treatmentRecommendationsVersion,
+} from "../../packages/contracts/funding-workflow";
 import { goalProgressSchema, isHomeGoalSummary } from "../../packages/contracts/goal-progress";
 import {
   balanceInputSchema, balanceResultSchema, compositionOutputSchema, contextResultSchema, portfolioInputSchema, portfolioResultSchema,
   glossaryInputSchema, glossaryResultSchema, goalProgressInputSchema, goalProgressResultSchema,
-  fundingOptionsResultSchema, fundingPreviewInputSchema, fundingPreviewResultSchema, treatmentRecommendationsResultSchema,
+  fundingOptionsResultSchema, fundingStatusResultSchema, fundingPreviewInputSchema, fundingPreviewResultSchema, treatmentRecommendationsResultSchema,
   propensityInputSchema, propensityResultSchema, routingOutputSchema,
   treatmentInputSchema, treatmentResultSchema, turnInputSchema,
 } from "../../packages/contracts/model";
@@ -38,8 +40,9 @@ const toolRefs = {
   glossary: `${sfieldTools.glossary.id}@${toolVersion}`,
   portfolio: `${sfieldTools.portfolio.id}@${toolVersion}`,
   goal: `${sfieldTools.goal.id}@${toolVersion}`,
-  fundingOptions: `${sfieldTools.fundingOptions.id}@${toolVersion}`,
-  fundingPreview: `${sfieldTools.fundingPreview.id}@${toolVersion}`,
+  fundingOptions: fundingToolRef("fundingOptions"),
+  fundingStatus: fundingToolRef("fundingStatus"),
+  fundingPreview: fundingToolRef("fundingPreview"),
 } as const;
 const registryPurposes = {
   catalogScopeId: "pzn-context-discovery",
@@ -51,7 +54,7 @@ const registryPurposes = {
 } as const;
 const registryBoundaries = {
   catalog: "catalogScopeId", propensity: "catalogScopeId", selection: "tsScopeId", glossary: "glossaryScopeId", portfolio: "portfolioScopeId",
-  goal: "goalScopeId", fundingOptions: "workflowScopeId", fundingPreview: "workflowScopeId",
+  goal: "goalScopeId", fundingOptions: "workflowScopeId", fundingStatus: "workflowScopeId", fundingPreview: "workflowScopeId",
 } as const;
 export function principalFor(id: string): Principal {
   return { tenantId: "pzn-local", subjectId: id, roles: ["pzn-demo", "pzn-developer"], attributes: {} };
@@ -206,7 +209,8 @@ export class Runtime {
     const persona = host.personas.find((entry) => entry.personaId === conversation.personaId);
     requireCheck(persona && persona.allowedScenarios.includes(conversation.scenarioId), "PERSONA_MISMATCH");
     if (boundary === "workflowScopeId") {
-      requireCheck(turn.workflow && isFundingPreviewWorkflow(turn.workflow.recommendation), "FUNDING_WORKFLOW_REQUIRED");
+      const definition = turn.workflow && resolveFundingWorkflow(turn.workflow.recommendation, turn.toolSetup?.fundingWorkflow);
+      requireCheck(definition?.steps.some((ref) => ref === toolRefs[key]), "FUNDING_WORKFLOW_STEP_REQUIRED");
     }
     requireToolEnabled(turn, key);
     return { turn, conversation, persona };
@@ -298,7 +302,14 @@ export class Runtime {
             amountCents: 25_000, currency: "USD",
           };
         },
-      }),
+      }, fundingToolVersion),
+      read("fundingStatus", {
+        inputs: turnInputSchema, outputs: fundingStatusResultSchema,
+        handler: ({ turnRef }, ctx) => {
+          const { persona } = this.scopedRegistryTurn(turnRef, ctx, "fundingStatus");
+          return { accountFundingStatus: persona.accountFundingStatus };
+        },
+      }, fundingToolVersion),
       read("fundingPreview", {
         inputs: fundingPreviewInputSchema, outputs: fundingPreviewResultSchema,
         handler: async ({ turnRef, methodId }, ctx) => {
@@ -313,7 +324,7 @@ export class Runtime {
           ctx.signal.throwIfAborted();
           return { status: "preview", method, amountCents: options.amountCents, currency: options.currency };
         },
-      }),
+      }, fundingToolVersion),
       read("portfolio", {
         inputs: portfolioInputSchema, outputs: portfolioResultSchema,
         handler: async ({ turnRef, routeDecisionId }, ctx) => {

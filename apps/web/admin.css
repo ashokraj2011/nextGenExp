@@ -17,6 +17,8 @@
   display: grid; grid-template-columns: minmax(245px, .85fr) minmax(0, 1.62fr);
   gap: 18px; min-width: 0; margin: 0; padding: 0; border: 0; align-items: start;
 }
+.admin-tool-sections { display: grid; gap: 18px; min-width: 0; }
+.admin-workflow-ref code { color: var(--teal-dark); overflow-wrap: anywhere; }
 .admin-card {
   min-width: 0; padding: clamp(16px, 2.4vw, 25px); background: var(--white);
   border: 1px solid var(--line); border-radius: var(--radius);
@@ -68,7 +70,7 @@
   border-radius: 7px; background: var(--teal-pale); color: var(--teal-dark); font-weight: 680;
 }
 .rank-item { flex: 1; min-width: 0; }
-.rank-item code { display: block; margin-top: 3px; color: var(--muted); }
+.rank-item code { display: block; margin-top: 3px; color: var(--muted); overflow-wrap: anywhere; }
 .rank-actions { display: flex; flex-shrink: 0; }
 .rank-actions .icon-button { min-width: 30px; min-height: 34px; padding: 4px; }
 .rank-actions button:disabled { opacity: .35; }

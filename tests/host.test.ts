@@ -11,7 +11,7 @@ import type { IncomingHttpHeaders } from "node:http";
 import { startApp } from "../apps/server/http";
 import type { Bootstrap, TurnAccepted, TurnView, ConversationView } from "../packages/contracts/api";
 import type { TurnPayloads } from "../packages/contracts/inspector";
-import { fundingPreviewWorkflow, treatmentRecommendationsSchema } from "../packages/contracts/funding-workflow";
+import { defaultFundingWorkflow, fundingPreviewWorkflow, fundingToolRef, treatmentRecommendationsSchema } from "../packages/contracts/funding-workflow";
 import type { GlossaryCondition } from "../packages/contracts/rule-glossary";
 import { demoExperiencesQuestion, leavingWorkQuestion, portfolioSummaryQuestion, retirementQuestion } from "../packages/contracts/routing-intents";
 import {
@@ -695,6 +695,42 @@ test("the address guide can launch the funding workflow only when Treatment Sele
   const excluded = await client.ask(chat.id, prompt);
   assert.deepEqual(excluded.trace.finalOrder, [guide]);
   assert.deepEqual(excluded.turn.experience?.actions, []);
+});
+
+test("the funding workflow uses the saved step order for the Treatment Selector reference", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const { client } = f;
+  const chat = await client.conversation("normal", "demo-new-account");
+  const source = (await client.ask(chat.id, "I moved and need to update my address.")).turn.experience!;
+  const options = fundingToolRef("fundingOptions");
+  const status = fundingToolRef("fundingStatus");
+  const preview = fundingToolRef("fundingPreview");
+  const invalid = await client.response("/api/admin/tools", {
+    ...defaultToolSetup, fundingWorkflow: { ...defaultFundingWorkflow, steps: [preview, options] },
+  });
+  assert.equal(invalid.status, 400);
+  assert.equal((await invalid.json()).code, "invalid_funding_workflow");
+  const unknownVersion = await client.response("/api/admin/tools", {
+    ...defaultToolSetup, fundingWorkflow: { ...defaultFundingWorkflow, version: "2.0.0" },
+  });
+  assert.equal(unknownVersion.status, 400);
+
+  const definition = { ...defaultFundingWorkflow, steps: [options, status, preview] };
+  await client.request("/api/admin/tools", { ...defaultToolSetup, fundingWorkflow: definition });
+  const accepted = await client.request<TurnAccepted>("/api/experiences/" + source.experienceId + "/actions", {
+    clientRequestId: randomUUID(), envelope: actionFor(source),
+  }, 202);
+  const result = await client.wait(accepted);
+  assert.equal(result.turn.status, "completed");
+  const path = "/api/debug/payloads/" + accepted.turnId;
+  const { workflow } = await client.request<TurnPayloads>(path);
+  assert.deepEqual(workflow?.recommendation, fundingPreviewWorkflow.recommendation);
+  assert.deepEqual(workflow?.definition?.data, definition);
+  assert.deepEqual(workflow?.calls.map(({ tool }) => tool), definition.steps);
+  assert.deepEqual(workflow?.calls[1].result?.data, { accountFundingStatus: "unfunded" });
+  await client.request("/api/admin/tools", defaultToolSetup);
+  assert.deepEqual((await client.request<TurnPayloads>(path)).workflow, workflow);
 });
 
 test("home-buying progress reads the eligible member's target and history through sfield", async (t) => {

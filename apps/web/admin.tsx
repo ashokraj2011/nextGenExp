@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { ArrowDown, ArrowLeft, ArrowUp, FlaskConical, MessageSquare, Trash2 } from "lucide-react";
 import {
+  defaultFundingWorkflow, fundingToolKey, fundingToolKeys, fundingToolRef, fundingTools, fundingWorkflowIssue,
+  type FundingStepRef, type FundingWorkflowDefinition,
+} from "../../packages/contracts/funding-workflow";
+import {
   MAX_CCRE_RULES, sfieldTools, toolKeys, toolVersion, treatmentOverride,
   type MockCcreRule, type MockOutput, type ToolSetup, type ToolSetupView, type TreatmentPreview, type TreatmentPreviewInput,
 } from "../../packages/contracts/tool-setup";
@@ -10,16 +14,34 @@ import { rememberActiveConversation } from "./conversation-storage";
 import { TreatmentPreviewResult } from "./treatment-preview";
 import "./admin.css";
 
-function RankedContent({ ids, content, change }: {
-  ids: string[]; content: ToolSetupView["content"]; change: (ids: string[]) => void;
+function RankedList<Id extends string>({ ids, label, titleFor, change }: {
+  ids: Id[]; label: string; titleFor: (id: Id) => string; change: (ids: Id[]) => void;
 }) {
-  const choices = content.filter(({ contentId }) => !ids.includes(contentId));
   function move(index: number, destination: number) {
     const next = [...ids];
     [next[index], next[destination]] = [next[destination], next[index]];
     change(next);
   }
 
+  return <ol className="rank-list" aria-label={label}>
+    {ids.map((id, index) => <li key={id}>
+      <span className="rank-number" aria-hidden="true">{index + 1}</span>
+      <span className="rank-item"><strong>{titleFor(id)}</strong><code>{id}</code></span>
+      <span className="rank-actions">
+        <button type="button" className="icon-button" aria-label={"Move " + id + " up"} disabled={index === 0}
+          onClick={() => move(index, index - 1)}><ArrowUp size={16} /></button>
+        <button type="button" className="icon-button" aria-label={"Move " + id + " down"} disabled={index === ids.length - 1}
+          onClick={() => move(index, index + 1)}><ArrowDown size={16} /></button>
+        <button type="button" className="icon-button" aria-label={"Remove " + id} onClick={() => change(ids.filter((value) => value !== id))}><Trash2 size={16} /></button>
+      </span>
+    </li>)}
+  </ol>;
+}
+
+function RankedContent({ ids, content, change }: {
+  ids: string[]; content: ToolSetupView["content"]; change: (ids: string[]) => void;
+}) {
+  const choices = content.filter(({ contentId }) => !ids.includes(contentId));
   return <div className="rank-editor">
     <div className="setup-field">
       <label htmlFor="mock-content">Add content</label>
@@ -28,20 +50,49 @@ function RankedContent({ ids, content, change }: {
         {choices.map(({ contentId, title }) => <option key={contentId} value={contentId}>{title}</option>)}
       </select>
     </div>
-    {ids.length ? <ol className="rank-list" aria-label="Content order">
-      {ids.map((id, index) => <li key={id}>
-        <span className="rank-number" aria-hidden="true">{index + 1}</span>
-        <span className="rank-item"><strong>{content.find(({ contentId }) => contentId === id)?.title ?? id}</strong><code>{id}</code></span>
-        <span className="rank-actions">
-          <button type="button" className="icon-button" aria-label={"Move " + id + " up"} disabled={index === 0}
-            onClick={() => move(index, index - 1)}><ArrowUp size={16} /></button>
-          <button type="button" className="icon-button" aria-label={"Move " + id + " down"} disabled={index === ids.length - 1}
-            onClick={() => move(index, index + 1)}><ArrowDown size={16} /></button>
-          <button type="button" className="icon-button" aria-label={"Remove " + id} onClick={() => change(ids.filter((value) => value !== id))}><Trash2 size={16} /></button>
-        </span>
-      </li>)}
-    </ol> : <p className="admin-muted">Add at least one item, or choose Return no content.</p>}
+    {ids.length ? <RankedList ids={ids} label="Content order" change={change}
+      titleFor={(id) => content.find(({ contentId }) => contentId === id)?.title ?? id} />
+      : <p className="admin-muted">Add at least one item, or choose Return no content.</p>}
   </div>;
+}
+
+function FundingWorkflowEditor({ definition, issue, change }: {
+  definition: FundingWorkflowDefinition; issue?: string; change: (definition: FundingWorkflowDefinition) => void;
+}) {
+  const { id, version, steps } = definition;
+  const choices = fundingToolKeys.filter((key) => !steps.includes(fundingToolRef(key)));
+  function setSteps(next: FundingStepRef[]) {
+    change({ ...definition, steps: next });
+  }
+  function add(ref: string) {
+    const key = choices.find((item) => fundingToolRef(item) === ref);
+    if (!key) return;
+    const next = [...steps];
+    const previewIndex = next.indexOf(fundingToolRef("fundingPreview"));
+    next.splice(previewIndex < 0 || key === "fundingPreview" ? next.length : previewIndex, 0, fundingToolRef(key));
+    setSteps(next);
+  }
+
+  return <section className="admin-card" aria-labelledby="funding-workflow-title">
+    <h2 id="funding-workflow-title">Funding preview workflow</h2>
+    <p className="admin-workflow-ref"><code>{id}@{version}</code></p>
+    <p>Choose the tools sfield runs when Marcus clicks Preview funding.</p>
+    <div className="rank-editor">
+      <RankedList ids={steps} label="Funding workflow tool order" change={setSteps} titleFor={(ref) => {
+        const key = fundingToolKey(ref);
+        return key ? fundingTools[key].label : ref;
+      }} />
+      <div className="setup-field">
+        <label htmlFor="funding-workflow-tool">Add workflow tool</label>
+        <select id="funding-workflow-tool" value="" disabled={!choices.length} onChange={(event) => add(event.target.value)}>
+          <option value="" disabled>{choices.length ? "Choose a tool" : "All workflow tools added"}</option>
+          {choices.map((key) => <option key={key} value={fundingToolRef(key)}>{fundingTools[key].label}</option>)}
+        </select>
+      </div>
+      {issue ? <p className="admin-error" role="status">{issue}</p>
+        : <p>Build funding preview uses the funding options and runs last.</p>}
+    </div>
+  </section>;
 }
 
 function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: string }) {
@@ -67,6 +118,12 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
   const ccreRules = allCcreRules.filter(inSelectedScope);
   const dirty = JSON.stringify(saved.setup) !== JSON.stringify(setup);
   const incompleteRankedResponse = setup.treatmentOverrides.some(({ output }) => output.mode === "ranked" && !output.contentIds.length);
+  const fundingWorkflow = setup.fundingWorkflow ?? defaultFundingWorkflow;
+  const workflowIssue = fundingWorkflowIssue(fundingWorkflow.steps);
+  const invalidDraft = incompleteRankedResponse || Boolean(workflowIssue);
+  const saveHint = workflowIssue ? "Fix the funding workflow before saving."
+    : incompleteRankedResponse ? "Add at least one item to each custom response before saving."
+    : dirty ? "Unsaved changes" : "";
   const previewInput: TreatmentPreviewInput = {
     personaId, scenarioId, contextId, ordinal: Number(ordinal), enabled: setup.enabled.selection, output, ccreRules,
   };
@@ -86,7 +143,7 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
     edit({ ...setup, treatmentOverrides: next ? [...remaining, { scenarioId, contextId, output: next }] : remaining });
   }
   async function save() {
-    if (incompleteRankedResponse || saving) return false;
+    if (invalidDraft || saving) return false;
     if (!dirty) return true;
     setSaving(true);
     setSaveError("");
@@ -141,28 +198,32 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
         <p>Saved settings apply to new chat requests in this browser.</p>
       </div>
       <div className="admin-save">
-        <p role="status">{saveNotice || (incompleteRankedResponse ? "Add at least one item to each custom response before saving." : dirty ? "Unsaved changes" : "")}</p>
-        <button className="send-button" type="submit" disabled={!dirty || incompleteRankedResponse || saving || startingChat}>{saving ? "Saving…" : "Save settings"}</button>
+        <p role="status">{saveNotice || saveHint}</p>
+        <button className="send-button" type="submit" disabled={!dirty || invalidDraft || saving || startingChat}>{saving ? "Saving…" : "Save settings"}</button>
       </div>
       {saveError && <p className="admin-error" role="alert">{saveError}</p>}
     </div>
     <fieldset className="admin-layout" disabled={saving || startingChat}>
-      <section className="admin-card" aria-labelledby="sfield-tools-title">
-        <h2 id="sfield-tools-title">sfield tools</h2>
-        <p>Turn tools on or off.</p>
-        <ul className="admin-tools">
-          {toolKeys.map((key) => {
-            const tool = sfieldTools[key];
-            return <li key={key}>
-              <label className="admin-tool">
-                <span><strong>{tool.label}</strong><code>{tool.id}@{toolVersion}</code><small>{tool.description}</small></span>
-                <input type="checkbox" role="switch" aria-label={tool.label} checked={setup.enabled[key] !== false}
-                  onChange={(event) => edit({ ...setup, enabled: { ...setup.enabled, [key]: event.target.checked } })} />
-              </label>
-            </li>;
-          })}
-        </ul>
-      </section>
+      <div className="admin-tool-sections">
+        <FundingWorkflowEditor definition={fundingWorkflow} issue={workflowIssue}
+          change={(definition) => edit({ ...setup, fundingWorkflow: definition })} />
+        <section className="admin-card" aria-labelledby="sfield-tools-title">
+          <h2 id="sfield-tools-title">sfield tools</h2>
+          <p>Turn tools on or off.</p>
+          <ul className="admin-tools">
+            {toolKeys.map((key) => {
+              const tool = sfieldTools[key];
+              return <li key={key}>
+                <label className="admin-tool">
+                  <span><strong>{tool.label}</strong><code>{tool.id}@{toolVersion}</code><small>{tool.description}</small></span>
+                  <input type="checkbox" role="switch" aria-label={tool.label} checked={setup.enabled[key] !== false}
+                    onChange={(event) => edit({ ...setup, enabled: { ...setup.enabled, [key]: event.target.checked } })} />
+                </label>
+              </li>;
+            })}
+          </ul>
+        </section>
+      </div>
 
       <section className="admin-card" aria-labelledby="treatment-mock-title">
         <h2 id="treatment-mock-title">Treatment Selector test settings</h2>
@@ -221,7 +282,7 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
             <button type="button" className="secondary-button" disabled={!canPreview || previewing} onClick={() => void runPreview()}>
               <FlaskConical size={16} aria-hidden="true" />{previewing ? "Testing…" : "Run preview"}
             </button>
-            <button type="button" className="secondary-button" disabled={!personaId || incompleteRankedResponse || startingChat}
+            <button type="button" className="secondary-button" disabled={!personaId || invalidDraft || startingChat}
               aria-describedby="test-chat-note" onClick={() => void testInChat()}>
               <MessageSquare size={16} aria-hidden="true" />{startingChat ? "Opening chat…" : dirty ? "Save and test in chat" : "Test in chat"}
             </button>

@@ -1,7 +1,7 @@
 import type { CallRecord, JsonValue, ModelAttemptRecord, RunRecord, SField } from "@sfield/core";
 import host from "../../fixtures/host.json";
 import type { WorkflowPayloads, ModelStagePayloads, RegistryToolPayloads, TreatmentPayloads, TurnPayloads } from "../../packages/contracts/inspector";
-import { treatmentRecommendationsVersion } from "../../packages/contracts/funding-workflow";
+import { fundingToolKey, resolveFundingWorkflow, treatmentRecommendationsVersion } from "../../packages/contracts/funding-workflow";
 import { sfieldTools, toolVersion } from "../../packages/contracts/tool-setup";
 import type { configureGateway } from "./gateway";
 import { assistantResponse } from "./payload-capture";
@@ -128,13 +128,16 @@ async function treatmentPayloads(sf: SField, inspection: Inspection, turn: TurnR
 
 async function workflowPayloads(sf: SField, inspection: Inspection, turn: TurnRecord): Promise<WorkflowPayloads | null> {
   if (!turn.workflow) return null;
+  const { recommendation } = turn.workflow;
+  const definition = resolveFundingWorkflow(recommendation, turn.toolSetup?.fundingWorkflow);
   const recorded = turn.workflowScopeId ? await sf.persistence.listCalls(turn.workflowScopeId) : [];
-  const calls = (["fundingOptions", "fundingPreview"] as const).flatMap((key) => {
-    const { id, label } = sfieldTools[key];
-    const call = recorded.find((entry) => entry.toolRef === `${id}@${toolVersion}` && entry.proposedArguments.turnRef === turn.public.id);
-    return call ? [{ ...registryPayload(inspection, call), label }] : [];
-  });
-  return { recommendation: turn.workflow.recommendation, calls };
+  const calls = recorded.filter((call) => call.proposedArguments.turnRef === turn.public.id)
+    .sort((a, b) => a.turn - b.turn || a.order - b.order)
+    .flatMap((call) => {
+      const key = fundingToolKey(call.toolRef);
+      return key ? [{ ...registryPayload(inspection, call), label: sfieldTools[key].label }] : [];
+    });
+  return { recommendation, definition: definition && inspection.payload(definition), calls };
 }
 
 export async function readTurnPayloads(sf: SField, store: Store, inspection: Inspection, turn: TurnRecord, conversation: ConversationRecord): Promise<TurnPayloads> {

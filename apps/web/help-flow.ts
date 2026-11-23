@@ -284,7 +284,7 @@ export const addressUpdateExample = {
       } },
     },
     followUp: {
-      description: "Marcus clicks Preview funding. The app checks the offer and starts a new chat turn. sfield reads the funding options and builds the preview. Choose Preview funding in Logs to see both calls.",
+      description: "Marcus clicks Preview funding. The app checks the offer and finds the saved workflow by ID and version. sfield runs its tools in order. Choose Preview funding in Logs to see the definition and calls.",
       input: { label: "POST /api/experiences/" + addressExperienceId + "/actions", value: {
         clientRequestId: "request_demo_follow_up",
         envelope: {

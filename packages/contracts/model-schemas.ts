@@ -59,6 +59,7 @@ export const treatmentRecommendationsResultSchema = closed({
 const fundingMethodResult = closed({ methodId: string, label: string, from: string, to: string });
 const fundingAmounts = { amountCents: { type: "integer", minimum: 1 }, currency: { type: "string", enum: ["USD"] } };
 export const fundingOptionsResultSchema = closed({ methods: { ...array(fundingMethodResult, 4), minItems: 1 }, ...fundingAmounts });
+export const fundingStatusResultSchema = closed({ accountFundingStatus: { type: "string", enum: ["funded", "unfunded"] } });
 export const fundingPreviewInputSchema = closed({ turnRef: string, methodId: string });
 export const fundingPreviewResultSchema = closed({
   status: { type: "string", enum: ["preview"] }, method: fundingMethodResult, ...fundingAmounts,

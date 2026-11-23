@@ -40,6 +40,7 @@ export type TreatmentPayloads = RegistryToolPayloads & {
 
 export type WorkflowPayloads = {
   recommendation: WorkflowRecommendation;
+  definition?: InspectorPayload;
   calls: (RegistryToolPayloads & { label: string })[];
 };
 

@@ -130,7 +130,7 @@ export const treatmentExample = {
 const recommendations = [
   { title: "Content", Icon: BookOpenText, description: "Show the address guide and the Fund your account card." },
   { title: "Action", Icon: Zap, description: "A single-tool recommendation could show the available funding methods." },
-  { title: "Workflow", Icon: GitBranch, description: "Read the sample funding options and build a preview when Marcus clicks." },
+  { title: "Workflow", Icon: GitBranch, description: "Run the saved funding steps when Marcus clicks Preview funding." },
 ];
 
 export function TreatmentProposalDiagram() {
@@ -145,7 +145,7 @@ export function TreatmentProposalDiagram() {
       <li className="help-proposal-entity">
         <span className="help-entity-icon"><Network size={18} aria-hidden="true" /></span>
         <h3>PZN app server + sfield</h3>
-        <p>The app checks the recommendation and offers it in chat. When Marcus clicks, sfield runs the workflow’s approved tools.</p>
+        <p>The app looks up the recommended ID and version in Tool setup. When Marcus clicks, sfield runs the tools in the saved order.</p>
         <ArrowRight className="help-proposal-arrow" size={22} aria-hidden="true" />
       </li>
       <li className="help-proposal-choices">
@@ -157,6 +157,6 @@ export function TreatmentProposalDiagram() {
         ))}
       </li>
     </ol>
-    <figcaption>In the address update demo, Marcus chooses <strong>Preview funding</strong> to see a sample transfer. Open <strong>Logs</strong> on that turn to see both sfield calls.</figcaption>
+    <figcaption>In the address update demo, Marcus chooses <strong>Preview funding</strong> to see a sample transfer. Open <strong>Logs</strong> on that turn to see the workflow definition and its calls.</figcaption>
   </figure>;
 }

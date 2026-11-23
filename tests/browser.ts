@@ -4,6 +4,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { chromium, type Locator } from "playwright";
 import marcusCalls from "../fixtures/marcus-sfield-exchanges.json";
+import { defaultFundingWorkflow, fundingToolRef } from "../packages/contracts/funding-workflow";
 import { activeContextCatalog } from "../packages/ts-adapter";
 import { startTestPreview } from "./preview";
 
@@ -118,7 +119,7 @@ try {
   await page.getByRole("link", { name: "sfield", exact: true }).click();
   assert.equal(new URL(page.url()).hash, "#sfield");
   const toolRegistry = page.getByRole("list", { name: "sfield tool registry", exact: true });
-  assert.equal(await toolRegistry.getByRole("listitem").count(), 9);
+  assert.equal(await toolRegistry.getByRole("listitem").count(), 10);
   await toolRegistry.getByText("Experience Composer", { exact: true }).waitFor();
   await toolRegistry.getByRole("link", { name: "Topic relevance scores", exact: true }).click();
   await page.getByRole("button", { name: "propensity.json", exact: true }).click();
@@ -408,6 +409,24 @@ try {
   await snapshot.getByText("$10,000", { exact: true }).waitFor();
   assert.equal(await portfolioPage.getByRole("heading", { name: "Explore investing options", exact: true }).count(), 0);
   await portfolioPage.screenshot({ path: resolve(screenshots, "portfolio-returning-chat.png") });
+  await portfolioPage.getByRole("link", { name: "Tool setup", exact: true }).click();
+  const editor = portfolioPage.getByRole("region", { name: "Funding preview workflow", exact: true });
+  const editorOrder = editor.getByRole("list", { name: "Funding workflow tool order", exact: true }).locator("code");
+  await editor.getByLabel("Add workflow tool", { exact: true }).selectOption(fundingToolRef("fundingStatus"));
+  await editor.getByRole("button", { name: "Move " + fundingToolRef("fundingStatus") + " up", exact: true }).click();
+  const workflowSteps = [fundingToolRef("fundingStatus"), ...defaultFundingWorkflow.steps];
+  assert.deepEqual(await editorOrder.allTextContents(), workflowSteps);
+  await editor.getByRole("button", { name: "Move " + fundingToolRef("fundingPreview") + " up", exact: true }).click();
+  await editor.getByText("Move Funding options before Build funding preview.", { exact: true }).waitFor();
+  const saveSettings = portfolioPage.getByRole("button", { name: "Save settings", exact: true });
+  assert.equal(await saveSettings.isDisabled(), true);
+  await editor.getByRole("button", { name: "Move " + fundingToolRef("fundingPreview") + " down", exact: true }).click();
+  await saveSettings.click();
+  await portfolioPage.getByText("Tool settings saved.", { exact: true }).waitFor();
+  await portfolioPage.reload();
+  await editorOrder.first().waitFor();
+  assert.deepEqual(await editorOrder.allTextContents(), workflowSteps);
+  await portfolioPage.getByRole("link", { name: "Back to chat", exact: true }).click();
   await jordanProfileTrigger.click();
   const marcusProfile = demoProfiles.getByRole("article", { name: "Marcus Reed", exact: true });
   await marcusProfile.getByText("Awaiting first deposit", { exact: true }).waitFor();
@@ -432,6 +451,13 @@ try {
   await portfolioPage.getByText("$250 by bank transfer", { exact: true }).waitFor();
   await portfolioPage.getByRole("button", { name: "Open call logs", exact: true }).click();
   await portfolioLogs.getByText("Funding preview workflow", { exact: true }).waitFor();
+  await portfolioLogs.getByText("Workflow definition", { exact: true }).click();
+  assert.deepEqual(JSON.parse(await portfolioLogs.getByLabel("Workflow definition", { exact: true }).innerText()), {
+    ...defaultFundingWorkflow, steps: workflowSteps,
+  });
+  assert.deepEqual(await portfolioLogs.locator(".payload-stage > summary").allTextContents(), [
+    "Funding preview workflow", "Check funding status · succeeded", "Funding options · succeeded", "Build funding preview · succeeded",
+  ]);
   await portfolioLogs.getByText("Funding options · succeeded", { exact: true }).click();
   await portfolioLogs.getByText("Build funding preview · succeeded", { exact: true }).click();
   const optionsResult = JSON.parse(await portfolioLogs.getByLabel("Funding options tool response", { exact: true }).innerText());

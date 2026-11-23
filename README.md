@@ -103,9 +103,11 @@ Use **Tool setup → Treatment Selector test settings → Learning → Run previ
 
 Start a chat as **Marcus Reed**, a new account holder awaiting his first deposit. Choose **Update mailing address** or ask “I moved and need to update my address.” The Context Router selects `update_address`. sfield calls Treatment Selector with Marcus’s synthetic member ID and the `address-update` context. The mock returns `address_update_guide` and evaluates **Account → Funding status → Equals → Unfunded** to determine whether it can also return `fund_account`.
 
-When both cards are eligible, Treatment Selector also returns `account.funding.preview@1.0.0`. Chat displays the address guide and **Fund your account**. Click **Preview funding** to start a separate turn. sfield runs **Funding options** and **Build funding preview**, then chat shows a sample $250 bank transfer that ends at review.
+When both cards are eligible, Treatment Selector also returns `account.funding.preview@1.0.0`. Chat displays the address guide and **Fund your account**. Click **Preview funding** to start a separate turn. The app resolves the workflow by ID and version, and sfield runs the saved steps. The default order is **Funding options** then **Build funding preview**. Chat shows a sample $250 bank transfer that ends at review.
 
-Open **Logs → Treatment Selector** on the address turn to see the CCRE evaluation and the workflow recommendation. Select **Preview funding** in **Logs** to inspect both workflow calls. Ask the same address question as **Jordan Lee** to see the guide for an already funded account. **Tool setup → Address update → Run preview** compares the rules for both profiles.
+In **Tool setup → Funding preview workflow**, add **Check funding status** and place it before or after **Funding options**. Keep both required tools, with **Build funding preview** last, and click **Save settings**.
+
+Open **Logs → Treatment Selector** on the address turn to see the CCRE evaluation and workflow recommendation. Select **Preview funding** in **Logs** to inspect the workflow definition and each call in execution order. Ask the same address question as **Jordan Lee** to see the guide for an already funded account. **Tool setup → Address update → Run preview** compares the rules for both profiles.
 
 ### Inspect requests and responses
 

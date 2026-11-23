@@ -89,10 +89,11 @@ function ReadToolStage({ title, stage, payloadLabel = title }: { title: string; 
 }
 
 function WorkflowStage({ workflow }: { workflow: WorkflowPayloads }) {
-  const { recommendation, calls } = workflow;
+  const { recommendation, definition, calls } = workflow;
   return <details className="trace-details payload-stage" open>
     <summary>Funding preview workflow</summary>
     <p><code>{recommendation.id}@{recommendation.version}</code></p>
+    {definition && <JsonBlock title="Workflow definition" value={definition} />}
     {calls.length ? calls.map((call) => <ReadToolStage key={call.tool} title={call.label} stage={call} />)
       : <p>No workflow calls recorded for this turn.</p>}
   </details>;
