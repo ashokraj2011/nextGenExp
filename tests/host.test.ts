@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gatewayFromEnv } from "../apps/server/gateway";
 import type { IncomingHttpHeaders } from "node:http";
+import host from "../fixtures/host.json";
 import { startApp } from "../apps/server/http";
 import type { Bootstrap, TurnAccepted, TurnView, ConversationView } from "../packages/contracts/api";
 import type { TurnPayloads } from "../packages/contracts/inspector";
@@ -488,8 +489,57 @@ test("scenario outcomes distinguish intent-only routing, empty eligibility, part
   const second = await f.client.ask(change.id, "Show that transfer guide again.");
   assert.equal(first.turn.experience?.blocks[0]?.component, "PznStepList");
   assert.equal(second.turn.experience?.status, "no_match");
+  assert.match(second.turn.experience?.intro ?? "", /What would you like to look at next/);
   assert.notEqual(second.trace.contentDecisionId, first.trace.contentDecisionId);
   assert.ok(second.trace.ts?.baseline.every((id) => !id.startsWith("transfer")));
+});
+
+test("an empty eligibility result keeps a plain model reply in chat history and falls back when the model fails", async (t) => {
+  const comparison = "Compare available and current balance.";
+  const unavailable = "Explain balances when the chat reply is unavailable.";
+  let needsRepair = true;
+  const { client, gateway, close } = await fixture(({ envelope }) => {
+    if (envelope.inputType !== "PznExperienceCompositionInput") return;
+    if (envelope.request === unavailable) return { status: 403 };
+    if (envelope.request === comparison && needsRepair) {
+      needsRepair = false;
+      return { json: {
+        schemaVersion: "1.0", decisionId: envelope.eligible!.decisionId, status: "no_match", intent: envelope.intent,
+        introKey: "no_match", clarificationQuestion: null, replyText: null, blocks: [], followUpIds: [],
+      } };
+    }
+  });
+  t.after(close);
+  const conversation = await client.conversation("empty");
+  await client.ask(conversation.id, "Hi");
+  const reply = await client.ask(conversation.id, comparison);
+  const display = reply.turn.experience!;
+  assert.equal(reply.turn.status, "completed");
+  assert.equal(display.outcome, "eligible_empty");
+  assert.match(display.intro, /the total recorded in the ledger/);
+  assert.deepEqual(display.blocks, []);
+  assert.deepEqual(display.actions, []);
+  assert.equal(reply.trace.composeRun?.modelCalls, 2);
+  assert.ok(reply.trace.failures.some(({ code }) => code === "EMPTY_ELIGIBILITY_REPLY_REQUIRED"));
+  assert.equal(reply.trace.metricReadSucceeded, false);
+  const { envelope } = gateway.calls.at(-1)!;
+  assert.deepEqual(envelope.eligible?.candidates, []);
+  assert.equal(envelope.recent?.at(-1)?.request, "Hi");
+  const payloads = await client.request<TurnPayloads>("/api/debug/payloads/" + reply.turn.id);
+  assert.deepEqual(payloads.treatment?.result?.data, []);
+  assert.ok(payloads.composer?.attempts.at(-1)?.exchange?.response?.data);
+
+  const continued = await client.ask(conversation.id, "What did you just say?");
+  assert.equal(continued.turn.experience?.outcome, "reply");
+  assert.equal(continued.turn.experience?.intro, display.intro);
+  assert.equal(gateway.calls.at(-1)?.envelope.recent?.at(-1)?.assistantReply, display.intro);
+
+  const fallback = await client.ask(conversation.id, unavailable);
+  assert.equal(fallback.turn.status, "completed");
+  assert.equal(fallback.turn.experience?.outcome, "eligible_empty");
+  assert.equal(fallback.turn.experience?.intro, host.introCopy.no_match);
+  assert.deepEqual(fallback.turn.experience?.actions, []);
+  assert.ok(fallback.trace.failures.some(({ stage }) => stage === "compose"));
 });
 
 test("synthetic metrics require a successful real sfield tool call before display", async (t) => {
@@ -1143,7 +1193,7 @@ test("composer repair cannot publish drafts, old candidates, or text from a fail
     if (envelope.request === "Explain balances.") oldCandidate = envelope.eligible!.candidates[0].candidateId;
     if (envelope.request === "Explain balances again.") return { json: {
       schemaVersion: "1.0", decisionId: envelope.eligible!.decisionId, status: "ready", intent: envelope.intent,
-      introKey: "explanation", clarificationQuestion: null,
+      introKey: "explanation", clarificationQuestion: null, replyText: null,
       blocks: [{ blockId: "old", component: "PznContentCard", candidateIds: [oldCandidate], variant: "expanded" }], followUpIds: [],
     } };
     if (envelope.request === "A balance draft test.") return { draft: "DO NOT EXPOSE THIS UNVERIFIED DRAFT" };

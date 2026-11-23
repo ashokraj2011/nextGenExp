@@ -19,7 +19,10 @@ export const routingOutputSchema = {
 
 // The runtime schema subset disallows the standalone contract's URI identifier.
 const { $id: _experienceSchemaId, ...runtimeExperienceSchema } = experienceSchema;
-export const compositionOutputSchema = runtimeExperienceSchema as JsonObject;
+export const compositionOutputSchema = {
+  ...runtimeExperienceSchema,
+  required: [...runtimeExperienceSchema.required, "replyText"],
+} as JsonObject;
 
 const string = { type: "string" } as const;
 const score = { type: ["number", "null"], minimum: 0, maximum: 1 };

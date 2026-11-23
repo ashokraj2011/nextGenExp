@@ -100,6 +100,10 @@ export function verifyExperience(
   requireCheck(decision.catalogVersion === contentCatalog.catalogVersion, "CATALOG_VERSION_MISMATCH");
 
   const { status, blocks, clarificationQuestion, introKey, followUpIds } = value;
+  requireCheck(status === "no_match" || value.replyText == null, "REPLY_TEXT_NOT_ALLOWED");
+  if (!decision.candidates.length && !portfolio) {
+    requireCheck(status === "no_match" && value.replyText?.trim(), "EMPTY_ELIGIBILITY_REPLY_REQUIRED");
+  }
   if (goalProgress && isHomeGoalSummary(route)) {
     requireCheck(status === "ready" && blocks.some(({ component }) => component === "PznGoalProgress"), "GOAL_PROGRESS_CARD_REQUIRED");
   }

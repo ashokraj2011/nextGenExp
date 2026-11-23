@@ -24,5 +24,6 @@ export type ExperienceCompositionInput = {
   eligible: ReturnType<typeof modelBundle>;
   portfolioSnapshotIncluded?: true;
   goalProgressIncluded?: true;
+  recent?: RoutingHistoryEntry[];
   allowedQuestions: readonly string[];
 };

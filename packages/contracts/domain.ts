@@ -27,6 +27,7 @@ export type ExperienceProposal = {
   intent: Intent;
   introKey: IntroKey;
   clarificationQuestion: string | null;
+  replyText?: string | null;
   blocks: ProposalBlock[];
   followUpIds: string[];
 };

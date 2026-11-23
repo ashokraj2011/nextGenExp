@@ -147,9 +147,18 @@ function route(envelope: Envelope): ContextSelectionProposal {
   return choice && choice.contextId !== null ? select(choice.intentId) : noMatch;
 }
 
+const balanceReply = "Available balance is the amount marked ready to use. Current balance is the total recorded in the ledger. Which one would you like to understand better?";
+const conversationalReplies: Partial<Record<RoutingIntentId, string>> = {
+  explain_balance: balanceReply,
+  compare_balances: balanceReply,
+  explain_portfolio: "A portfolio holds investments and cash. Allocation describes how its total value is split. Which part would you like to explore?",
+  suggest_next_step: "I don’t have a specific next step to suggest right now. What would you like to work on?",
+};
+
 function compose({ body, envelope }: GatewayCall): ExperienceProposal | ToolCall {
   const eligible = envelope.eligible!;
   const text = envelope.request.toLowerCase();
+  const reply = envelope.selectedIntentId && conversationalReplies[envelope.selectedIntentId];
   const get = (prefix: string) => eligible.candidates.find((item) => item.title.startsWith(prefix));
   const choose = (component: ComponentName, candidates: (typeof eligible.candidates[number] | undefined)[], introKey: ExperienceProposal["introKey"]): ExperienceProposal => {
     const chosen = candidates.every(Boolean) ? candidates as typeof eligible.candidates : [];
@@ -157,6 +166,8 @@ function compose({ body, envelope }: GatewayCall): ExperienceProposal | ToolCall
     return {
       schemaVersion: "1.0", decisionId: eligible.decisionId, status: chosen.length ? "ready" : "no_match", intent: envelope.intent!,
       introKey: chosen.length ? introKey : "no_match", clarificationQuestion: null,
+      replyText: chosen.length || envelope.portfolioSnapshotIncluded ? null
+        : reply ?? "I couldn’t find a match for that request. What would you like to look at next?",
       blocks: chosen.length ? [{ blockId: "fixture", component, candidateIds: chosen.map((item) => item.candidateId), variant: "expanded" }] : [],
       followUpIds: [...new Set(chosen.flatMap((item) => item.followUps.map((followUp) => followUp.followUpId)))].slice(0, 3),
     };

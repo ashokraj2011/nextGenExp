@@ -191,7 +191,7 @@ export const helpContracts = [
       {
         id: "composer",
         title: "Experience Composer",
-        description: "The second model call gets the checked request and matching content. It picks what to show, which layout to use, and any follow-up buttons.",
+        description: "The second model call gets the checked request and matching content. It can choose a layout and follow-up buttons or continue in plain text when no content fits.",
         files: [
           { name: "model-inputs.ts", source: modelInputsSource },
           jsonFile("experience-proposal.schema.json", compositionOutputSchema),

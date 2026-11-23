@@ -31,9 +31,8 @@ type ExperienceInput = {
 };
 
 export function compileExperience(input: ExperienceInput): CompiledExperience {
-  const intro = input.portfolio ? host.introCopy.summary : input.outcome === "eligible_empty"
-    ? "I don’t have anything to show for that request."
-    : host.introCopy[input.introKey];
+  const intro = input.portfolio ? host.introCopy.summary
+    : input.approved?.proposal.replyText?.trim() || host.introCopy[input.introKey];
   const blocks: DisplayBlock[] = (input.approved?.blocks ?? []).map(({ proposal, content }) => {
     const primary = content[0];
     const shared = {
@@ -106,7 +105,7 @@ export function compileRuleCreation(props: RuleCreationProps & { glossary: RuleG
   }, [{ component: ruleCreation.name, props }], []);
 }
 
-export function compileChatReply(text: string, outcome: "reply" | "no_match", expiresAt: number): CompiledExperience {
+export function compileChatReply(text: string, outcome: "reply" | "no_match" | "eligible_empty", expiresAt: number): CompiledExperience {
   return buildSurface({
     status: outcome === "reply" ? "ready" : "no_match",
     outcome, intro: text, question: null, partial: false, expiresAt,

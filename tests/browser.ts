@@ -267,7 +267,11 @@ try {
   const chatWithMock = page.getByLabel("Your question");
   await chatWithMock.fill("Explain the fictional portfolio view.");
   await chatWithMock.press("Enter");
-  await page.getByText("I don’t have anything to show for that request.", { exact: true }).waitFor();
+  const plainReply = page.getByText("A portfolio holds investments and cash. Allocation describes how its total value is split. Which part would you like to explore?", { exact: true });
+  await plainReply.waitFor();
+  await chatWithMock.fill("What did you just say?");
+  await chatWithMock.press("Enter");
+  await plainReply.nth(1).waitFor();
 
   await page.getByRole("link", { name: "Tool setup" }).click();
   await page.getByRole("button", { name: "Create rule", exact: true }).click();
@@ -289,7 +293,7 @@ try {
   await page.screenshot({ path: resolve(screenshots, "ccre-rule-preview.png"), fullPage: true });
   await page.getByRole("button", { name: "Save and test in chat", exact: true }).click();
   await page.getByRole("button", { name: /Compare two terms/ }).click();
-  await page.getByText("I couldn’t find anything that answers that request.", { exact: true }).waitFor();
+  await page.getByText("Available balance is the amount marked ready to use. Current balance is the total recorded in the ledger. Which one would you like to understand better?", { exact: true }).waitFor();
   await logsButton.click();
   await page.getByText("Treatment Selector · succeeded", { exact: true }).click();
   await page.getByText("Mock CCRE evaluation", { exact: true }).click();
@@ -348,6 +352,7 @@ try {
   assert.match(await author.locator('pre[aria-label="Glossary tool request"]').innerText(), /"routerRunId"/);
   assert.match(await author.locator('pre[aria-label="Glossary tool response"]').innerText(), /"namespaces".*"customer"/s);
   await author.keyboard.press("Escape");
+  await author.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Open call logs");
   await authorMessage.fill("Compare available and current balance.");
   await authorMessage.press("Enter");
   await author.getByRole("heading", { name: "Compare balance definitions" }).waitFor();
@@ -379,6 +384,7 @@ try {
   await jordanProfileTrigger.click();
   await demoProfiles.getByRole("button", { name: "Start chat as Alice Morgan", exact: true }).click();
   await aliceProfileTrigger.waitFor();
+  await portfolioPage.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Profiles, current profile Alice Morgan");
   const portfolioQuestion = portfolioPage.getByLabel("Your question");
   await portfolioQuestion.fill("Let me know my portfolio summary.");
   await portfolioQuestion.press("Enter");

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/pzn-poc/experience-proposal.schema.json",
   "title": "experience-proposal",
-  "description": "Model proposal only. Intent summary is diagnostic. Host verifier enforces status, membership, compatibility, and proof requirements; host compiles all displayed facts.",
+  "description": "Model proposal. The host verifies selected content and supplies facts for cards. A no-match proposal can include a plain-text reply.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -76,6 +76,14 @@
       ],
       "minLength": 1,
       "maxLength": 400
+    },
+    "replyText": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 1600
     },
     "blocks": {
       "type": "array",

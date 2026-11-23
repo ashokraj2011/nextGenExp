@@ -29,6 +29,7 @@ class TurnFailure extends Error {
   constructor(readonly code: FailureCode) { super(code); }
 }
 const asRef = (turn: TurnRecord) => ({ turnRef: turn.public.id });
+const CONVERSATIONAL_REPLY_TIMEOUT = 6_000;
 const completed = (result: RunResult, stage: Stage) => {
   if (result.state === "completed") return;
   if (result.state === "verification_failed") throw new TurnFailure(stage === "route" ? "route_rejected" : "verification_failed");
@@ -125,7 +126,8 @@ export class ExperienceService {
   private async execute(id: string, recovering: boolean) {
     const initial = this.store.turn(id);
     if (this.closing || initial?.public.status !== "working") return;
-    const remains = initial.public.createdAt + TURN_DEADLINE - this.now();
+    const deadline = initial.public.createdAt + TURN_DEADLINE;
+    const remains = deadline - this.now();
     if (remains <= 0) {
       this.store.finish(id, { type: "failed", code: recovering ? "restarted" : "turn_timeout" }, this.now());
       return;
@@ -142,6 +144,7 @@ export class ExperienceService {
     const timer = setTimeout(() => controller.abort(new TurnFailure("turn_timeout")), remains);
     timer.unref();
     let stage: "catalog" | "route" | "glossary" | "ts" | "portfolio" | "goal" | "compose" | "workflow" = "catalog";
+    let emptyEligibility = false;
     const current = () => {
       signal.throwIfAborted();
       return runtime.current(id);
@@ -169,25 +172,7 @@ export class ExperienceService {
       if (!current().route) {
         this.store.progress(id, "routing", this.now());
         const turn = current();
-        const recent: RoutingHistoryEntry[] = this.store.conversationTurns(conversation.id)
-          .filter((previous) => previous.public.status === "completed" && previous.ordinal < turn.ordinal)
-          .slice(-ROUTING_HISTORY_TURNS)
-          .map((previous) => {
-            const experience = previous.public.experience;
-            const titles = experience?.blocks.map(({ component, props }) => {
-              if ("title" in props) return props.title;
-              if (component === "PznFundingPreview") return "Funding preview";
-              return component === "PznPortfolioSnapshot" ? "Portfolio snapshot" : "Rule editor";
-            }) ?? [];
-            return {
-              request: previous.public.message.slice(0, ROUTING_HISTORY_REQUEST_LENGTH),
-              contextId: previous.route?.contextId ?? null,
-              intentId: previous.trace.intentId ?? null,
-              clarificationQuestion: experience?.question ?? null,
-              assistantReply: experience && !experience.question ? experience.intro.slice(0, ROUTING_HISTORY_REPLY_LENGTH) : undefined,
-              displayedContent: titles.length ? titles : undefined,
-            };
-          });
+        const recent = this.recentChat(turn);
         const intentCatalog = availableRoutingIntents(catalog.catalog, this.canCreateRule);
         const summaryFollowUp = resolveSummaryFollowUp(turn.public.message, recent, intentCatalog);
         const result = await runtime.model("route", turn, conversation, catalog.snapshotId, {
@@ -335,20 +320,17 @@ export class ExperienceService {
         turn = current();
       }
       const portfolio = showPortfolio ? turn.portfolioSnapshot : undefined;
-      if (!decision.candidates.length) {
-        if (portfolio) {
-          const result = compileExperience({
-            status: "ready", outcome: "ready", introKey: "summary", question: null, portfolio, expiresAt, partial: decision.partial,
-          });
-          this.store.update(id, (row) => { row.trace.components = result.display.blocks.map((block) => block.component); });
-          this.store.finish(id, { type: "completed", result }, this.now());
-        } else {
-          if (turn.trace.ts?.baseline.length) throw new TurnFailure("content_unavailable");
-          done("no_match", "eligible_empty", null);
-        }
+      emptyEligibility = decision.candidates.length === 0;
+      if (emptyEligibility && portfolio) {
+        const result = compileExperience({
+          status: "ready", outcome: "ready", introKey: "summary", question: null, portfolio, expiresAt, partial: decision.partial,
+        });
+        this.store.update(id, (row) => { row.trace.components = result.display.blocks.map((block) => block.component); });
+        this.store.finish(id, { type: "completed", result }, this.now());
         return;
       }
-      if (showGoal && !turn.goalProgress) {
+      if (emptyEligibility && turn.trace.ts?.baseline.length) throw new TurnFailure("content_unavailable");
+      if (showGoal && !emptyEligibility && !turn.goalProgress) {
         stage = "goal";
         this.store.progress(id, "goal", this.now());
         const result = await runtime.registry(turn, "goalScopeId", 1, signal, async (call) => (
@@ -370,14 +352,18 @@ export class ExperienceService {
 
       stage = "compose";
       this.store.progress(id, "composition", this.now());
+      const composeSignal = emptyEligibility
+        ? AbortSignal.any([signal, AbortSignal.timeout(CONVERSATIONAL_REPLY_TIMEOUT)])
+        : signal;
       const result = await runtime.model("compose", turn, conversation, decision.decisionId, {
         inputType: "PznExperienceCompositionInput",
         request: turn.public.message, intent: route.intent,
         selectedIntentId: turn.trace.intentId ?? undefined, selectedContextId: route.contextId, eligible: modelBundle(decision, route),
         ...(portfolio && { portfolioSnapshotIncluded: true }),
         ...(goalProgress && { goalProgressIncluded: true }),
+        ...(emptyEligibility && { recent: this.recentChat(turn) }),
         allowedQuestions: demo.clarificationQuestions,
-      } satisfies ExperienceCompositionInput, signal, recovering);
+      } satisfies ExperienceCompositionInput, composeSignal, recovering);
 
       const latest = current();
       this.store.update(id, (row) => { row.trace.composeRun = traceFor(result); });
@@ -389,9 +375,10 @@ export class ExperienceService {
       const { verified, proof, unsuccessfulRead } = await runtime.verifyComposition(result.output, latest, result.runId);
       if (unsuccessfulRead) throw new TurnFailure("metric_unavailable");
       current();
+      const { status } = verified.proposal;
       const resultForDisplay = compileExperience({
-        status: verified.proposal.status, outcome: verified.proposal.status, introKey: verified.proposal.introKey,
-        question: verified.proposal.clarificationQuestion, partial: decision.partial && Boolean(portfolio || verified.proposal.status === "ready"),
+        status, outcome: emptyEligibility && status === "no_match" ? "eligible_empty" : status, introKey: verified.proposal.introKey,
+        question: verified.proposal.clarificationQuestion, partial: decision.partial && Boolean(portfolio || status === "ready"),
         expiresAt, approved: verified, proof, portfolio, goalProgress,
         workflow: fundingRecommendation(latest, verified.contentOrder),
       });
@@ -416,11 +403,39 @@ export class ExperienceService {
         : error instanceof Rejected ? (stage === "route" ? "route_rejected" : "verification_failed")
         : "internal_error";
       this.store.update(id, (row) => { row.trace.failures.push({ stage, code: error instanceof Rejected ? error.code : mapped }); });
-      this.store.finish(id, { type: "failed", code: mapped }, this.now());
+      const now = this.now();
+      if (emptyEligibility && stage === "compose" && !signal.aborted && now < deadline) {
+        const result = compileChatReply(demo.introCopy.no_match, "eligible_empty", now);
+        this.store.finish(id, { type: "completed", result }, now);
+      } else {
+        this.store.finish(id, { type: "failed", code: mapped }, now);
+      }
     } finally {
       clearTimeout(timer);
       this.controllers.delete(id);
     }
+  }
+
+  private recentChat(turn: TurnRecord): RoutingHistoryEntry[] {
+    return this.store.conversationTurns(turn.scope.conversationId)
+      .filter((previous) => previous.public.status === "completed" && previous.ordinal < turn.ordinal)
+      .slice(-ROUTING_HISTORY_TURNS)
+      .map((previous) => {
+        const experience = previous.public.experience;
+        const titles = experience?.blocks.map(({ component, props }) => {
+          if ("title" in props) return props.title;
+          if (component === "PznFundingPreview") return "Funding preview";
+          return component === "PznPortfolioSnapshot" ? "Portfolio snapshot" : "Rule editor";
+        }) ?? [];
+        return {
+          request: previous.public.message.slice(0, ROUTING_HISTORY_REQUEST_LENGTH),
+          contextId: previous.route?.contextId ?? null,
+          intentId: previous.trace.intentId ?? null,
+          clarificationQuestion: experience?.question ?? null,
+          assistantReply: experience && !experience.question ? experience.intro.slice(0, ROUTING_HISTORY_REPLY_LENGTH) : undefined,
+          displayedContent: titles.length ? titles : undefined,
+        };
+      });
   }
 
   private async runFundingPreview(runtime: Runtime, turn: TurnRecord, launch: WorkflowLaunch, signal: AbortSignal) {

@@ -22,7 +22,7 @@ export const failureCopy = {
   portfolio_unavailable: "We couldn’t load your portfolio snapshot. Please try again.",
   goal_unavailable: "We couldn’t load your home-buying goal. Please try again.",
   workflow_unavailable: "We couldn’t prepare your funding preview. Please try again.",
-  content_unavailable: "The matching content is unavailable. Please try again.",
+  content_unavailable: "I couldn’t load the matching content. You can try again or ask another question.",
   gateway_unavailable: "We couldn’t reach the model. Please try again.",
   verification_failed: "We couldn’t check the reply. Please try again.",
   metric_unavailable: "We couldn’t load your balances. Please try again.",

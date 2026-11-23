@@ -66,7 +66,9 @@ For a short demo, run **Learn about retirement** for both customers. Open **Logs
 
 sfield sends the latest message, up to four recent turns, and the available intent catalog to the Context Router. History includes clarification questions, assistant reply text, and titles of previously displayed cards. For demo content requests, the LLM selects an intent ID. The host verifies the choice and maps it to a task and Treatment Selector context.
 
-For greetings, acknowledgments, or general questions that need no demo tools, the LLM returns `replyText` and sfield displays it directly in chat. When a request has no clear supported intent or asks for something outside the demo, chat explains that it uses sample data and lists the experiences available to try. Open **Logs** to view the model response and any Treatment Selector call for that turn.
+For greetings, acknowledgments, or general questions that need no tools, the Context Router returns `replyText` and chat displays it directly. When a request has no clear supported intent or asks for something outside the available experiences, chat lists what it can help with.
+
+When Treatment Selector returns an empty list, the Experience Composer can continue in plain text using the request and recent chat. It can explain a general concept or ask a follow-up. The same reply field is available when eligible content exists and the Composer finds no suitable match. The app saves the reply in chat history. If the model fails on the empty-list path, the app shows a short local reply. See **Logs → Experience Composer** for the model call and its result.
 
 When the goal is unclear, the router selects a focused question from the approved list and chat displays it. In a new chat, try “i will be 62” followed by “last day of job is next week.” Confirm that you want retirement planning information to route to `retirement_learning`. In a chat that already established retirement as the goal, the same messages can continue that topic directly. Use **Logs → Context Router** to see the input and decision.
 
