@@ -34,23 +34,23 @@ const participants = [
 ];
 
 const [chat, host, sfield, model, selector, data] = participants;
-const cases = addressUpdateExample.exchanges;
+const { exchanges: cases, handoffs } = addressUpdateExample;
 const exchanges = [
   { path: [chat, host], label: "Message + conversation ID", example: cases.chat },
-  { path: [host, sfield, selector], label: "Ask which topics are supported", example: cases.contexts },
+  { path: [host, sfield, selector], label: "Ask which topics are supported", example: cases.contexts, handoff: handoffs.discovery },
   { path: [selector, sfield, host], label: "List of supported topics", reply: true, example: cases.contexts },
-  { path: [host, sfield, model], label: "Message, recent chat, and request options", example: cases.router },
+  { path: [host, sfield, model], label: "Message, recent chat, and request options", example: cases.router, handoff: handoffs.router },
   { path: [model, sfield, host], label: "Likely request or follow-up question", reply: true, example: cases.router },
-  { path: [host, sfield, selector], label: "Topic and member ID", example: cases.treatment },
+  { path: [host, sfield, selector], label: "Topic and member ID", example: cases.treatment, handoff: handoffs.treatment },
   { path: [selector, sfield, host], label: "Matching content IDs in order", reply: true, example: cases.treatment },
   { path: [host, data], label: "Look up content by ID", example: cases.content },
   { path: [data, host], label: "Matching content for this request", reply: true, example: cases.content },
-  { path: [host, sfield, model], label: "Customer’s request and matching content", example: cases.composer },
+  { path: [host, sfield, model], label: "Customer’s request and matching content", example: cases.composer, handoff: handoffs.composer },
   { path: [model, sfield, host], label: "Suggested layout for the reply", reply: true, example: cases.composer },
   { path: [host, chat], label: "A2UI instructions for cards and buttons", reply: true, example: cases.surface },
   { path: [chat, host], label: "Button starts the next chat step", example: cases.followUp },
 ];
-export type DiagramExchange = (typeof exchanges)[number] & { number: number };
+export type DiagramExchange = (typeof exchanges)[number] & { number: number; inspectHandoff?: true };
 
 export function ExchangePath({ path, short = false }: { path: DiagramExchange["path"]; short?: boolean }) {
   return path.map((participant, index) => (
@@ -76,8 +76,9 @@ export function InteractionDiagram({ onSelect }: { onSelect: (exchange: DiagramE
       <div className="help-lifelines" aria-hidden="true">{participants.map(({ name }) => <span key={name} />)}</div>
       <ol aria-label="Chat interaction sequence" role="list">
         {exchanges.map((exchange, index) => {
-          const { path, label, reply } = exchange;
+          const { path, label, reply, handoff } = exchange;
           const number = index + 1;
+          const step = { ...exchange, number };
           const lanes = path.map((participant) => participants.indexOf(participant));
           const start = lanes[0];
           const end = lanes[lanes.length - 1];
@@ -92,14 +93,21 @@ export function InteractionDiagram({ onSelect }: { onSelect: (exchange: DiagramE
                 <ExchangePath path={path} short />
               </span>
               <button className="help-message-heading" type="button" aria-haspopup="dialog" aria-label={`Step ${number} · ${label}`}
-                onClick={() => onSelect({ ...exchange, number })}>
+                onClick={() => onSelect(step)}>
                 <span className="help-message-number">{number}</span>
                 <span className="help-message-label">{label}</span>
               </button>
-              <span className="help-message-arrow" aria-hidden="true">
-                {path.slice(1).map((participant, leg) => (
-                  <span key={participant.name} style={{ flex: Math.abs(lanes[leg + 1] - lanes[leg]) }} />
-                ))}
+              <span className="help-message-arrow" data-inspectable={handoff ? true : undefined}>
+                {path.slice(1).map((participant, leg) => {
+                  const legStyle = { flex: Math.abs(lanes[leg + 1] - lanes[leg]) };
+                  return leg === 0 && handoff
+                    ? <button key={participant.name} className="help-message-leg help-message-handoff" style={legStyle}
+                        type="button" aria-haspopup="dialog" aria-label={`App server to sfield handoff · step ${number}`}
+                        onClick={() => onSelect({ ...step, inspectHandoff: true })}>
+                        <span>App <ArrowRight size={12} aria-hidden="true" /> sfield</span>
+                      </button>
+                    : <span key={participant.name} className="help-message-leg" style={legStyle} aria-hidden="true" />;
+                })}
               </span>
             </div>
           </li>;

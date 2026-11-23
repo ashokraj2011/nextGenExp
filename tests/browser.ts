@@ -2,8 +2,18 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { chromium } from "playwright";
+import { chromium, type Locator } from "playwright";
+import marcusCalls from "../fixtures/marcus-sfield-exchanges.json";
+import { scoreContexts } from "../packages/propensity-adapter";
+import { activeContextCatalog } from "../packages/ts-adapter";
 import { startTestPreview } from "./preview";
+
+async function readExchange(drawer: Locator) {
+  return {
+    request: JSON.parse(await drawer.getByLabel("Request JSON", { exact: true }).innerText()),
+    response: JSON.parse(await drawer.getByLabel("Response JSON", { exact: true }).innerText()),
+  };
+}
 
 const preview = await startTestPreview(undefined, ({ envelope }) => (
   envelope.request.toLowerCase().includes("slow") ? { delayMs: 4000 } : undefined
@@ -47,7 +57,7 @@ try {
   const sequence = page.getByRole("list", { name: "Chat interaction sequence" });
   await sequence.getByText("Matching content IDs in order", { exact: true }).waitFor();
   await sequence.getByText("A2UI instructions for cards and buttons", { exact: true }).waitFor();
-  const numberedSteps = await sequence.getByRole("button").all();
+  const numberedSteps = await sequence.getByRole("button", { name: /^Step \d+ ·/ }).all();
   assert.equal(numberedSteps.length, 13);
   const exchanges = [];
   const exchangePaths = [];
@@ -55,10 +65,7 @@ try {
     await button.click();
     const drawer = page.getByRole("dialog", { name: new RegExp(`^Step ${index + 1} ·`) });
     await drawer.getByText("Marcus Reed", { exact: true }).waitFor();
-    exchanges.push({
-      request: JSON.parse(await drawer.locator('pre[aria-label="Request JSON"]').innerText()),
-      response: JSON.parse(await drawer.locator('pre[aria-label="Response JSON"]').innerText()),
-    });
+    exchanges.push(await readExchange(drawer));
     exchangePaths.push(await drawer.locator(".help-exchange-direction strong").allTextContents());
     await page.keyboard.press("Escape");
     await drawer.waitFor({ state: "hidden" });
@@ -68,7 +75,11 @@ try {
   assert.deepEqual(exchangePaths[6], ["Treatment Selector", "sfield", "PZN app server"]);
   assert.deepEqual(exchangePaths[9], ["PZN app server", "sfield", "Language model"]);
   assert.equal(exchanges[0].request.message, "I moved and need to update my address.");
-  assert.equal(exchanges[2].response.contexts[0].contextId, "address-update");
+  assert.deepEqual(exchanges[2].response, activeContextCatalog);
+  assert.deepEqual(exchanges[3].request.catalog, activeContextCatalog);
+  assert.deepEqual(exchanges[3].request.propensity, scoreContexts(
+    "demo-new-account", "normal", activeContextCatalog.contexts.map(({ contextId }) => contextId),
+  ));
   assert.equal(exchanges[4].response.intentId, "update_address");
   assert.deepEqual(exchanges[5], exchanges[6]);
   assert.deepEqual(exchanges[6].request.adapterInput, { mid: "DEMO-MID-1003", context: "address-update" });
@@ -78,11 +89,38 @@ try {
   assert.equal(exchanges[11].response.type, "experience.ready");
   assert.equal(exchanges[12].request.envelope.action.name, "request_follow_up");
   assert.equal(exchanges[12].response.turn.message, "Show the fictional transfer checklist.");
+
+  const handoffs = sequence.getByRole("button", { name: /^App server to sfield handoff · step / });
+  assert.equal(await handoffs.count(), 4);
+  for (const [number, call] of [[2, "catalog"], [4, "router"], [6, "treatment"], [10, "composer"]] as const) {
+    const button = sequence.getByRole("button", { name: `App server to sfield handoff · step ${number}`, exact: true });
+    await button.click();
+    const drawer = page.getByRole("dialog", { name: `Step ${number} · App server to sfield`, exact: true });
+    assert.deepEqual(await drawer.locator(".help-exchange-direction strong").allTextContents(), ["PZN app server", "sfield"]);
+    assert.deepEqual(await readExchange(drawer), marcusCalls[call]);
+    if (call === "catalog") {
+      await drawer.getByText(/fixtures\/contexts\.json/).waitFor();
+      await drawer.getByRole("button", { name: "Topic relevance scores", exact: true }).click();
+      await drawer.getByText(/fixtures\/propensity\.json/).waitFor();
+      assert.deepEqual(await readExchange(drawer), marcusCalls.scores);
+    }
+    if (call === "router" || call === "composer") {
+      await drawer.getByText("Read the model input as JSON", { exact: true }).click();
+      const modelInput = JSON.parse(await drawer.getByLabel("Model input JSON", { exact: true }).innerText());
+      assert.deepEqual(modelInput, exchanges[number - 1].request);
+    }
+    await page.keyboard.press("Escape");
+    await drawer.waitFor({ state: "hidden" });
+    assert.equal(await button.evaluate((element) => element === document.activeElement), true);
+  }
   await page.getByRole("link", { name: "sfield", exact: true }).click();
   assert.equal(new URL(page.url()).hash, "#sfield");
   const toolRegistry = page.getByRole("list", { name: "sfield tool registry", exact: true });
   assert.equal(await toolRegistry.getByRole("listitem").count(), 7);
   await toolRegistry.getByText("Experience Composer", { exact: true }).waitFor();
+  await toolRegistry.getByRole("link", { name: "Topic relevance scores", exact: true }).click();
+  await page.getByRole("button", { name: "propensity.json", exact: true }).click();
+  await page.getByRole("button", { name: "Download propensity.json", exact: true }).waitFor();
   await toolRegistry.getByRole("link", { name: "Portfolio Snapshot", exact: true }).click();
   assert.equal(new URL(page.url()).hash, "#contracts");
   await page.getByRole("button", { name: "Download portfolio-snapshot.tool.json", exact: true }).waitFor();
@@ -422,9 +460,10 @@ try {
   await mobile.getByRole("link", { name: "Help", exact: true }).click();
   await mobile.getByRole("heading", { name: "How PZN Lab works", exact: true }).waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  await mobile.getByRole("button", { name: /^Step 6 ·/ }).click();
-  const mobileExchange = mobile.getByRole("dialog", { name: /^Step 6 ·/ });
+  await mobile.getByRole("button", { name: "App server to sfield handoff · step 6", exact: true }).click();
+  const mobileExchange = mobile.getByRole("dialog", { name: "Step 6 · App server to sfield", exact: true });
   await mobileExchange.getByText("Marcus Reed", { exact: true }).waitFor();
+  assert.deepEqual(await readExchange(mobileExchange), marcusCalls.treatment);
   const exchangeBox = await mobileExchange.boundingBox();
   assert.ok(exchangeBox && exchangeBox.width <= 360, "The exchange drawer fits the mobile viewport");
   await mobileExchange.getByRole("button", { name: "Close exchange details", exact: true }).click();

@@ -3,7 +3,7 @@ import { ArrowLeft, ArrowUpRight, BookOpenText, Braces, Database, Download, GitB
 import { DeveloperDrawer } from "./developer-drawer";
 import { currentTreatmentExample, ExchangePath, InteractionDiagram, proposedTreatmentExample, TreatmentProposalDiagram, type DiagramExchange } from "./help-architecture";
 import { contractList, helpContracts, type ContractFile } from "./help-contracts";
-import { addressUpdateExample, helpFlows, type FlowStep, type PayloadExample } from "./help-flow";
+import { addressUpdateExample, helpFlows, type FlowStep, type HandoffExample, type PayloadExample } from "./help-flow";
 import { SfieldHelp } from "./help-sfield";
 import "./help.css";
 
@@ -37,20 +37,51 @@ function PayloadPair({ input, output }: { input: PayloadExample; output: Payload
   ]} />;
 }
 
+function HandoffExamples({ handoff }: { handoff: HandoffExample }) {
+  const [selected, setSelected] = useState(0);
+  const { description, exchange: { request, response } } = handoff.calls[selected];
+  const message = "message" in request ? request.message : undefined;
+  return <>
+    {handoff.description && <p className="help-exchange-description">{handoff.description}</p>}
+    {handoff.calls.length > 1 && <div className="help-flow-picker help-handoff-picker" role="group" aria-label="Discovery tool calls">
+      {handoff.calls.map(({ title }, index) => (
+        <button key={title} type="button" aria-pressed={selected === index} onClick={() => setSelected(index)}>{title}</button>
+      ))}
+    </div>}
+    <p className="help-exchange-description">{description}</p>
+    <PayloadExamples examples={[
+      { direction: "Request", label: message ? "session.send" : "registry.execute", source: JSON.stringify(request, null, 2) },
+      { direction: "Response", label: message ? "sfield RunResult" : "sfield ToolResult", source: JSON.stringify(response, null, 2) },
+    ]} />
+    {message && <details className="help-tool-exchange help-handoff-message">
+      <summary>Read the model input as JSON</summary>
+      <pre className="help-contract-source" tabIndex={0} aria-label="Model input JSON">
+        <code>{JSON.stringify(JSON.parse(message.text), null, 2)}</code>
+      </pre>
+    </details>}
+  </>;
+}
+
 function ExchangeDetails({ exchange, close }: { exchange: DiagramExchange; close: () => void }) {
   const { example, path, label, number, reply } = exchange;
+  const handoff = exchange.inspectHandoff ? exchange.handoff : undefined;
   return <div className="help-exchange-drawer">
-    <DeveloperDrawer title={`Step ${number} · ${label}`} icon={<Braces size={18} />} closeLabel="Close exchange details" close={close} wide>
+    <DeveloperDrawer title={`Step ${number} · ${handoff ? "App server to sfield" : label}`} icon={<Braces size={18} />} closeLabel="Close exchange details" close={close} wide>
       <p className="help-example">As <strong>{addressUpdateExample.persona}</strong>, ask <strong>“{addressUpdateExample.prompt}”</strong></p>
       <p className="help-exchange-direction">
-        <ExchangePath path={path} />
+        <ExchangePath path={handoff ? path.slice(0, 2) : path} />
       </p>
-      <p className="help-exchange-description">{example.description}</p>
-      <PayloadExamples examples={[
-        { direction: "Request", label: example.input.label, source: JSON.stringify(example.input.value, null, 2), emphasized: !reply },
-        { direction: "Response", label: example.output.label, source: JSON.stringify(example.output.value, null, 2), emphasized: reply },
-      ]} />
-      <p className="help-example-note">These examples use sample IDs. Open <strong>Logs</strong> in chat to see a real run of the demo.</p>
+      {handoff ? <>
+        <HandoffExamples handoff={handoff} />
+        <p className="help-example-note">Recorded in Test mode. Generated IDs were replaced with sample IDs.</p>
+      </> : <>
+        <p className="help-exchange-description">{example.description}</p>
+        <PayloadExamples examples={[
+          { direction: "Request", label: example.input.label, source: JSON.stringify(example.input.value, null, 2), emphasized: !reply },
+          { direction: "Response", label: example.output.label, source: JSON.stringify(example.output.value, null, 2), emphasized: reply },
+        ]} />
+        <p className="help-example-note">These examples use sample IDs. Open <strong>Logs</strong> in chat to see a real run of the demo.</p>
+      </>}
     </DeveloperDrawer>
   </div>;
 }
@@ -122,7 +153,7 @@ export function Help() {
         <div className="help-section-heading">
           <div>
             <h2 id="architecture-title">How chat answers a message</h2>
-            <p className="help-exchange-description">Choose a step number to see the request and response for Marcus’s address update.</p>
+            <p className="help-exchange-description">Choose a step number for Marcus’s address update, or select an App → sfield arrow to see what passes between the server and sfield.</p>
           </div>
           <a className="help-section-link" href="#walkthroughs">See a walkthrough <ArrowUpRight size={14} aria-hidden="true" /></a>
         </div>

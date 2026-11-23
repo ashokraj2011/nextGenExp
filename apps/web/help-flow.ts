@@ -5,11 +5,17 @@ import portfolioFixture from "../../fixtures/demo-portfolio-snapshots.json";
 import propensityFixture from "../../fixtures/propensity.json";
 import treatmentFixture from "../../fixtures/treatment-scenarios.json";
 import host from "../../fixtures/host.json";
+import marcusCalls from "../../fixtures/marcus-sfield-exchanges.json";
 import type { ContextSelectionProposal, ExperienceProposal, Intent, ProposalBlock } from "../../packages/contracts/domain";
-import { portfolioSummaryQuestion, routingIntents, type RoutingIntentId } from "../../packages/contracts/routing-intents";
+import { portfolioSummaryQuestion, type RoutingIntentId } from "../../packages/contracts/routing-intents";
 import { mockRuleGlossary } from "../../packages/rule-glossary";
 
 export type PayloadExample = { label: string; value: unknown };
+type CapturedCall = (typeof marcusCalls)[keyof typeof marcusCalls];
+export type HandoffExample = {
+  description?: string;
+  calls: { title: string; description: string; exchange: CapturedCall }[];
+};
 export type FlowStep = {
   id: "chat" | "discovery" | "router" | "treatment" | "portfolio" | "goal" | "composer" | "glossary" | "render";
   title: string;
@@ -60,7 +66,7 @@ function discoveryFor(personaId: keyof typeof propensityFixture.defaults): FlowS
   };
   return {
     id: "discovery", title: "Load supported topics", role: "sfield tools",
-    description: "sfield fetches the supported topics and scores that suggest which ones may fit. The app saves a copy of the list for this message and sends it to the first model call.",
+    description: "sfield gets active topics from the mock Treatment Selector, which loads fixtures/contexts.json. A separate sfield tool looks up the demo profile’s scores in fixtures/propensity.json. The app saves the list and scores for the turn and sends both to the first model call.",
     input: { label: "Tool requests", value: {
       "contexts.list": { turnRef }, "propensity.context.score": { turnRef, catalogSnapshotId },
     } },
@@ -133,7 +139,6 @@ const balanceRoute = routeProposal("show_balance", "Show the summary of the esta
 const portfolioRoute = routeProposal("show_portfolio", "Show the customer's demo portfolio.");
 const goalRoute = routeProposal("show_home_goal", "Show progress toward a home down payment.");
 const retirementRoute = routeProposal("retirement_learning", "Explain retirement planning basics.");
-const addressRoute = routeProposal("update_address", "Show the mailing address update steps.");
 const balanceCard: ProposalBlock = { blockId: "b1", component: "PznMetricSummary", candidateIds: ["candidate_balance"], variant: "compact" };
 const balanceComposer = composer(
   summaryPrompt, "balance", "show_balance", { topic: "Show demo balances", task: "show", summary: balanceRoute.summary },
@@ -150,8 +155,7 @@ balanceComposer.tool = {
 balanceComposer.contracts = [...balanceComposer.contracts, "balance"];
 
 const addressContext = "address-update";
-const addressCatalog = { ...catalog, contexts: catalog.contexts.filter(({ contextId }) => contextId === addressContext) };
-const addressContentIds = treatmentFixture.base[addressContext];
+const addressContentIds = marcusCalls.treatment.response.output;
 const addressCandidateId = "candidate_address";
 const addressExperienceId = "exp_demo";
 const addressFollowUp = { actionId: "action_demo", componentId: "follow_up_1", label: "See demo transfer steps" };
@@ -162,39 +166,79 @@ const addressBlocks = [
 const addressSteps = {
   chat: chat(addressPrompt),
   discovery: discoveryFor("demo-new-account"),
-  router: router(
-    "The model recognizes the mailing address change and returns update_address. The app checks it and picks Address update as the topic.",
-    { request: addressPrompt, recent: [], catalog: addressCatalog, intentCatalog: routingIntents.filter(({ contextId }) => contextId === addressContext) },
-    addressRoute,
-  ),
+  router: {
+    id: "router", title: "Context Router", role: "First model call",
+    description: "The model gets all active topics, Marcus’s scores, and the allowed intents. It returns update_address, which the app checks before asking Treatment Selector for content.",
+    input: { label: "What the model receives", value: JSON.parse(marcusCalls.router.request.message.text) },
+    output: { label: "ContextSelectionProposal", value: marcusCalls.router.response.output },
+    contracts: ["router", "gateway"],
+  },
   treatment: treatment(
     addressContext, addressContentIds,
     "Treatment Selector gets Marcus’s demo member ID and the topic. His account is waiting for a first deposit, so the rule adds fund_account to the address guide.",
     newAccount.syntheticMid,
   ),
-  composer: composer(
-    addressPrompt, addressContext, "update_address", { topic: "Update mailing address", task: "guide", summary: addressRoute.summary },
-    [{ candidateId: addressCandidateId, title: addressBlocks[0].props.title, tsRank: 1 }],
-    [{ blockId: "b1", component: "PznStepList", candidateIds: [addressCandidateId], variant: "expanded" }],
-    "The model chooses the address guide. The app checks the choices and adds the funding card that Treatment Selector returned.",
-    "steps",
-  ),
+  composer: {
+    id: "composer", title: "Experience Composer", role: "Second model call",
+    description: "The model chooses the address guide. The app checks the choice and adds the funding card that Treatment Selector returned.",
+    input: { label: "What the model receives", value: JSON.parse(marcusCalls.composer.request.message.text) },
+    output: { label: "ExperienceProposal", value: marcusCalls.composer.response.output },
+    contracts: ["composer", "domain"],
+  },
   render: render(
     "Chat shows the address guide and the funding card. The button opens the transfer walkthrough.",
     { label: "Verified inputs · excerpt", value: { selectedCandidateId: addressCandidateId, eligibleFundingCard: "fund_account" } },
     { label: "DisplayExperience · excerpt", value: { status: "ready", blocks: addressBlocks, actions: [addressFollowUp] } },
   ),
-};
+} satisfies Record<string, FlowStep>;
 
 export const addressUpdateExample = {
   persona: newAccount.displayName,
   prompt: addressPrompt,
+  handoffs: {
+    discovery: {
+      description: "Before the first model call, the app uses sfield to load the topics and then the scores. It saves both for Marcus’s turn and sends them with his message.",
+      calls: [
+        {
+          title: "Supported topics",
+          description: "The tool calls the mock Treatment Selector, which loads fixtures/contexts.json and returns the six active topics. The app saves that list under catalog_demo for this turn.",
+          exchange: marcusCalls.catalog,
+        },
+        {
+          title: "Topic relevance scores",
+          description: "The scores tool uses catalog_demo to find the same topics. It looks up Marcus’s demo profile and test case in fixtures/propensity.json. Address update has a score of 0.78, which the first model call can use as a hint.",
+          exchange: marcusCalls.scores,
+        },
+      ],
+    },
+    router: {
+      calls: [{
+        title: "Context Router",
+        description: "The app sends its routing input as JSON text. sfield runs the Context Router and returns a completed run with the model’s proposed intent.",
+        exchange: marcusCalls.router,
+      }],
+    },
+    treatment: {
+      calls: [{
+        title: "Treatment Selector",
+        description: "The app sends the turn ID and checked route ID. The tool uses those IDs to look up Marcus’s demo member ID and the Address update topic, then returns the content IDs from Treatment Selector.",
+        exchange: marcusCalls.treatment,
+      }],
+    },
+    composer: {
+      calls: [{
+        title: "Experience Composer",
+        description: "The app sends the checked intent and address guide as JSON text. sfield runs the Experience Composer and returns the model’s proposed layout.",
+        exchange: marcusCalls.composer,
+      }],
+    },
+  } satisfies Record<string, HandoffExample>,
   exchanges: {
     chat: addressSteps.chat,
     contexts: {
-      description: "sfield asks which topics are supported. This example shows the Address update topic used for Marcus’s message.",
-      input: { label: "contexts.list", value: { turnRef } },
-      output: { label: "ContextCatalog · excerpt", value: addressCatalog },
+      description: "sfield asks the mock Treatment Selector for the active topics in fixtures/contexts.json. Address update is one of the six it returns.",
+      input: { label: "contexts.list", value: marcusCalls.catalog.request.inputs },
+      output: { label: "ContextCatalog", value: marcusCalls.catalog.response.output },
     },
     router: addressSteps.router,
     treatment: addressSteps.treatment,

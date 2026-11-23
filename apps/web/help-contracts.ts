@@ -14,6 +14,7 @@ import contentBundleSource from "../../packages/experience/content.ts?raw";
 import portfolioProviderSource from "../../packages/portfolio-snapshot/index.ts?raw";
 import goalProviderSource from "../../packages/goal-progress/index.ts?raw";
 import contextFixtureSource from "../../fixtures/contexts.json?raw";
+import propensityFixtureSource from "../../fixtures/propensity.json?raw";
 import treatmentFixtureSource from "../../fixtures/treatment-scenarios.json?raw";
 import sfieldModelSource from "../../vendor/sfield/packages/core/src/types/model.ts?raw";
 import traceSource from "./api.ts?raw";
@@ -70,14 +71,15 @@ export const helpContracts = [
       },
       {
         id: "discovery",
-        title: "Context catalog and propensity",
-        description: "The context catalog lists supported topics. Propensity scores suggest which topics might be relevant to the customer.",
+        title: "Supported topics and relevance scores",
+        description: "The mock Treatment Selector loads active topics from contexts.json. The scores tool reads propensity.json by demo profile and test case.",
         files: [
           jsonFile("context-discovery.tools.json", {
             "contexts.list": { input: turnInputSchema, output: contextResultSchema },
             "propensity.context.score": { input: propensityInputSchema, output: propensityResultSchema },
           }),
           { name: "contexts.json", source: contextFixtureSource },
+          { name: "propensity.json", source: propensityFixtureSource },
         ],
       },
       {
