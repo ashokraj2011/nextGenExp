@@ -18,6 +18,7 @@ export const routingIntents = [
   { intentId: "update_address", label: "Update mailing address", contextId: "address-update", task: "guide", description: "Walk through a mailing or residential address change in the demo, including when a customer has moved or needs account correspondence sent to a new address." },
   { intentId: "learn_transfers", label: "Learn about the demo app", contextId: "app-home", task: "explain", description: "Get explicit demo app help or learn about the fictional transfer flow." },
   { intentId: "guide_transfer", label: "Walk through a transfer", contextId: "app-home", task: "guide", description: "See the steps for the fictional transfer preview." },
+  { intentId: "suggest_next_step", label: "Suggest a next step", contextId: "next-step", task: "guide", description: "Find a personalized next action for the demo account. Includes open-ended requests such as 'what is next' and 'what should I do now?'." },
   { intentId: "create_rule", label: "Create an eligibility rule", contextId: null, task: "create_rule", description: "An explicit request to create or add a Treatment Selector rule." },
 ] as const satisfies readonly IntentDefinition[];
 

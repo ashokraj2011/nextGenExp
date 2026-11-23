@@ -3,6 +3,7 @@ import type {
   BalanceProof, CatalogSnapshot, ContentDecision, ContentEntry, Dated, ExperienceProposal, ProposalBlock, RouteDecision, Scope,
 } from "../contracts/domain";
 import { isContextProposal, isExperienceProposal } from "../contracts/model";
+import { fundingPreviewApplies } from "../contracts/funding-workflow";
 import { isHomeGoalSummary, type GoalProgress } from "../contracts/goal-progress";
 import { isPortfolioSummary, type PortfolioSnapshot } from "../contracts/portfolio";
 import { availableRoutingIntents, routingQuestions } from "../contracts/routing-intents";
@@ -85,7 +86,7 @@ export type VerifiedExperience = {
   contentOrder: string[];
 };
 
-const readyIntros = new Set(["explanation", "comparison", "steps", "summary"]);
+const readyIntros = new Set(["explanation", "comparison", "steps", "summary", "next_step"]);
 export function verifyExperience(
   value: unknown, decision: ContentDecision, route: RouteDecision, scope: Scope, composerRunId: string,
   proof: BalanceProof | null, now: number, portfolio?: PortfolioSnapshot, goalProgress?: GoalProgress,
@@ -159,8 +160,7 @@ export function verifyExperience(
   });
 
   if (resolved.some(({ content }) => content[0].contentId === "fund_account")) {
-    requireCheck(route.contextId === "address-update"
-      && resolved.some(({ content }) => content[0].contentId === "address_update_guide"), "FUNDING_REQUIRES_ADDRESS_GUIDE");
+    requireCheck(fundingPreviewApplies(route.contextId, resolved.map(({ content }) => content[0].contentId)), "FUNDING_CONTEXT_NOT_ELIGIBLE");
   }
 
   if (decision.selectionMode === "preserve_ts_rank") {

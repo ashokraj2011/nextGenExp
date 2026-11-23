@@ -4,7 +4,7 @@ import { sfieldTools, toolKeys, toolVersion, type ToolKey } from "../../packages
 const usage = {
   catalog: { caller: "App · Before the first model call", contract: "discovery", description: "Gets the active topics from the mock Treatment Selector." },
   propensity: { caller: "App · Before the first model call", contract: "discovery", description: "Asks Treatment Selector for the customer’s scores for the active topics." },
-  selection: { caller: "App · Finds eligible treatments", contract: "treatment", description: "Returns eligible content and the funding workflow for the address demo when its rule matches." },
+  selection: { caller: "App · Finds eligible treatments", contract: "treatment", description: "Returns eligible content and can recommend the funding workflow for address updates and next-step questions." },
   balances: { caller: "Experience Composer", contract: "balance", description: "Looks up the customer’s sample balances." },
   glossary: { caller: "App · Creates a rule", contract: "glossary", description: "Lists the fields and comparisons you can use in a rule." },
   portfolio: { caller: "App · Summarizes a portfolio", contract: "portfolio", description: "Looks up what the demo customer holds in their portfolio." },

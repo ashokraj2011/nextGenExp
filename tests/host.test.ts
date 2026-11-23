@@ -697,6 +697,38 @@ test("the address guide can launch the funding workflow only when Treatment Sele
   assert.deepEqual(excluded.turn.experience?.actions, []);
 });
 
+test("an open-ended next-step question uses the member's eligible Treatment Selector recommendation", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const { client } = f;
+  const marcus = await client.conversation("normal", "demo-new-account");
+  const { turn, trace } = await client.ask(marcus.id, "what is next");
+  assert.equal(turn.status, "completed");
+  assert.equal(trace.intentId, "suggest_next_step");
+  assert.equal(trace.selectedContextId, "next-step");
+  assert.deepEqual(trace.finalOrder, ["fund_account"]);
+  const experience = turn.experience!;
+  assert.deepEqual(experience.actions.map(({ label }) => label), ["Preview funding"]);
+  const logs = await client.request<TurnPayloads>("/api/debug/payloads/" + turn.id);
+  assert.deepEqual(logs.treatment?.mockInput?.data, { mid: "DEMO-MID-1003", context: "next-step" });
+  assert.deepEqual(treatmentRecommendationsSchema.parse(logs.treatment?.result?.data).recommendations, [
+    { kind: "content", id: "fund_account" }, fundingPreviewWorkflow.recommendation,
+  ]);
+  const accepted = await client.request<TurnAccepted>("/api/experiences/" + experience.experienceId + "/actions", {
+    clientRequestId: randomUUID(), envelope: actionFor(experience),
+  }, 202);
+  const preview = await client.wait(accepted);
+  assert.equal(preview.turn.experience?.blocks[0].component, "PznFundingPreview");
+
+  const jordan = await client.conversation("normal", "demo-returning");
+  const funded = await client.ask(jordan.id, "What should I do next?");
+  assert.equal(funded.trace.intentId, "suggest_next_step");
+  assert.equal(funded.turn.experience?.outcome, "eligible_empty");
+  assert.deepEqual(funded.turn.experience?.actions, []);
+  const specific = await client.ask(marcus.id, "What's next for my home-buying goal?");
+  assert.equal(specific.trace.intentId, "show_home_goal");
+});
+
 test("the funding workflow uses the saved step order for the Treatment Selector reference", async (t) => {
   const f = await fixture();
   t.after(() => f.close());

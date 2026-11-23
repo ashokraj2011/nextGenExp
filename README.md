@@ -107,6 +107,8 @@ When both cards are eligible, Treatment Selector also returns `account.funding.p
 
 In **Tool setup → Funding preview workflow**, add **Check funding status** and place it before or after **Funding options**. Keep both required tools, with **Build funding preview** last, and click **Save settings**.
 
+Ask **“what is next”** as Marcus to get the funding suggestion directly. The Context Router selects `suggest_next_step`. Treatment Selector evaluates the unfunded-account rule for the `next-step` topic and can return **Fund your account** and **Preview funding**.
+
 Open **Logs → Treatment Selector** on the address turn to see the CCRE evaluation and workflow recommendation. Select **Preview funding** in **Logs** to inspect the workflow definition and each call in execution order. Ask the same address question as **Jordan Lee** to see the guide for an already funded account. **Tool setup → Address update → Run preview** compares the rules for both profiles.
 
 ### Inspect requests and responses

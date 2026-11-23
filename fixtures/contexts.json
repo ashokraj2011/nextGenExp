@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0",
-  "catalogVersion": "ts-contexts-demo-v5",
+  "catalogVersion": "ts-contexts-demo-v6",
   "contexts": [
     {
       "contextId": "balance",
@@ -36,6 +36,12 @@
       "contextId": "app-home",
       "displayName": "App home",
       "description": "General demo app help, entry points and supported capabilities. Includes learning about the fictional transfer flow and guiding a transfer preview. Use for explicit app help or transfer requests.",
+      "active": true
+    },
+    {
+      "contextId": "next-step",
+      "displayName": "Suggested next step",
+      "description": "Find a relevant next action for the demo account when the customer asks what to do next without naming a specific task.",
       "active": true
     },
     {

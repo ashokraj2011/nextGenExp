@@ -3,7 +3,7 @@ import demo from "../../fixtures/host.json";
 import { type FailureCode } from "../../packages/contracts/api";
 import { DECISION_TTL, TURN_DEADLINE, contextCatalogSchema, propensitySchema, type SelectionMode, type PropensityResult } from "../../packages/contracts/domain";
 import {
-  fundingOptionsSchema, fundingPreviewSchema, fundingPreviewWorkflow, fundingStatusSchema, fundingToolKey,
+  fundingOptionsSchema, fundingPreviewApplies, fundingPreviewSchema, fundingPreviewWorkflow, fundingStatusSchema, fundingToolKey,
   fundingWorkflowIssue, resolveFundingWorkflow, treatmentRecommendationsSchema, type WorkflowLaunch,
 } from "../../packages/contracts/funding-workflow";
 import { goalProgressSchema, isHomeGoalSummary } from "../../packages/contracts/goal-progress";
@@ -41,8 +41,7 @@ function traceFor(result: RunResult) {
 }
 
 function fundingRecommendation(turn: TurnRecord, contentOrder: readonly string[]) {
-  if (turn.route?.contextId === fundingPreviewWorkflow.contextId
-    && fundingPreviewWorkflow.requiredContentIds.every((id) => contentOrder.includes(id))) {
+  if (turn.route && fundingPreviewApplies(turn.route.contextId, contentOrder)) {
     return turn.decision?.workflowRecommendations?.find((item) => resolveFundingWorkflow(item, turn.toolSetup?.fundingWorkflow));
   }
 }
@@ -272,7 +271,7 @@ export class ExperienceService {
       const showGoal = isHomeGoalSummary(route);
       if (!turn.decision) {
         this.store.progress(id, "eligibility", this.now());
-        const withWorkflows = route.contextId === fundingPreviewWorkflow.contextId;
+        const withWorkflows = fundingPreviewWorkflow.contexts.some(({ contextId }) => contextId === route.contextId);
         const result = await runtime.registry(turn, "tsScopeId", 1, signal, async (call) => (
           call(withWorkflows ? "recommendations" : "selection", { ...asRef(turn), routeDecisionId: route.routeDecisionId })
         ));

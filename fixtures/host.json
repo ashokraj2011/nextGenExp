@@ -50,6 +50,7 @@
     "comparison": "Here’s how the terms compare in the demo.",
     "steps": "Here are the steps in this demo.",
     "summary": "Here’s a summary using sample data.",
+    "next_step": "Here’s a suggested next step for your demo account.",
     "clarification": "A little more detail will help me answer.",
     "no_match": "I couldn’t find a match for this request in the demo."
   }

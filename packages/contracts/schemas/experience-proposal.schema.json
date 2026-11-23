@@ -64,6 +64,7 @@
         "comparison",
         "steps",
         "summary",
+        "next_step",
         "clarification",
         "no_match"
       ]

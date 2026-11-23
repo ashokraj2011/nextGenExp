@@ -111,7 +111,7 @@ export const helpContracts = [
       {
         id: "treatment",
         title: "Treatment Selector",
-        description: "The tool sends Treatment Selector a demo member ID and the checked topic. Address update uses version 2 to return content and any eligible workflow.",
+        description: "The tool sends Treatment Selector a demo member ID and the checked topic. Address updates and next-step questions use version 2 to return content and any eligible workflow.",
         files: [
           jsonFile("treatment-selector.tool.json", { input: treatmentInputSchema, output: treatmentResultSchema }),
           jsonFile("treatment-recommendations.tool.json", { input: treatmentInputSchema, output: treatmentRecommendationsResultSchema }),

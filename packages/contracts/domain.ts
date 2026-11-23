@@ -6,7 +6,7 @@ export const componentNames = ["PznContentCard", "PznComparison", "PznStepList",
 export type ComponentName = typeof componentNames[number];
 export type Variant = "compact" | "expanded";
 export type SelectionMode = "semantic_rerank" | "preserve_ts_rank";
-export type IntroKey = "explanation" | "comparison" | "steps" | "summary" | "clarification" | "no_match";
+export type IntroKey = "explanation" | "comparison" | "steps" | "summary" | "next_step" | "clarification" | "no_match";
 
 export type Intent = { topic: string; task: "explain" | "compare" | "guide" | "show" | "unknown"; summary: string };
 export type ContextSelectionProposal = {

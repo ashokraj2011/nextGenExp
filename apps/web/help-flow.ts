@@ -207,7 +207,7 @@ export const addressUpdateExample = {
       calls: [
         {
           title: "Supported topics",
-          description: "The tool calls the mock Treatment Selector, which loads fixtures/contexts.json and returns the six active topics. The app saves that list under catalog_demo for this turn.",
+          description: "The tool calls the mock Treatment Selector, which loads the active topics from fixtures/contexts.json. The app saves that list under catalog_demo for this turn.",
           exchange: marcusCalls.catalog,
         },
         {

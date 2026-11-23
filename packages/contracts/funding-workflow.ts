@@ -17,9 +17,17 @@ export type TreatmentRecommendations = z.infer<typeof treatmentRecommendationsSc
 export const fundingPreviewWorkflow = {
   recommendation: { kind: "workflow", id: "account.funding.preview", version: "1.0.0" },
   label: "Preview funding",
-  contextId: "address-update",
-  requiredContentIds: ["address_update_guide", "fund_account"],
+  contexts: [
+    { contextId: "address-update", requiredContentIds: ["address_update_guide", "fund_account"] },
+    { contextId: "next-step", requiredContentIds: ["fund_account"] },
+  ],
 } as const;
+
+export function fundingPreviewApplies(contextId: string, contentIds: readonly string[]) {
+  return fundingPreviewWorkflow.contexts.some((context) => (
+    context.contextId === contextId && context.requiredContentIds.every((id) => contentIds.includes(id))
+  ));
+}
 
 export const fundingTools = {
   fundingOptions: {

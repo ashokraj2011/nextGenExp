@@ -89,6 +89,8 @@ function route(envelope: Envelope): ContextSelectionProposal {
       : noMatch;
   }
   if (/\b(?:job search|unemployment|layoff assistance|(?:find|look(?:ing)? for) (?:a )?new job)\b/.test(text)) return noMatch;
+  if (/^(?:what(?:'s| is) next(?: for me)?|what (?:should|can|do) i do (?:next|now)|what (?:is|are) my next steps?|now what)[.!?]*$/.test(text.replaceAll("’", "'"))
+    && intentCatalog.some(({ intentId }) => intentId === "suggest_next_step")) return select("suggest_next_step");
 
   const contexts = new Set<string>();
   const retirementTopic = /\b(?:retire|retiring|retirement|retierment|retieremtn)\b/;
@@ -185,6 +187,9 @@ function compose({ body, envelope }: GatewayCall): ExperienceProposal | ToolCall
   }
   if (envelope.selectedContextId === "address-update") {
     return choose("PznStepList", [get("Update your mailing address")], "steps");
+  }
+  if (envelope.selectedContextId === "next-step") {
+    return { ...choose("PznContentCard", [get("Fund your account")], "next_step"), followUpIds: [] };
   }
   if (envelope.selectedContextId === "app-home") {
     if (envelope.intent?.task === "guide") return choose("PznStepList", [get("Fictional transfer checklist")], "steps");
