@@ -30,7 +30,7 @@
     "@sfield/core": "0.1.0",
     "@sfield/store-sqlite": "0.1.0",
     "ajv": "8.20.0",
-    "lucide-react": "1.77.0",
+    "lucide-react": "1.74.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "tsx": "4.23.15",
@@ -50,6 +50,7 @@
   "overrides": {
     "@a2ui/markdown-it@0.2.2": {
       "@a2ui/web_core": "$@a2ui/web_core"
-    }
+    },
+    "@babel/runtime": "7.29.14"
   }
 }
