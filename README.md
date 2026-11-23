@@ -64,6 +64,20 @@ Click the customer name in the chat header to compare **Alice Morgan**, **Jordan
 
 For a short demo, run **Learn about retirement** for both customers. Open **Logs → Treatment Selector** to show why Alice sees the beneficiary reminder and Jordan sees the lesson alone. Then ask both for a portfolio summary to show how the same cash threshold applies at $12,500 and $10,000.
 
+### Chat history and harness
+
+sfield saves the transcript in `sfield.sqlite` for each profile, browser session, and chat thread. The chat screen reads this transcript when a thread opens, and the router and agents use it for recent turns. Opening a saved thread imports earlier messages. Saved messages can be opened while the model gateway is unavailable.
+
+For host integrations, open a thread with `sf.chat.open({ tenantId, userId, sessionId, threadId })`. Use the identifiers from the host session and thread. The returned handle exposes `append` and `history`. Supply the same message ID when retrying a write.
+
+Run the chat harness with the local model fixture.
+
+~~~sh
+npm run chat:harness
+~~~
+
+The harness checks history across a restart, separate profiles and browser sessions, separate threads, and importing a saved chat.
+
 ### Intent routing and clarification
 
 sfield sends the latest message, up to four recent turns, and the available intent catalog to the Context Router. History includes clarification questions, assistant reply text, and titles of previously displayed cards. For demo content requests, the LLM selects an intent ID. The host verifies the choice and maps it to a task and Treatment Selector context.

@@ -66,6 +66,7 @@ export function principalFor(id: string): Principal {
   return { tenantId: "pzn-local", subjectId: id, roles: ["pzn-demo", "pzn-developer"], attributes: {} };
 }
 const actions = new Set<string>(toolKeys.map((key) => sfieldTools[key].id));
+export const sfieldNamespace = "pzn-experience-runtime";
 
 function requireToolEnabled(turn: TurnRecord, key: ToolKey) {
   if (turn.toolSetup?.enabled[key] === false) throw new ToolError("TOOL_DISABLED");
@@ -197,7 +198,7 @@ export class Runtime {
     runtime.sf = await SField.create({
       deployment: "durable_single", config: runtimeConfig(settings, gateway.model),
       persistence: new SqlitePersistence({ path }),
-      namespace: "pzn-experience-runtime",
+      namespace: sfieldNamespace,
       ...gateway.options,
       authorizer: {
         async authorize({ principal, action, effect, agentId }) {
@@ -245,6 +246,10 @@ export class Runtime {
 
   payloads(turn: TurnRecord, conversation: ConversationRecord) {
     return this.inspection && readTurnPayloads(this.sf, this.store, this.inspection, turn, conversation);
+  }
+
+  get chat() {
+    return this.sf.chat;
   }
 
   current(id: string): TurnRecord {

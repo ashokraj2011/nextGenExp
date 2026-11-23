@@ -26,7 +26,7 @@ import type { Checkpoint, RunEvent, RunState } from "../types/runtime.js";
 import type { MemoryRepository } from "../types/memory.js";
 import { SFieldError } from "../errors.js";
 import { deepClone } from "../util/freeze.js";
-import { newId, nowIso } from "../util/digest.js";
+import { digestJson, newId, nowIso } from "../util/digest.js";
 import { InMemoryArtifactStore } from "./artifacts-memory.js";
 import { InMemoryMemoryRepository } from "../memory/repository-memory.js";
 
@@ -205,6 +205,14 @@ export class EphemeralPersistence implements ExecutionPersistence {
   }
   private appendMessageSync(msg: Omit<MessageRecord, "index" | "id"> & { id?: string }): MessageRecord {
     const list = this.messages.get(msg.conversationId) ?? [];
+    const existing = msg.id === undefined ? undefined : list.find(({ id }) => id === msg.id);
+    if (existing) {
+      if (existing.tenantId !== msg.tenantId || existing.role !== msg.role || existing.runId !== msg.runId
+        || digestJson(existing.content) !== digestJson(msg.content)) {
+        throw new SFieldError("IDEMPOTENCY_CONFLICT", "This message ID already has different content.");
+      }
+      return deepClone(existing);
+    }
     const rec: MessageRecord = { ...deepClone(msg), id: msg.id ?? newId("msg"), index: list.length } as MessageRecord;
     list.push(rec);
     this.messages.set(msg.conversationId, list);

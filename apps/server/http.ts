@@ -1,4 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { ChatHarness, newId } from "@sfield/core";
+import { SqlitePersistence } from "@sfield/store-sqlite";
 import { readFile, stat } from "node:fs/promises";
 import { join, resolve, extname, sep } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -13,7 +15,7 @@ import { tsFixtures } from "../../packages/ts-adapter";
 import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import { fixtureGoalProgressProvider, type GoalProgressProvider } from "../../packages/goal-progress";
 import type { GatewaySettings } from "./gateway";
-import { Runtime } from "./runtime";
+import { Runtime, sfieldNamespace } from "./runtime";
 import { ApiError, Store, presentConversation } from "./store";
 import { ExperienceService } from "./service";
 import { addCcreRule, previewTreatmentSelector, toolSetupTag, toolSetupView, validateToolSetup } from "./tool-setup";
@@ -107,16 +109,21 @@ export async function startApp(options: Options) {
     },
   })));
   const store = new Store(join(options.dataDir, "app.sqlite"));
+  const sfieldPath = join(options.dataDir, "sfield.sqlite");
+  const offline = options.gateway ? undefined : new SqlitePersistence({ path: sfieldPath });
   let runtime: Runtime | null;
   try {
     runtime = options.gateway
-      ? await Runtime.open(store, join(options.dataDir, "sfield.sqlite"), options.gateway, now, inspectorEnabled, portfolioSnapshots, goalProgressProvider)
+      ? await Runtime.open(store, sfieldPath, options.gateway, now, inspectorEnabled, portfolioSnapshots, goalProgressProvider)
       : null;
+    await offline?.init({ namespace: sfieldNamespace, ownerId: newId("owner") });
   } catch (error) {
     store.close();
     throw error;
   }
-  const experience = new ExperienceService(store, runtime, selectionMode, now, inspectorEnabled);
+  const experience = new ExperienceService(store, runtime, selectionMode, now, inspectorEnabled, offline && {
+    chat: new ChatHarness(offline), close: () => offline.close(),
+  });
   const mode = options.mode ?? "live";
   let vite: ViteDevServer | undefined;
   const streams = new Set<ServerResponse>();
@@ -216,7 +223,7 @@ export async function startApp(options: Options) {
       if (id) {
         const conversation = store.conversation(id, principalId);
         if (method === "GET" && !operation) {
-          return json(res, { ...presentConversation(conversation), turns: store.conversationTurns(id).map((turn) => turn.public) });
+          return json(res, { ...presentConversation(conversation), turns: await experience.conversationTurns(conversation) });
         }
         if (method === "POST" && operation === "turns") {
           const { message, clientRequestId } = await body(req, messageBody);
@@ -227,11 +234,11 @@ export async function startApp(options: Options) {
     }
     if (resource === "turns" && id) {
       const turn = store.ownTurn(id, principalId);
-      if (method === "GET" && !operation) return json(res, turn.public);
+      if (method === "GET" && !operation) return json(res, await experience.turnView(turn));
       if (method === "POST" && operation === "cancel") return json(res, experience.cancel(turn));
       if (method === "POST" && operation === "retry") {
         const { clientRequestId } = await body(req, retryBody);
-        return json(res, experience.retry(store.ownTurn(id, principalId), clientRequestId), 202);
+        return json(res, await experience.retry(store.ownTurn(id, principalId), clientRequestId), 202);
       }
       if (method === "GET" && operation === "events") {
         const rawCursor = req.headers["last-event-id"] ?? url.searchParams.get("after") ?? "0";

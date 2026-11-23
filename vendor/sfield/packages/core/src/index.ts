@@ -57,6 +57,7 @@ export { Scheduler } from "./runtime/scheduler.js";
 export { EventBus } from "./runtime/events.js";
 export { RunHandleImpl, toResult } from "./runtime/run-handle.js";
 export { RunService } from "./runtime/run-service.js";
+export { ChatHarness, type ChatScope, type ChatThread, type ChatMessageInput } from "./chat/harness.js";
 export { ExternalExecutionScope, type ExecutionScope, type ExecutionScopeOptions } from "./runtime/execution-scope.js";
 export { PluginManager, CORE_API_VERSION, CORE_VERSION } from "./plugins/manager.js";
 export { EnvSecretResolver, CompositeSecretResolver } from "./secrets.js";

@@ -264,6 +264,7 @@ export interface ExecutionPersistence {
   getConversation(id: string): Promise<ConversationRecord | null>;
   /** Atomically sets the active run; returns false when another run is active. */
   setActiveRun(conversationId: string, runId: string | null, expectedActive?: string | null): Promise<boolean>;
+  /** A supplied ID makes appends idempotent within the conversation for the same message content. */
   appendMessage(msg: Omit<MessageRecord, "index" | "id"> & { id?: string }): Promise<MessageRecord>;
   listMessages(conversationId: string, opts: { limit?: number; before?: number; includeExpired?: boolean }): Promise<MessageRecord[]>;
   deleteConversation(id: string): Promise<{ messages: number }>;

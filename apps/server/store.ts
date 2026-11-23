@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { SqliteDatabase } from "@sfield/store-sqlite";
 import type { UsageSummary } from "@sfield/core";
 import type { CatalogSnapshot, ContentDecision, PropensityResult, RouteDecision, BalanceProof, Scope, SelectionMode } from "../../packages/contracts/domain";
-import type { Conversation, FailureCode, Progress, PublicEvent, PublicEventType, TurnView } from "../../packages/contracts/api";
+import type { Conversation, FailureCode, Progress, PublicEvent, PublicEventType, TurnStatus, TurnView } from "../../packages/contracts/api";
 import type { GatewayExchange } from "../../packages/contracts/inspector";
 import type { GoalProgress } from "../../packages/contracts/goal-progress";
 import {
@@ -62,6 +62,7 @@ export type FundingRun = {
 };
 export type TurnRecord = {
   public: TurnView;
+  historyStatus?: TurnStatus;
   scope: Scope;
   ordinal: number;
   requestId: string;
@@ -226,6 +227,15 @@ export class Store {
 
   private saveTurn(record: TurnRecord) {
     this.db.run("UPDATE turns SET record = ?, status = ? WHERE id = ?", JSON.stringify(record), record.public.status, record.public.id);
+  }
+
+  markHistoryStatus(id: string, status: TurnStatus) {
+    this.db.tx(() => {
+      const turn = this.turn(id);
+      if (turn?.public.status !== status || turn.historyStatus === status) return;
+      turn.historyStatus = status;
+      this.saveTurn(turn);
+    });
   }
 
   existingRequest(conversationId: string, requestId: string, message: string, origin: string) {

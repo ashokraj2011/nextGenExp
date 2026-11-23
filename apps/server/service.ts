@@ -1,4 +1,4 @@
-import type { RunResult } from "@sfield/core";
+import type { ChatHarness, RunResult } from "@sfield/core";
 import demo from "../../fixtures/host.json";
 import { type FailureCode } from "../../packages/contracts/api";
 import { DECISION_TTL, TURN_DEADLINE, contextCatalogSchema, propensitySchema, type SelectionMode, type PropensityResult } from "../../packages/contracts/domain";
@@ -12,8 +12,6 @@ import { isPortfolioSummary, portfolioSnapshotSchema } from "../../packages/cont
 import { ruleGlossarySchema } from "../../packages/contracts/rule-glossary";
 import {
   availableRoutingIntents, demoExperiencesQuestion, resolveSummaryFollowUp, routingQuestions,
-  ROUTING_HISTORY_TURNS, ROUTING_HISTORY_REQUEST_LENGTH, ROUTING_HISTORY_REPLY_LENGTH,
-  type RoutingHistoryEntry,
 } from "../../packages/contracts/routing-intents";
 import { FOLLOW_UP_EVENT, type DisplayExperience } from "../../packages/contracts/surface";
 import { normalizedIdsSchema, treatmentOverride } from "../../packages/contracts/tool-setup";
@@ -24,6 +22,7 @@ import { verifyContextProposal, verifyRoute, requireCheck, Rejected } from "../.
 import { ApiError, Store, type ConversationRecord, type Stage, type TurnRecord } from "./store";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import { principalFor, type Runtime } from "./runtime";
+import { PznChatHistory } from "./chat-history";
 
 class TurnFailure extends Error {
   constructor(readonly code: FailureCode) { super(code); }
@@ -50,17 +49,34 @@ function fundingRecommendation(turn: TurnRecord, contentOrder: readonly string[]
 export class ExperienceService {
   private readonly controllers = new Map<string, AbortController>();
   private readonly jobs = new Map<string, Promise<void>>();
+  private readonly history: PznChatHistory;
   private closing = false;
 
   constructor(
     readonly store: Store, private readonly runtime: Runtime | null, readonly selectionMode: SelectionMode, private readonly now: () => number,
-    private readonly canCreateRule: boolean,
-  ) {}
+    private readonly canCreateRule: boolean, private readonly offlineHistory?: { chat: ChatHarness; close(): Promise<void> },
+  ) {
+    const chat = runtime?.chat ?? offlineHistory?.chat;
+    if (!chat) throw new Error("sfield chat persistence is required.");
+    this.history = new PznChatHistory(store, chat);
+  }
 
   createConversation(principalId: string, personaId: string, scenarioId: string) {
     const persona = demo.personas.find((entry) => entry.personaId === personaId);
     if (!persona?.allowedScenarios.includes(scenarioId)) throw new ApiError(400, "demo_scope_invalid", "Select an available profile and scenario.");
     return this.store.createConversation(principalId, personaId, scenarioId, this.now());
+  }
+
+  conversationTurns(conversation: ConversationRecord) {
+    return this.history.turns(conversation);
+  }
+
+  async turnView(turn: TurnRecord) {
+    const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
+    const views = await this.history.turns(conversation);
+    const current = views.find(({ id }) => id === turn.public.id);
+    requireCheck(current, "TURN_UNAVAILABLE");
+    return current;
   }
 
   submit(conversation: ConversationRecord, message: string, requestId: string, origin = "message", retry?: TurnRecord, workflow?: WorkflowLaunch) {
@@ -71,9 +87,10 @@ export class ExperienceService {
     return this.accepted(turn);
   }
 
-  retry(turn: TurnRecord, requestId: string) {
+  async retry(turn: TurnRecord, requestId: string) {
     const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
-    return this.submit(conversation, turn.public.message, requestId, "retry:" + turn.public.id, turn);
+    const { message } = await this.turnView(turn);
+    return this.submit(conversation, message, requestId, "retry:" + turn.public.id, turn);
   }
 
   followUp(principalId: string, experienceId: string, envelope: ActionMessage, requestId: string) {
@@ -116,7 +133,21 @@ export class ExperienceService {
   private schedule(turn: TurnRecord, recovering = false) {
     const { id, conversationId } = turn.public;
     const earlier = this.jobs.get(conversationId) ?? Promise.resolve();
-    const promise = earlier.catch(() => undefined).then(() => this.execute(id, recovering));
+    const promise = earlier.catch(() => undefined).then(async () => {
+      const conversation = this.store.conversation(conversationId, turn.scope.principalId);
+      try {
+        await this.history.flush(conversation);
+      } catch {
+        this.store.finish(id, { type: "failed", code: "internal_error" }, this.now());
+        return;
+      }
+      try {
+        await this.execute(id, recovering);
+      } finally {
+        // The committed app snapshot lets refresh or restart finish an interrupted history write.
+        await this.history.flush(conversation);
+      }
+    });
     this.jobs.set(conversationId, promise);
     void promise.finally(() => {
       if (this.jobs.get(conversationId) === promise) this.jobs.delete(conversationId);
@@ -172,7 +203,8 @@ export class ExperienceService {
       if (!current().route) {
         this.store.progress(id, "routing", this.now());
         const turn = current();
-        const recent = this.recentChat(turn);
+        const recent = await this.history.recent(conversation, turn.ordinal);
+        current();
         const intentCatalog = availableRoutingIntents(catalog.catalog, this.canCreateRule);
         const summaryFollowUp = resolveSummaryFollowUp(turn.public.message, recent, intentCatalog);
         const result = await runtime.model("route", turn, conversation, catalog.snapshotId, {
@@ -361,7 +393,7 @@ export class ExperienceService {
         selectedIntentId: turn.trace.intentId ?? undefined, selectedContextId: route.contextId, eligible: modelBundle(decision, route),
         ...(portfolio && { portfolioSnapshotIncluded: true }),
         ...(goalProgress && { goalProgressIncluded: true }),
-        ...(emptyEligibility && { recent: this.recentChat(turn) }),
+        ...(emptyEligibility && { recent: await this.history.recent(conversation, turn.ordinal) }),
         allowedQuestions: demo.clarificationQuestions,
       } satisfies ExperienceCompositionInput, composeSignal, recovering);
 
@@ -416,28 +448,6 @@ export class ExperienceService {
     }
   }
 
-  private recentChat(turn: TurnRecord): RoutingHistoryEntry[] {
-    return this.store.conversationTurns(turn.scope.conversationId)
-      .filter((previous) => previous.public.status === "completed" && previous.ordinal < turn.ordinal)
-      .slice(-ROUTING_HISTORY_TURNS)
-      .map((previous) => {
-        const experience = previous.public.experience;
-        const titles = experience?.blocks.map(({ component, props }) => {
-          if ("title" in props) return props.title;
-          if (component === "PznFundingPreview") return "Funding preview";
-          return component === "PznPortfolioSnapshot" ? "Portfolio snapshot" : "Rule editor";
-        }) ?? [];
-        return {
-          request: previous.public.message.slice(0, ROUTING_HISTORY_REQUEST_LENGTH),
-          contextId: previous.route?.contextId ?? null,
-          intentId: previous.trace.intentId ?? null,
-          clarificationQuestion: experience?.question ?? null,
-          assistantReply: experience && !experience.question ? experience.intro.slice(0, ROUTING_HISTORY_REPLY_LENGTH) : undefined,
-          displayedContent: titles.length ? titles : undefined,
-        };
-      });
-  }
-
   private async runFundingPreview(runtime: Runtime, turn: TurnRecord, launch: WorkflowLaunch, signal: AbortSignal) {
     const { turn: source } = this.store.experience(launch.sourceExperienceId, turn.scope.principalId);
     const definition = resolveFundingWorkflow(launch.recommendation, turn.toolSetup?.fundingWorkflow);
@@ -448,8 +458,10 @@ export class ExperienceService {
     const id = turn.public.id;
     this.store.progress(id, "workflow", this.now());
     if (definition.mode === "agent") {
+      const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
+      const recent = await this.history.recent(conversation, turn.ordinal);
       const result = await runtime.funding.execute(
-        turn, definition, principalFor(turn.scope.principalId), this.recentChat(turn), source.public.experience.expiresAt, signal,
+        turn, definition, principalFor(turn.scope.principalId), recent, source.public.experience.expiresAt, signal,
       );
       if (result.outcome === "other_topic") return false;
       const now = this.now();
@@ -536,7 +548,11 @@ export class ExperienceService {
     this.closing = true;
     for (const controller of this.controllers.values()) controller.abort(new Error("Shutting down"));
     await Promise.allSettled(this.jobs.values());
-    await this.runtime?.close();
-    this.store.close();
+    try {
+      if (this.runtime) await this.runtime.close();
+      else await this.offlineHistory?.close();
+    } finally {
+      this.store.close();
+    }
   }
 }

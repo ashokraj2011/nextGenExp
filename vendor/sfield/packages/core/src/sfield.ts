@@ -14,6 +14,7 @@ import type { RetrievalBinding } from "./types/retrieval.js";
 import type { RunHandle, RunSnapshot, Session } from "./types/runtime.js";
 import type { DefineToolInput, ToolDefinition } from "./types/tool.js";
 import { ConfigErrors, SFieldError } from "./errors.js";
+import { ChatHarness } from "./chat/harness.js";
 import { loadConfigDocument, loadConfigFile, type LoadedDocument } from "./config/load.js";
 import { compileConfig, GENERIC_PARAMS, PROVIDER_PARAMS, shorthandIdentity, type CompileContext } from "./config/compile.js";
 import { explainConfig, formatExplanation } from "./config/explain.js";
@@ -95,7 +96,10 @@ interface Internals {
 
 export class SField {
   private closed = false;
-  private constructor(readonly i: Internals) {}
+  readonly chat: ChatHarness;
+  private constructor(readonly i: Internals) {
+    this.chat = new ChatHarness(i.persistence);
+  }
 
   // ------------------------------------------------------------ construction
 

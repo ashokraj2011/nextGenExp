@@ -33,7 +33,7 @@ import type {
   RunRecord,
   RunState,
 } from "@sfield/core";
-import { SFieldError, newId, nowIso } from "@sfield/core";
+import { SFieldError, digestJson, newId, nowIso } from "@sfield/core";
 import { SqliteDatabase } from "./db.js";
 import { ensureSchema } from "./schema.js";
 import { SqliteMemoryRepository } from "./sqlite-memory.js";
@@ -354,6 +354,17 @@ export class SqlitePersistence implements ExecutionPersistence {
   }
 
   private appendMessageSync(msg: Omit<MessageRecord, "index" | "id"> & { id?: string }): MessageRecord {
+    const row = msg.id === undefined ? undefined : this.db.one<BodyRow>(
+      "SELECT body FROM messages WHERE conversation_id = ? AND id = ?", msg.conversationId, msg.id,
+    );
+    if (row) {
+      const existing = parse<MessageRecord>(row.body);
+      if (existing.tenantId !== msg.tenantId || existing.role !== msg.role || existing.runId !== msg.runId
+        || digestJson(existing.content) !== digestJson(msg.content)) {
+        throw new SFieldError("IDEMPOTENCY_CONFLICT", "This message ID already has different content.");
+      }
+      return existing;
+    }
     const count = Number(this.db.one<{ n: number }>("SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?", msg.conversationId)?.n ?? 0);
     const rec = { ...clone(msg), id: msg.id ?? newId("msg"), index: count } as MessageRecord;
     this.db.run("INSERT INTO messages (conversation_id, idx, id, expires_at, body) VALUES (?, ?, ?, ?, ?)", rec.conversationId, rec.index, rec.id, rec.expiresAt, JSON.stringify(rec));
