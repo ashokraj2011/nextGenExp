@@ -39,6 +39,7 @@ export type TreatmentPayloads = RegistryToolPayloads & {
 
 export type TurnPayloads = {
   turnId: string;
+  topicScores: TreatmentPayloads | null;
   router: ModelStagePayloads | null;
   glossary: RegistryToolPayloads | null;
   treatment: TreatmentPayloads | null;

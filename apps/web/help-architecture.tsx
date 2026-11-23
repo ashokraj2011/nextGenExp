@@ -25,7 +25,7 @@ const participants = [
   },
   {
     name: "Treatment Selector", shortName: "Treatment Selector", Icon: ListFilter,
-    description: "Uses CCRE rules to decide what content applies to this customer and topic.",
+    description: "Provides topics and relevance scores. Uses CCRE rules to decide what content fits the customer and topic.",
   },
   {
     name: "Content and data", shortName: "Content and data", Icon: Database,
@@ -37,8 +37,8 @@ const [chat, host, sfield, model, selector, data] = participants;
 const { exchanges: cases, handoffs } = addressUpdateExample;
 const exchanges = [
   { path: [chat, host], label: "Message + conversation ID", example: cases.chat },
-  { path: [host, sfield, selector], label: "Ask which topics are supported", example: cases.contexts, handoff: handoffs.discovery },
-  { path: [selector, sfield, host], label: "List of supported topics", reply: true, example: cases.contexts },
+  { path: [host, sfield, selector], label: "Get supported topics and scores", example: cases.contexts, handoff: handoffs.discovery },
+  { path: [selector, sfield, host], label: "Supported topics and relevance scores", reply: true, example: cases.contexts },
   { path: [host, sfield, model], label: "Message, recent chat, and request options", example: cases.router, handoff: handoffs.router },
   { path: [model, sfield, host], label: "Likely request or follow-up question", reply: true, example: cases.router },
   { path: [host, sfield, selector], label: "Topic and member ID", example: cases.treatment, handoff: handoffs.treatment },

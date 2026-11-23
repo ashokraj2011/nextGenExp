@@ -68,6 +68,17 @@
         "catalogSnapshotId": "catalog_demo"
       }
     },
+    "treatmentSelectorInput": {
+      "mid": "DEMO-MID-1003",
+      "contextIds": [
+        "balance",
+        "portsum",
+        "learning",
+        "goals",
+        "address-update",
+        "app-home"
+      ]
+    },
     "response": {
       "callId": "call_demo_scores",
       "toolRef": "propensity.context.score@1.0.0",

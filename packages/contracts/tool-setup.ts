@@ -11,7 +11,7 @@ export const sfieldTools = {
   propensity: {
     id: "propensity.context.score",
     label: "Topic relevance scores",
-    description: "Provides advisory scores for the current contexts.",
+    description: "Gets advisory topic scores from Treatment Selector.",
   },
   selection: {
     id: "treatments.eligible",

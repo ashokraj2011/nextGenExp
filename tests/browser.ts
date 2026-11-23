@@ -4,7 +4,6 @@ import { mkdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { chromium, type Locator } from "playwright";
 import marcusCalls from "../fixtures/marcus-sfield-exchanges.json";
-import { scoreContexts } from "../packages/propensity-adapter";
 import { activeContextCatalog } from "../packages/ts-adapter";
 import { startTestPreview } from "./preview";
 
@@ -75,11 +74,10 @@ try {
   assert.deepEqual(exchangePaths[6], ["Treatment Selector", "sfield", "PZN app server"]);
   assert.deepEqual(exchangePaths[9], ["PZN app server", "sfield", "Language model"]);
   assert.equal(exchanges[0].request.message, "I moved and need to update my address.");
-  assert.deepEqual(exchanges[2].response, activeContextCatalog);
+  const topicScores = marcusCalls.scores.response.output;
+  assert.deepEqual(exchanges[2].response, { catalog: activeContextCatalog, propensity: topicScores });
   assert.deepEqual(exchanges[3].request.catalog, activeContextCatalog);
-  assert.deepEqual(exchanges[3].request.propensity, scoreContexts(
-    "demo-new-account", "normal", activeContextCatalog.contexts.map(({ contextId }) => contextId),
-  ));
+  assert.deepEqual(exchanges[3].request.propensity, topicScores);
   assert.equal(exchanges[4].response.intentId, "update_address");
   assert.deepEqual(exchanges[5], exchanges[6]);
   assert.deepEqual(exchanges[6].request.adapterInput, { mid: "DEMO-MID-1003", context: "address-update" });
@@ -102,7 +100,11 @@ try {
       await drawer.getByText(/fixtures\/contexts\.json/).waitFor();
       await drawer.getByRole("button", { name: "Topic relevance scores", exact: true }).click();
       await drawer.getByText(/fixtures\/propensity\.json/).waitFor();
-      assert.deepEqual(await readExchange(drawer), marcusCalls.scores);
+      const { request, response, treatmentSelectorInput } = marcusCalls.scores;
+      assert.deepEqual(await readExchange(drawer), { request, response });
+      await drawer.getByText("Treatment Selector request and response", { exact: true }).click();
+      assert.deepEqual(JSON.parse(await drawer.getByLabel("Treatment Selector request JSON", { exact: true }).innerText()), treatmentSelectorInput);
+      assert.deepEqual(JSON.parse(await drawer.getByLabel("Treatment Selector response JSON", { exact: true }).innerText()), topicScores);
     }
     if (call === "router" || call === "composer") {
       await drawer.getByText("Read the model input as JSON", { exact: true }).click();
@@ -415,6 +417,10 @@ try {
   await portfolioPage.getByRole("heading", { name: "Fund your account", exact: true }).waitFor();
   await portfolioPage.getByText("Suggested next step", { exact: true }).waitFor();
   await portfolioPage.getByRole("button", { name: "Open call logs", exact: true }).click();
+  const scoresStage = portfolioLogs.locator(".payload-stage").filter({ hasText: "Treatment Selector topic scores · succeeded" });
+  await scoresStage.getByText("Treatment Selector topic scores · succeeded", { exact: true }).click();
+  assert.deepEqual(JSON.parse(await scoresStage.getByLabel("Mock topic scores request", { exact: true }).innerText()), marcusCalls.scores.treatmentSelectorInput);
+  assert.deepEqual(JSON.parse(await scoresStage.getByLabel("Topic scores response", { exact: true }).innerText()), topicScores);
   await portfolioLogs.getByText("Treatment Selector · succeeded", { exact: true }).click();
   await portfolioLogs.getByText("Mock CCRE evaluation", { exact: true }).click();
   const fundingEvaluation = JSON.parse(await portfolioLogs.locator('pre[aria-label="Mock CCRE evaluation"]').innerText());

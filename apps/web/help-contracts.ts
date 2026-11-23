@@ -72,12 +72,13 @@ export const helpContracts = [
       {
         id: "discovery",
         title: "Supported topics and relevance scores",
-        description: "The mock Treatment Selector loads active topics from contexts.json. The scores tool reads propensity.json by demo profile and test case.",
+        description: "The mock Treatment Selector loads active topics from contexts.json. It uses the member ID and test case to return scores from propensity.json for the requested topics.",
         files: [
           jsonFile("context-discovery.tools.json", {
             "contexts.list": { input: turnInputSchema, output: contextResultSchema },
             "propensity.context.score": { input: propensityInputSchema, output: propensityResultSchema },
           }),
+          { name: "ts-adapter.ts", source: treatmentAdapterSource },
           { name: "contexts.json", source: contextFixtureSource },
           { name: "propensity.json", source: propensityFixtureSource },
         ],

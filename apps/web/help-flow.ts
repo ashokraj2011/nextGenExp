@@ -65,8 +65,8 @@ function discoveryFor(personaId: keyof typeof propensityFixture.defaults): FlowS
     scores: catalog.contexts.map(({ contextId }) => ({ contextId, score: scores[contextId] ?? null })),
   };
   return {
-    id: "discovery", title: "Load supported topics", role: "sfield tools",
-    description: "sfield gets active topics from the mock Treatment Selector, which loads fixtures/contexts.json. A separate sfield tool looks up the demo profile’s scores in fixtures/propensity.json. The app saves the list and scores for the turn and sends both to the first model call.",
+    id: "discovery", title: "Load topics and scores", role: "sfield tools",
+    description: "sfield asks the mock Treatment Selector for the active topics from fixtures/contexts.json, then for scores from fixtures/propensity.json. The app saves both for the turn and sends them to the first model call.",
     input: { label: "Tool requests", value: {
       "contexts.list": { turnRef }, "propensity.context.score": { turnRef, catalogSnapshotId },
     } },
@@ -197,7 +197,7 @@ export const addressUpdateExample = {
   prompt: addressPrompt,
   handoffs: {
     discovery: {
-      description: "Before the first model call, the app uses sfield to load the topics and then the scores. It saves both for Marcus’s turn and sends them with his message.",
+      description: "Before the first model call, the app uses sfield to ask Treatment Selector for the supported topics and then for Marcus’s scores. It saves both for his turn.",
       calls: [
         {
           title: "Supported topics",
@@ -206,7 +206,7 @@ export const addressUpdateExample = {
         },
         {
           title: "Topic relevance scores",
-          description: "The scores tool uses catalog_demo to find the same topics. It looks up Marcus’s demo profile and test case in fixtures/propensity.json. Address update has a score of 0.78, which the first model call can use as a hint.",
+          description: "The scores tool sends Marcus’s demo member ID and the saved topic IDs to the mock Treatment Selector. The mock reads fixtures/propensity.json and returns 0.78 for Address update.",
           exchange: marcusCalls.scores,
         },
       ],
@@ -235,11 +235,7 @@ export const addressUpdateExample = {
   } satisfies Record<string, HandoffExample>,
   exchanges: {
     chat: addressSteps.chat,
-    contexts: {
-      description: "sfield asks the mock Treatment Selector for the active topics in fixtures/contexts.json. Address update is one of the six it returns.",
-      input: { label: "contexts.list", value: marcusCalls.catalog.request.inputs },
-      output: { label: "ContextCatalog", value: marcusCalls.catalog.response.output },
-    },
+    contexts: addressSteps.discovery,
     router: addressSteps.router,
     treatment: addressSteps.treatment,
     content: {

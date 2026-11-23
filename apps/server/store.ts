@@ -10,7 +10,7 @@ import type { RoutingIntentId } from "../../packages/contracts/routing-intents";
 import { defaultToolSetup, type MockCcreEvaluation, type ToolSetup, type TreatmentSource } from "../../packages/contracts/tool-setup";
 import type { CompiledExperience, IssuedAction } from "../../packages/experience/compile";
 import { makeId } from "../../packages/experience/compile";
-import type { Rejection } from "../../packages/ts-adapter";
+import type { ContextScoresRequest, Rejection } from "../../packages/ts-adapter";
 
 export type Stage = "route" | "compose";
 export const stageAgent: Record<Stage, string> = { route: "context-router", compose: "experience-composer" };
@@ -65,6 +65,7 @@ export type TurnRecord = {
   portfolioSnapshot?: PortfolioSnapshot;
   goalScopeId?: string;
   goalProgress?: GoalProgress;
+  treatmentScores?: { scopeId: string; input: ContextScoresRequest };
   treatmentMockInput?: { mid: string; context: string };
   treatmentCcre?: MockCcreEvaluation;
   catalog?: CatalogSnapshot;

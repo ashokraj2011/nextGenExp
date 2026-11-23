@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { contextCatalogSchema, type ContextCatalog } from "../contracts/domain";
+import { contextCatalogSchema, type ContextCatalog, type PropensityResult } from "../contracts/domain";
 import { portfolioSnapshotSchema } from "../contracts/portfolio";
 import { mockCcreRuleSchema, normalizedIdsSchema, treatmentOverride, type MockCcreRule, type TreatmentOverride } from "../contracts/tool-setup";
 import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../portfolio-snapshot";
@@ -7,6 +7,7 @@ import rawCatalog from "../../fixtures/contexts.json";
 import rawScenarios from "../../fixtures/treatment-scenarios.json";
 import host from "../../fixtures/host.json";
 import { applyMockCcreRules } from "./mock-ccre";
+import { scoreContexts } from "./propensity";
 
 const rejectionSchema = z.object({
   contentId: z.string(), stage: z.enum(["simulated_ccre", "catalog_resolution"]), reasonCode: z.string(),
@@ -42,8 +43,10 @@ if (new Set(catalog.contexts.map((entry) => entry.contextId)).size !== catalog.c
 
 export type FixtureState = Readonly<{ scenarioId: string; ordinal: number }>;
 type TreatmentRequest = { mid: string; context: string };
+export type ContextScoresRequest = { mid: string; contextIds: string[] };
 export interface TsAdapter {
   listContexts(signal?: AbortSignal): Promise<ContextCatalog>;
+  getContextScores(request: ContextScoresRequest, signal?: AbortSignal): Promise<PropensityResult>;
   getRankedEligibleIds(request: TreatmentRequest, signal?: AbortSignal): Promise<string[]>;
 }
 
@@ -71,10 +74,23 @@ export class FixtureTsAdapter implements TsAdapter {
     private readonly portfolios: PortfolioSnapshotProvider = fixturePortfolioSnapshotProvider,
   ) {}
 
+  private personaFor(mid: string) {
+    const persona = host.personas.find((entry) => (
+      entry.syntheticMid === mid && entry.allowedScenarios.includes(this.state.scenarioId)
+    ));
+    if (!persona) throw new Error("UNCONFIGURED_TS_SCOPE");
+    return persona;
+  }
+
   async listContexts(signal?: AbortSignal): Promise<ContextCatalog> {
     signal?.throwIfAborted();
     if (this.state.scenarioId === "catalog-unavailable") throw new Error("TS_CONTEXT_CATALOG_UNAVAILABLE");
     return activeContextCatalog;
+  }
+
+  async getContextScores({ mid, contextIds }: ContextScoresRequest, signal?: AbortSignal): Promise<PropensityResult> {
+    signal?.throwIfAborted();
+    return scoreContexts(this.personaFor(mid).personaId, this.state.scenarioId, contextIds);
   }
 
   async getRankedEligibleIds(request: TreatmentRequest, signal?: AbortSignal): Promise<string[]> {
@@ -83,10 +99,8 @@ export class FixtureTsAdapter implements TsAdapter {
 
   async selectEligibleContent({ mid, context }: TreatmentRequest, signal?: AbortSignal) {
     signal?.throwIfAborted();
-    const persona = host.personas.find((persona) => (
-      persona.syntheticMid === mid && persona.allowedScenarios.includes(this.state.scenarioId)
-    ));
-    if (!persona || !activeContexts.some((entry) => entry.contextId === context)) {
+    const persona = this.personaFor(mid);
+    if (!activeContexts.some((entry) => entry.contextId === context)) {
       throw new Error("UNCONFIGURED_TS_SCOPE");
     }
 

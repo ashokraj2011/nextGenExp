@@ -191,7 +191,7 @@ The smoke run exercises structured comparison, the balance tool round trip, step
 - `apps/server` hosts the sfield registry and two agent sessions along with SQLite, SSE, action validation, and the tool setup and inspector APIs.
 - `apps/web` contains the responsive assistant-ui chat, registered A2UI components, inspector, and tool setup panel.
 - `packages/contracts` and `packages/experience` contain the schemas, scoping verifiers, and compiler for approved content and disclosures.
-- `packages/ts-adapter`, `packages/propensity-adapter`, and `fixtures` provide the simulated placement catalog, scores, and ranked eligibility.
+- `packages/ts-adapter` serves the supported topics, topic scores, and ranked eligible content from the Treatment Selector demo fixtures.
 - `vendor/sfield` contains the sfield workspace source and license.
 
 The project pins dependencies in `package-lock.json` and records the runtime commit, A2UI baseline, and fixture versions in `build-baseline.json`. [A2UI React package](https://www.npmjs.com/package/@a2ui/react/v/0.15.0), [assistant-ui external store runtime](https://www.assistant-ui.com/docs/runtimes/custom/external-store)

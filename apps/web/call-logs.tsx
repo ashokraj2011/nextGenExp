@@ -62,15 +62,19 @@ function ModelStage({ title, stage }: { title: string; stage: ModelStagePayloads
   </details>;
 }
 
-function TreatmentStage({ stage }: { stage: TreatmentPayloads | null }) {
+function TreatmentStage({ stage, scoring = false }: { stage: TreatmentPayloads | null; scoring?: boolean }) {
+  const title = scoring ? "Treatment Selector topic scores" : "Treatment Selector";
+  const labels = scoring
+    ? { toolRequest: "sfield topic scores request", request: "Mock topic scores request", response: "Topic scores response", error: "Topic scores error" }
+    : { toolRequest: "sfield tool request", request: "Mock request", response: "Tool response", error: "Tool error" };
   return <details className="trace-details payload-stage">
-    <summary>Treatment Selector · {stage?.status ?? "no call"}</summary>
+    <summary>{title} · {stage?.status ?? "no call"}</summary>
     {stage ? <>
       <p><code>{stage.tool}</code></p>
-      <JsonBlock title="sfield tool request" value={stage.registryInput} />
-      {stage.mockInput && <JsonBlock title="Mock request" value={stage.mockInput} open />}
+      <JsonBlock title={labels.toolRequest} value={stage.registryInput} />
+      {stage.mockInput && <JsonBlock title={labels.request} value={stage.mockInput} open />}
       {stage.ccre && <JsonBlock title="Mock CCRE evaluation" value={stage.ccre} />}
-      <JsonBlock title={stage.error ? "Tool error" : "Tool response"} value={stage.error ?? stage.result} open />
+      <JsonBlock title={stage.error ? labels.error : labels.response} value={stage.error ?? stage.result} open />
     </> : <p>No Treatment Selector call recorded for this turn.</p>}
   </details>;
 }
@@ -108,6 +112,7 @@ function TurnPayloadLog({ turn }: { turn: TurnView }) {
       <button className="secondary-button" type="button" onClick={() => setReload((attempt) => attempt + 1)}>Retry loading logs</button>
     </div>}
     {payloads ? <>
+      {payloads.topicScores && <TreatmentStage stage={payloads.topicScores} scoring />}
       <ModelStage title="Context Router" stage={payloads.router} />
       {payloads.glossary && <ReadToolStage title="CCRE glossary" payloadLabel="Glossary" stage={payloads.glossary} />}
       <TreatmentStage stage={payloads.treatment} />

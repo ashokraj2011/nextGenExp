@@ -10,7 +10,7 @@ const fixture = z.object({
   overrides: z.array(z.object({ personaId: z.string(), scenarioId: z.string(), scores: scoreMap.nullable() }).strict()),
 }).strict().parse(rawPropensity);
 
-export function scoreContexts(personaId: string, scenarioId: string, contextIds: string[]): PropensityResult {
+export function scoreContexts(personaId: string, scenarioId: string, contextIds: readonly string[]): PropensityResult {
   const override = fixture.overrides.find((item) => item.personaId === personaId && item.scenarioId === scenarioId);
   const scores = override ? override.scores : fixture.defaults[personaId];
   return {

@@ -94,6 +94,17 @@ async function routeReadPayloads(
   return call ? registryPayload(inspection, call) : null;
 }
 
+async function topicScoresPayloads(sf: SField, inspection: Inspection, turn: TurnRecord): Promise<TreatmentPayloads | null> {
+  const recorded = turn.treatmentScores;
+  if (!recorded || recorded.scopeId !== turn.catalogScopeId || !turn.catalog) return null;
+  const tool = `${sfieldTools.propensity.id}@${toolVersion}`;
+  const call = (await sf.persistence.listCalls(recorded.scopeId)).find((entry) => (
+    entry.toolRef === tool && entry.proposedArguments.turnRef === turn.public.id
+    && entry.proposedArguments.catalogSnapshotId === turn.catalog?.snapshotId
+  ));
+  return call ? { ...registryPayload(inspection, call), mockInput: inspection.payload(recorded.input) } : null;
+}
+
 async function treatmentPayloads(sf: SField, inspection: Inspection, turn: TurnRecord, conversation: ConversationRecord): Promise<TreatmentPayloads | null> {
   if (!turn.tsScopeId || !turn.route) return null;
   const tool = `${sfieldTools.selection.id}@${toolVersion}`;
@@ -115,7 +126,8 @@ async function treatmentPayloads(sf: SField, inspection: Inspection, turn: TurnR
 }
 
 export async function readTurnPayloads(sf: SField, store: Store, inspection: Inspection, turn: TurnRecord, conversation: ConversationRecord): Promise<TurnPayloads> {
-  const [router, glossary, treatment, portfolio, goal, composer] = await Promise.all([
+  const [topicScores, router, glossary, treatment, portfolio, goal, composer] = await Promise.all([
+    topicScoresPayloads(sf, inspection, turn),
     modelPayloads(sf, store, inspection, turn, "route"),
     glossaryPayloads(sf, inspection, turn),
     treatmentPayloads(sf, inspection, turn, conversation),
@@ -123,5 +135,5 @@ export async function readTurnPayloads(sf: SField, store: Store, inspection: Ins
     routeReadPayloads(sf, inspection, turn, turn.goalScopeId, "goal"),
     modelPayloads(sf, store, inspection, turn, "compose"),
   ]);
-  return { turnId: turn.public.id, router, glossary, treatment, portfolio, goal, composer };
+  return { turnId: turn.public.id, topicScores, router, glossary, treatment, portfolio, goal, composer };
 }

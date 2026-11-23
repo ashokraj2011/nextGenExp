@@ -39,7 +39,8 @@ function PayloadPair({ input, output }: { input: PayloadExample; output: Payload
 
 function HandoffExamples({ handoff }: { handoff: HandoffExample }) {
   const [selected, setSelected] = useState(0);
-  const { description, exchange: { request, response } } = handoff.calls[selected];
+  const { description, exchange } = handoff.calls[selected];
+  const { request, response } = exchange;
   const message = "message" in request ? request.message : undefined;
   return <>
     {handoff.description && <p className="help-exchange-description">{handoff.description}</p>}
@@ -49,6 +50,13 @@ function HandoffExamples({ handoff }: { handoff: HandoffExample }) {
       ))}
     </div>}
     <p className="help-exchange-description">{description}</p>
+    {"treatmentSelectorInput" in exchange && <details className="help-tool-exchange">
+      <summary>Treatment Selector request and response</summary>
+      <PayloadExamples examples={[
+        { direction: "Treatment Selector request", label: "getContextScores", source: JSON.stringify(exchange.treatmentSelectorInput, null, 2) },
+        { direction: "Treatment Selector response", label: "Topic relevance scores", source: JSON.stringify(response.output, null, 2) },
+      ]} />
+    </details>}
     <PayloadExamples examples={[
       { direction: "Request", label: message ? "session.send" : "registry.execute", source: JSON.stringify(request, null, 2) },
       { direction: "Response", label: message ? "sfield RunResult" : "sfield ToolResult", source: JSON.stringify(response, null, 2) },

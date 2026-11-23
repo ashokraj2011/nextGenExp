@@ -16,8 +16,7 @@ import {
   ROUTING_HISTORY_TURNS, ROUTING_HISTORY_REQUEST_LENGTH, ROUTING_HISTORY_REPLY_LENGTH,
 } from "../../packages/contracts/routing-intents";
 import { sfieldTools, toolKeys, toolVersion, type MockCcreEvaluation, type ToolKey } from "../../packages/contracts/tool-setup";
-import { activeContextCatalog, fixtureEligibleSets, FixtureTsAdapter } from "../../packages/ts-adapter";
-import { scoreContexts } from "../../packages/propensity-adapter";
+import { activeContextCatalog, fixtureEligibleSets, FixtureTsAdapter, type ContextScoresRequest } from "../../packages/ts-adapter";
 import { mockRuleGlossary } from "../../packages/rule-glossary";
 import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import { fixtureGoalProgressProvider, type GoalProgressProvider } from "../../packages/goal-progress";
@@ -233,10 +232,19 @@ export class Runtime {
       read("propensity", {
         inputs: propensityInputSchema, outputs: propensityResultSchema,
         handler: ({ turnRef, catalogSnapshotId }, ctx) => {
-          const { turn, conversation } = this.scopedRegistryTurn(turnRef, ctx, "propensity");
+          const { turn, conversation, persona } = this.scopedRegistryTurn(turnRef, ctx, "propensity");
           requireCheck(turn.catalog?.snapshotId === catalogSnapshotId && turn.catalog, "CATALOG_MISMATCH");
           checkFresh(turn.catalog, turn.scope, this.now());
-          return scoreContexts(conversation.personaId, conversation.scenarioId, turn.catalog.catalog.contexts.map(({ contextId }) => contextId));
+          const input: ContextScoresRequest = {
+            mid: persona.syntheticMid,
+            contextIds: turn.catalog.catalog.contexts.map(({ contextId }) => contextId),
+          };
+          if (this.inspection) {
+            try {
+              this.store.update(turn.public.id, (row) => { row.treatmentScores = { scopeId: ctx.runId, input }; });
+            } catch { /* Diagnostic storage cannot change the tool result. */ }
+          }
+          return this.treatmentAdapter(turn, conversation).getContextScores(input, ctx.signal);
         },
       }),
       read("selection", {

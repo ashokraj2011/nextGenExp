@@ -120,6 +120,8 @@ test("saved tool settings are isolated by browser and take effect on subsequent 
   const ranked = await client.wait(accepted);
   assert.equal(ranked.turn.status, "completed");
   assert.equal(ranked.trace.propensity?.status, "unavailable");
+  const rankedPayloads = await client.request<TurnPayloads>("/api/debug/payloads/" + ranked.turn.id);
+  assert.equal(rankedPayloads.topicScores, null);
   assert.equal(ranked.trace.ts?.source, "override");
   assert.deepEqual(ranked.trace.ts?.baseline, contentIds);
   assert.ok(ranked.trace.tsScopeId);
@@ -618,6 +620,12 @@ test("the address guide includes the funding suggestion only when Treatment Sele
       results: [{ name: "Account is unfunded", contentId: suggestion, outcome: matched ? "matched" : "excluded" }],
     };
     const logs = await client.request<TurnPayloads>("/api/debug/payloads/" + turn.id);
+    assert.deepEqual(logs.topicScores?.mockInput?.data, {
+      mid, contextIds: trace.catalog!.contexts.map(({ contextId: id }) => id),
+    });
+    assert.deepEqual(logs.topicScores?.result?.data, trace.propensity);
+    assert.deepEqual(gateway.calls.at(-2)?.envelope.propensity, trace.propensity);
+    assert.equal(trace.propensity?.scores.find(({ contextId: id }) => id === contextId)?.score, matched ? 0.78 : null);
     assert.deepEqual(logs.treatment?.mockInput?.data, { mid, context: contextId });
     assert.deepEqual(logs.treatment?.result?.data, expected);
     assert.deepEqual(logs.treatment?.ccre?.data, ccre);
