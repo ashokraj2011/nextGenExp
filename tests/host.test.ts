@@ -12,7 +12,9 @@ import host from "../fixtures/host.json";
 import { startApp } from "../apps/server/http";
 import type { Bootstrap, TurnAccepted, TurnView, ConversationView } from "../packages/contracts/api";
 import type { TurnPayloads } from "../packages/contracts/inspector";
-import { defaultFundingWorkflow, fundingPreviewWorkflow, fundingToolRef, treatmentRecommendationsSchema } from "../packages/contracts/funding-workflow";
+import {
+  defaultAgentFundingWorkflow, defaultFundingWorkflow, fundingChoiceQuestion, fundingPreviewWorkflow, fundingToolRef, treatmentRecommendationsSchema,
+} from "../packages/contracts/funding-workflow";
 import type { GlossaryCondition } from "../packages/contracts/rule-glossary";
 import { demoExperiencesQuestion, leavingWorkQuestion, portfolioSummaryQuestion, retirementQuestion } from "../packages/contracts/routing-intents";
 import {
@@ -641,6 +643,7 @@ test("the address guide can launch the funding workflow only when Treatment Sele
   const f = await fixture();
   t.after(() => f.close());
   const { client, gateway } = f;
+  await client.request("/api/admin/tools", { ...defaultToolSetup, fundingWorkflow: defaultFundingWorkflow });
   const prompt = "I moved and need to update my address.";
   const contextId = "address-update";
   const guide = "address_update_guide";
@@ -770,7 +773,9 @@ test("an open-ended next-step question uses the member's eligible Treatment Sele
     clientRequestId: randomUUID(), envelope: actionFor(experience),
   }, 202);
   const preview = await client.wait(accepted);
-  assert.equal(preview.turn.experience?.blocks[0].component, "PznFundingPreview");
+  assert.equal(preview.turn.experience?.blocks[0]?.component, "PznFundingOptions");
+  const choice = await client.ask(marcus.id, "Use my linked bank.");
+  assert.equal(choice.turn.experience?.blocks[0]?.component, "PznFundingPreview");
 
   const jordan = await client.conversation("normal", "demo-returning");
   const funded = await client.ask(jordan.id, "What should I do next?");
@@ -815,6 +820,79 @@ test("the funding workflow uses the saved step order for the Treatment Selector 
   assert.deepEqual(workflow?.calls[1].result?.data, { accountFundingStatus: "unfunded" });
   await client.request("/api/admin/tools", defaultToolSetup);
   assert.deepEqual((await client.request<TurnPayloads>(path)).workflow, workflow);
+});
+
+test("the funding agent waits for a method and resumes the same run after restart", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const { client } = f;
+  const chat = await client.conversation("normal", "demo-new-account");
+  await client.ask(chat.id, "I moved and need to update my address.");
+
+  const first = await client.ask(chat.id, "What are my options?");
+  const options = first.turn.experience?.blocks[0];
+  assert.equal(options?.component, "PznFundingOptions", JSON.stringify(first.trace.failures));
+  assert.equal(first.turn.experience?.question, fundingChoiceQuestion);
+  assert.deepEqual(options.props.methods.map(({ methodId }) => methodId), ["bank_transfer", "account_transfer"]);
+  const path = "/api/debug/payloads/" + first.turn.id;
+  const before = (await client.request<TurnPayloads>(path)).workflow;
+  assert.equal(before?.agent?.outcome, "waiting_input");
+  assert.equal(before.agent.model.attempts.length, 3);
+  assert.deepEqual(before.definition?.data, defaultAgentFundingWorkflow);
+  assert.deepEqual(before.calls.map(({ tool, status }) => [tool, status]), [
+    [fundingToolRef("fundingStatus"), "succeeded"], [fundingToolRef("fundingOptions"), "succeeded"], ["ask_user@1.0.0", "waiting_input"],
+  ]);
+
+  const restarted = await f.restart();
+  const requestId = randomUUID();
+  const selection = await restarted.submit(chat.id, "Use the cash management account.", requestId);
+  const resumed = await restarted.wait(selection);
+  const preview = resumed.turn.experience?.blocks[0];
+  assert.equal(preview?.component, "PznFundingPreview", JSON.stringify(resumed.trace.failures));
+  assert.equal(preview.props.method.methodId, "account_transfer");
+  const after = (await restarted.request<TurnPayloads>("/api/debug/payloads/" + resumed.turn.id)).workflow;
+  assert.equal(after?.agent?.runId, before.agent.runId);
+  assert.equal(after?.agent?.outcome, "preview");
+  assert.match(JSON.stringify(after?.agent?.answer?.data), /Use the cash management account/);
+  assert.deepEqual(after?.calls.map(({ tool }) => tool), [fundingToolRef("fundingPreview")]);
+  assert.deepEqual(after?.calls[0].registryInput.data, { turnRef: first.turn.id, methodId: "account_transfer" });
+  assert.equal((await restarted.submit(chat.id, "Use the cash management account.", requestId)).turnId, selection.turnId);
+  assert.deepEqual((await restarted.request<TurnPayloads>(path)).workflow, before);
+});
+
+test("the funding agent previews a named eligible method directly and releases a new topic back to chat", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const chat = await f.client.conversation("normal", "demo-new-account");
+  const address = "I moved and need to update my address.";
+  await f.client.ask(chat.id, address);
+  const first = await f.client.ask(chat.id, "Preview funding from my linked bank.");
+  const preview = first.turn.experience?.blocks[0];
+  assert.equal(preview?.component, "PznFundingPreview", JSON.stringify(first.trace.failures));
+  assert.equal(preview.props.method.methodId, "bank_transfer");
+  const workflow = (await f.client.request<TurnPayloads>("/api/debug/payloads/" + first.turn.id)).workflow;
+  assert.deepEqual(workflow?.calls.map(({ tool }) => tool), defaultAgentFundingWorkflow.steps);
+
+  await f.client.ask(chat.id, address);
+  const pending = await f.client.ask(chat.id, "Show me my funding options.");
+  assert.equal(pending.turn.experience?.question, fundingChoiceQuestion);
+  const changed = await f.client.ask(chat.id, "Compare available and current balances.");
+  assert.equal(changed.turn.experience?.blocks[0]?.component, "PznComparison");
+  assert.equal(changed.trace.intentId, "compare_balances");
+});
+
+test("a funding preview requires a successful scoped tool result", async (t) => {
+  const f = await fixture(({ envelope }) => envelope.inputType === "PznFundingInput" ? {
+    json: { outcome: "preview", methodId: "bank_transfer" },
+  } : undefined);
+  t.after(() => f.close());
+  const chat = await f.client.conversation("normal", "demo-new-account");
+  await f.client.ask(chat.id, "I moved and need to update my address.");
+  const { turn } = await f.client.ask(chat.id, "Preview funding from my linked bank.");
+  const { workflow } = await f.client.request<TurnPayloads>("/api/debug/payloads/" + turn.id);
+  assert.equal(workflow?.agent?.outcome, "unavailable");
+  assert.deepEqual(workflow?.calls, []);
+  assert.deepEqual(turn.experience?.blocks, []);
 });
 
 test("home-buying progress reads the eligible member's target and history through sfield", async (t) => {

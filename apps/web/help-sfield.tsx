@@ -9,8 +9,8 @@ const usage = {
   glossary: { caller: "App · Creates a rule", contract: "glossary", description: "Lists the fields and comparisons you can use in a rule." },
   portfolio: { caller: "App · Summarizes a portfolio", contract: "portfolio", description: "Looks up what the demo customer holds in their portfolio." },
   goal: { caller: "App · Shows goal progress", contract: "goal", description: "Looks up the down payment target and monthly savings." },
-  fundingOptions: { caller: "Funding preview workflow", contract: "funding", description: "Reads the sample funding method and amount." },
-  fundingStatus: { caller: "Funding preview workflow · Optional", contract: "funding", description: "Checks whether the demo account is awaiting its first deposit." },
+  fundingOptions: { caller: "Funding preview workflow", contract: "funding", description: "Reads eligible funding methods and the preview amount." },
+  fundingStatus: { caller: "Funding preview workflow", contract: "funding", description: "Checks funding status before the agent offers a method." },
   fundingPreview: { caller: "Funding preview workflow", contract: "funding", description: "Builds a sample preview using the method read for this turn." },
 } satisfies Record<ToolKey, { caller: string; contract: string; description: string }>;
 

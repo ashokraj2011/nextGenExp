@@ -417,6 +417,7 @@ try {
   await portfolioPage.screenshot({ path: resolve(screenshots, "portfolio-returning-chat.png") });
   await portfolioPage.getByRole("link", { name: "Tool setup", exact: true }).click();
   const editor = portfolioPage.getByRole("region", { name: "Funding preview workflow", exact: true });
+  await editor.getByLabel("How to run funding preview", { exact: true }).selectOption("ordered");
   const editorOrder = editor.getByRole("list", { name: "Funding workflow tool order", exact: true }).locator("code");
   await editor.getByLabel("Add workflow tool", { exact: true }).selectOption(fundingToolRef("fundingStatus"));
   await editor.getByRole("button", { name: "Move " + fundingToolRef("fundingStatus") + " up", exact: true }).click();
@@ -472,6 +473,31 @@ try {
   assert.equal(previewInput.methodId, optionsResult.methods[0].methodId);
   assert.equal(previewResult.amountCents, 25_000);
   await portfolioPage.keyboard.press("Escape");
+
+  await portfolioPage.getByRole("link", { name: "Tool setup", exact: true }).click();
+  await editor.getByLabel("How to run funding preview", { exact: true }).selectOption("agent");
+  await editor.getByLabel("Goal", { exact: true }).waitFor();
+  await editor.getByLabel("Tool call limit", { exact: true }).fill("6");
+  await saveSettings.click();
+  await portfolioPage.getByText("Tool settings saved.", { exact: true }).waitFor();
+  await portfolioPage.getByRole("link", { name: "Back to chat", exact: true }).click();
+  await portfolioPage.getByRole("button", { name: "Profiles, current profile Marcus Reed", exact: true }).click();
+  await marcusProfile.getByRole("button", { name: "Start chat as Marcus Reed", exact: true }).click();
+  await portfolioPage.getByRole("button", { name: /Update mailing address/ }).click();
+  await portfolioPage.getByRole("button", { name: "Preview funding", exact: true }).click();
+  await portfolioPage.getByText("Which funding method would you like to preview?", { exact: true }).waitFor();
+  const fundingChoices = portfolioPage.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Funding options", exact: true });
+  await fundingChoices.getByRole("heading", { name: "Bank transfer", exact: true }).waitFor();
+  await fundingChoices.getByRole("heading", { name: "Transfer from another account", exact: true }).waitFor();
+  await portfolioQuestion.fill("Use the cash management account.");
+  await portfolioQuestion.press("Enter");
+  const guidedPreview = portfolioPage.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Funding preview", exact: true });
+  await guidedPreview.getByText("Cash management account", { exact: true }).waitFor();
+  await portfolioPage.getByRole("button", { name: "Open call logs", exact: true }).click();
+  await portfolioLogs.getByText("Customer reply that resumed this run", { exact: true }).click();
+  assert.match(await portfolioLogs.getByLabel("Customer reply that resumed this run", { exact: true }).innerText(), /Use the cash management account/);
+  await portfolioPage.keyboard.press("Escape");
+
   const goalPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   goalPage.setDefaultTimeout(12_000);
   goalPage.on("pageerror", (error) => pageErrors.push(error.message));

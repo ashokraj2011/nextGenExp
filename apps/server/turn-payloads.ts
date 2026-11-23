@@ -1,10 +1,12 @@
+import { ASK_USER } from "@sfield/core";
 import type { CallRecord, JsonValue, ModelAttemptRecord, RunRecord, SField } from "@sfield/core";
 import host from "../../fixtures/host.json";
 import type { WorkflowPayloads, ModelStagePayloads, RegistryToolPayloads, TreatmentPayloads, TurnPayloads } from "../../packages/contracts/inspector";
-import { fundingToolKey, resolveFundingWorkflow, treatmentRecommendationsVersion } from "../../packages/contracts/funding-workflow";
+import { fundingAgentId, fundingToolKey, resolveFundingWorkflow, treatmentRecommendationsVersion } from "../../packages/contracts/funding-workflow";
 import { sfieldTools, toolVersion } from "../../packages/contracts/tool-setup";
 import type { configureGateway } from "./gateway";
 import { assistantResponse } from "./payload-capture";
+import { fundingModelTools } from "./funding-agent";
 import { stageAgent, type ConversationRecord, type Stage, type Store, type TurnRecord } from "./store";
 
 type Inspection = NonNullable<ReturnType<typeof configureGateway>["inspection"]>;
@@ -19,7 +21,7 @@ async function verifiedExchange(sf: SField, inspection: Inspection, run: RunReco
       agent: run.agentId, principal: run.principal, message: run.request.message,
       runInputs: run.request.inputs, transcript: saved.transcript,
     });
-    const compiled = await inspection.compile(context.request);
+    const compiled = await inspection.compile(fundingModelTools(context.request, (ref) => ref !== ASK_USER.ref));
     if (compiled.digest !== attempt.compiledDigest) return;
     return inspection.exchange(compiled, {
       type: "done", message: response, stopReason: attempt.stopReason, usage: attempt.usage,
@@ -38,11 +40,7 @@ async function modelPayloads(sf: SField, store: Store, inspection: Inspection, t
     || run.request.inputs?.turnRef !== turn.public.id || run.request.inputs?.stageAttemptId !== stageAttempt.id) return null;
 
   const recorded = await sf.persistence.listModelAttempts(run.runId);
-  const attempts = recorded.map((attempt) => ({
-    id: attempt.attemptId, model: attempt.model, status: attempt.status,
-    exchange: store.gatewayExchange(attempt.attemptId),
-    error: attempt.error ? inspection.payload({ ...attempt.error }) : undefined,
-  }));
+  const attempts = recorded.map((attempt) => modelAttemptPayload(store, inspection, attempt));
   if (attempts.length === 1 && !attempts[0].exchange) {
     const exchange = await verifiedExchange(sf, inspection, run, recorded[0]);
     if (exchange) {
@@ -61,6 +59,14 @@ async function modelPayloads(sf: SField, store: Store, inspection: Inspection, t
   let input: JsonValue = run.request.message.text;
   try { input = JSON.parse(run.request.message.text) as JsonValue; } catch { /* Preserve a plain text input. */ }
   return { attempts, saved: { input: inspection.payload(input), responses } };
+}
+
+function modelAttemptPayload(store: Store, inspection: Inspection, attempt: ModelAttemptRecord) {
+  return {
+    id: attempt.attemptId, model: attempt.model, status: attempt.status,
+    exchange: store.gatewayExchange(attempt.attemptId),
+    error: attempt.error ? inspection.payload({ ...attempt.error }) : undefined,
+  };
 }
 
 function registryPayload(inspection: Inspection, call: CallRecord): RegistryToolPayloads {
@@ -126,10 +132,41 @@ async function treatmentPayloads(sf: SField, inspection: Inspection, turn: TurnR
   };
 }
 
-async function workflowPayloads(sf: SField, inspection: Inspection, turn: TurnRecord): Promise<WorkflowPayloads | null> {
+async function workflowPayloads(sf: SField, store: Store, inspection: Inspection, turn: TurnRecord): Promise<WorkflowPayloads | null> {
   if (!turn.workflow) return null;
   const { recommendation } = turn.workflow;
   const definition = resolveFundingWorkflow(recommendation, turn.toolSetup?.fundingWorkflow);
+  const phase = turn.fundingRun;
+  if (phase) {
+    const run = await sf.persistence.getRun(phase.id);
+    const root = store.turn(phase.rootTurnId);
+    if (!run || run.agentId !== fundingAgentId || run.tenantId !== "pzn-local" || run.subjectId !== turn.scope.principalId
+      || run.request.inputs?.turnRef !== phase.rootTurnId || root?.scope.conversationId !== turn.scope.conversationId) return null;
+    const [calls, attempts, input] = await Promise.all([
+      sf.persistence.listCalls(phase.id),
+      sf.persistence.listModelAttempts(phase.id),
+      phase.waiting ? sf.persistence.getInputRequest(phase.waiting.requestId) : undefined,
+    ]);
+    return {
+      recommendation, definition: definition && inspection.payload(definition),
+      calls: calls.slice(phase.after.calls, phase.through?.calls).flatMap((call) => {
+        if (call.toolRef === ASK_USER.ref) {
+          const payload = registryPayload(inspection, call);
+          return [{
+            ...payload, label: "Ask for a funding method",
+            ...(call.callId === input?.callId && { status: "waiting_input", result: undefined, error: undefined }),
+          }];
+        }
+        const key = fundingToolKey(call.toolRef);
+        return key ? [{ ...registryPayload(inspection, call), label: sfieldTools[key].label }] : [];
+      }),
+      agent: {
+        runId: phase.id, outcome: phase.outcome,
+        answer: phase.answerTo ? inspection.payload({ requestId: phase.answerTo, reply: turn.public.message }) : undefined,
+        model: { attempts: attempts.slice(phase.after.attempts, phase.through?.attempts).map((attempt) => modelAttemptPayload(store, inspection, attempt)) },
+      },
+    };
+  }
   const recorded = turn.workflowScopeId ? await sf.persistence.listCalls(turn.workflowScopeId) : [];
   const calls = recorded.filter((call) => call.proposedArguments.turnRef === turn.public.id)
     .sort((a, b) => a.turn - b.turn || a.order - b.order)
@@ -149,7 +186,7 @@ export async function readTurnPayloads(sf: SField, store: Store, inspection: Ins
     routeReadPayloads(sf, inspection, turn, turn.portfolioScopeId, "portfolio"),
     routeReadPayloads(sf, inspection, turn, turn.goalScopeId, "goal"),
     modelPayloads(sf, store, inspection, turn, "compose"),
-    workflowPayloads(sf, inspection, turn),
+    workflowPayloads(sf, store, inspection, turn),
   ]);
   return { turnId: turn.public.id, topicScores, router, glossary, treatment, portfolio, goal, composer, workflow };
 }

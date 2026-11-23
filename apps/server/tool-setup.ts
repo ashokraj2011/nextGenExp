@@ -63,7 +63,7 @@ function validateCcreRule(rule: MockCcreRule) {
 }
 
 export function validateToolSetup(setup: ToolSetup) {
-  const workflowIssue = setup.fundingWorkflow && fundingWorkflowIssue(setup.fundingWorkflow.steps);
+  const workflowIssue = setup.fundingWorkflow && fundingWorkflowIssue(setup.fundingWorkflow);
   if (workflowIssue) throw new ApiError(400, "invalid_funding_workflow", workflowIssue);
   for (const { scenarioId, contextId, output } of setup.treatmentOverrides) validateMock(scenarioId, contextId, output);
   for (const rule of setup.ccreRules ?? []) validateCcreRule(rule);

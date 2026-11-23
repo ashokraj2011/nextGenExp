@@ -6,7 +6,7 @@ import { isSubjectlessSummaryRequest, leavingWorkQuestion, portfolioSummaryQuest
 import type { modelBundle } from "../packages/experience/content";
 
 type Envelope = {
-  inputType: "PznContextRoutingInput" | "PznExperienceCompositionInput";
+  inputType: "PznContextRoutingInput" | "PznExperienceCompositionInput" | "PznFundingInput";
   request: string;
   catalogSnapshotId?: string;
   catalog?: { catalogVersion: string; contexts: { contextId: string }[] };
@@ -43,7 +43,7 @@ function fromMessage(body: RequestBody): Envelope | undefined {
     if (message.role !== "user" || !message.content) continue;
     try {
       const value = JSON.parse(message.content);
-      if (value?.inputType === "PznContextRoutingInput" || value?.inputType === "PznExperienceCompositionInput") return value;
+      if (["PznContextRoutingInput", "PznExperienceCompositionInput", "PznFundingInput"].includes(value?.inputType)) return value;
     } catch { /* Runtime repair instructions are ordinary text. */ }
   }
   return undefined;
@@ -212,6 +212,29 @@ function compose({ body, envelope }: GatewayCall): ExperienceProposal | ToolCall
   return choose("PznContentCard", [get("Understanding your balances")], "explanation");
 }
 
+function funding({ envelope, body }: GatewayCall): ResponseData | ToolCall {
+  const results = body.messages.filter(({ role }) => role === "tool").map(({ content }) => JSON.parse(content ?? "{}"));
+  const answer = results.findLast(({ status }) => status === "answered")?.value;
+  const request = typeof answer === "string" ? answer : envelope.request;
+  const finish = (outcome: string, methodId: string | null = null) => ({ outcome, methodId });
+  if (/\b(?:cancel|stop)\b/i.test(request)) return finish("cancelled");
+  if (answer && /compare.*balances|home.buying goal/i.test(request)) return finish("other_topic");
+  const preview = results.find(({ status }) => status === "preview");
+  if (preview) return finish("preview", preview.method.methodId);
+  if (results.some(({ accountFundingStatus }) => accountFundingStatus === "funded")) return finish("already_funded");
+  const tool = (name: string) => body.tools?.some(({ function: spec }) => spec.name === name);
+  const call = (name: string, args: object): ToolCall => ({
+    id: "call_fixture_" + name + "_" + results.length, type: "function", function: { name, arguments: JSON.stringify(args) },
+  });
+  if (tool("funding_status_read")) return call("funding_status_read", {});
+  if (tool("funding_options_read")) return call("funding_options_read", {});
+  const method = /another account|cash management/i.test(request) ? "account_transfer"
+    : /linked bank|bank transfer/i.test(request) ? "bank_transfer" : undefined;
+  if (method && tool("funding_preview_build")) return call("funding_preview_build", { methodId: method });
+  if (tool("ask_user")) return call("ask_user", { question: "Which funding method would you like to preview?", response_type: "string" });
+  return finish(results.some(({ methods }) => Array.isArray(methods)) ? "options" : "unavailable");
+}
+
 export async function startFixtureGateway(
   intercept?: TestInterceptor,
   authorize = (headers: IncomingHttpHeaders) => headers.authorization === "Bearer " + testKey,
@@ -246,7 +269,8 @@ export async function startFixtureGateway(
         if (response.destroyed) return;
       }
 
-      const result = override?.json ?? (envelope.inputType === "PznContextRoutingInput" ? route(envelope) : compose(call));
+      const result = override?.json ?? (envelope.inputType === "PznContextRoutingInput" ? route(envelope)
+        : envelope.inputType === "PznFundingInput" ? funding(call) : compose(call));
       response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
       const write = (payload: unknown) => response.write("data: " + JSON.stringify(payload) + "\n\n");
       if ("function" in result && "id" in result) {

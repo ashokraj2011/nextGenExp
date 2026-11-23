@@ -5,7 +5,9 @@ import type { CatalogSnapshot, ContentDecision, PropensityResult, RouteDecision,
 import type { Conversation, FailureCode, Progress, PublicEvent, PublicEventType, TurnView } from "../../packages/contracts/api";
 import type { GatewayExchange } from "../../packages/contracts/inspector";
 import type { GoalProgress } from "../../packages/contracts/goal-progress";
-import type { WorkflowLaunch } from "../../packages/contracts/funding-workflow";
+import {
+  asksAboutFunding, defaultAgentFundingWorkflow, type WorkflowLaunch,
+} from "../../packages/contracts/funding-workflow";
 import type { PortfolioSnapshot } from "../../packages/contracts/portfolio";
 import type { RoutingIntentId } from "../../packages/contracts/routing-intents";
 import { defaultToolSetup, type MockCcreEvaluation, type ToolSetup, type TreatmentSource } from "../../packages/contracts/tool-setup";
@@ -48,6 +50,16 @@ export type ConversationRecord = Conversation & {
   principalId: string;
   sessions: Partial<Record<Stage, string>>;
 };
+type FundingLogPosition = { attempts: number; calls: number };
+export type FundingRun = {
+  id: string;
+  rootTurnId: string;
+  after: FundingLogPosition;
+  through?: FundingLogPosition;
+  answerTo?: string;
+  waiting?: { requestId: string; expiresAt: number };
+  outcome?: string;
+};
 export type TurnRecord = {
   public: TurnView;
   scope: Scope;
@@ -68,6 +80,7 @@ export type TurnRecord = {
   goalProgress?: GoalProgress;
   workflow?: WorkflowLaunch;
   workflowScopeId?: string;
+  fundingRun?: FundingRun;
   treatmentScores?: { scopeId: string; input: ContextScoresRequest };
   treatmentMockInput?: { mid: string; context: string };
   treatmentCcre?: MockCcreEvaluation;
@@ -239,13 +252,26 @@ export class Store {
       }
 
       const id = makeId("turn");
+      const setup = this.toolSetup(conversation.principalId);
+      const workflowDefinition = setup.fundingWorkflow ?? defaultAgentFundingWorkflow;
+      const paused = origin === "message" && latest?.workflow ? latest.fundingRun : undefined;
+      const continuation = paused?.through && paused.waiting && paused.waiting.expiresAt > now ? {
+        id: paused.id, rootTurnId: paused.rootTurnId, after: paused.through, answerTo: paused.waiting.requestId,
+      } : undefined;
+      const offered = !continuation && origin === "message" && workflowDefinition.mode === "agent" && asksAboutFunding(message)
+        && latest?.public.experience && latest.public.experience.expiresAt > now
+        ? this.experience(latest.public.experience.experienceId, conversation.principalId).actions.find(({ workflow }) => workflow)?.workflow
+        : undefined;
+      const launch = retry?.workflow ?? input.workflow ?? (continuation ? latest?.workflow : undefined)
+        ?? (offered && latest?.public.experience ? { recommendation: offered, sourceExperienceId: latest.public.experience.experienceId } : undefined);
       const record: TurnRecord = {
         public: { id, conversationId: conversation.id, message, createdAt: now, status: "working", progress: "accepted", retryOf: retry?.public.id },
         scope: { turnId: id, principalId: conversation.principalId, conversationId: conversation.id, personaId: conversation.personaId },
         ordinal: retry?.ordinal ?? (latest?.ordinal ?? 0) + 1,
         requestId, origin, selectionMode, attempts: {},
-        workflow: retry?.workflow ?? input.workflow,
-        toolSetup: this.toolSetup(conversation.principalId),
+        workflow: launch,
+        fundingRun: continuation,
+        toolSetup: continuation ? latest?.toolSetup : setup.fundingWorkflow ? setup : { ...setup, fundingWorkflow: workflowDefinition },
         trace: { surface: "chat", sourcePageContext: null, selectionMode, markers: { accepted: now }, failures: [] },
       };
       this.db.run("INSERT INTO turns VALUES (?, ?, ?, ?, ?, ?)", id, conversation.id, requestId, record.ordinal, "working", JSON.stringify(record));

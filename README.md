@@ -107,13 +107,15 @@ Use **Tool setup → Treatment Selector test settings → Learning → Run previ
 
 Start a chat as **Marcus Reed**, a new account holder awaiting his first deposit. Choose **Update mailing address** or ask “I moved and need to update my address.” The Context Router selects `update_address`. sfield calls Treatment Selector with Marcus’s synthetic member ID and the `address-update` context. The mock returns `address_update_guide` and evaluates **Account → Funding status → Equals → Unfunded** to determine whether it can also return `fund_account`.
 
-When both cards are eligible, Treatment Selector also returns `account.funding.preview@1.0.0`. Chat displays the address guide and **Fund your account**. Click **Preview funding** to start a separate turn. The app resolves the workflow by ID and version, and sfield runs the saved steps. The default order is **Funding options** then **Build funding preview**. Chat shows a sample $250 bank transfer that ends at review.
+When both cards are eligible, Treatment Selector also returns `account.funding.preview@1.0.0`. Chat displays the address guide and **Fund your account**. Click **Preview funding** or ask “What are my options?” The app matches the workflow ID and version to Tool setup. sfield checks funding status and shows the eligible methods. Reply “Use my linked bank” or “Use the cash management account” to resume the same agent run. Chat shows a $250 preview for the selected method that ends at review.
 
-In **Tool setup → Funding preview workflow**, add **Check funding status** and place it before or after **Funding options**. Keep both required tools, with **Build funding preview** last, and click **Save settings**.
+After getting the funding suggestion, ask “Preview funding from my linked bank” to go directly to the bank transfer preview. The agent checks status and available methods before building it. If the account is already funded, the agent reports the status and ends the run.
+
+Use **Tool setup → Funding preview workflow → Agent-guided** to edit the goal, tool call limit, and whether the agent can build a preview. **Saved tool order** runs the configured sequence. That sequence supports adding **Check funding status** and requires **Funding options** before **Build funding preview**.
 
 Ask **“what is next”** as Marcus to get the funding suggestion directly. The Context Router selects `suggest_next_step`. Treatment Selector evaluates the unfunded-account rule for the `next-step` topic and can return **Fund your account** and **Preview funding**.
 
-Open **Logs → Treatment Selector** on the address turn to see the CCRE evaluation and workflow recommendation. Select **Preview funding** in **Logs** to inspect the workflow definition and each call in execution order. Ask the same address question as **Jordan Lee** to see the guide for an already funded account. **Tool setup → Address update → Run preview** compares the rules for both profiles.
+Open **Logs → Treatment Selector** on the address turn to see the CCRE evaluation and workflow recommendation. In **Logs**, select the preview request and the reply that chose a method. Both show the same agent run ID, with the model and tool calls for that message. Ask the same address question as **Jordan Lee** to see the guide for an already funded account. **Tool setup → Address update → Run preview** compares the rules for both profiles.
 
 ### Inspect requests and responses
 

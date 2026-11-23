@@ -6,11 +6,11 @@ import {
 } from "@a2ui/web_core/v1_0";
 import { ArrowUpRight, BookOpenText, ChartNoAxesColumnIncreasing, ChevronDown, Columns2, FileText, House, ListChecks } from "lucide-react";
 import { makeAssistantDataUI } from "@assistant-ui/react";
-import type { FundingPreview } from "../../packages/contracts/funding-workflow";
+import type { FundingOptions, FundingPreview } from "../../packages/contracts/funding-workflow";
 import { formatPortfolioAmount } from "../../packages/contracts/portfolio";
 import {
   PZN_CATALOG_ID, FOLLOW_UP_EVENT, contentCard, comparison, stepList, metricSummary, experienceRoot, followUpButton, ruleCreation, portfolioSnapshot,
-  fundingPreview, goalProgressCard, validatePznSurface, type DisplayBlock, type DisplayExperience,
+  fundingOptions, fundingPreview, goalProgressCard, validatePznSurface, type DisplayBlock, type DisplayExperience,
 } from "../../packages/contracts/surface";
 import { RuleCreationBlock } from "./rule-creation-block";
 import { PortfolioSnapshotBlock } from "./portfolio-snapshot";
@@ -43,10 +43,26 @@ function FundingPreviewBlock({ amountCents, method }: FundingPreview) {
   </section>;
 }
 
+function FundingOptionsBlock({ methods }: FundingOptions) {
+  return <section className="content-card" aria-label="Funding options">
+    <h3>Funding options</h3>
+    <div className="compare-grid">
+      {methods.map(({ methodId, label, from, to }) => <section key={methodId} className="compare-column">
+        <h4>{label}</h4>
+        <dl>
+          <div><dt>From</dt><dd>{from}</dd></div>
+          <div><dt>To</dt><dd>{to}</dd></div>
+        </dl>
+      </section>)}
+    </div>
+  </section>;
+}
+
 function ContentBlock({ block }: { block: DisplayBlock }) {
   if (block.component === ruleCreation.name) return <RuleCreationBlock {...block.props} />;
   if (block.component === portfolioSnapshot.name) return <PortfolioSnapshotBlock {...block.props} />;
   if (block.component === fundingPreview.name) return <FundingPreviewBlock {...block.props} />;
+  if (block.component === fundingOptions.name) return <FundingOptionsBlock {...block.props} />;
   const { component, props } = block;
   const Icon = icons[component];
   const recommendation = block.component === "PznContentCard" && block.props.recommendation;
@@ -143,6 +159,7 @@ const pznCatalog = new Catalog<ReactCatalogComponent>(PZN_CATALOG_ID, "1.0", [
   createComponentImplementation(goalProgressCard, ({ props }) => <ContentBlock block={{ component: goalProgressCard.name, props }} />),
   createComponentImplementation(portfolioSnapshot, ({ props }) => <PortfolioSnapshotBlock {...props} />),
   createComponentImplementation(fundingPreview, ({ props }) => <FundingPreviewBlock {...props} />),
+  createComponentImplementation(fundingOptions, ({ props }) => <FundingOptionsBlock {...props} />),
   createComponentImplementation(ruleCreation, ({ props }) => <RuleCreationBlock {...props} />),
   createComponentImplementation(followUpButton, ({ props, context }) => {
     const { enabled } = useContext(SurfaceActions);

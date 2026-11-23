@@ -19,11 +19,11 @@ import { FOLLOW_UP_EVENT, type DisplayExperience } from "../../packages/contract
 import { normalizedIdsSchema, treatmentOverride } from "../../packages/contracts/tool-setup";
 import { activeContextCatalog, fixtureRejections, tsFixtures } from "../../packages/ts-adapter";
 import { contentCatalog, lookupContent, modelBundle, resolveCandidates } from "../../packages/experience/content";
-import { compileChatReply, compileExperience, compileFundingPreview, compileRuleCreation, makeId } from "../../packages/experience/compile";
+import { compileChatReply, compileExperience, compileFundingOptions, compileFundingPreview, compileRuleCreation, makeId } from "../../packages/experience/compile";
 import { verifyContextProposal, verifyRoute, requireCheck, Rejected } from "../../packages/experience/verify";
 import { ApiError, Store, type ConversationRecord, type Stage, type TurnRecord } from "./store";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
-import type { Runtime } from "./runtime";
+import { principalFor, type Runtime } from "./runtime";
 
 class TurnFailure extends Error {
   constructor(readonly code: FailureCode) { super(code); }
@@ -160,8 +160,8 @@ export class ExperienceService {
     try {
       if (initial.workflow) {
         stage = "workflow";
-        await this.runFundingPreview(runtime, current(), initial.workflow, signal);
-        return;
+        if (await this.runFundingPreview(runtime, current(), initial.workflow, signal)) return;
+        stage = "catalog";
       }
       if (!initial.catalog || !initial.propensity) await this.discover(runtime, current(), signal);
       const catalog = current().catalog!;
@@ -441,12 +441,32 @@ export class ExperienceService {
   private async runFundingPreview(runtime: Runtime, turn: TurnRecord, launch: WorkflowLaunch, signal: AbortSignal) {
     const { turn: source } = this.store.experience(launch.sourceExperienceId, turn.scope.principalId);
     const definition = resolveFundingWorkflow(launch.recommendation, turn.toolSetup?.fundingWorkflow);
-    requireCheck(definition && !fundingWorkflowIssue(definition.steps)
+    requireCheck(definition && !fundingWorkflowIssue(definition)
       && source.scope.conversationId === turn.scope.conversationId && source.scope.personaId === turn.scope.personaId
       && source.public.experience && source.public.experience.expiresAt > this.now()
       && fundingRecommendation(source, source.trace.finalOrder ?? []), "FUNDING_WORKFLOW_NOT_OFFERED");
     const id = turn.public.id;
     this.store.progress(id, "workflow", this.now());
+    if (definition.mode === "agent") {
+      const result = await runtime.funding.execute(
+        turn, definition, principalFor(turn.scope.principalId), this.recentChat(turn), source.public.experience.expiresAt, signal,
+      );
+      if (result.outcome === "other_topic") return false;
+      const now = this.now();
+      const expiresAt = now + DECISION_TTL;
+      const display = result.outcome === "preview" ? compileFundingPreview(result.preview, expiresAt)
+        : result.outcome === "waiting_input" ? compileFundingOptions(result.options, result.expiresAt, result.question)
+        : result.outcome === "options" ? compileFundingOptions(result.options, expiresAt)
+        : compileChatReply(
+          result.outcome === "already_funded" ? "Your account is already funded."
+            : result.outcome === "cancelled" ? "I’ve closed the funding preview." : "I couldn’t prepare your funding preview. Please try again.",
+          "reply", expiresAt,
+        );
+      runtime.current(id);
+      this.store.update(id, (row) => { row.trace.components = display.display.blocks.map(({ component }) => component); });
+      this.store.finish(id, { type: "completed", result: display }, now);
+      return true;
+    }
     const preview = await runtime.registry(turn, "workflowScopeId", definition.steps.length, signal, async (call) => {
       const outputs = new Map<string, unknown>();
       for (const ref of definition.steps) {
@@ -470,6 +490,7 @@ export class ExperienceService {
     const result = compileFundingPreview(preview, now + DECISION_TTL);
     this.store.update(id, (row) => { row.trace.components = result.display.blocks.map(({ component }) => component); });
     this.store.finish(id, { type: "completed", result }, now);
+    return true;
   }
 
   private async discover(runtime: Runtime, turn: TurnRecord, signal: AbortSignal) {

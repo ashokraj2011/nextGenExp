@@ -4,7 +4,7 @@ import modelInputsSource from "../../packages/contracts/model-inputs.ts?raw";
 import routingSource from "../../packages/contracts/routing-intents.ts?raw";
 import domainSource from "../../packages/contracts/domain.ts?raw";
 import fundingWorkflowSource from "../../packages/contracts/funding-workflow.ts?raw";
-import { defaultFundingWorkflow } from "../../packages/contracts/funding-workflow";
+import { defaultAgentFundingWorkflow, defaultFundingWorkflow } from "../../packages/contracts/funding-workflow";
 import toolSetupSource from "../../packages/contracts/tool-setup.ts?raw";
 import glossarySource from "../../packages/contracts/rule-glossary.ts?raw";
 import portfolioSource from "../../packages/contracts/portfolio.ts?raw";
@@ -25,7 +25,8 @@ import {
   propensityResultSchema, treatmentInputSchema, treatmentResultSchema, glossaryInputSchema, glossaryResultSchema,
   portfolioInputSchema, portfolioResultSchema, balanceInputSchema, balanceResultSchema,
   goalProgressInputSchema, goalProgressResultSchema,
-  treatmentRecommendationsResultSchema, fundingOptionsResultSchema, fundingStatusResultSchema, fundingPreviewInputSchema, fundingPreviewResultSchema,
+  treatmentRecommendationsResultSchema, fundingAgentResultSchema, fundingOptionsResultSchema,
+  fundingStatusResultSchema, fundingPreviewInputSchema, fundingPreviewResultSchema,
 } from "../../packages/contracts/model-schemas";
 
 export type ContractFile = { name: string; source: string };
@@ -160,14 +161,16 @@ export const helpContracts = [
       {
         id: "funding",
         title: "Funding preview workflow",
-        description: "The app resolves the recommended workflow ID and version against Tool setup. sfield runs the saved steps when the customer clicks Preview funding.",
+        description: "The app resolves the workflow ID and version in Tool setup. The agent uses funding results to choose a next tool, ask for a method, or finish the preview.",
         files: [
           jsonFile("funding-preview.tools.json", {
             "funding.options.read": { input: turnInputSchema, output: fundingOptionsResultSchema },
             "funding.status.read": { input: turnInputSchema, output: fundingStatusResultSchema },
             "funding.preview.build": { input: fundingPreviewInputSchema, output: fundingPreviewResultSchema },
           }),
-          jsonFile("funding-workflow.default.json", defaultFundingWorkflow),
+          jsonFile("funding-workflow.default.json", defaultAgentFundingWorkflow),
+          jsonFile("funding-workflow.saved-order.json", defaultFundingWorkflow),
+          jsonFile("funding-agent.result.json", fundingAgentResultSchema),
           { name: "funding-workflow.ts", source: fundingWorkflowSource },
         ],
       },

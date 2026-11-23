@@ -1,4 +1,5 @@
 import type { JsonObject } from "@sfield/core";
+import { fundingAgentOutcomes } from "./funding-workflow";
 import { goalMonthPattern, homeDownPaymentGoalId } from "./goal-progress";
 import { glossaryOperators, glossaryValueTypes } from "./rule-glossary";
 import { routingIntents } from "./routing-intents";
@@ -63,9 +64,16 @@ const fundingMethodResult = closed({ methodId: string, label: string, from: stri
 const fundingAmounts = { amountCents: { type: "integer", minimum: 1 }, currency: { type: "string", enum: ["USD"] } };
 export const fundingOptionsResultSchema = closed({ methods: { ...array(fundingMethodResult, 4), minItems: 1 }, ...fundingAmounts });
 export const fundingStatusResultSchema = closed({ accountFundingStatus: { type: "string", enum: ["funded", "unfunded"] } });
-export const fundingPreviewInputSchema = closed({ turnRef: string, methodId: string });
+export const fundingReadInputSchema = { ...turnInputSchema, required: [] };
+export const fundingPreviewInputSchema = { ...closed({ turnRef: string, methodId: string }), required: ["methodId"] };
+export const fundingAgentReadInputSchema = closed({});
+export const fundingAgentPreviewInputSchema = closed({ methodId: string });
 export const fundingPreviewResultSchema = closed({
   status: { type: "string", enum: ["preview"] }, method: fundingMethodResult, ...fundingAmounts,
+});
+export const fundingAgentResultSchema = closed({
+  outcome: { type: "string", enum: [...fundingAgentOutcomes] },
+  methodId: { type: ["string", "null"] },
 });
 const cents = { type: "integer", minimum: 0, maximum: 1_000_000_000_000 };
 export const portfolioResultSchema = closed({

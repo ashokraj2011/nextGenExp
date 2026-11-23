@@ -101,12 +101,17 @@ function ReadToolStage({ title, stage, payloadLabel = title }: { title: string; 
 }
 
 function WorkflowStage({ workflow }: { workflow: WorkflowPayloads }) {
-  const { recommendation, definition, calls } = workflow;
+  const { recommendation, definition, calls, agent } = workflow;
   return <details className="trace-details payload-stage" open>
     <summary>Funding preview workflow</summary>
     <p><code>{recommendation.id}@{recommendation.version}</code></p>
     {definition && <JsonBlock title="Workflow definition" value={definition} />}
-    {calls.length ? calls.map((call) => <ReadToolStage key={call.tool} title={call.label} stage={call} />)
+    {agent && <>
+      <p>Agent run <code>{agent.runId}</code>{agent.outcome === "waiting_input" ? " · Waiting for a funding method" : ""}</p>
+      {agent.answer && <JsonBlock title="Customer reply that resumed this run" value={agent.answer} />}
+      <ModelStage title="Funding agent model" stage={agent.model} />
+    </>}
+    {calls.length ? calls.map((call, index) => <ReadToolStage key={call.tool + ":" + index} title={call.label} stage={call} />)
       : <p>No workflow calls recorded for this turn.</p>}
   </details>;
 }
@@ -134,14 +139,17 @@ function TurnPayloadLog({ turn }: { turn: TurnView }) {
       <p role="alert">The call logs are unavailable.</p>
       <button className="secondary-button" type="button" onClick={() => setReload((attempt) => attempt + 1)}>Retry loading logs</button>
     </div>}
-    {payloads?.workflow ? <WorkflowStage workflow={payloads.workflow} /> : payloads ? <>
-      {payloads.topicScores && <TreatmentStage stage={payloads.topicScores} scoring />}
-      <ModelStage title="Context Router" stage={payloads.router} />
-      {payloads.glossary && <ReadToolStage title="CCRE glossary" payloadLabel="Glossary" stage={payloads.glossary} />}
-      <TreatmentStage stage={payloads.treatment} />
-      {payloads.portfolio && <ReadToolStage title="Portfolio Snapshot" stage={payloads.portfolio} />}
-      {payloads.goal && <ReadToolStage title="Goal Progress" stage={payloads.goal} />}
-      <ModelStage title="Experience Composer" stage={payloads.composer} />
+    {payloads ? <>
+      {payloads.workflow && <WorkflowStage workflow={payloads.workflow} />}
+      {(!payloads.workflow || payloads.topicScores || payloads.router) && <>
+        {payloads.topicScores && <TreatmentStage stage={payloads.topicScores} scoring />}
+        <ModelStage title="Context Router" stage={payloads.router} />
+        {payloads.glossary && <ReadToolStage title="CCRE glossary" payloadLabel="Glossary" stage={payloads.glossary} />}
+        <TreatmentStage stage={payloads.treatment} />
+        {payloads.portfolio && <ReadToolStage title="Portfolio Snapshot" stage={payloads.portfolio} />}
+        {payloads.goal && <ReadToolStage title="Goal Progress" stage={payloads.goal} />}
+        <ModelStage title="Experience Composer" stage={payloads.composer} />
+      </>}
     </> : !failed && <p role="status">Loading call logs…</p>}
   </div>;
 }

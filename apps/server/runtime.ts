@@ -1,17 +1,19 @@
 import { dirname, resolve } from "node:path";
-import { defineTool, estimateJsonTokens, estimateTokens, SField, ToolError } from "@sfield/core";
+import { ASK_USER, defineTool, estimateJsonTokens, estimateTokens, SField, ToolError } from "@sfield/core";
 import type { ConfigDocument, DefineToolInput, JsonObject, Principal, RunRecord, RunResult, ToolHandlerContext, Verifier } from "@sfield/core";
 import { SqlitePersistence } from "@sfield/store-sqlite";
 import host from "../../fixtures/host.json";
 import { MAX_MESSAGE_LENGTH, metricReadingSchema, TURN_DEADLINE, type BalanceProof } from "../../packages/contracts/domain";
 import {
-  fundingOptionsSchema, fundingToolRef, fundingToolVersion, resolveFundingWorkflow, treatmentRecommendationsVersion,
+  fundingAgentId, fundingAgentToolLimit, fundingOptionsSchema, fundingToolRef, fundingToolVersion,
+  resolveFundingWorkflow, treatmentRecommendationsVersion,
 } from "../../packages/contracts/funding-workflow";
 import { goalProgressSchema, isHomeGoalSummary } from "../../packages/contracts/goal-progress";
 import {
   balanceInputSchema, balanceResultSchema, compositionOutputSchema, contextResultSchema, portfolioInputSchema, portfolioResultSchema,
   glossaryInputSchema, glossaryResultSchema, goalProgressInputSchema, goalProgressResultSchema,
-  fundingOptionsResultSchema, fundingStatusResultSchema, fundingPreviewInputSchema, fundingPreviewResultSchema, treatmentRecommendationsResultSchema,
+  fundingAgentResultSchema, fundingOptionsResultSchema, fundingReadInputSchema, fundingStatusResultSchema, fundingPreviewInputSchema,
+  fundingPreviewResultSchema, treatmentRecommendationsResultSchema,
   propensityInputSchema, propensityResultSchema, routingOutputSchema,
   treatmentInputSchema, treatmentResultSchema, turnInputSchema,
 } from "../../packages/contracts/model";
@@ -31,6 +33,7 @@ import { makeId } from "../../packages/experience/compile";
 import type { GatewayExchange } from "../../packages/contracts/inspector";
 import { configureCopilotAcp } from "./copilot-acp";
 import { configureGateway, type GatewaySettings } from "./gateway";
+import { FundingAgent, fundingAgentInstructions } from "./funding-agent";
 import { stageAgent, type ConversationRecord, type Stage, type StageAttempt, type Store, type TurnRecord } from "./store";
 import { readTurnPayloads } from "./turn-payloads";
 
@@ -154,19 +157,33 @@ function runtimeConfig(settings: GatewaySettings, model: JsonObject): ConfigDocu
         budget: { max_model_calls: 4, max_provider_attempts: 4, max_tool_calls: 1, max_tool_attempts: 1, max_active_seconds: 42, max_elapsed_seconds: 45 },
         output: { stream: false, max_repairs: 1, verifier: "experience", schema: compositionOutputSchema },
       },
+      [fundingAgentId]: {
+        instructions: fundingAgentInstructions,
+        tools: [toolRefs.fundingStatus, toolRefs.fundingOptions, toolRefs.fundingPreview],
+        memory, context, policy: readOnly,
+        budget: {
+          max_tool_calls: fundingAgentToolLimit, max_tool_attempts: fundingAgentToolLimit,
+          max_model_calls: fundingAgentToolLimit + 2, max_provider_attempts: fundingAgentToolLimit + 3,
+          max_active_seconds: 85, max_elapsed_seconds: 345,
+        },
+        output: { stream: false, max_repairs: 1, verifier: "fundingPreview", schema: fundingAgentResultSchema },
+      },
     },
   };
 }
 
 export class Runtime {
   private sf!: SField;
+  readonly funding: FundingAgent;
   private constructor(
     private readonly store: Store,
     private readonly now: () => number,
     private readonly inspection: ReturnType<typeof configureGateway>["inspection"],
     private readonly portfolioSnapshots: PortfolioSnapshotProvider,
     private readonly goalProgressProvider: GoalProgressProvider,
-  ) {}
+  ) {
+    this.funding = new FundingAgent(store, () => this.sf, now);
+  }
 
   static async open(
     store: Store, path: string, settings: GatewaySettings, now: () => number,
@@ -183,18 +200,45 @@ export class Runtime {
       namespace: "pzn-experience-runtime",
       ...gateway.options,
       authorizer: {
-        async authorize({ principal, action, effect }) {
-          return principal.tenantId === "pzn-local" && principal.roles.includes("pzn-demo") && actions.has(action) && effect === "read"
+        async authorize({ principal, action, effect, agentId }) {
+          const allowed = actions.has(action) || (agentId === fundingAgentId && action === ASK_USER.policy.action);
+          return principal.tenantId === "pzn-local" && principal.roles.includes("pzn-demo") && allowed && effect === "read"
             ? { decision: "allow", evidenceId: makeId("auth"), expiresAt: new Date(now() + TURN_DEADLINE).toISOString() }
             : { decision: "deny", code: "TOOL_DENIED", reason: "The demo permits scoped fixture reads." };
         },
       },
+      input: { async request() { /* The chat turn renders the persisted input request. */ } },
+      hooks: [
+        {
+          id: "pzn-funding-model-tools", point: "beforeModelDispatch", timeoutMs: 1_000, onFailure: "fail",
+          seesProtectedContent: false, buildIdentity: "pzn-funding-tools-v1",
+          async beforeModelDispatch({ request, runId }) {
+            return { request: await runtime.funding.narrow(request, runId) };
+          },
+        },
+        {
+          id: "pzn-funding-tool-input", point: "prepareTool", timeoutMs: 1_000, onFailure: "fail",
+          seesProtectedContent: false, buildIdentity: "pzn-funding-input-v1",
+          prepareTool: ({ toolRef, inputs, runId }) => runtime.funding.prepare(toolRef, inputs, runId),
+        },
+      ],
       tools: runtime.tools(),
       verifiers: {
         contextSelection: runtime.verifier("contextSelection", "route"),
         experience: runtime.verifier("experience", "compose"),
+        fundingPreview: {
+          id: "fundingPreview", kind: "validator",
+          async validate(output, { runId }) {
+            try {
+              await runtime.funding.verify(output, runId);
+              return { ok: true };
+            } catch (error) {
+              return { ok: false, reason: error instanceof Rejected ? error.code : "FUNDING_RESULT_INVALID" };
+            }
+          },
+        },
       },
-      limits: { requestMaxBytes: 64 * 1024, grants: { effects: ["read"] } },
+      limits: { requestMaxBytes: 64 * 1024, inputExpirySeconds: 300, grants: { effects: ["read"], interactionTools: ["ask_user"] } },
     });
     return runtime;
   }
@@ -227,6 +271,15 @@ export class Runtime {
     }
     requireToolEnabled(turn, key);
     return { turn, conversation, persona };
+  }
+
+  private async scopedFundingTurn(ref: unknown, ctx: ToolHandlerContext, key: "fundingOptions" | "fundingStatus" | "fundingPreview") {
+    const turn = await this.funding.scopedTurn(ref, ctx);
+    if (!turn) return { ...this.scopedRegistryTurn(ref, ctx, key), agentGuided: false };
+    requireToolEnabled(turn, key);
+    const persona = host.personas.find((entry) => entry.personaId === turn.scope.personaId);
+    requireCheck(persona, "PERSONA_MISMATCH");
+    return { persona, agentGuided: true };
   }
 
   private treatmentAdapter(turn: TurnRecord, conversation: ConversationRecord) {
@@ -307,28 +360,35 @@ export class Runtime {
         handler: async (input, ctx) => (await this.selectTreatment(input, ctx)).recommendations,
       }, treatmentRecommendationsVersion),
       read("fundingOptions", {
-        inputs: turnInputSchema, outputs: fundingOptionsResultSchema,
-        handler: ({ turnRef }, ctx) => {
-          this.scopedRegistryTurn(turnRef, ctx, "fundingOptions");
+        inputs: fundingReadInputSchema, outputs: fundingOptionsResultSchema,
+        handler: async ({ turnRef }, ctx) => {
+          const { persona, agentGuided } = await this.scopedFundingTurn(turnRef, ctx, "fundingOptions");
+          if (agentGuided) requireCheck(persona.accountFundingStatus === "unfunded", "ACCOUNT_ALREADY_FUNDED");
           return {
-            methods: [{ methodId: "bank_transfer", label: "Bank transfer", from: "Linked bank account", to: "Investment account" }],
+            methods: [
+              { methodId: "bank_transfer", label: "Bank transfer", from: "Linked bank account", to: "Investment account" },
+              ...(agentGuided ? [{
+                methodId: "account_transfer", label: "Transfer from another account", from: "Cash management account", to: "Investment account",
+              }] : []),
+            ],
             amountCents: 25_000, currency: "USD",
           };
         },
       }, fundingToolVersion),
       read("fundingStatus", {
-        inputs: turnInputSchema, outputs: fundingStatusResultSchema,
-        handler: ({ turnRef }, ctx) => {
-          const { persona } = this.scopedRegistryTurn(turnRef, ctx, "fundingStatus");
+        inputs: fundingReadInputSchema, outputs: fundingStatusResultSchema,
+        handler: async ({ turnRef }, ctx) => {
+          const { persona } = await this.scopedFundingTurn(turnRef, ctx, "fundingStatus");
           return { accountFundingStatus: persona.accountFundingStatus };
         },
       }, fundingToolVersion),
       read("fundingPreview", {
         inputs: fundingPreviewInputSchema, outputs: fundingPreviewResultSchema,
         handler: async ({ turnRef, methodId }, ctx) => {
-          this.scopedRegistryTurn(turnRef, ctx, "fundingPreview");
+          const { persona, agentGuided } = await this.scopedFundingTurn(turnRef, ctx, "fundingPreview");
+          if (agentGuided) requireCheck(persona.accountFundingStatus === "unfunded", "ACCOUNT_ALREADY_FUNDED");
           const read = (await this.sf.persistence.listCalls(ctx.runId)).find((call) => (
-            call.toolRef === toolRefs.fundingOptions && call.proposedArguments.turnRef === turnRef && call.result?.status === "succeeded"
+            call.toolRef === toolRefs.fundingOptions && call.invocation?.normalizedInputs.turnRef === turnRef && call.result?.status === "succeeded"
           ));
           requireCheck(read, "FUNDING_OPTIONS_REQUIRED");
           const options = fundingOptionsSchema.parse(read.result?.output);

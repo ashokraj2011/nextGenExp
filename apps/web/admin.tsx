@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { ArrowDown, ArrowLeft, ArrowUp, FlaskConical, MessageSquare, Trash2 } from "lucide-react";
 import {
-  defaultFundingWorkflow, fundingToolKey, fundingToolKeys, fundingToolRef, fundingTools, fundingWorkflowIssue,
+  defaultAgentFundingWorkflow, defaultFundingWorkflow, fundingAgentToolLimit, fundingToolKey, fundingToolKeys,
+  fundingToolRef, fundingTools, fundingWorkflowIssue,
   type FundingStepRef, type FundingWorkflowDefinition,
 } from "../../packages/contracts/funding-workflow";
 import {
@@ -60,6 +61,7 @@ function FundingWorkflowEditor({ definition, issue, change }: {
   definition: FundingWorkflowDefinition; issue?: string; change: (definition: FundingWorkflowDefinition) => void;
 }) {
   const { id, version, steps } = definition;
+  const guided = definition.mode === "agent";
   const choices = fundingToolKeys.filter((key) => !steps.includes(fundingToolRef(key)));
   function setSteps(next: FundingStepRef[]) {
     change({ ...definition, steps: next });
@@ -76,8 +78,36 @@ function FundingWorkflowEditor({ definition, issue, change }: {
   return <section className="admin-card" aria-labelledby="funding-workflow-title">
     <h2 id="funding-workflow-title">Funding preview workflow</h2>
     <p className="admin-workflow-ref"><code>{id}@{version}</code></p>
-    <p>Choose the tools sfield runs when Marcus clicks Preview funding.</p>
-    <div className="rank-editor">
+    <div className="setup-field">
+      <label htmlFor="funding-workflow-mode">How to run funding preview</label>
+      <select id="funding-workflow-mode" value={guided ? "agent" : "ordered"} onChange={(event) => (
+        change(event.target.value === "agent" ? defaultAgentFundingWorkflow : defaultFundingWorkflow)
+      )}>
+        <option value="agent">Agent-guided</option>
+        <option value="ordered">Saved tool order</option>
+      </select>
+    </div>
+    {guided ? <div className="rank-editor">
+      <div className="setup-field">
+        <label htmlFor="funding-workflow-goal">Goal</label>
+        <input id="funding-workflow-goal" maxLength={320} value={definition.goal ?? defaultAgentFundingWorkflow.goal}
+          onChange={(event) => change({ ...definition, goal: event.target.value })} />
+      </div>
+      <div className="setup-field">
+        <label htmlFor="funding-workflow-limit">Tool call limit</label>
+        <input id="funding-workflow-limit" type="number" min={4} max={fundingAgentToolLimit}
+          value={definition.maxToolCalls ?? defaultAgentFundingWorkflow.maxToolCalls}
+          onChange={(event) => change({ ...definition, maxToolCalls: event.target.valueAsNumber || undefined })} />
+      </div>
+      <p>Check funding status and Funding options are required before the agent offers a method.</p>
+      <label className="admin-tool">
+        <strong>Allow building a funding preview</strong>
+        <input type="checkbox" role="switch" checked={steps.includes(fundingToolRef("fundingPreview"))}
+          onChange={(event) => setSteps(event.target.checked ? [...steps, fundingToolRef("fundingPreview")]
+            : steps.filter((ref) => ref !== fundingToolRef("fundingPreview")))} />
+      </label>
+      {issue && <p className="admin-error" role="status">{issue}</p>}
+    </div> : <div className="rank-editor">
       <RankedList ids={steps} label="Funding workflow tool order" change={setSteps} titleFor={(ref) => {
         const key = fundingToolKey(ref);
         return key ? fundingTools[key].label : ref;
@@ -91,7 +121,7 @@ function FundingWorkflowEditor({ definition, issue, change }: {
       </div>
       {issue ? <p className="admin-error" role="status">{issue}</p>
         : <p>Build funding preview uses the funding options and runs last.</p>}
-    </div>
+    </div>}
   </section>;
 }
 
@@ -118,8 +148,8 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
   const ccreRules = allCcreRules.filter(inSelectedScope);
   const dirty = JSON.stringify(saved.setup) !== JSON.stringify(setup);
   const incompleteRankedResponse = setup.treatmentOverrides.some(({ output }) => output.mode === "ranked" && !output.contentIds.length);
-  const fundingWorkflow = setup.fundingWorkflow ?? defaultFundingWorkflow;
-  const workflowIssue = fundingWorkflowIssue(fundingWorkflow.steps);
+  const fundingWorkflow = setup.fundingWorkflow ?? defaultAgentFundingWorkflow;
+  const workflowIssue = fundingWorkflowIssue(fundingWorkflow);
   const invalidDraft = incompleteRankedResponse || Boolean(workflowIssue);
   const saveHint = workflowIssue ? "Fix the funding workflow before saving."
     : incompleteRankedResponse ? "Add at least one item to each custom response before saving."

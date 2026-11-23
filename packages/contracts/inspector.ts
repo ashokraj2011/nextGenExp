@@ -42,6 +42,12 @@ export type WorkflowPayloads = {
   recommendation: WorkflowRecommendation;
   definition?: InspectorPayload;
   calls: (RegistryToolPayloads & { label: string })[];
+  agent?: {
+    runId: string;
+    outcome?: string;
+    answer?: InspectorPayload;
+    model: ModelStagePayloads;
+  };
 };
 
 export type TurnPayloads = {

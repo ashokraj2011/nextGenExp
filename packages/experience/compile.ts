@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import host from "../../fixtures/host.json";
 import type { BalanceProof, IntroKey } from "../contracts/domain";
-import { fundingPreviewWorkflow, type FundingPreview, type WorkflowRecommendation } from "../contracts/funding-workflow";
+import { fundingPreviewWorkflow, type FundingOptions, type FundingPreview, type WorkflowRecommendation } from "../contracts/funding-workflow";
 import type { GoalProgress } from "../contracts/goal-progress";
 import { formatPortfolioAmount, type PortfolioSnapshot } from "../contracts/portfolio";
 import type { RuleGlossary } from "../contracts/rule-glossary";
 import {
-  MAX_SURFACE_BYTES, PZN_CATALOG_ID, fundingPreview, portfolioSnapshot, ruleCreation, validatePznSurface,
+  MAX_SURFACE_BYTES, PZN_CATALOG_ID, fundingOptions, fundingPreview, portfolioSnapshot, ruleCreation, validatePznSurface,
   type DisplayBlock, type DisplayExperience, type RuleCreationProps,
 } from "../contracts/surface";
 import type { VerifiedExperience } from "./verify";
@@ -96,6 +96,13 @@ export function compileFundingPreview(preview: FundingPreview, expiresAt: number
     status: "ready", outcome: "ready", intro: "Your funding preview is ready.",
     question: null, partial: false, expiresAt,
   }, [{ component: fundingPreview.name, props: preview }], []);
+}
+
+export function compileFundingOptions(options: FundingOptions, expiresAt: number, question: string | null = null): CompiledExperience {
+  const status = question ? "clarify" : "ready";
+  return buildSurface({
+    status, outcome: status, intro: "Here are your funding options.", question, partial: false, expiresAt,
+  }, [{ component: fundingOptions.name, props: options }], []);
 }
 
 export function compileRuleCreation(props: RuleCreationProps & { glossary: RuleGlossary }, expiresAt: number): CompiledExperience {
