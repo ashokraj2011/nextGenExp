@@ -29,7 +29,9 @@ export function Login() {
       setNotice("Couldn’t save your profile in this tab. Please try again.");
       return;
     }
-    location.replace(chatPath);
+    const destination = new URL(chatPath, location.origin);
+    if (!destination.searchParams.has("topic") && !destination.searchParams.has("view")) destination.searchParams.set("view", "overview");
+    location.replace(destination.pathname + destination.search);
   }
 
   return <div className="login-page">
@@ -44,11 +46,11 @@ export function Login() {
         {profiles && <ul className="login-profiles" aria-label="Available profiles">
           {profiles.map(({ personaId, displayName, profile }) => <li key={personaId}>
             <button type="button" className="login-profile" aria-label={"Sign in as " + displayName}
-              aria-describedby={"login-focus-" + personaId} onClick={() => signIn(personaId)}>
+              aria-describedby={"login-account-" + personaId} onClick={() => signIn(personaId)}>
               <ProfileAvatar name={displayName} />
               <span>
                 <strong>{displayName}</strong>
-                <small id={"login-focus-" + personaId}>{profile.focus}</small>
+                <small id={"login-account-" + personaId}>{profile.accountFundingStatus === "funded" ? "Funded account" : "Awaiting first deposit"}</small>
               </span>
               <ArrowRight size={19} aria-hidden="true" />
             </button>

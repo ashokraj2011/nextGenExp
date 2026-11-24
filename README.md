@@ -44,11 +44,11 @@ npm run test:preview
 
 Open the [test preview](http://127.0.0.1:4174) to start in chat. The **Test mode** badge identifies deterministic gateway responses. The preview runs those responses through real sfield, the host verifiers, SQLite, assistant-ui, and the A2UI renderer. It uses temporary data for each server launch.
 
-Try **Compare two terms** for the A2UI comparison. **Guide me through a task** opens the canonical transfer checklist and a portfolio follow-up. To see the eligible set and route decisions, open **Inspector**. Its persona and scenario settings create a new conversation. Type “Show my synthetic demo balance summary” for the read-only metric example.
+Try **Compare two terms** for the A2UI comparison. **Guide me through a task** opens the canonical transfer checklist and a portfolio follow-up. To inspect the eligible set and route decisions, open `/admin/inspector` and choose a conversation. Its profile and scenario settings open a separate test chat. Type “Show my synthetic demo balance summary” for the read-only metric example.
 
 ### Help and planning overview
 
-Chat opens at `/` and `/chat`. The **PZN Lab** link returns to the homepage. **Help** at `/help` shows the chat sequence and each component’s role, with interactive turn walkthroughs, sample payloads, and downloadable runtime contracts. Its **sfield** section shows who calls each registered tool and how the Portfolio Snapshot provider plugs in. **Proposal** shows the version 2 Treatment Selector response used by the funding workflow demo.
+Customer chat opens at `/` and `/chat`. The administration workspace opens at `/admin` and includes Tool setup, UI Builder, Logs, Inspector, Architecture, and Test chat. **Architecture** at `/admin/help` shows the chat sequence and each component’s role, with interactive turn walkthroughs, sample payloads, and downloadable runtime contracts. Its **sfield** section shows who calls each registered tool and how the Portfolio Snapshot provider plugs in. **Proposal** shows the version 2 Treatment Selector response used by the funding workflow demo.
 
 The planning overview is at `/planning`. **Portfolio**, **Retirement**, and **Balances** open chat with a question you can edit before sending. **Compare profiles** opens the profile picker in chat.
 
@@ -144,7 +144,7 @@ Choose **Learn about retirement** in a new chat with **Standard rules**. The Con
 - **Alice Morgan** has missing beneficiary details. Chat shows **Retirement planning basics** and **Update your beneficiaries**. Click **See beneficiary update steps** for the A2UI demo guide.
 - **Jordan Lee** has details on file. Chat shows **Retirement planning basics**.
 
-Use **Tool setup → Treatment Selector test settings → Learning → Run preview** to evaluate the rule for either persona. In chat, **Logs → Treatment Selector** shows the mock CCRE evaluation and the returned content IDs.
+Use **Tool setup → Treatment Selector test settings → Learning → Run preview** to evaluate the rule for either persona. In **Logs** at `/admin/logs`, choose the conversation and expand **Treatment Selector** to see the mock CCRE evaluation and returned content IDs.
 
 ### Address update and account funding demo
 
@@ -162,7 +162,9 @@ Open **Logs → Treatment Selector** on the address turn to see the CCRE evaluat
 
 ### Inspect requests and responses
 
-Open **Logs** in the chat header and choose a **Chat message**. The Context Router and Experience Composer show the compiled Chat Completions request body, assembled assistant response, and individual gateway attempts. Treatment Selector shows the sfield tool input, mock input, rule evaluation, and recommendations. Portfolio Snapshot and the funding workflow show their tool requests and results. In **Inspector**, select a **Chat message** and click **Open call logs** to open the logs for that turn.
+Open `/admin/logs` and choose a **Conversation** and **Chat message**. The Context Router and Experience Composer show the compiled Chat Completions request body, assembled assistant response, and individual gateway attempts. Treatment Selector shows the sfield tool input, mock input, rule evaluation, and recommendations. Portfolio Snapshot and the funding workflow show their tool requests and results. In `/admin/inspector`, select a **Chat message** and click **Open call logs** to open the logs for that turn.
+
+Choose **Pending actions** in Logs to inspect a welcome-page lookup. The app resolves the selected profile’s MID and sends it to Treatment Selector with context `pending-actions`. The lookup shows the request, recommendations, and CCRE results. You can preview or change the rules for this topic in **Tool setup**.
 
 Capture is local to the inspector and saved in SQLite. Gateway headers are excluded, and configured metadata values and known credentials are redacted. For older turns, the inspector verifies a reconstructed gateway body against the saved digest when possible and can show the saved agent input and responses. Set `PZN_INSPECTOR=off` to disable inspector access and new payload capture.
 
@@ -174,7 +176,7 @@ Open **Tool setup** from the chat header to enable the registered sfield tools. 
 
 #### Create and test a CCRE mock rule
 
-Type **Create rule** in chat. After the Context Router returns `create_rule`, sfield calls the read-only `ccre.glossary.get` tool. The host passes the returned namespaces, attributes, operators and values to the A2UI editor. Open **Logs → CCRE glossary** to see the tool exchange.
+In **Test chat** at `/admin/chat`, ask **Create a rule**. After the Context Router returns `create_rule`, sfield calls the read-only `ccre.glossary.get` tool. The host passes the returned namespaces, attributes, operators and values to the A2UI editor. Open **Logs → CCRE glossary** to see the tool exchange.
 
 Choose a topic and a piece of content. Build the rule using **Field group**, **Field**, **Comparison**, and **Value**. For example, choose **Customer**, **Demo profile**, **Equals**, and **Alice Morgan**. **Preview rule** evaluates the draft for a persona and turn. **Save rule** adds it to Tool setup for future chat turns. The mock evaluates the structured condition and stores any optional CCRE source as text.
 
@@ -221,7 +223,7 @@ npm run build
 npm start
 ~~~
 
-Open [chat](http://127.0.0.1:4173/chat) and look for the **Copilot ACP** badge. Try Marcus Reed's “I moved and need to update my address.” In **Logs**, expand **Context Router** and **Experience Composer** to see the ACP prompts and replies. sfield runs PZN Lab tools, including Treatment Selector and scoped balance reads. Chat and settings for this provider are stored under `.pzn-data/copilot` unless you set `PZN_DATA_DIR`.
+Open [chat](http://127.0.0.1:4173/chat) and try Marcus Reed's “I moved and need to update my address.” In **Logs** at `/admin/logs`, expand **Context Router** and **Experience Composer** to see the ACP prompts and replies. sfield runs PZN Lab tools, including Treatment Selector and scoped balance reads. Chat and settings for this provider are stored under `.pzn-data/copilot` unless you set `PZN_DATA_DIR`.
 
 ### Office gateway
 

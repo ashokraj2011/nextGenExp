@@ -9,7 +9,7 @@ import {
 import { contentCatalog } from "../../packages/experience/content";
 import type { PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import { mockRuleGlossary } from "../../packages/rule-glossary";
-import { activeContexts, fixtureEligibleSets, FixtureTsAdapter, scenariosById, TreatmentSelectorTimeout, tsFixtures } from "../../packages/ts-adapter";
+import { fixtureEligibleSets, FixtureTsAdapter, scenariosById, treatmentContexts, TreatmentSelectorTimeout, tsFixtures } from "../../packages/ts-adapter";
 import { ApiError } from "./store";
 
 const fixtureIds = new Set(fixtureEligibleSets.flat());
@@ -17,7 +17,7 @@ const content = contentCatalog.entries
   .filter(({ contentId, publicationStatus }) => publicationStatus === "published" && fixtureIds.has(contentId))
   .map(({ contentId, title }) => ({ contentId, title }));
 const contentIds = new Set(content.map(({ contentId }) => contentId));
-const contexts = activeContexts.map(({ contextId, displayName }) => ({ contextId, displayName }));
+const contexts = treatmentContexts.map(({ contextId, displayName }) => ({ contextId, displayName }));
 
 export function toolSetupTag(setup: ToolSetup) {
   return '"' + createHash("sha256").update(JSON.stringify(setup)).digest("hex") + '"';

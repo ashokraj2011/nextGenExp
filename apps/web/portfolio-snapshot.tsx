@@ -1,10 +1,11 @@
-import { useId } from "react";
+import { useId, type ReactNode } from "react";
 import { formatPortfolioAmount, type PortfolioSnapshot } from "../../packages/contracts/portfolio";
 
 const asOfFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" });
 
-export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedIncomeCents }: PortfolioSnapshot) {
-  const title = useId();
+export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedIncomeCents, title = "Portfolio snapshot", footer }:
+  PortfolioSnapshot & { title?: string; footer?: ReactNode }) {
+  const titleId = useId();
   const invested = equityCents + fixedIncomeCents;
   const total = cashCents + invested;
   const allocation = [
@@ -13,9 +14,9 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
     { label: "Cash", amount: cashCents, color: "cash" },
   ];
   const percent = (amount: number) => (total ? amount / total * 100 : 0);
-  return <section className="content-card portfolio-snapshot" aria-labelledby={title}>
+  return <section className="content-card portfolio-snapshot" aria-labelledby={titleId}>
     <header className="portfolio-heading">
-      <h3 id={title}>Portfolio snapshot</h3>
+      <h3 id={titleId}>{title}</h3>
       <p>As of <time dateTime={asOf}>{asOfFormat.format(new Date(asOf))}</time></p>
     </header>
     <dl className="portfolio-values">
@@ -32,5 +33,6 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
         <span className={color} aria-hidden="true" />{label} <strong>{Number(percent(amount).toFixed(1))}%</strong>
       </li>)}
     </ul>
+    {footer && <div className="portfolio-footer">{footer}</div>}
   </section>;
 }

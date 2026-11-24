@@ -1,0 +1,61 @@
+.administration-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 13px;
+  min-width: 0;
+  overflow: auto;
+  border-right: 1px solid var(--line);
+  background: #fbfcfd;
+}
+.administration-sidebar > .rail-home { align-self: start; }
+.administration-sidebar .admin-navigation { display: grid; gap: 3px; }
+.administration-topbar { background: #fff; }
+.admin-diagnostics { display: grid; align-content: start; gap: 13px; }
+.admin-diagnostics .admin-heading { margin-bottom: 4px; }
+.log-sources { display: flex; flex-wrap: wrap; gap: 6px; }
+.log-sources .rail-link { width: auto; padding-inline: 12px; }
+.pending-log-payloads { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.pending-log-payloads .trace-payload pre { max-height: 19rem; }
+.diagnostics-picker { display: grid; gap: 7px; }
+.diagnostics-picker > label { color: var(--soft-ink); font-size: .84rem; font-weight: 650; }
+.diagnostics-picker > div { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.diagnostics-picker select, .admin-diagnostics .trace-selector select, .admin-diagnostics .demo-settings select {
+  min-height: 38px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: var(--ink);
+  background: #fff;
+  font-size: .86rem;
+}
+.diagnostics-picker select { flex: 1 1 230px; }
+.admin-diagnostics-content {
+  display: grid;
+  min-width: 0;
+  gap: 9px;
+  padding: clamp(15px, 2.3vw, 24px);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+.admin-diagnostics .trace-selector select, .admin-diagnostics .demo-settings select { width: 100%; }
+.admin-diagnostics .inspector-logs-link { justify-self: start; text-decoration: none; }
+.admin-test-settings { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+.admin-test-settings summary { color: var(--teal-dark); font-weight: 620; font-size: .91rem; cursor: pointer; }
+.admin-test-settings .demo-settings { margin: 9px 0 0; max-width: 530px; }
+.admin-diagnostics-content h3 { font-size: .96rem; font-weight: 690; }
+
+@media (max-width: 850px) {
+  .administration-layout { display: flex; flex-direction: column; }
+  .administration-layout > .workspace { flex: 1; }
+  .administration-sidebar { flex: 0 0 auto; gap: 5px; padding: 7px 9px; border: 0; border-bottom: 1px solid var(--line); }
+  .administration-sidebar .admin-navigation { display: flex; overflow-x: auto; scrollbar-width: thin; padding: 3px; }
+  .administration-sidebar .rail-link { width: auto; flex-shrink: 0; white-space: nowrap; }
+}
+
+@media (max-width: 650px) {
+  .pending-log-payloads { grid-template-columns: minmax(0, 1fr); gap: 0; }
+}

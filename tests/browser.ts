@@ -6,6 +6,9 @@ import { chromium, type Locator } from "playwright";
 import marcusCalls from "../fixtures/marcus-sfield-exchanges.json";
 import { defaultFundingWorkflow, fundingToolRef } from "../packages/contracts/funding-workflow";
 import { activeContextCatalog } from "../packages/ts-adapter";
+import { adminPaths } from "../packages/contracts/admin-paths";
+import { pendingActionsContext } from "../packages/contracts/workspace";
+import { openAdmin, openCustomerChat } from "./browser-navigation";
 import { startTestPreview } from "./preview";
 
 async function readExchange(drawer: Locator) {
@@ -46,10 +49,10 @@ try {
     return new URL(image.currentSrc).origin === location.origin;
   }), true);
   await page.getByRole("link", { name: "Start a conversation", exact: true }).click();
-  await page.getByText("Test mode", { exact: true }).waitFor();
+  await page.getByRole("heading", { name: "Welcome, Alice.", exact: true }).waitFor();
   await page.getByRole("link", { name: "PZN Lab", exact: true }).click();
   assert.equal(new URL(page.url()).pathname, "/");
-  await page.getByRole("link", { name: "Help", exact: true }).click();
+  await openAdmin(page, "help");
   await page.getByRole("heading", { name: "How PZN Lab works", exact: true, level: 1 }).waitFor();
   const architecture = page.getByRole("region", { name: "How chat answers a message", exact: true });
   await architecture.getByRole("heading", { name: "PZN app server", exact: true }).waitFor();
@@ -156,15 +159,22 @@ try {
   const glossarySchema = await download;
   assert.equal(glossarySchema.suggestedFilename(), "ccre-glossary.tool.json");
   assert.deepEqual(JSON.parse(await readFile(await glossarySchema.path(), "utf8")).input.required, ["turnRef", "routerRunId"]);
-  await page.getByRole("link", { name: "Back to chat", exact: true }).click();
-  assert.equal(new URL(page.url()).pathname, "/");
-  await page.getByRole("heading", { name: "What would you like to explore?" }).waitFor();
-  const logs = page.getByRole("dialog", { name: "Call logs" });
-  const logsButton = page.getByRole("button", { name: "Open call logs", exact: true });
-  await logsButton.click();
+  await openCustomerChat(page);
+  assert.equal(new URL(page.url()).pathname, "/chat");
+  const sidebar = page.getByRole("complementary", { name: "Workspace navigation" });
+  await sidebar.getByRole("heading", { name: "Chat threads", exact: true }).waitFor();
+  assert.equal(await sidebar.locator('a[href^="/admin"]').count(), 0);
+  assert.equal(await page.getByText("Test mode", { exact: true }).count(), 0);
+  await page.getByRole("heading", { name: "Welcome, Alice.", exact: true }).waitFor();
+  const shortcuts = page.getByRole("navigation", { name: "Workspace shortcuts" });
+  await shortcuts.getByRole("button", { name: "Savings goal", exact: true }).click();
+  await page.getByRole("img", { name: /Down payment savings from \$7,500 to \$26,000/ }).waitFor();
+  await shortcuts.getByRole("button", { name: "Summary", exact: true }).click();
+  const logs = page.getByRole("region", { name: "Call log details" });
+  await openAdmin(page, "logs");
   await logs.getByText("Send a question to see its call logs.", { exact: true }).waitFor();
-  await page.keyboard.press("Escape");
-  await logs.waitFor({ state: "hidden" });
+  await openCustomerChat(page);
+  await page.getByRole("heading", { name: "Welcome, Alice.", exact: true }).waitFor();
   await page.screenshot({ path: resolve(screenshots, "welcome-desktop.png") });
   await page.getByRole("button", { name: /Compare two terms/ }).click();
   await page.getByRole("heading", { name: "Compare balance definitions" }).waitFor();
@@ -184,12 +194,16 @@ try {
   await page.reload();
   await page.getByRole("heading", { name: "Available balance", exact: true, level: 3 }).waitFor();
   assert.equal(await page.getByRole("button", { name: "Helpful", exact: true, pressed: true }).count(), 1);
-  await page.getByRole("button", { name: "Open developer inspector" }).click();
-  const inspector = page.getByRole("dialog", { name: "Developer inspector" });
+  await sidebar.getByRole("button", { name: "Overview", exact: true }).click();
+  await page.getByRole("heading", { name: "Welcome, Alice.", exact: true }).waitFor();
+  await sidebar.getByRole("button", { name: /^Compare available and current balance/ }).click();
+  await page.getByRole("heading", { name: "Available balance", exact: true, level: 3 }).waitFor();
+  await openAdmin(page, "inspector");
+  const inspector = page.getByRole("region", { name: "Turn inspection details" });
   await inspector.waitFor();
   await page.getByText("Selected topic", { exact: true }).waitFor();
   await page.getByLabel("Chat message").selectOption({ index: 1 });
-  await inspector.getByRole("button", { name: "Open call logs", exact: true }).click();
+  await inspector.getByRole("link", { name: "Open call logs", exact: true }).click();
   await logs.waitFor();
   await inspector.waitFor({ state: "hidden" });
   const routerLogs = logs.locator("details.payload-stage").filter({ has: page.getByText("Context Router · 1 attempt", { exact: true }) });
@@ -207,9 +221,8 @@ try {
   await routerLogs.getByText("Context Router · 1 attempt", { exact: true }).click();
   await routerLogs.getByText("Decoded chat input", { exact: true }).click();
   assert.match(await routerLogs.locator('pre[aria-label="Decoded chat input"]').innerText(), /available-balance term/);
-  await page.keyboard.press("Escape");
-  await logs.waitFor({ state: "hidden" });
-  await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Open call logs");
+  await openCustomerChat(page);
+  await page.getByRole("heading", { name: "Available balance", exact: true, level: 3 }).waitFor();
 
   const input = page.getByLabel("Your question");
   await input.fill("Explain this slow balance request");
@@ -239,7 +252,7 @@ try {
   await page.getByRole("button", { name: "Explain portfolio terms", exact: true }).click();
   await page.getByRole("heading", { name: "Understanding your portfolio" }).waitFor();
 
-  await page.getByRole("link", { name: "Tool setup" }).click();
+  await openAdmin(page, "tools");
   await page.getByRole("heading", { name: "Tool setup", level: 1 }).waitFor();
   assert.equal(await page.getByRole("switch", { name: "Treatment Selector", exact: true }).isChecked(), true);
   assert.equal(await page.getByRole("switch", { name: "CCRE glossary", exact: true }).isChecked(), true);
@@ -262,8 +275,8 @@ try {
   assert.equal(await page.getByLabel("Response", { exact: true }).inputValue(), "ranked");
   await page.getByLabel("Topic", { exact: true }).selectOption("portsum");
   assert.equal(await page.getByLabel("Response", { exact: true }).inputValue(), "empty");
-  await page.getByRole("link", { name: "Back to chat" }).click();
-  await page.getByText("Test mode", { exact: true }).waitFor();
+  await openCustomerChat(page);
+  await page.getByRole("heading", { name: "Understanding your portfolio" }).waitFor();
   const chatWithMock = page.getByLabel("Your question");
   await chatWithMock.fill("Explain the fictional portfolio view.");
   await chatWithMock.press("Enter");
@@ -273,7 +286,7 @@ try {
   await chatWithMock.press("Enter");
   await plainReply.nth(1).waitFor();
 
-  await page.getByRole("link", { name: "Tool setup" }).click();
+  await openAdmin(page, "tools");
   await page.getByRole("button", { name: "Create rule", exact: true }).click();
   await page.getByLabel("Rule name", { exact: true }).fill("Available definition for learners");
   await page.getByLabel("Content for this rule", { exact: true }).selectOption("balance_available_definition");
@@ -294,7 +307,7 @@ try {
   await page.getByRole("button", { name: "Save and test in chat", exact: true }).click();
   await page.getByRole("button", { name: /Compare two terms/ }).click();
   await page.getByText("Available balance is the amount marked ready to use. Current balance is the total recorded in the ledger. Which one would you like to understand better?", { exact: true }).waitFor();
-  await logsButton.click();
+  await openAdmin(page, "logs");
   await page.getByText("Treatment Selector · succeeded", { exact: true }).click();
   await page.getByText("Mock CCRE evaluation", { exact: true }).click();
   assert.match(await page.locator('pre[aria-label="Mock CCRE evaluation"]').innerText(), /"outcome": "excluded"/);
@@ -302,7 +315,7 @@ try {
   const author = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   author.setDefaultTimeout(12_000);
   author.on("pageerror", (error) => pageErrors.push(error.message));
-  await author.goto(preview.url + "/chat");
+  await author.goto(preview.url + adminPaths.chat);
   await author.getByText("Test mode", { exact: true }).waitFor();
   const authorMessage = author.getByLabel("Your question");
   await authorMessage.fill("Create rule");
@@ -347,16 +360,16 @@ try {
   assert.deepEqual((await beforeRuleSave.json()).setup.ccreRules ?? [], []);
   await ruleBlock.getByRole("button", { name: "Save rule", exact: true }).click();
   await ruleBlock.getByRole("button", { name: "Saved", exact: true, disabled: true }).waitFor();
-  await author.getByRole("button", { name: "Open call logs", exact: true }).click();
+  await openAdmin(author, "logs");
   await author.getByText("CCRE glossary · succeeded", { exact: true }).click();
   assert.match(await author.locator('pre[aria-label="Glossary tool request"]').innerText(), /"routerRunId"/);
   assert.match(await author.locator('pre[aria-label="Glossary tool response"]').innerText(), /"namespaces".*"customer"/s);
-  await author.keyboard.press("Escape");
-  await author.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Open call logs");
+  await openAdmin(author, "chat");
+  await ruleBlock.getByRole("heading", { name: "Create a CCRE rule" }).waitFor();
   await authorMessage.fill("Compare available and current balance.");
   await authorMessage.press("Enter");
   await author.getByRole("heading", { name: "Compare balance definitions" }).waitFor();
-  await ruleBlock.getByRole("link", { name: "Open Tool setup" }).click();
+  await author.getByRole("navigation", { name: "Administration" }).getByRole("link", { name: "Tool setup", exact: true }).click();
   await author.getByRole("list", { name: "CCRE rules for this context" }).getByText("Available balance for learners", { exact: true }).waitFor();
   await author.getByRole("button", { name: "Edit rule Available balance for learners", exact: true }).click();
   assert.equal(await author.getByLabel("Field group", { exact: true }).inputValue(), "customer");
@@ -392,8 +405,8 @@ try {
   await snapshot.getByText("$12,500", { exact: true }).waitFor();
   await portfolioPage.getByText("You have $12,500 in cash. Would you like to explore investing options?", { exact: true }).waitFor();
   await portfolioPage.screenshot({ path: resolve(screenshots, "portfolio-learner-chat.png") });
-  await portfolioPage.getByRole("button", { name: "Open call logs", exact: true }).click();
-  const portfolioLogs = portfolioPage.getByRole("dialog", { name: "Call logs" });
+  await openAdmin(portfolioPage, "logs");
+  const portfolioLogs = portfolioPage.getByRole("region", { name: "Call log details" });
   for (const stage of ["Context Router · 1 attempt", "Treatment Selector · succeeded", "Portfolio Snapshot · succeeded", "Experience Composer · 1 attempt"]) {
     await portfolioLogs.getByText(stage, { exact: true }).waitFor();
   }
@@ -401,8 +414,7 @@ try {
   await portfolioLogs.getByText("Portfolio Snapshot · succeeded", { exact: true }).click();
   assert.match(await portfolioLogs.locator('pre[aria-label="Portfolio Snapshot tool request"]').innerText(), /"routeDecisionId"/);
   assert.match(await portfolioLogs.locator('pre[aria-label="Portfolio Snapshot tool response"]').innerText(), /"cashCents": 1250000/);
-  await portfolioPage.keyboard.press("Escape");
-  await portfolioPage.getByRole("link", { name: "Tool setup" }).click();
+  await openAdmin(portfolioPage, "tools");
   await portfolioPage.getByLabel("Topic", { exact: true }).selectOption("portsum");
   await portfolioPage.getByLabel("Demo profile", { exact: true }).selectOption("demo-returning");
   await portfolioPage.getByRole("button", { name: "Run preview", exact: true }).click();
@@ -415,7 +427,7 @@ try {
   await snapshot.getByText("$10,000", { exact: true }).waitFor();
   assert.equal(await portfolioPage.getByRole("heading", { name: "Explore investing options", exact: true }).count(), 0);
   await portfolioPage.screenshot({ path: resolve(screenshots, "portfolio-returning-chat.png") });
-  await portfolioPage.getByRole("link", { name: "Tool setup", exact: true }).click();
+  await openAdmin(portfolioPage, "tools");
   const editor = portfolioPage.getByRole("region", { name: "Funding preview workflow", exact: true });
   await editor.getByLabel("How to run funding preview", { exact: true }).selectOption("ordered");
   const editorOrder = editor.getByRole("list", { name: "Funding workflow tool order", exact: true }).locator("code");
@@ -433,7 +445,7 @@ try {
   await portfolioPage.reload();
   await editorOrder.first().waitFor();
   assert.deepEqual(await editorOrder.allTextContents(), workflowSteps);
-  await portfolioPage.getByRole("link", { name: "Back to chat", exact: true }).click();
+  await openAdmin(portfolioPage, "chat");
   await jordanProfileTrigger.click();
   const marcusProfile = demoProfiles.getByRole("article", { name: "Marcus Reed", exact: true });
   await marcusProfile.getByText("Awaiting first deposit", { exact: true }).waitFor();
@@ -442,7 +454,7 @@ try {
   await portfolioPage.getByRole("heading", { name: "Update your mailing address", exact: true }).waitFor();
   await portfolioPage.getByRole("heading", { name: "Fund your account", exact: true }).waitFor();
   await portfolioPage.getByText("Suggested next step", { exact: true }).waitFor();
-  await portfolioPage.getByRole("button", { name: "Open call logs", exact: true }).click();
+  await openAdmin(portfolioPage, "logs");
   const scoresStage = portfolioLogs.locator(".payload-stage").filter({ hasText: "Treatment Selector topic scores · succeeded" });
   await scoresStage.getByText("Treatment Selector topic scores · succeeded", { exact: true }).click();
   assert.deepEqual(JSON.parse(await scoresStage.getByLabel("Mock topic scores request", { exact: true }).innerText()), marcusCalls.scores.treatmentSelectorInput);
@@ -452,11 +464,11 @@ try {
   const fundingEvaluation = JSON.parse(await portfolioLogs.locator('pre[aria-label="Mock CCRE evaluation"]').innerText());
   assert.deepEqual(fundingEvaluation.results, [{ name: "Account is unfunded", contentId: "fund_account", outcome: "matched" }]);
   assert.deepEqual(JSON.parse(await portfolioLogs.getByLabel("Tool response", { exact: true }).innerText()), addressResponse);
-  await portfolioPage.keyboard.press("Escape");
+  await openAdmin(portfolioPage, "chat");
   await portfolioPage.getByRole("button", { name: "Preview funding", exact: true }).click();
   await portfolioPage.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Funding preview", exact: true }).waitFor();
   await portfolioPage.getByText("$250 by bank transfer", { exact: true }).waitFor();
-  await portfolioPage.getByRole("button", { name: "Open call logs", exact: true }).click();
+  await openAdmin(portfolioPage, "logs");
   await portfolioLogs.getByText("Funding preview workflow", { exact: true }).waitFor();
   await portfolioLogs.getByText("Workflow definition", { exact: true }).click();
   assert.deepEqual(JSON.parse(await portfolioLogs.getByLabel("Workflow definition", { exact: true }).innerText()), {
@@ -472,15 +484,13 @@ try {
   const previewResult = JSON.parse(await portfolioLogs.getByLabel("Build funding preview tool response", { exact: true }).innerText());
   assert.equal(previewInput.methodId, optionsResult.methods[0].methodId);
   assert.equal(previewResult.amountCents, 25_000);
-  await portfolioPage.keyboard.press("Escape");
-
-  await portfolioPage.getByRole("link", { name: "Tool setup", exact: true }).click();
+  await openAdmin(portfolioPage, "tools");
   await editor.getByLabel("How to run funding preview", { exact: true }).selectOption("agent");
   await editor.getByLabel("Goal", { exact: true }).waitFor();
   await editor.getByLabel("Tool call limit", { exact: true }).fill("6");
   await saveSettings.click();
   await portfolioPage.getByText("Tool settings saved.", { exact: true }).waitFor();
-  await portfolioPage.getByRole("link", { name: "Back to chat", exact: true }).click();
+  await openAdmin(portfolioPage, "chat");
   await portfolioPage.getByRole("button", { name: "Profiles, current profile Marcus Reed", exact: true }).click();
   await marcusProfile.getByRole("button", { name: "Start chat as Marcus Reed", exact: true }).click();
   await portfolioPage.getByRole("button", { name: /Update mailing address/ }).click();
@@ -493,10 +503,9 @@ try {
   await portfolioQuestion.press("Enter");
   const guidedPreview = portfolioPage.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Funding preview", exact: true });
   await guidedPreview.getByText("Cash management account", { exact: true }).waitFor();
-  await portfolioPage.getByRole("button", { name: "Open call logs", exact: true }).click();
+  await openAdmin(portfolioPage, "logs");
   await portfolioLogs.getByText("Customer reply that resumed this run", { exact: true }).click();
   assert.match(await portfolioLogs.getByLabel("Customer reply that resumed this run", { exact: true }).innerText(), /Use the cash management account/);
-  await portfolioPage.keyboard.press("Escape");
 
   const goalPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   goalPage.setDefaultTimeout(12_000);
@@ -517,7 +526,7 @@ try {
   await goalPage.screenshot({ path: resolve(screenshots, "home-goal-desktop.png") });
   await goal.getByText("View monthly values", { exact: true }).click();
   assert.equal(await goal.getByRole("row").count(), 7);
-  await goalPage.getByRole("button", { name: "Open call logs", exact: true }).click();
+  await openAdmin(goalPage, "logs");
   await goalPage.getByText("Goal Progress · succeeded", { exact: true }).click();
   assert.match(await goalPage.locator('pre[aria-label="Goal Progress tool response"]').innerText(), /"targetCents": 5000000/);
 
@@ -528,11 +537,12 @@ try {
   await retirementLink.waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await retirementLink.click();
-  await mobile.getByText("Test mode", { exact: true }).waitFor();
+  await mobile.getByRole("heading", { name: "Welcome, Alice.", exact: true }).waitFor();
   const mobileMessage = mobile.getByLabel("Your question");
   assert.equal(await mobileMessage.inputValue(), "I'd like to learn about retirement.");
   await mobileMessage.fill("");
-  await mobile.getByRole("link", { name: "Help", exact: true }).click();
+  const mobileMenu = mobile.getByRole("button", { name: "Show conversations" });
+  await openAdmin(mobile, "help");
   await mobile.getByRole("heading", { name: "How PZN Lab works", exact: true }).waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await mobile.getByRole("button", { name: "App server to sfield handoff · step 6", exact: true }).click();
@@ -550,13 +560,15 @@ try {
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await mobile.getByLabel("Select a contract", { exact: true }).selectOption("render");
   await mobile.getByRole("heading", { name: "A2UI surfaces and actions", exact: true }).waitFor();
-  await mobile.getByRole("link", { name: "Back to chat", exact: true }).click();
+  await openCustomerChat(mobile);
+  await mobileMenu.click();
+  assert.equal(await mobile.getByRole("complementary", { name: "Workspace navigation" }).locator('a[href^="/admin"]').count(), 0);
   await mobile.getByRole("button", { name: "Profiles, current profile Alice Morgan", exact: true }).click();
   const mobileProfiles = mobile.getByRole("dialog", { name: "Profiles", exact: true });
   await mobileProfiles.getByRole("heading", { name: "Jordan Lee", exact: true }).waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await mobileProfiles.getByRole("button", { name: "Close profiles", exact: true }).click();
-  await mobile.getByRole("button", { name: "Show conversations" }).click();
+  await mobileMenu.click();
   await mobile.getByRole("button", { name: "Close conversation navigation" }).click();
   await mobile.getByRole("button", { name: /Compare two terms/ }).click();
   await mobile.getByRole("heading", { name: "Compare balance definitions" }).waitFor();
@@ -571,23 +583,26 @@ try {
   await mobileMessage.press("Enter");
   await mobile.locator('[data-renderer="a2ui"]').getByRole("heading", { name: "Portfolio snapshot", exact: true }).waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  await mobile.getByRole("button", { name: "Open call logs", exact: true }).click();
-  const mobileLogs = mobile.getByRole("dialog", { name: "Call logs" });
+  await openAdmin(mobile, "logs");
+  const mobileLogs = mobile.getByRole("region", { name: "Call log details" });
   await mobileLogs.getByText("Portfolio Snapshot · succeeded", { exact: true }).waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  await mobileLogs.getByRole("button", { name: "Close call logs", exact: true }).click();
+  await openCustomerChat(mobile);
+  await mobile.locator('[data-renderer="a2ui"]').getByRole("heading", { name: "Portfolio snapshot", exact: true }).waitFor();
   await mobileMessage.fill("Show my mortgage goal.");
   await mobileMessage.press("Enter");
   const mobileGoal = mobile.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Home down payment", exact: true });
   await mobileGoal.getByRole("img", { name: /Down payment savings/ }).waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await openAdmin(mobile, "chat");
+  await mobile.getByText("Test mode", { exact: true }).waitFor();
   await mobileMessage.fill("Create a rule");
   await mobileMessage.press("Enter");
   const mobileRule = mobile.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Create a CCRE rule" });
   await mobileRule.getByLabel("Field group", { exact: true }).waitFor();
   const mobileCard = await mobileRule.boundingBox();
   assert.ok(mobileCard && mobileCard.x >= 0 && mobileCard.x + mobileCard.width <= 360, "The rule editor fits the mobile conversation");
-  await mobile.getByRole("link", { name: "Tool setup" }).click();
+  await openAdmin(mobile, "tools");
   await mobile.getByRole("heading", { name: "Treatment Selector test settings" }).waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await mobile.getByRole("button", { name: "Create rule", exact: true }).click();
@@ -612,7 +627,8 @@ try {
   await fallback.getByLabel("Your question").press("Enter");
   await fallback.locator('[data-renderer="fallback"]').getByRole("img", { name: /Down payment savings/ }).waitFor();
 
-  const signInPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  const signInContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  const signInPage = await signInContext.newPage();
   signInPage.on("pageerror", (error) => pageErrors.push(error.message));
   await signInPage.goto(preview.url + "/chat");
   await signInPage.getByRole("link", { name: "Sign in", exact: true }).click();
@@ -635,14 +651,25 @@ try {
     await signInPage.getByRole("button", { name: "Send", exact: true }).click();
   };
   const portfolioPrompt = "Let me know my portfolio summary.";
-  const jordanCash = signInPage.getByRole("region", { name: "Portfolio snapshot", exact: true }).getByText("$10,000", { exact: true });
+  const jordanCash = signInPage.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Portfolio snapshot", exact: true })
+    .getByText("$10,000", { exact: true });
+  const welcomePortfolio = signInPage.getByRole("region", { name: "Account summary", exact: true });
+  const pendingActions = signInPage.getByRole("region", { name: "Pending actions", exact: true });
   await signInAs("Jordan Lee");
   await currentProfile("Jordan Lee").waitFor();
-  await askAsProfile(portfolioPrompt);
+  await welcomePortfolio.getByText("$10,000", { exact: true }).waitFor();
+  await pendingActions.getByText("No pending actions.", { exact: true }).waitFor();
+  await welcomePortfolio.getByRole("button", { name: "Ask about portfolio", exact: true }).click();
   await jordanCash.waitFor();
   await signInPage.reload();
   await currentProfile("Jordan Lee").waitFor();
   await jordanCash.waitFor();
+  await signInPage.getByRole("button", { name: "New conversation", exact: true }).click();
+  await signInPage.getByRole("heading", { name: "New conversation", exact: true, level: 1 }).waitFor();
+  await welcomePortfolio.getByText("$10,000", { exact: true }).waitFor();
+  await pendingActions.getByText("No pending actions.", { exact: true }).waitFor();
+  assert.equal(await signInPage.getByRole("main").getByRole("complementary").count(), 0);
+  assert.equal(await signInPage.getByRole("button", { name: "Details", exact: true }).count(), 0);
 
   await signOut.click();
   await signIn.waitFor();
@@ -652,29 +679,66 @@ try {
   await signInAs("Marcus Reed");
   await currentProfile("Marcus Reed").waitFor();
   assert.doesNotMatch(await history.innerText(), /portfolio summary/i);
-  await askAsProfile("what is next");
-  await signInPage.getByRole("heading", { name: "Fund your account", exact: true }).waitFor();
+  await welcomePortfolio.getByText("$0", { exact: true }).first().waitFor();
+  await pendingActions.getByRole("heading", { name: "Fund your account", exact: true }).waitFor();
+  await pendingActions.getByRole("button", { name: "Preview funding", exact: true }).click();
+  const signedInResponse = signInPage.locator('[data-renderer="a2ui"]');
+  await signedInResponse.getByRole("region", { name: "Funding options", exact: true }).waitFor();
+  await askAsProfile("Use the linked bank account.");
+  await signedInResponse.getByRole("region", { name: "Funding preview", exact: true }).waitFor();
 
   await signOut.click();
   await signInAs("Alice Morgan");
   await currentProfile("Alice Morgan").waitFor();
   assert.match(await history.innerText(), /New conversations appear here/);
+  await welcomePortfolio.getByText("$12,500", { exact: true }).waitFor();
+  const pendingGuide = pendingActions.getByRole("button", { name: "See beneficiary update steps", exact: true });
+  await pendingGuide.waitFor();
+  const loginLogs = await signInContext.newPage();
+  await loginLogs.goto(preview.url + adminPaths.logs);
+  await loginLogs.getByRole("link", { name: "Pending actions", exact: true }).click();
+  const details = loginLogs.getByRole("region", { name: "Pending action call details" });
+  const lookup = loginLogs.getByLabel("Pending action lookup", { exact: true });
+  for (const [name, mid, ids] of [
+    ["Alice Morgan", "DEMO-MID-1001", ["beneficiary_update"]],
+    ["Marcus Reed", "DEMO-MID-1003", ["fund_account", "account.funding.preview"]],
+    ["Jordan Lee", "DEMO-MID-1002", []],
+  ] as const) {
+    const option = lookup.locator("option").filter({ hasText: name }).first();
+    await option.waitFor({ state: "attached" });
+    await lookup.selectOption(await option.getAttribute("value") ?? "");
+    assert.deepEqual(JSON.parse(await details.getByLabel("Treatment Selector request").innerText()), { mid, context: pendingActionsContext });
+    const response = JSON.parse(await details.getByLabel("Treatment Selector response").innerText());
+    assert.deepEqual(response.recommendations.map(({ id }: { id: string }) => id), ids);
+  }
+  await loginLogs.close();
+  await pendingGuide.click();
+  await signedInResponse.getByRole("heading", { name: "Update your beneficiaries", exact: true }).waitFor();
   await signOut.click();
   await signInAs("Jordan Lee");
+  await signInPage.getByRole("heading", { name: "Welcome, Jordan.", exact: true }).waitFor();
+  await history.getByRole("button", { name: portfolioPrompt, exact: true }).click();
   await jordanCash.waitFor();
-  assert.doesNotMatch(await history.innerText(), /what is next/i);
+  assert.doesNotMatch(await history.innerText(), /preview funding|beneficiaries/i);
 
-  await signInPage.getByRole("link", { name: "Tool setup", exact: true }).click();
+  await openAdmin(signInPage, "tools");
   await signInPage.getByLabel("Demo profile", { exact: true }).selectOption("demo-new-account");
   await signInPage.getByRole("button", { name: "Test in chat", exact: true }).click();
   await currentProfile("Marcus Reed").waitFor();
   assert.doesNotMatch(await history.innerText(), /portfolio summary/i);
+  await openCustomerChat(signInPage);
+  await currentProfile("Jordan Lee").waitFor();
+  await jordanCash.waitFor();
 
   const mobileSignIn = await browser.newPage({ viewport: { width: 360, height: 780 }, reducedMotion: "reduce" });
   await mobileSignIn.goto(preview.url + "/login");
   await mobileSignIn.getByRole("button", { name: "Sign in as Marcus Reed", exact: true }).waitFor();
   assert.equal(await mobileSignIn.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await mobileSignIn.screenshot({ path: resolve(screenshots, "sign-in-mobile.png") });
+  await mobileSignIn.getByRole("button", { name: "Sign in as Alice Morgan", exact: true }).click();
+  await mobileSignIn.getByRole("region", { name: "Account summary", exact: true }).waitFor();
+  await mobileSignIn.getByRole("region", { name: "Pending actions", exact: true }).waitFor();
+  assert.equal(await mobileSignIn.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.deepEqual(pageErrors, []);
   console.log("Browser checks passed for profile sign-in, the chat homepage, Help, personalization, logs, tool setup, and renderer fallback.");
 } finally {

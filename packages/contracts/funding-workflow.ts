@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { pendingActionsContext } from "./workspace";
 
 export const treatmentRecommendationsVersion = "2.0.0";
 export const workflowRecommendationSchema = z.object({
@@ -20,6 +21,7 @@ export const fundingPreviewWorkflow = {
   contexts: [
     { contextId: "address-update", requiredContentIds: ["address_update_guide", "fund_account"] },
     { contextId: "next-step", requiredContentIds: ["fund_account"] },
+    { contextId: pendingActionsContext, requiredContentIds: ["fund_account"] },
   ],
 } as const;
 
@@ -112,7 +114,10 @@ export function fundingWorkflowIssue({ steps, mode, goal, maxToolCalls }: Fundin
   if (preview !== steps.length - 1) return "Place Build funding preview last.";
 }
 
-export type WorkflowLaunch = { recommendation: WorkflowRecommendation; sourceExperienceId: string };
+export type WorkflowLaunch = { recommendation: WorkflowRecommendation } & (
+  { sourceExperienceId: string; sourceOverviewTurnId?: never } |
+  { sourceOverviewTurnId: string; sourceExperienceId?: never }
+);
 
 const fundingMethodSchema = z.object({
   methodId: z.string().min(1), label: z.string().min(1), from: z.string().min(1), to: z.string().min(1),

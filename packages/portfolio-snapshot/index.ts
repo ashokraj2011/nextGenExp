@@ -1,7 +1,8 @@
 import { z } from "zod";
 import host from "../../fixtures/host.json";
 import raw from "../../fixtures/demo-portfolio-snapshots.json";
-import { portfolioSnapshotSchema, type PortfolioSnapshot } from "../contracts/portfolio";
+import historyFixture from "../../fixtures/demo-portfolio-history.json";
+import { portfolioHistoryPointSchema, portfolioSnapshotSchema, type PortfolioSnapshot } from "../contracts/portfolio";
 
 export interface PortfolioSnapshotProvider {
   read(mid: string, signal?: AbortSignal): Promise<PortfolioSnapshot | null>;
@@ -17,6 +18,19 @@ const { fixtureVersion, asOf, currency, snapshots } = z.object({
 const byMid = new Map(snapshots.map(({ mid, ...balances }) => [mid, balances]));
 if (byMid.size !== snapshots.length || snapshots.some(({ mid }) => !host.personas.some(({ syntheticMid }) => syntheticMid === mid))) {
   throw new Error("Invalid demo portfolio snapshot bindings");
+}
+const snapshotDate = asOf.slice(0, 10);
+const historyByMid = z.record(z.array(portfolioHistoryPointSchema).min(1).max(60)).parse(historyFixture);
+if (Object.entries(historyByMid).some(([mid, points]) => !byMid.has(mid)
+  || points.some(({ date }, index) => date >= snapshotDate || (index > 0 && points[index - 1].date >= date)))) {
+  throw new Error("Invalid demo portfolio history");
+}
+
+export function fixturePortfolioHistory(mid: string) {
+  const history = historyByMid[mid];
+  const snapshot = byMid.get(mid);
+  if (!history || !snapshot) return [];
+  return [...history, { date: snapshotDate, totalCents: snapshot.cashCents + snapshot.equityCents + snapshot.fixedIncomeCents }];
 }
 
 export const fixturePortfolioSnapshotProvider: PortfolioSnapshotProvider = {

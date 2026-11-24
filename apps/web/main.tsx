@@ -1,25 +1,35 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useAui, useAuiState, useExternalStoreRuntime, type ThreadMessageLike } from "@assistant-ui/react";
 import { CreateSurfaceMessageSchema, type ActionMessage } from "@a2ui/web_core/v1_0";
-import { BookOpenText, ChevronDown, CircleHelp, Columns2, FileText, GraduationCap, House, ListChecks, LogIn, LogOut, MapPin, Menu, MessageSquare, PanelRight, Plus, RotateCcw, Settings2, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
-import { failureCopy, progressLabels, type Bootstrap, type Conversation, type ConversationView, type TurnView, type TurnAccepted, type Progress } from "../../packages/contracts/api";
+import { ArrowLeft, ArrowUp, BookOpenText, ChevronDown, ChevronRight, Columns2, GraduationCap, House, LayoutDashboard, ListChecks, LogIn, LogOut, MapPin, MessageSquare, PanelLeft, Plus, RotateCcw, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { failureCopy, progressLabels, type Bootstrap, type Conversation, type ConversationChange, type ConversationView, type DemoPersona, type TurnView, type TurnAccepted, type Progress } from "../../packages/contracts/api";
 import { MAX_MESSAGE_LENGTH } from "../../packages/contracts/domain";
+import { defaultWorkspacePins, pendingActionsContext, type WorkspacePin } from "../../packages/contracts/workspace";
+import { adminPaths } from "../../packages/contracts/admin-paths";
 import { api } from "./api";
+import { AdminNavigation } from "./admin-navigation";
 import { readActiveConversation, readProfileSession, rememberActiveConversation, saveProfileSession } from "./conversation-storage";
-import { Inspector } from "./inspector";
-import { CallLogs } from "./call-logs";
 import { DemoProfiles, ProfileAvatar } from "./demo-profiles";
 import { LabMark } from "./lab-mark";
 import { planningTopics } from "./planning-topics";
 import { BasicSmoke, ExperienceControls, ExperienceDataUI, installA2uiStyles } from "./surface";
+import { usePendingActions, WorkspaceHome, WorkspaceOverview, type PendingActions } from "./workspace-overview";
+import { WorkspaceCustomization, WorkspaceMenu, type WorkspaceSection } from "./workspace-menu";
+import { ThreadList, ThreadSettings } from "./thread-list";
+import "./customer-workbench.css";
 
+const homeGoalPrompt = "Show my home-buying goal and savings progress.";
+const portfolioPrompt = planningTopics.find(({ id }) => id === "portfolio")!.prompt;
+const adminChat = location.pathname === adminPaths.chat;
+const createConversation = adminChat ? api.newAdminConversation : api.newConversation;
 const starters = [
+  ...(adminChat ? [{ Icon: BookOpenText, label: "Create a rule", message: "Create a rule" }] : []),
   { Icon: BookOpenText, label: "Explain a concept", message: "Explain the balance labels." },
   { Icon: Columns2, label: "Compare two terms", message: "Compare available and current balance." },
   { Icon: ListChecks, label: "Guide me through a task", message: "Walk me through the transfer steps." },
   { Icon: GraduationCap, label: "Learn about retirement", message: "I'd like to learn about retirement." },
-  { Icon: House, label: "Home-buying goal", message: "Show my home-buying goal and savings progress." },
+  { Icon: House, label: "Home-buying goal", message: homeGoalPrompt },
   { Icon: MapPin, label: "Update mailing address", message: "I need to update my mailing address." },
 ];
 type ConversationOperations = {
@@ -30,22 +40,15 @@ type ConversationOperations = {
   feedback: (turnId: string, experienceId: string, value: "helpful" | "unhelpful") => void;
 };
 const ConversationControls = createContext<ConversationOperations>({ pending: false, retry: () => undefined, feedback: () => undefined, anchorTurn: () => undefined });
-function Welcome({ testMode, configured, disabled }: { testMode: boolean; configured: boolean; disabled: boolean }) {
+function StarterPrompts({ disabled }: { disabled: boolean }) {
   const aui = useAui();
-  return <section className="welcome">
-    <div className="welcome-mark"><LabMark /></div>
-    <h2>What would you like to explore?</h2>
-    <p className="welcome-subtitle">Review your finances and track progress toward a home-buying goal.</p>
-    <div className="starters">
-      {starters.map(({ Icon, label, message }) => (
-        <button key={label} type="button" className="starter" disabled={disabled} onClick={() => aui.thread().append(message)}>
-          <span className="starter-icon"><Icon size={20} aria-hidden="true" /></span>
-          <strong>{label}</strong><span>{message}</span>
-        </button>
-      ))}
-    </div>
-    {!testMode && !configured && <p className="gateway-status" role="status">Set up a model connection to get chat responses.</p>}
-  </section>;
+  return <div className="composer-starters" role="group" aria-label="Suggested questions">
+    {starters.map(({ Icon, label, message }) => (
+      <button key={label} type="button" className="starter" disabled={disabled} onClick={() => aui.thread().append(message)}>
+        <Icon size={15} aria-hidden="true" />{label}
+      </button>
+    ))}
+  </div>;
 }
 
 function UserMessage() {
@@ -81,9 +84,10 @@ function AssistantMessage() {
   </MessagePrimitive.Root>;
 }
 
-function Composer({ draft, onDraft, running, pending, disabled, notice, input }: {
+function Composer({ draft, onDraft, running, pending, disabled, notice, input, showStarters }: {
   draft: string; onDraft: (value: string) => void; running: boolean; pending: boolean; disabled: boolean; notice: string;
   input: React.RefObject<HTMLTextAreaElement | null>;
+  showStarters: boolean;
 }) {
   const aui = useAui();
   const send = () => {
@@ -97,17 +101,21 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input }:
   }
   return <div className="composer-area">
     <div className="composer-inner">
+      {showStarters && <StarterPrompts disabled={disabled || pending} />}
       {notice && <div className="request-notice" role="status">{notice}</div>}
       {pending && !running && !notice && <div className="submit-status" role="status">Sending your request…</div>}
       <form className="composer" onSubmit={(event) => { event.preventDefault(); send(); }}>
+        <MessageSquare size={19} className="composer-icon" aria-hidden="true" />
         <div className="composer-field">
-          <label htmlFor="composer-input">Your question</label>
+          <label className="sr-only" htmlFor="composer-input">Your question</label>
           <textarea id="composer-input" ref={input} rows={1} value={draft} maxLength={MAX_MESSAGE_LENGTH}
-            placeholder="Type your question…" onChange={(event) => onDraft(event.target.value)} onKeyDown={onKeyDown} />
+            placeholder="Ask a question…" onChange={(event) => onDraft(event.target.value)} onKeyDown={onKeyDown} />
         </div>
         {running ? <button className="send-button stop-button" type="button" disabled={pending} onClick={() => aui.thread().cancelRun()}>
           <Square size={13} aria-hidden="true" />Stop
-        </button> : <button className="send-button" type="submit" disabled={disabled || pending || !draft.trim()}>Send</button>}
+        </button> : <button className="send-button" type="submit" disabled={disabled || pending || !draft.trim()}>
+          Send <ArrowUp size={15} aria-hidden="true" />
+        </button>}
       </form>
       <p className="composer-hint">Enter to send <span aria-hidden="true">·</span> Shift+Enter for a new line</p>
     </div>
@@ -134,13 +142,19 @@ function visibleMessages(turns: TurnView[]): ThreadMessageLike[] {
 
 type ChatProps = {
   conversation?: ConversationView; configuration?: Bootstrap; pending: boolean; notice: string;
+  activeProfile?: DemoPersona; pendingActions: PendingActions; section: WorkspaceSection; pins: WorkspacePin[];
+  onSelect: (section: WorkspaceSection) => void; onCustomize: () => void; customizeTrigger: React.RefObject<HTMLButtonElement | null>;
+  onPreviewFunding: (source?: typeof pendingActionsContext) => void; onRestore: () => void;
   draft: string; onDraft: (value: string) => void; onSend: (text: string) => Promise<void>; onStop: () => Promise<void>;
   onRetry: (id: string) => void;
   onFollowUp: (id: string, envelope: ActionMessage) => void;
   onFeedback: ConversationOperations["feedback"];
 };
 const noTurns: TurnView[] = [];
-function Chat({ conversation, configuration, pending, draft, onDraft, onSend, onStop, onRetry, onFollowUp, onFeedback, notice }: ChatProps) {
+function Chat({
+  conversation, configuration, activeProfile, pendingActions, pending, draft, onDraft, onSend, onStop, onRetry, onFollowUp, onFeedback, notice,
+  section, pins, onSelect, onCustomize, customizeTrigger, onPreviewFunding, onRestore,
+}: ChatProps) {
   const turns = conversation?.turns ?? noTurns;
   const latest = turns.at(-1);
   const running = latest?.status === "working";
@@ -167,21 +181,44 @@ function Chat({ conversation, configuration, pending, draft, onDraft, onSend, on
   const rendered = useCallback((experienceId: string, fallback?: boolean) => {
     void api.event(experienceId, fallback ? "render_fallback" : "rendered").catch(() => undefined);
   }, []);
-  const activeExperienceId = pending || running ? undefined : latest?.experience?.experienceId;
+  const archived = conversation?.archivedAt !== undefined;
+  const activeExperienceId = pending || running || archived ? undefined : latest?.experience?.experienceId;
+  const canWrite = Boolean(configuration) && !pending && !running && !archived;
+  const showWelcomeCards = !adminChat && !turns.length && section === "summary";
+  const showOverview = adminChat || section !== "summary";
+  const overviewProps = {
+    activeProfile, pins, onSelect, disabled: !canWrite,
+    modelUnavailable: Boolean(configuration && !configuration.gatewayConfigured),
+    onReviewGoal: () => void onSend(homeGoalPrompt),
+    onReviewPortfolio: () => void onSend(portfolioPrompt),
+    onPreviewFunding: () => onPreviewFunding(),
+  };
+  const composer = archived ? <div className="composer-area archived-conversation"><p>This conversation is archived.</p>
+    <button className="secondary-button" type="button" disabled={pending} onClick={onRestore}>Restore conversation</button>
+  </div> : <Composer draft={draft} onDraft={onDraft} running={running} pending={pending} disabled={!configuration} input={input}
+    notice={notice} showStarters={turns.length === 0} />;
 
   return <AssistantRuntimeProvider runtime={runtime}>
-    <ExperienceControls.Provider value={{ activeExperienceId, followUp: onFollowUp, rendered }}>
+    <ExperienceControls.Provider value={{ activeExperienceId, allowRuleCreation: adminChat, followUp: onFollowUp, rendered }}>
       <ConversationControls.Provider value={{ latest, pending, retry: onRetry, feedback: onFeedback, anchorTurn }}>
         <ExperienceDataUI />
-        <ThreadPrimitive.Root className="thread">
+        <ThreadPrimitive.Root className={adminChat ? "thread" : "thread customer-workbench"}>
+          <WorkspaceMenu pins={pins} section={section} onCustomize={onCustomize} trigger={customizeTrigger} disabled={!configuration}
+            onSelect={(next) => {
+              onSelect(next);
+              viewport.current?.scrollTo(0, 0);
+            }} />
           <ThreadPrimitive.Viewport className="thread-scroll" ref={viewport}
             autoScroll={false} scrollToBottomOnInitialize={false} scrollToBottomOnRunStart={false} scrollToBottomOnThreadSwitch={false}
             aria-label="Conversation">
-            {turns.length ? <div className="messages">
+            {showWelcomeCards && <WorkspaceHome {...overviewProps} pendingActions={pendingActions}
+              onReviewGuide={(message) => void onSend(message)} onPreviewFunding={() => onPreviewFunding(pendingActionsContext)} />}
+            {showOverview && <WorkspaceOverview {...overviewProps} section={section} showNextStep={!turns.length} />}
+            {turns.length > 0 && <div className="messages">
               <ThreadPrimitive.Messages>{({ message }) => message.role === "user" ? <UserMessage /> : <AssistantMessage />}</ThreadPrimitive.Messages>
-            </div> : <Welcome testMode={configuration?.mode === "test"} configured={configuration?.gatewayConfigured ?? true} disabled={!configuration || pending} />}
+            </div>}
           </ThreadPrimitive.Viewport>
-          <Composer draft={draft} onDraft={onDraft} running={running} pending={pending} disabled={!configuration} input={input} notice={notice} />
+          {composer}
         </ThreadPrimitive.Root>
       </ConversationControls.Provider>
     </ExperienceControls.Provider>
@@ -192,7 +229,8 @@ function messageFor(error: unknown) {
   return error instanceof Error && error.name !== "TypeError" ? error.message : "Couldn’t connect. Your draft is still here.";
 }
 
-type Panel = { kind: "profiles" } | { kind: "inspector" } | { kind: "logs"; turnId?: string };
+type Panel = { kind: "profiles" } | { kind: "pins" } | { kind: "thread"; id: string };
+const narrowNavigation = "(max-width: 850px)";
 
 function App() {
   const [entry] = useState(() => {
@@ -200,13 +238,16 @@ function App() {
     return {
       topic: planningTopics.find(({ id }) => id === query.get("topic")),
       showProfiles: query.get("view") === "profiles",
-      profileId: readProfileSession(),
+      showOverview: query.get("view") === "overview",
+      profileId: adminChat ? null : readProfileSession(),
     };
   });
   const [signedInProfileId, setSignedInProfileId] = useState(entry.profileId);
   const [configuration, setConfiguration] = useState<Bootstrap>();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversation, setConversation] = useState<ConversationView>();
+  const [overviewOpen, setOverviewOpen] = useState(entry.showOverview);
+  const [section, setSection] = useState<WorkspaceSection>("summary");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState("");
   const [pending, setPending] = useState(false);
@@ -214,55 +255,65 @@ function App() {
   const [panel, setPanel] = useState<Panel | undefined>(entry.showProfiles ? { kind: "profiles" } : undefined);
   const inFlight = useRef(false);
   const previousAttempt = useRef<{ fingerprint: string; id: string } | null>(null);
-  const inspectorTrigger = useRef<HTMLButtonElement>(null);
-  const logsTrigger = useRef<HTMLButtonElement>(null);
   const profilesTrigger = useRef<HTMLButtonElement>(null);
+  const customizeTrigger = useRef<HTMLButtonElement>(null);
+  const threadTrigger = useRef<HTMLButtonElement | null>(null);
+  const newThreadTrigger = useRef<HTMLButtonElement>(null);
   const railTrigger = useRef<HTMLButtonElement>(null);
   const railClose = useRef<HTMLButtonElement>(null);
-  const draftKey = conversation?.id ?? "new";
-  const latest = conversation?.turns.at(-1);
-  const activeTurnId = latest?.status === "working" ? latest.id : undefined;
+  const previousPanel = useRef<Panel["kind"] | undefined>(undefined);
   const profilesById = new Map(configuration?.personas.map((persona) => [persona.personaId, persona]));
   const activeProfile = profilesById.get(conversation?.personaId ?? signedInProfileId ?? configuration?.defaultPersonaId ?? "");
+  const pins = activeProfile?.pins ?? defaultWorkspacePins;
+  const activeSection = section === "summary" || pins.includes(section) ? section : "summary";
+  const chat = overviewOpen ? undefined : conversation;
+  const pendingActions = usePendingActions(!adminChat && !chat?.turns.length ? activeProfile?.personaId : undefined);
+  const draftKey = chat?.id ?? "new:" + (conversation?.personaId ?? signedInProfileId ?? "");
+  const latest = chat?.turns.at(-1);
+  const activeTurnId = latest?.status === "working" ? latest.id : undefined;
   const visibleConversations = signedInProfileId ? conversations.filter((row) => row.personaId === signedInProfileId) : conversations;
   const remember = (row: Conversation) => setConversations((list) => (
     [row, ...list.filter((item) => item.id !== row.id)].sort((a, b) => b.updatedAt - a.updatedAt)
   ));
-  const choose = (row: ConversationView) => {
+  const choose = (row: ConversationView, showOverview = false) => {
     setConversation(row);
+    setOverviewOpen(showOverview);
     remember(row);
-    rememberActiveConversation(row.id);
+    rememberActiveConversation(row.id, adminChat);
     setRailOpen(false);
   };
 
   useEffect(() => {
     let mounted = true;
-    void api.bootstrap().then(async (data) => {
+    void (adminChat ? api.adminBootstrap() : api.bootstrap()).then(async (data) => {
       if (!mounted) return;
       if (entry.profileId && !data.personas.some(({ personaId }) => personaId === entry.profileId)) {
         location.replace("/login");
         return;
       }
-      setConversations(data.conversations);
-      const matching = entry.profileId ? data.conversations.filter((row) => row.personaId === entry.profileId) : data.conversations;
-      const preferred = matching.find((row) => row.id === readActiveConversation()) ?? matching[0];
+      const threads = data.conversations.filter(({ audience }) => (audience === "admin") === adminChat);
+      setConversations(threads);
+      const matching = entry.profileId ? threads.filter((row) => row.personaId === entry.profileId) : threads;
+      const preferred = matching.find((row) => row.id === readActiveConversation(adminChat))
+        ?? matching.find(({ archivedAt }) => archivedAt === undefined);
       if (preferred) {
         const restored = await api.conversation(preferred.id);
         if (!mounted) return;
-        choose(restored);
+        choose(restored, entry.showOverview);
       }
       const prompt = entry.topic?.prompt;
       if (prompt) {
-        const key = preferred?.id ?? "new";
+        const key = preferred?.id ?? "new:" + (entry.profileId ?? "");
         setDrafts((all) => ({ ...all, [key]: all[key] ?? prompt }));
       }
-      if (entry.topic || entry.showProfiles) history.replaceState(history.state, "", location.pathname + location.hash);
+      if (entry.topic || entry.showProfiles || entry.showOverview) history.replaceState(history.state, "", location.pathname + location.hash);
       setConfiguration(data);
     }).catch((error: unknown) => { if (mounted) setNotice(messageFor(error)); });
     return () => { mounted = false; };
   }, [entry]);
 
   useEffect(() => {
+    if (adminChat) return;
     const onPageShow = (event: PageTransitionEvent) => {
       if (event.persisted && readProfileSession() !== signedInProfileId) location.reload();
     };
@@ -275,7 +326,7 @@ function App() {
     const trigger = railTrigger.current;
     railClose.current?.focus();
     const handle = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setRailOpen(false); };
-    const layout = window.matchMedia("(max-width: 850px)");
+    const layout = window.matchMedia(narrowNavigation);
     const onLayout = () => { if (!layout.matches) setRailOpen(false); };
     window.addEventListener("keydown", handle);
     layout.addEventListener("change", onLayout);
@@ -285,6 +336,17 @@ function App() {
       if (layout.matches) trigger?.focus();
     };
   }, [railOpen]);
+
+  useLayoutEffect(() => {
+    const closed = previousPanel.current;
+    previousPanel.current = panel?.kind;
+    if (panel || !closed) return;
+    const triggers = { profiles: profilesTrigger, pins: customizeTrigger, thread: threadTrigger };
+    const isNavigationPanel = closed !== "pins";
+    if (isNavigationPanel && window.matchMedia(narrowNavigation).matches) railTrigger.current?.focus();
+    else if (triggers[closed].current?.isConnected) triggers[closed].current?.focus();
+    else newThreadTrigger.current?.focus();
+  }, [panel]);
 
   const upsert = useCallback((turn: TurnView) => {
     setConversation((previous) => {
@@ -344,80 +406,116 @@ function App() {
     previousAttempt.current = { fingerprint, id };
     return id;
   };
-  const accept = ({ turn }: TurnAccepted, target: ConversationView) => {
+  const accept = ({ turn, conversation: row }: TurnAccepted) => {
     previousAttempt.current = null;
     upsert(turn);
-    remember({
-      id: target.id, title: target.turns.length ? target.title : [...turn.message.replace(/\s+/g, " ")].slice(0, 54).join(""),
-      personaId: target.personaId, scenarioId: target.scenarioId, updatedAt: turn.createdAt,
-    });
-    if (!target.turns.length) setConversation((row) => row?.id === target.id ? {
-      ...row, title: [...turn.message.replace(/\s+/g, " ")].slice(0, 54).join(""), updatedAt: turn.createdAt,
-    } : row);
+    remember(row);
+    setConversation((current) => current?.id === row.id ? { ...current, ...row } : current);
   };
 
   const send = async (message: string) => {
     if (!configuration) return;
     await exclusive(async () => {
-      const target = conversation ?? await api.newConversation(signedInProfileId ?? configuration.defaultPersonaId, configuration.defaultScenarioId);
-      if (!conversation) choose(target);
+      const target = chat ?? await createConversation(activeProfile?.personaId ?? configuration.defaultPersonaId, configuration.defaultScenarioId);
+      if (!chat) choose(target);
       try {
-        accept(await api.send(target.id, message, requestId(target.id + ":" + message)), target);
+        accept(await api.send(target.id, message, requestId(target.id + ":" + message)));
         setDrafts((all) => ({ ...all, [draftKey]: all[draftKey]?.trim() === message ? "" : all[draftKey] }));
       } catch (error) {
-        if (!conversation) setDrafts((all) => ({ ...all, [target.id]: all[draftKey] ?? message }));
+        if (!chat) setDrafts((all) => ({ ...all, [target.id]: all[draftKey] ?? message }));
         throw error;
       }
     });
   };
+  const previewFunding = (source?: typeof pendingActionsContext) => {
+    if (!configuration || !activeProfile) return;
+    void exclusive(async () => {
+      const target = chat && !chat.turns.length && chat.scenarioId === configuration.defaultScenarioId
+        ? chat : await createConversation(activeProfile.personaId, configuration.defaultScenarioId);
+      choose(target);
+      accept(await api.previewFunding(target.id, requestId(target.id + ":preview-funding:" + (source ?? "overview")), source));
+    });
+  };
+  const revealChat = (row: ConversationView) => {
+    setSection("summary");
+    choose(row);
+    if (!adminChat && !row.turns.length) pendingActions.refresh();
+  };
   const startConversation = async (personaId: string, scenarioId: string) => exclusive(async () => {
-    const row = await api.newConversation(personaId, scenarioId);
+    const row = await createConversation(personaId, scenarioId);
     if (signedInProfileId && signedInProfileId !== row.personaId) {
       if (!saveProfileSession(row.personaId)) throw new Error("Couldn’t switch profiles in this tab. Please try again.");
       setSignedInProfileId(row.personaId);
     }
-    choose(row);
+    revealChat(row);
   });
+  const changeConversation = async (id: string, change: ConversationChange) => exclusive(async () => {
+    const updated = await api.changeConversation(id, change);
+    remember(updated);
+    setConversation((current) => current?.id === id ? { ...current, ...updated, archivedAt: updated.archivedAt } : current);
+    if (change.operation === "archive" && readActiveConversation(adminChat) === id) {
+      rememberActiveConversation(null, adminChat);
+      setOverviewOpen(true);
+      setSection("summary");
+    }
+  });
+  const savePins = async (next: WorkspacePin[]) => {
+    if (!activeProfile) return false;
+    return exclusive(async () => {
+      const updated = await api.savePins(activeProfile.personaId, next);
+      setConfiguration((current) => current && {
+        ...current, personas: current.personas.map((profile) => profile.personaId === activeProfile.personaId ? { ...profile, pins: updated } : profile),
+      });
+      if (section !== "summary" && !updated.includes(section)) setSection("summary");
+    });
+  };
   const signOut = () => {
     if (saveProfileSession(null)) location.replace("/login");
     else setNotice("Couldn’t sign out in this tab. Please try again.");
   };
-  const openLogs = (turnId?: string) => setPanel({ kind: "logs", turnId });
-  const closePanel = () => {
-    const triggers = { profiles: profilesTrigger, inspector: inspectorTrigger, logs: logsTrigger };
-    const trigger = panel && triggers[panel.kind];
-    setPanel(undefined);
-    requestAnimationFrame(() => trigger?.current?.focus());
+  const openPanel = (next: Panel) => {
+    setRailOpen(false);
+    if (next.kind === "thread" || next.kind === "pins") setNotice("");
+    setPanel(next);
   };
+  const closePanel = () => setPanel(undefined);
+  const modelStatus = configuration?.mode === "test" ? "Test mode" : configuration?.gatewayConfigured ? "Model connected" : "Model offline";
+  const managedThread = panel?.kind === "thread" ? visibleConversations.find(({ id }) => id === panel.id) : undefined;
 
   return <div className="app-layout">
     {railOpen && <button className="rail-scrim" aria-label="Close conversations" onClick={() => setRailOpen(false)} />}
-    <aside className={"rail" + (railOpen ? " rail-open" : "")} id="conversation-rail" aria-label="Conversation navigation">
+    <aside className={"rail" + (railOpen ? " rail-open" : "")} id="conversation-rail" aria-label="Workspace navigation">
       <div className="rail-header">
-        <a className="rail-home" href="/"><LabMark /> PZN Lab</a>
+        <a className="rail-home" href={adminChat ? adminPaths.tools : "/"}><LabMark />{adminChat ? "Administration" : "PZN Lab"}</a>
         <button className="icon-button rail-close" ref={railClose} aria-label="Close conversation navigation" onClick={() => setRailOpen(false)}><X size={20} /></button>
       </div>
-      <button className="new-conversation" disabled={pending || !configuration} onClick={() => {
+      <button ref={newThreadTrigger} type="button" className="new-conversation" disabled={pending || !configuration} onClick={() => {
         if (configuration) void startConversation(conversation?.personaId ?? signedInProfileId ?? configuration.defaultPersonaId, conversation?.scenarioId ?? configuration.defaultScenarioId);
       }}><Plus size={18} aria-hidden="true" />New conversation</button>
-      <div className="rail-section">
-        <h2>Conversations</h2>
-        <nav aria-label="Recent conversations">
-          {visibleConversations.length ? visibleConversations.map((row) => (
-            <button className="conversation-link" key={row.id} aria-current={conversation?.id === row.id ? "page" : undefined} disabled={pending}
-              title={row.title} onClick={() => void exclusive(async () => choose(await api.conversation(row.id)))}>
-              <MessageSquare size={16} aria-hidden="true" />
-              <span className="conversation-link-copy">
-                <span className="conversation-link-title">{row.title}</span>
-                <small>{profilesById.get(row.personaId)?.displayName}</small>
-              </span>
-            </button>
-          )) : <p>New conversations appear here.</p>}
-        </nav>
-      </div>
+      <button type="button" className="rail-link rail-overview" aria-current={!chat ? "page" : undefined} disabled={pending}
+        onClick={() => {
+          setOverviewOpen(true);
+          setSection("summary");
+          setRailOpen(false);
+          setNotice("");
+          if (!adminChat) pendingActions.refresh();
+        }}>
+        <LayoutDashboard size={17} aria-hidden="true" />Overview
+      </button>
+      <ThreadList threads={visibleConversations} profiles={profilesById} activeId={chat?.id}
+        showNames={!signedInProfileId} pending={pending || !configuration}
+        open={(id) => void exclusive(async () => revealChat(await api.conversation(id)))}
+        manage={(id, trigger) => { threadTrigger.current = trigger; openPanel({ kind: "thread", id }); }} />
+      {adminChat && <section className="rail-section rail-tools"><AdminNavigation thread={chat?.id} /></section>}
       <div className="rail-footer">
-        <p><span className="demo-dot" />Preview workspace</p>
-        {signedInProfileId
+        {activeProfile && <button ref={profilesTrigger} className="rail-profile" type="button" aria-haspopup="dialog"
+          aria-label={"Profiles, current profile " + activeProfile.displayName}
+          onClick={() => openPanel({ kind: "profiles" })}>
+          <ProfileAvatar name={activeProfile.displayName} />
+          <span className="rail-profile-copy"><strong>{activeProfile.displayName}</strong><small>Switch profile</small></span>
+          <ChevronDown size={14} aria-hidden="true" />
+        </button>}
+        {adminChat ? <a className="rail-account" href="/chat"><ArrowLeft size={16} aria-hidden="true" />Customer view</a> : signedInProfileId
           ? <button type="button" className="rail-account" onClick={signOut}><LogOut size={16} aria-hidden="true" />Sign out</button>
           : <a className="rail-account" href="/login"><LogIn size={16} aria-hidden="true" />Sign in</a>}
       </div>
@@ -426,42 +524,27 @@ function App() {
       <header className="topbar">
         <div className="topbar-left">
           <button className="icon-button rail-menu" ref={railTrigger} type="button" aria-label="Show conversations" aria-expanded={railOpen}
-            aria-controls="conversation-rail" onClick={() => setRailOpen((open) => !open)}><Menu size={21} /></button>
-          <div className="assistant-heading">
-            <h1>Your assistant</h1>
-            {activeProfile && <button ref={profilesTrigger} className="demo-profile-trigger" type="button" aria-haspopup="dialog"
-              aria-label={"Profiles, current profile " + activeProfile.displayName} title="Switch profile"
-              onClick={() => setPanel({ kind: "profiles" })}>
-              <ProfileAvatar name={activeProfile.displayName} />
-              <span>{activeProfile.displayName}</span><ChevronDown className="profile-chevron" size={14} aria-hidden="true" />
-            </button>}
-          </div>
+            aria-controls="conversation-rail" onClick={() => setRailOpen((open) => !open)}><PanelLeft size={20} aria-hidden="true" /></button>
+          <span className="workspace-crumb">{adminChat ? "Test chat" : "Workspace"} <ChevronRight size={14} aria-hidden="true" /></span>
+          <h1>{chat?.title ?? "Overview"}</h1>
         </div>
-        <div className="topbar-actions">
-          {configuration?.mode === "test" && <span className="test-label" title="Uses preset model responses">Test mode</span>}
-          {configuration?.openAiModel && <span className="test-label" title={configuration.openAiModel}>Live model</span>}
-          {configuration?.copilotModel && <span className="test-label" title={configuration.copilotModel}>Copilot ACP</span>}
-          {configuration?.inspectorEnabled && <a className="tool-setup-trigger inspector-trigger icon-button" aria-label="Tool setup" href="/admin">
-            <Settings2 size={18} aria-hidden="true" /><span>Tool setup</span></a>}
-          {configuration?.inspectorEnabled && <button className="inspector-trigger icon-button" ref={inspectorTrigger} type="button" aria-label="Open developer inspector"
-            aria-haspopup="dialog" onClick={() => setPanel({ kind: "inspector" })}><PanelRight size={18} aria-hidden="true" /><span>Inspector</span></button>}
-          {configuration?.inspectorEnabled && <button className="inspector-trigger call-logs-trigger icon-button" ref={logsTrigger} type="button"
-            aria-label="Open call logs" aria-haspopup="dialog" title="Call logs" onClick={() => openLogs()}><FileText size={18} aria-hidden="true" /><span>Logs</span></button>}
-          <a className="inspector-trigger icon-button help-trigger" href="/help" aria-label="Help" title="Help">
-            <CircleHelp size={18} aria-hidden="true" /><span>Help</span>
-          </a>
-        </div>
+        {adminChat && configuration && <span className="model-status" data-connected={configuration.gatewayConfigured}>
+          <span aria-hidden="true" />{modelStatus}
+        </span>}
       </header>
-      <Chat key={conversation?.id ?? "new"} conversation={conversation} configuration={configuration} pending={pending}
+      <Chat key={draftKey} conversation={chat} configuration={configuration} activeProfile={activeProfile}
+        pendingActions={pendingActions} pending={pending} section={activeSection} pins={pins}
+        onSelect={setSection} customizeTrigger={customizeTrigger} onCustomize={() => openPanel({ kind: "pins" })}
+        onPreviewFunding={previewFunding} onRestore={() => { if (chat) void changeConversation(chat.id, { operation: "restore" }); }}
         draft={drafts[draftKey] ?? ""} onDraft={(value) => setDrafts((all) => ({ ...all, [draftKey]: value }))} notice={notice}
         onSend={send} onStop={async () => {
           if (activeTurnId) await exclusive(async () => upsert(await api.cancel(activeTurnId)));
         }}
         onRetry={(id) => {
-          if (conversation) void exclusive(async () => accept(await api.retry(id, requestId("retry:" + id)), conversation));
+          if (chat) void exclusive(async () => accept(await api.retry(id, requestId("retry:" + id))));
         }}
         onFollowUp={(id, envelope) => {
-          if (conversation) void exclusive(async () => accept(await api.followUp(id, envelope, requestId("action:" + String(envelope.action.context.actionId) + ":" + JSON.stringify(envelope.action.context.values ?? null))), conversation));
+          if (chat) void exclusive(async () => accept(await api.followUp(id, envelope, requestId("action:" + String(envelope.action.context.actionId) + ":" + JSON.stringify(envelope.action.context.values ?? null)))));
         }}
         onFeedback={(turnId, expId, value) => {
           void api.event(expId, value).then(() => api.turn(turnId)).then(upsert).catch((error) => setNotice(messageFor(error)));
@@ -470,9 +553,9 @@ function App() {
     {configuration && activeProfile && panel?.kind === "profiles" && <DemoProfiles personas={configuration.personas}
       activePersonaId={activeProfile.personaId} pending={pending} close={closePanel}
       startChat={(personaId) => startConversation(personaId, configuration.defaultScenarioId)} />}
-    {configuration && panel?.kind === "inspector" && <Inspector configuration={configuration} conversation={conversation}
-      latest={latest} close={closePanel} create={startConversation} openLogs={openLogs} />}
-    {panel?.kind === "logs" && <CallLogs turns={conversation?.turns ?? noTurns} turnId={panel.turnId} close={closePanel} />}
+    {panel?.kind === "pins" && <WorkspaceCustomization key={activeProfile?.personaId} initial={pins} pending={pending} notice={notice} close={closePanel} save={savePins} />}
+    {managedThread && <ThreadSettings key={managedThread.id} thread={managedThread} pending={pending} notice={notice} close={closePanel}
+      change={(input) => changeConversation(managedThread.id, input)} />}
   </div>;
 }
 
@@ -484,11 +567,7 @@ if (location.pathname === "/__test/a2ui") {
     const { default: message } = await import("../../fixtures/a2ui-v1-basic-smoke.json");
     root.render(<BasicSmoke input={CreateSurfaceMessageSchema.parse(message)} />);
   });
-} else if (location.pathname === "/admin/ui") {
-  void import("./ui-builder").then(({ UiBuilder }) => root.render(<UiBuilder />));
-} else if (location.pathname === "/admin") {
-  void import("./admin").then(({ AdminPage }) => root.render(<AdminPage />));
 } else {
-  document.title = "Assistant · PZN Lab";
+  document.title = (adminChat ? "Test chat" : "Assistant") + " · PZN Lab";
   root.render(<App />);
 }

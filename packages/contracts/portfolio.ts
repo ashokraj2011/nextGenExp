@@ -11,6 +11,8 @@ export const portfolioSnapshotSchema = z.object({
   fixedIncomeCents: amount,
 }).strict();
 export type PortfolioSnapshot = z.infer<typeof portfolioSnapshotSchema>;
+export const portfolioHistoryPointSchema = z.object({ date: z.string().date(), totalCents: amount }).strict();
+export type PortfolioHistoryPoint = z.infer<typeof portfolioHistoryPointSchema>;
 
 export function isPortfolioSummary(route: Pick<RouteDecision, "contextId" | "intent">) {
   return route.contextId === "portsum" && route.intent.task === "show";

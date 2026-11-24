@@ -7,7 +7,7 @@ import { EventEmitter } from "node:events";
 import { SqliteDatabase } from "@sfield/store-sqlite";
 import type { UsageSummary } from "@sfield/core";
 import type { CatalogSnapshot, ContentDecision, PropensityResult, RouteDecision, BalanceProof, Scope, SelectionMode } from "../../packages/contracts/domain";
-import type { Conversation, FailureCode, Progress, PublicEvent, PublicEventType, TurnStatus, TurnView } from "../../packages/contracts/api";
+import type { Conversation, ConversationChange, FailureCode, Progress, PublicEvent, PublicEventType, TurnStatus, TurnView } from "../../packages/contracts/api";
 import type { GatewayExchange } from "../../packages/contracts/inspector";
 import type { GoalProgress } from "../../packages/contracts/goal-progress";
 import {
@@ -19,6 +19,7 @@ import { defaultToolSetup, type MockCcreEvaluation, type ToolSetup, type Treatme
 import type { CompiledExperience, IssuedAction } from "../../packages/experience/compile";
 import { makeId } from "../../packages/experience/compile";
 import type { ContextScoresRequest, Rejection } from "../../packages/ts-adapter";
+import { defaultWorkspacePins, workspaceFundingContext, workspacePinsSchema, type WorkspaceActionLog, type WorkspacePin } from "../../packages/contracts/workspace";
 
 export type Stage = "route" | "compose";
 export const stageAgent: Record<Stage, string> = { route: "context-router", compose: "experience-composer" };
@@ -55,6 +56,7 @@ export type TurnTrace = {
 export type ConversationRecord = Conversation & {
   principalId: string;
   sessions: Partial<Record<Stage, string>>;
+  customTitle?: boolean;
 };
 type FundingLogPosition = { attempts: number; calls: number };
 export type FundingRun = {
@@ -111,8 +113,8 @@ function parse<T>(row?: { record: string }): T | undefined {
   return row ? JSON.parse(row.record) as T : undefined;
 }
 export function presentConversation(record: ConversationRecord): Conversation {
-  const { id, title, personaId, scenarioId, updatedAt } = record;
-  return { id, title, personaId, scenarioId, updatedAt };
+  const { id, title, personaId, scenarioId, updatedAt, archivedAt, audience } = record;
+  return { id, title, personaId, scenarioId, updatedAt, ...(archivedAt === undefined ? {} : { archivedAt }), ...(audience && { audience }) };
 }
 function inaccessible(): never {
   throw new ApiError(404, "not_found", "This item is unavailable.");
@@ -128,6 +130,13 @@ export class Store {
     this.axe = new AgenticStore(this.db);
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS local_sessions (id TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS workspace_preferences (
+        principal_id TEXT NOT NULL, persona_id TEXT NOT NULL, pins TEXT NOT NULL, PRIMARY KEY (principal_id, persona_id)
+      );
+      CREATE TABLE IF NOT EXISTS workspace_action_logs (
+        id TEXT PRIMARY KEY, principal_id TEXT NOT NULL REFERENCES local_sessions(id), record TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS workspace_actions_principal ON workspace_action_logs(principal_id);
       CREATE TABLE IF NOT EXISTS tool_setups (
         principal_id TEXT PRIMARY KEY REFERENCES local_sessions(id), record TEXT NOT NULL
       );
@@ -163,6 +172,11 @@ export class Store {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS analytics_rendered ON analytics(experience_id, event_type)
         WHERE event_type IN ('rendered', 'render_fallback');
+      UPDATE conversations SET record = json_set(record, '$.audience', 'admin')
+        WHERE json_extract(record, '$.audience') IS NULL AND id IN (
+          SELECT conversation_id FROM turns WHERE json_extract(record, '$.trace.intentId') = 'create_rule'
+            OR json_extract(record, '$.public.experience.outcome') = 'create_rule'
+        );
     `);
   }
 
@@ -231,8 +245,11 @@ export class Store {
     this.db.run("INSERT OR IGNORE INTO gateway_exchanges (attempt_id, record) VALUES (?, ?)", attemptId, JSON.stringify(exchange));
   }
 
-  createConversation(principalId: string, personaId: string, scenarioId: string, now: number) {
-    const record: ConversationRecord = { id: makeId("conv"), principalId, personaId, scenarioId, title: "New conversation", updatedAt: now, sessions: {} };
+  createConversation(principalId: string, personaId: string, scenarioId: string, now: number, audience?: Conversation["audience"]) {
+    const record: ConversationRecord = {
+      id: makeId("conv"), principalId, personaId, scenarioId, title: "New conversation", updatedAt: now, sessions: {},
+      ...(audience && { audience }),
+    };
     this.db.run("INSERT INTO conversations VALUES (?, ?, ?, ?)", record.id, principalId, now, JSON.stringify(record));
     return record;
   }
@@ -245,6 +262,52 @@ export class Store {
   conversation(id: string, principalId: string) {
     const record = parse<ConversationRecord>(this.db.one("SELECT record FROM conversations WHERE id = ? AND principal_id = ?", id, principalId));
     return record ?? inaccessible();
+  }
+
+  changeConversation(id: string, principalId: string, change: ConversationChange, now: number) {
+    return this.db.tx(() => {
+      const record = this.conversation(id, principalId);
+      if (change.operation === "rename") {
+        record.title = change.title;
+        record.customTitle = true;
+      } else if (change.operation === "archive") {
+        if (this.latestTurn(id)?.public.status === "working") {
+          throw new ApiError(409, "turn_active", "Wait for the current response or stop it before archiving this chat.");
+        }
+        record.archivedAt ??= now;
+      } else {
+        delete record.archivedAt;
+      }
+      this.saveConversation(record);
+      return presentConversation(record);
+    });
+  }
+
+  workspacePins(principalId: string, personaId: string) {
+    const row = this.db.one<{ pins: string }>("SELECT pins FROM workspace_preferences WHERE principal_id = ? AND persona_id = ?", principalId, personaId);
+    return row ? workspacePinsSchema.parse(JSON.parse(row.pins)) : defaultWorkspacePins;
+  }
+
+  saveWorkspacePins(principalId: string, personaId: string, pins: WorkspacePin[]) {
+    this.db.run("INSERT INTO workspace_preferences VALUES (?, ?, ?) ON CONFLICT(principal_id, persona_id) DO UPDATE SET pins = excluded.pins",
+      principalId, personaId, JSON.stringify(pins));
+    return pins;
+  }
+
+  saveWorkspaceActionLog(principalId: string, log: WorkspaceActionLog) {
+    this.db.tx(() => {
+      this.db.run("INSERT INTO workspace_action_logs VALUES (?, ?, ?)", log.id, principalId, JSON.stringify(log));
+      this.db.run(`
+        DELETE FROM workspace_action_logs WHERE id IN (
+          SELECT id FROM workspace_action_logs WHERE principal_id = ? ORDER BY rowid DESC LIMIT -1 OFFSET 50
+        )
+      `, principalId);
+    });
+  }
+
+  workspaceActionLogs(principalId: string) {
+    return this.db.all<{ record: string }>("SELECT record FROM workspace_action_logs WHERE principal_id = ? ORDER BY rowid DESC LIMIT 50", principalId)
+      .map((row) => parse<WorkspaceActionLog>(row)!);
   }
 
   setSession(record: ConversationRecord, stage: Stage, sessionId: string) {
@@ -316,9 +379,11 @@ export class Store {
   }) {
     let created = false;
     const turn = this.db.tx(() => {
-      const { conversation, requestId, origin, message, selectionMode, now, retry } = input;
+      const { requestId, origin, message, selectionMode, now, retry } = input;
+      const conversation = this.conversation(input.conversation.id, input.conversation.principalId);
       const previous = this.existingRequest(conversation.id, requestId, message, origin);
       if (previous) return previous;
+      if (conversation.archivedAt !== undefined) throw new ApiError(409, "chat_archived", "Restore this chat to continue it.");
       const latest = this.latestTurn(conversation.id);
       if (latest?.public.status === "working") throw new ApiError(409, "turn_active", "Wait for the current response or stop it first.");
       if (retry && (latest?.public.id !== retry.public.id || !["cancelled", "failed"].includes(retry.public.status))) {
@@ -340,8 +405,10 @@ export class Store {
         && latest?.public.experience && latest.public.experience.expiresAt > now
         ? this.experience(latest.public.experience.experienceId, conversation.principalId).actions.find(({ workflow }) => workflow)?.workflow
         : undefined;
-      const launch = retry?.workflow ?? input.workflow ?? (continuation ? latest?.workflow : undefined)
-        ?? (offered && latest?.public.experience ? { recommendation: offered, sourceExperienceId: latest.public.experience.experienceId } : undefined);
+      const overviewFunding = workspaceFundingContext(origin);
+      const launch = overviewFunding ? undefined
+        : retry?.workflow ?? input.workflow ?? (continuation ? latest?.workflow : undefined)
+          ?? (offered && latest?.public.experience ? { recommendation: offered, sourceExperienceId: latest.public.experience.experienceId } : undefined);
       const record: TurnRecord = {
         public: { id, conversationId: conversation.id, message, createdAt: now, status: "working", progress: "accepted", retryOf: retry?.public.id },
         scope: { turnId: id, principalId: conversation.principalId, conversationId: conversation.id, personaId: conversation.personaId },
@@ -352,10 +419,10 @@ export class Store {
         fundingRun: continuation,
         ...(uiLayouts.length && { uiLayouts }),
         toolSetup: continuation ? latest?.toolSetup : setup.fundingWorkflow ? setup : { ...setup, fundingWorkflow: workflowDefinition },
-        trace: { surface: "chat", sourcePageContext: null, selectionMode, markers: { accepted: now }, failures: [] },
+        trace: { surface: "chat", sourcePageContext: overviewFunding ? "Overview" : null, selectionMode, markers: { accepted: now }, failures: [] },
       };
       this.db.run("INSERT INTO turns VALUES (?, ?, ?, ?, ?, ?)", id, conversation.id, requestId, record.ordinal, "working", JSON.stringify(record));
-      if (!latest) conversation.title = [...message.replace(/\s+/g, " ")].slice(0, 54).join("");
+      if (!latest && !conversation.customTitle) conversation.title = [...message.replace(/\s+/g, " ")].slice(0, 54).join("");
       conversation.updatedAt = now;
       this.saveConversation(conversation);
       this.addEvent(record, "turn.accepted", { progress: "accepted" });

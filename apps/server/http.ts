@@ -16,16 +16,19 @@ import { z } from "zod";
 import demo from "../../fixtures/host.json";
 import { type Bootstrap } from "../../packages/contracts/api";
 import type { SelectionMode } from "../../packages/contracts/domain";
-import { actionBody, createBody, eventBody, idPattern, messageBody, retryBody } from "../../packages/contracts/http-inputs";
+import { actionBody, conversationChangeBody, createBody, eventBody, idPattern, messageBody, previewFundingBody, retryBody } from "../../packages/contracts/http-inputs";
+import { pendingActionsContext, workspacePinsSchema } from "../../packages/contracts/workspace";
+import { adminPaths, isAdminPath } from "../../packages/contracts/admin-paths";
 import { mockCcreRuleSchema, toolSetupSchema, treatmentPreviewSchema } from "../../packages/contracts/tool-setup";
 import { tsFixtures } from "../../packages/ts-adapter";
-import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
+import { fixturePortfolioHistory, fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import { fixtureGoalProgressProvider, type GoalProgressProvider } from "../../packages/goal-progress";
 import type { GatewaySettings } from "./gateway";
 import { Runtime, sfieldNamespace } from "./runtime";
 import { ApiError, Store, presentConversation } from "./store";
 import { ExperienceService } from "./service";
 import { addCcreRule, previewTreatmentSelector, toolSetupTag, toolSetupView, validateToolSetup } from "./tool-setup";
+import { readWorkspacePendingActions } from "./workspace-actions";
 
 type Options = {
   dataDir: string;
@@ -46,7 +49,7 @@ const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".woff2": "font/woff2", ".woff": "font/woff", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml",
 };
-const pagePaths = new Set(["/", "/chat", "/login", "/help", "/planning", "/admin", "/admin/ui", "/__test/a2ui"]);
+const pagePaths = new Set(["/", "/chat", "/login", "/planning", "/__test/a2ui", ...Object.values(adminPaths)]);
 
 function json(res: ServerResponse, body: unknown, status = 200) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
@@ -106,16 +109,22 @@ export async function startApp(options: Options) {
   const portfolioSnapshots = options.portfolioSnapshots ?? fixturePortfolioSnapshotProvider;
   const goalProgressProvider = options.goalProgressProvider ?? fixtureGoalProgressProvider;
   const personas: Bootstrap["personas"] = await Promise.all(demo.personas.map(async ({
-    personaId, displayName, allowedScenarios, profile, beneficiaryStatus, accountFundingStatus, syntheticMid,
-  }) => ({
-    personaId, displayName, allowedScenarios,
-    profile: {
-      ...profile,
-      beneficiaryStatus: beneficiaryStatusSchema.parse(beneficiaryStatus),
-      accountFundingStatus: accountFundingStatusSchema.parse(accountFundingStatus),
-      cashCents: (await fixturePortfolioSnapshotProvider.read(syntheticMid))?.cashCents ?? null,
-    },
-  })));
+    personaId, displayName, allowedScenarios, beneficiaryStatus, accountFundingStatus, syntheticMid,
+  }) => {
+    const [portfolio, homeGoal] = await Promise.all([
+      fixturePortfolioSnapshotProvider.read(syntheticMid),
+      fixtureGoalProgressProvider.read(syntheticMid),
+    ]);
+    return {
+      personaId, displayName, allowedScenarios,
+      profile: {
+        beneficiaryStatus: beneficiaryStatusSchema.parse(beneficiaryStatus),
+        accountFundingStatus: accountFundingStatusSchema.parse(accountFundingStatus),
+        cashCents: portfolio?.cashCents ?? null,
+      },
+      overview: { portfolio, homeGoal, portfolioHistory: fixturePortfolioHistory(syntheticMid) },
+    };
+  }));
   const store = new Store(join(options.dataDir, "app.sqlite"));
   const registry = new CapabilityRegistry(store);
   const sfieldPath = join(options.dataDir, "sfield.sqlite");
@@ -157,7 +166,12 @@ export async function startApp(options: Options) {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
     if (!pathname.startsWith("/api/")) {
-      if ((pathname === "/admin" || pathname === "/admin/ui") && !inspectorEnabled) throw new ApiError(404, "not_found", "This page is unavailable.");
+      if ((isAdminPath(pathname) || pathname === "/help") && !inspectorEnabled) throw new ApiError(404, "not_found", "This page is unavailable.");
+      if (pathname === "/help" && req.method === "GET") {
+        res.writeHead(308, { Location: adminPaths.help + url.search, "Cache-Control": "no-store" });
+        res.end();
+        return;
+      }
       if (vite) {
         vite.middlewares(req, res, () => { if (!res.headersSent) res.writeHead(404).end(); });
       } else if (req.method === "GET") {
@@ -176,13 +190,17 @@ export async function startApp(options: Options) {
     if (created) res.setHeader("Set-Cookie", sessionCookie + "=" + principalId + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000");
 
     const [resource, id, operation, extra] = pathname.slice(5).split("/");
-    if (extra !== undefined || (id && !idPattern.test(id))) throw new ApiError(404, "not_found", "This item is unavailable.");
+    if (extra !== undefined || (id && !idPattern.test(id)) || (operation && !idPattern.test(operation))) {
+      throw new ApiError(404, "not_found", "This item is unavailable.");
+    }
     const method = req.method;
-    if (resource === "bootstrap" && method === "GET" && !id) {
+    const adminBootstrap = resource === "admin" && id === "bootstrap" && !operation && inspectorEnabled;
+    if (method === "GET" && ((resource === "bootstrap" && !id) || adminBootstrap)) {
       const state: Bootstrap = {
-        conversations: store.conversations(principalId),
+        conversations: store.conversations(principalId).filter((conversation) => adminBootstrap || conversation.audience !== "admin"),
         personas: personas.map((entry) => ({
-          ...entry, profile: { ...entry.profile, accountFundingStatus: store.axe.fundingStatus({ principalId, personaId: entry.personaId }) ?? entry.profile.accountFundingStatus },
+          ...entry, pins: store.workspacePins(principalId, entry.personaId),
+          profile: { ...entry.profile, accountFundingStatus: store.axe.fundingStatus({ principalId, personaId: entry.personaId }) ?? entry.profile.accountFundingStatus },
         })),
         scenarios: tsFixtures.scenarios.map(({ scenarioId, label }) => ({ scenarioId, label })),
         defaultPersonaId: demo.defaultPersonaId, defaultScenarioId: demo.defaultScenarioId,
@@ -192,8 +210,28 @@ export async function startApp(options: Options) {
       };
       return json(res, state);
     }
+    const workspacePersona = resource === "workspace" && id ? demo.personas.find(({ personaId }) => personaId === id) : undefined;
+    if (workspacePersona) {
+      const { personaId } = workspacePersona;
+      if (operation === "next-step" && method === "GET") {
+        return json(res, await runtime?.workspaceNextStep(principalId, personaId) ?? null);
+      }
+      if (operation === pendingActionsContext && method === "GET") {
+        return json(res, await readWorkspacePendingActions(store, principalId, workspacePersona, portfolioSnapshots, inspectorEnabled, now()));
+      }
+      if (operation === "preferences" && method === "POST") {
+        const { pins } = await body(req, z.object({ pins: workspacePinsSchema }).strict());
+        return json(res, store.saveWorkspacePins(principalId, personaId, pins));
+      }
+    }
     if (resource === "admin" && inspectorEnabled && !operation) {
       const toolSetupLimit = 768 * 1024;
+      if (id === "pending-action-logs" && method === "GET") return json(res, store.workspaceActionLogs(principalId));
+      if (id === "conversations" && method === "POST") {
+        const { personaId, scenarioId } = await body(req, createBody);
+        const conversation = experience.createConversation(principalId, personaId, scenarioId, "admin");
+        return json(res, { ...presentConversation(conversation), turns: [] }, 201);
+      }
       if (id === "ui-layouts" && method === "GET") {
         return json(res, { layouts: store.listUiLayouts(principalId), targets: uiTargetOptions(registry, principalId) });
       }
@@ -226,9 +264,9 @@ export async function startApp(options: Options) {
         if (!registry.get(principalId, capabilityRef(input.capability))) {
           throw new ApiError(404, "capability_unavailable", "Publish or select a known capability version.");
         }
-        const conversation = experience.createConversation(principalId, input.personaId, demo.defaultScenarioId);
+        const conversation = experience.createConversation(principalId, input.personaId, demo.defaultScenarioId, "admin");
         const turn = experience.submit(conversation, input.message, makeId("request"), "capability_preview", undefined, undefined, { capability: input.capability });
-        return json(res, { conversation: presentConversation(conversation), ...turn }, 202);
+        return json(res, turn, 202);
       }
       if (id === "customer-events" && method === "POST") {
         return json(res, simulateCustomerEvent(store, principalId, await body(req, customerEventSchema), now()));
@@ -272,8 +310,16 @@ export async function startApp(options: Options) {
       }
       if (id) {
         const conversation = store.conversation(id, principalId);
+        if (conversation.audience === "admin" && !inspectorEnabled) throw new ApiError(404, "not_found", "This conversation is unavailable.");
         if (method === "GET" && !operation) {
           return json(res, { ...presentConversation(conversation), turns: await experience.conversationTurns(conversation) });
+        }
+        if (method === "POST" && operation === "settings") {
+          return json(res, store.changeConversation(id, principalId, await body(req, conversationChangeBody), now()));
+        }
+        if (method === "POST" && operation === "preview-funding") {
+          const { clientRequestId, source } = await body(req, previewFundingBody);
+          return json(res, experience.previewWorkspaceFunding(conversation, clientRequestId, source), 202);
         }
         if (method === "POST" && operation === "turns") {
           const { message, clientRequestId } = await body(req, messageBody);
@@ -284,6 +330,9 @@ export async function startApp(options: Options) {
     }
     if (resource === "turns" && id) {
       const turn = store.ownTurn(id, principalId);
+      if (!inspectorEnabled && store.conversation(turn.scope.conversationId, principalId).audience === "admin") {
+        throw new ApiError(404, "not_found", "This message is unavailable.");
+      }
       if (method === "GET" && !operation) return json(res, await experience.turnView(turn));
       if (method === "POST" && operation === "cancel") return json(res, experience.cancel(turn));
       if (method === "POST" && operation === "retry") {
@@ -330,10 +379,12 @@ export async function startApp(options: Options) {
       store.analytics(principalId, data.experienceId, data.eventId, data.type, now());
       return json(res, { received: true });
     }
-    if (resource === "debug" && inspectorEnabled && (id === "turns" || id === "payloads") && operation && method === "GET") {
+    const payloadRequest = (resource === "admin" && id === "logs") || (resource === "debug" && id === "payloads");
+    const traceRequest = (resource === "admin" && id === "inspector") || (resource === "debug" && id === "turns");
+    if (inspectorEnabled && (payloadRequest || traceRequest) && operation && method === "GET") {
       const turn = store.ownTurn(operation, principalId);
       const conversation = store.conversation(turn.scope.conversationId, principalId);
-      if (id === "payloads") {
+      if (payloadRequest) {
         const payloads = await runtime?.payloads(turn, conversation);
         return json(res, payloads ?? {
           turnId: turn.public.id, topicScores: null, router: null, glossary: null, treatment: null,
@@ -344,7 +395,7 @@ export async function startApp(options: Options) {
         turnId: turn.public.id, personaId: conversation.personaId, scenarioId: conversation.scenarioId, ordinal: turn.ordinal,
         catalog: turn.catalog ? { id: turn.catalog.snapshotId, ...turn.catalog.catalog } : null,
         propensity: turn.propensity ?? null,
-        selectedContextId: turn.route?.contextId ?? null, routeDecisionId: turn.route?.routeDecisionId ?? null,
+        selectedContextId: turn.route?.contextId ?? turn.decision?.contextId ?? null, routeDecisionId: turn.route?.routeDecisionId ?? null,
         contentDecisionId: turn.decision?.decisionId ?? null,
         catalogScopeId: turn.catalogScopeId ?? null, tsScopeId: turn.tsScopeId ?? null,
         glossaryScopeId: turn.glossaryScopeId ?? null,

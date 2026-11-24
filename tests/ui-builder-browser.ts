@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { chromium } from "playwright";
 import { startTestPreview } from "./preview";
+import { openAdmin } from "./browser-navigation";
 
 const app = await startTestPreview();
 const browser = await chromium.launch();
@@ -11,7 +12,7 @@ try {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.goto(app.url + "/admin");
-  await page.getByRole("link", { name: "UI builder", exact: true }).click();
+  await page.getByRole("link", { name: "UI Builder", exact: true }).click();
   await page.getByRole("heading", { level: 1, name: "UI builder" }).waitFor();
   const preview = page.getByRole("region", { name: "Layout preview" });
   await preview.getByRole("heading", { name: "Understand your balances" }).waitFor();
@@ -55,8 +56,8 @@ try {
   const published = page.locator(".published-ui[data-renderer='a2ui']");
   await published.getByRole("heading", { name: "Read both balances" }).waitFor();
   await published.getByRole("heading", { name: "Compare balance definitions" }).waitFor();
-  await page.getByRole("button", { name: "Open developer inspector" }).click();
-  const inspector = page.getByRole("dialog", { name: "Developer inspector" });
+  await openAdmin(page, "inspector");
+  const inspector = page.getByRole("region", { name: "Turn inspection details" });
   await inspector.getByRole("heading", { name: "Published UI" }).waitFor();
   await inspector.getByText("Compare balances layout", { exact: true }).waitFor();
   assert.deepEqual(pageErrors, []);

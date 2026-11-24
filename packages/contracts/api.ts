@@ -1,5 +1,8 @@
 import type { SelectionMode } from "./domain";
+import type { GoalProgress } from "./goal-progress";
+import type { PortfolioHistoryPoint, PortfolioSnapshot } from "./portfolio";
 import type { DisplayExperience } from "./surface";
+import type { WorkspacePin } from "./workspace";
 
 export type Progress = "accepted" | "catalog" | "routing" | "glossary" | "eligibility" | "portfolio" | "goal" | "composition" | "verifying" | "workflow" | "planning";
 export const progressLabels: Record<Progress, string> = {
@@ -25,7 +28,7 @@ export const failureCopy = {
   goal_unavailable: "We couldn’t load your home-buying goal. Please try again.",
   workflow_unavailable: "We couldn’t prepare your funding preview. Please try again.",
   content_unavailable: "I couldn’t load the matching content. You can try again or ask another question.",
-  gateway_unavailable: "We couldn’t reach the model. Please try again.",
+  gateway_unavailable: "The assistant is temporarily unavailable. Please try again.",
   verification_failed: "We couldn’t check the reply. Please try again.",
   metric_unavailable: "We couldn’t load your balances. Please try again.",
   turn_timeout: "This request took too long. Please try again.",
@@ -48,19 +51,26 @@ export type TurnView = {
 };
 export type Conversation = {
   id: string; title: string; personaId: string; scenarioId: string; updatedAt: number;
+  archivedAt?: number;
+  audience?: "admin";
 };
+export type ConversationChange = { operation: "rename"; title: string } | { operation: "archive" | "restore" };
 export type ConversationView = Conversation & { turns: TurnView[] };
 export type DemoPersona = {
   personaId: string;
   displayName: string;
   allowedScenarios: string[];
   profile: {
-    focus: string;
-    summary: string;
     beneficiaryStatus: "missing" | "on_file";
     accountFundingStatus: "funded" | "unfunded";
     cashCents: number | null;
   };
+  overview?: {
+    portfolio: PortfolioSnapshot | null;
+    portfolioHistory?: PortfolioHistoryPoint[];
+    homeGoal: GoalProgress | null;
+  };
+  pins?: WorkspacePin[];
 };
 export type Bootstrap = {
   conversations: Conversation[];
@@ -75,7 +85,7 @@ export type Bootstrap = {
   selectionMode: SelectionMode;
   inspectorEnabled: boolean;
 };
-export type TurnAccepted = { turnId: string; eventsUrl: string; turn: TurnView };
+export type TurnAccepted = { turnId: string; eventsUrl: string; turn: TurnView; conversation: Conversation };
 export type PublicEventType = "turn.accepted" | "turn.status" | "experience.ready" | "turn.failed" | "turn.cancelled";
 export type PublicEvent = {
   eventId: string;

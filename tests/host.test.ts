@@ -243,6 +243,9 @@ test("the inspector setting also closes the tool setup page, API, and chat edito
   t.after(() => f.close());
   const { client, gateway } = f;
   assert.equal((await client.response("/admin")).status, 404);
+  assert.equal((await client.response("/admin/logs")).status, 404);
+  assert.equal((await client.response("/admin/chat")).status, 404);
+  assert.equal((await client.response("/api/admin/bootstrap")).status, 404);
   assert.equal((await client.response("/api/admin/tools")).status, 404);
   assert.equal((await client.response("/api/admin/tools", defaultToolSetup)).status, 404);
   assert.equal((await client.response("/api/admin/treatment-preview", {})).status, 404);
@@ -254,11 +257,28 @@ test("the inspector setting also closes the tool setup page, API, and chat edito
   assert.equal(gateway.calls[0].envelope.canCreateRule, false);
 });
 
+test("customer chat keeps rule authoring separate when administration is enabled", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const conversation = await f.client.conversation();
+  const response = await f.client.ask(conversation.id, "Create a rule");
+  assert.equal(f.gateway.calls[0].envelope.canCreateRule, false);
+  assert.equal(response.turn.experience?.blocks.some(({ component }) => component === "PznRuleCreation"), false);
+  const payloads = await f.client.request<TurnPayloads>("/api/admin/logs/" + response.turn.id);
+  assert.equal(payloads.glossary, null);
+  const trace = await f.client.request<{ turnId: string }>("/api/admin/inspector/" + response.turn.id);
+  assert.equal(trace.turnId, response.turn.id);
+});
+
 test("create rule reads the sfield glossary and uses its attributes for preview and treatment selection", async (t) => {
   const f = await fixture();
   t.after(() => f.close());
   const { client, gateway } = f;
-  const conversation = await client.conversation("normal", "demo-returning");
+  const conversation = await client.request<ConversationView>("/api/admin/conversations", { personaId: "demo-returning", scenarioId: "normal" }, 201);
+  const customer = await client.request<Bootstrap>("/api/bootstrap");
+  assert.equal(customer.conversations.some(({ id }) => id === conversation.id), false);
+  const administration = await client.request<Bootstrap>("/api/admin/bootstrap");
+  assert.equal(administration.conversations.find(({ id }) => id === conversation.id)?.audience, "admin");
   const toolsPath = "/api/admin/tools";
   const output = { mode: "ranked" as const, contentIds: ["balance_current_definition", "balance_available_definition"] };
   const { glossary: _glossary, ...oldEnabledSettings } = defaultToolSetup.enabled;
@@ -1326,7 +1346,7 @@ test("restart finalizes a completed unpublished composer run without repeating e
       db.exec("COMMIT");
     } finally { db.close(); }
   });
-  const recovered = await client.wait({ turnId: id, eventsUrl: "/api/turns/" + id + "/events", turn: completed.turn });
+  const recovered = await client.wait({ turnId: id, eventsUrl: "/api/turns/" + id + "/events" });
   assert.equal(recovered.turn.status, "completed");
   assert.equal(recovered.turn.experience?.blocks[0]?.component, "PznComparison");
   assert.equal(recovered.trace.composerRunId, completed.trace.composerRunId);

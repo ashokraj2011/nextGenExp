@@ -31,10 +31,9 @@ export function DemoProfiles({ personas, activePersonaId, pending, close, startC
         return <article key={personaId} className={"profile-card" + (active ? " profile-current" : "")} aria-labelledby={titleId}>
           <header>
             <ProfileAvatar name={displayName} />
-            <div><h3 id={titleId}>{displayName}</h3><p>{profile.focus}</p></div>
+            <h3 id={titleId}>{displayName}</h3>
             {active && <p className="profile-current-label">Current</p>}
           </header>
-          <p className="profile-summary">{profile.summary}</p>
           <dl className="profile-facts">
             <div><dt>Portfolio cash</dt><dd>{profile.cashCents === null ? "Unavailable" : formatPortfolioAmount(profile.cashCents)}</dd></div>
             <div><dt>Beneficiaries</dt><dd className={profile.beneficiaryStatus === "missing" ? "profile-missing" : undefined}>

@@ -9,10 +9,6 @@
       "syntheticMid": "DEMO-MID-1001",
       "beneficiaryStatus": "missing",
       "accountFundingStatus": "funded",
-      "profile": {
-        "focus": "Retirement planning",
-        "summary": "Alice is preparing to leave work and wants to learn what to consider as she approaches retirement."
-      },
       "allowedScenarios": ["normal", "conflicting-propensity", "missing-propensity", "propensity-unavailable", "catalog-unavailable", "relevant-blocked", "empty", "ts-unavailable", "catalog-resolution"]
     },
     {
@@ -21,10 +17,6 @@
       "syntheticMid": "DEMO-MID-1002",
       "beneficiaryStatus": "on_file",
       "accountFundingStatus": "funded",
-      "profile": {
-        "focus": "Portfolio review",
-        "summary": "Jordan is a returning customer checking how much of his portfolio is in cash before his next review."
-      },
       "allowedScenarios": ["normal", "cross-turn-change"]
     },
     {
@@ -33,10 +25,6 @@
       "syntheticMid": "DEMO-MID-1003",
       "beneficiaryStatus": "on_file",
       "accountFundingStatus": "unfunded",
-      "profile": {
-        "focus": "New account holder",
-        "summary": "Marcus recently moved and wants to update his mailing address. His new account is awaiting its first deposit."
-      },
       "allowedScenarios": ["normal"]
     }
   ],

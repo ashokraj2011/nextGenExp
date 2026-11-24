@@ -29,7 +29,7 @@ export async function testClient(base: string, existingCookie?: string) {
   );
   const turn = (id: string) => request<TurnView>("/api/turns/" + id);
   const trace = (id: string) => request<Trace>("/api/debug/turns/" + id);
-  const wait = async (accepted: TurnAccepted) => {
+  const wait = async (accepted: Pick<TurnAccepted, "turnId" | "eventsUrl">) => {
     const stream = await response(accepted.eventsUrl);
     assert.equal(stream.status, 200);
     const events = await stream.text();

@@ -1,13 +1,13 @@
 import { useEffect, useId, useState } from "react";
-import { FileText } from "lucide-react";
+import { RotateCw } from "lucide-react";
 import type { JsonValue } from "@sfield/core";
-import type { TurnView } from "../../packages/contracts/api";
+import type { DemoPersona, TurnView } from "../../packages/contracts/api";
+import type { WorkspaceActionLog } from "../../packages/contracts/workspace";
 import { decodeChatInput } from "../../packages/contracts/inspector";
 import type {
   GatewayExchange, InspectorPayload, ModelStagePayloads, RegistryToolPayloads, TreatmentPayloads, TurnPayloads, WorkflowPayloads,
 } from "../../packages/contracts/inspector";
 import { api } from "./api";
-import { DeveloperDrawer } from "./developer-drawer";
 
 function JsonBlock({ title, value, open = false }: { title: string; value?: InspectorPayload; open?: boolean }) {
   return <details className="trace-details trace-payload" open={open}>
@@ -131,8 +131,7 @@ function TurnPayloadLog({ turn }: { turn: TurnView }) {
         {payloads.agentic.model && <ModelStage title="Experience Agent model" stage={payloads.agentic.model} />}
         {payloads.agentic.calls.map((call, i) => <ReadToolStage key={call.tool + ":" + i} title={call.tool} stage={call} />)}
       </details>}
-      {payloads.workflow && <WorkflowStage workflow={payloads.workflow} />}
-      {((!payloads.workflow && !payloads.agentic) || payloads.topicScores || payloads.router) && <>
+      {((!payloads.workflow && !payloads.agentic) || payloads.topicScores || payloads.router || payloads.treatment) && <>
         {payloads.topicScores && <TreatmentStage stage={payloads.topicScores} scoring />}
         <ModelStage title="Context Router" stage={payloads.router} />
         {payloads.glossary && <ReadToolStage title="CCRE glossary" payloadLabel="Glossary" stage={payloads.glossary} />}
@@ -141,16 +140,17 @@ function TurnPayloadLog({ turn }: { turn: TurnView }) {
         {payloads.goal && <ReadToolStage title="Goal Progress" stage={payloads.goal} />}
         <ModelStage title="Experience Composer" stage={payloads.composer} />
       </>}
+      {payloads.workflow && <WorkflowStage workflow={payloads.workflow} />}
     </> : !failed && <p role="status">Loading call logs…</p>}
   </div>;
 }
 
-export function CallLogs({ turns, turnId, close }: { turns: TurnView[]; turnId?: string; close: () => void }) {
+export function CallLogs({ turns, turnId }: { turns: TurnView[]; turnId?: string }) {
   const selectorId = useId();
-  const [selected, setSelected] = useState(turnId ?? "");
+  const [selected, setSelected] = useState(turns.some(({ id }) => id === turnId) ? turnId! : "");
   const turn = turns.find((entry) => entry.id === selected) ?? turns.at(-1);
 
-  return <DeveloperDrawer title="Call logs" icon={<FileText size={17} />} closeLabel="Close call logs" close={close} wide>
+  return <section className="admin-diagnostics-content" aria-label="Call log details">
     {turn ? <>
       <section className="trace-selector call-log-selector">
         <label htmlFor={selectorId}>Chat message</label>
@@ -162,5 +162,62 @@ export function CallLogs({ turns, turnId, close }: { turns: TurnView[]; turnId?:
       </section>
       <TurnPayloadLog key={turn.id} turn={turn} />
     </> : <p className="call-log-empty">Send a question to see its call logs.</p>}
-  </DeveloperDrawer>;
+  </section>;
+}
+
+const lookupTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" });
+
+export function PendingActionLogs({ profiles }: { profiles: DemoPersona[] }) {
+  const selectorId = useId();
+  const [logs, setLogs] = useState<WorkspaceActionLog[]>();
+  const [selected, setSelected] = useState("");
+  const [failed, setFailed] = useState(false);
+  const [refresh, setRefresh] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setFailed(false);
+    void api.pendingActionLogs().then(
+      (rows) => {
+        if (!active) return;
+        setLogs(rows);
+        setSelected((id) => rows.some((row) => row.id === id) ? id : "");
+      },
+      () => { if (active) setFailed(true); },
+    );
+    return () => { active = false; };
+  }, [refresh]);
+  const lookup = logs?.find(({ id }) => id === selected) ?? logs?.[0];
+  const profileName = (personaId: string) => profiles.find((entry) => entry.personaId === personaId)?.displayName ?? personaId;
+
+  return <>
+    <section className="admin-card diagnostics-picker">
+      <label htmlFor={selectorId}>Pending action lookup</label>
+      <div>
+        <select id={selectorId} value={selected} disabled={!logs?.length} onChange={(event) => setSelected(event.target.value)}>
+          <option value="">Latest lookup</option>
+          {logs?.map(({ id, personaId, createdAt }) => (
+            <option key={id} value={id}>{profileName(personaId)} · {lookupTime.format(createdAt)}</option>
+          ))}
+        </select>
+        <button className="secondary-button" type="button" onClick={() => setRefresh((value) => value + 1)}>
+          <RotateCw size={15} aria-hidden="true" />Refresh
+        </button>
+      </div>
+    </section>
+    <section className="admin-diagnostics-content" aria-label="Pending action call details">
+      {failed && <p className="request-notice" role="alert">Couldn’t load pending action logs.</p>}
+      {lookup ? <div className="call-log-list">
+        <h3>Treatment Selector · {lookup.status}</h3>
+        <p>{profileName(lookup.personaId)} · <time dateTime={new Date(lookup.createdAt).toISOString()}>{lookupTime.format(lookup.createdAt)}</time></p>
+        <div className="pending-log-payloads" key={lookup.id}>
+          <JsonBlock title="Treatment Selector request" value={{ bytes: 0, data: lookup.request }} open />
+          {lookup.status === "succeeded"
+            ? <JsonBlock title="Treatment Selector response" value={{ bytes: 0, data: lookup.response }} open />
+            : <JsonBlock title="Treatment Selector error" value={{ bytes: 0, data: lookup.error }} open />}
+        </div>
+        {lookup.status === "succeeded" && lookup.ccre && <JsonBlock title="Mock CCRE evaluation" value={{ bytes: 0, data: lookup.ccre }} />}
+      </div> : !failed && (logs ? <p className="call-log-empty">Sign in as a customer to see their pending action calls.</p>
+        : <p className="call-log-empty" role="status">Loading pending action calls…</p>)}
+    </section>
+  </>;
 }

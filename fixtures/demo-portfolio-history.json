@@ -1,0 +1,18 @@
+{
+  "DEMO-MID-1001": [
+    { "date": "2026-06-22", "totalCents": 4235000 },
+    { "date": "2026-07-22", "totalCents": 4460000 },
+    { "date": "2026-08-22", "totalCents": 4412000 },
+    { "date": "2026-09-22", "totalCents": 4690000 },
+    { "date": "2026-10-22", "totalCents": 4815000 },
+    { "date": "2026-11-08", "totalCents": 4925000 }
+  ],
+  "DEMO-MID-1002": [
+    { "date": "2026-06-22", "totalCents": 4640000 },
+    { "date": "2026-07-22", "totalCents": 4812500 },
+    { "date": "2026-08-22", "totalCents": 4750000 },
+    { "date": "2026-09-22", "totalCents": 4890000 },
+    { "date": "2026-10-22", "totalCents": 5025000 },
+    { "date": "2026-11-08", "totalCents": 4980000 }
+  ]
+}

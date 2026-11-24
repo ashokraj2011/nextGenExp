@@ -4,7 +4,8 @@ import type { CapabilityManifest, CapabilityRef, OutputKind } from "../../packag
 import type { AgenticTrace } from "./decision-trace";
 import type { EvaluationRow } from "../../packages/contracts/evaluation";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
-import type { Bootstrap, ConversationView, TurnAccepted, TurnView } from "../../packages/contracts/api";
+import type { Bootstrap, Conversation, ConversationChange, ConversationView, TurnAccepted, TurnView } from "../../packages/contracts/api";
+import { pendingActionsContext, type WorkspaceActionLog, type WorkspaceNextStep, type WorkspacePendingAction, type WorkspacePin } from "../../packages/contracts/workspace";
 import type { TurnPayloads } from "../../packages/contracts/inspector";
 import type { ContextCatalog, PropensityResult, SelectionMode } from "../../packages/contracts/domain";
 import type { MockCcreRule, ToolSetup, ToolSetupView, TreatmentPreview, TreatmentPreviewInput, TreatmentSource } from "../../packages/contracts/tool-setup";
@@ -68,12 +69,13 @@ export type Trace = {
 };
 export const api = {
   bootstrap: () => request<Bootstrap>("/api/bootstrap"),
+  adminBootstrap: () => request<Bootstrap>("/api/admin/bootstrap"),
   evaluation: () => request<{ mode: "live" | "test"; rows: EvaluationRow[] }>("/api/admin/evaluation"),
   capabilities: () => request<{ manifests: CapabilityManifest[]; tools: { ref: string; label: string; output: OutputKind; invariant: string }[] }>("/api/admin/capabilities"),
   publishCapability: (manifest: unknown, validate: boolean) => request<CapabilityManifest>(
     "/api/admin/" + (validate ? "capability-validation" : "capabilities"), manifest,
   ),
-  previewCapability: (capability: CapabilityRef, personaId: string, message: string) => request<TurnAccepted & { conversation: ConversationView }>(
+  previewCapability: (capability: CapabilityRef, personaId: string, message: string) => request<TurnAccepted>(
     "/api/admin/capability-preview", { capability, personaId, message },
   ),
   simulateFirstDeposit: (personaId: string, eventId: string) => request<{ accepted: boolean; fundingStatus: "funded" }>(
@@ -87,7 +89,15 @@ export const api = {
   createCcreRule: (rule: MockCcreRule) => request<MockCcreRule>("/api/admin/ccre-rules", rule),
   previewTreatmentSelector: (input: TreatmentPreviewInput) => request<TreatmentPreview>("/api/admin/treatment-preview", input),
   conversation: (id: string) => request<ConversationView>("/api/conversations/" + id),
+  changeConversation: (id: string, change: ConversationChange) => request<Conversation>("/api/conversations/" + id + "/settings", change),
+  nextStep: (personaId: string) => request<WorkspaceNextStep | null>("/api/workspace/" + personaId + "/next-step"),
+  pendingActions: (personaId: string) => request<WorkspacePendingAction[]>("/api/workspace/" + personaId + "/" + pendingActionsContext),
+  savePins: (personaId: string, pins: WorkspacePin[]) => request<WorkspacePin[]>("/api/workspace/" + personaId + "/preferences", { pins }),
+  previewFunding: (conversationId: string, clientRequestId: string, source?: typeof pendingActionsContext) => request<TurnAccepted>(
+    "/api/conversations/" + conversationId + "/preview-funding", { clientRequestId, source },
+  ),
   newConversation: (personaId: string, scenarioId: string) => request<ConversationView>("/api/conversations", { personaId, scenarioId }),
+  newAdminConversation: (personaId: string, scenarioId: string) => request<ConversationView>("/api/admin/conversations", { personaId, scenarioId }),
   turn: (id: string) => request<TurnView>("/api/turns/" + id),
   send: (id: string, message: string, clientRequestId: string) => (
     request<TurnAccepted>("/api/conversations/" + id + "/turns", { message, clientRequestId })
@@ -103,6 +113,7 @@ export const api = {
       experienceId, type,
     })
   ),
-  debug: (id: string) => request<Trace>("/api/debug/turns/" + id),
-  payloads: (id: string) => request<TurnPayloads>("/api/debug/payloads/" + id),
+  debug: (id: string) => request<Trace>("/api/admin/inspector/" + id),
+  payloads: (id: string) => request<TurnPayloads>("/api/admin/logs/" + id),
+  pendingActionLogs: () => request<WorkspaceActionLog[]>("/api/admin/pending-action-logs"),
 };

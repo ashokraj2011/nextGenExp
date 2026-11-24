@@ -5,6 +5,7 @@ import host from "../../fixtures/host.json";
 import type { AgenticPayloads, WorkflowPayloads, ModelStagePayloads, RegistryToolPayloads, TreatmentPayloads, TurnPayloads } from "../../packages/contracts/inspector";
 import { fundingAgentId, fundingToolKey, resolveFundingWorkflow, treatmentRecommendationsVersion } from "../../packages/contracts/funding-workflow";
 import { sfieldTools, toolVersion } from "../../packages/contracts/tool-setup";
+import { workspaceFundingContext } from "../../packages/contracts/workspace";
 import type { configureGateway } from "./gateway";
 import { assistantResponse } from "./payload-capture";
 import { fundingModelTools } from "./funding-agent";
@@ -114,17 +115,20 @@ async function topicScoresPayloads(sf: SField, inspection: Inspection, turn: Tur
 }
 
 async function treatmentPayloads(sf: SField, inspection: Inspection, turn: TurnRecord, conversation: ConversationRecord): Promise<TreatmentPayloads | null> {
-  if (!turn.tsScopeId || !turn.route) return null;
+  const workspaceContext = workspaceFundingContext(turn.origin);
+  const decisionRef = workspaceContext ? turn.public.id : turn.route?.routeDecisionId;
+  const context = workspaceContext ?? turn.route?.contextId;
+  if (!turn.tsScopeId || !decisionRef || !context) return null;
   const tools = [toolVersion, treatmentRecommendationsVersion].map((version) => `${sfieldTools.selection.id}@${version}`);
   const call = (await sf.persistence.listCalls(turn.tsScopeId)).find((entry) => (
     tools.includes(entry.toolRef) && entry.proposedArguments.turnRef === turn.public.id
-    && entry.proposedArguments.routeDecisionId === turn.route?.routeDecisionId
+    && entry.proposedArguments.routeDecisionId === decisionRef
   ));
   if (!call) return null;
   let mockInput = turn.treatmentMockInput;
   if (!mockInput && (call.result?.status === "succeeded" || call.result?.error?.code === "TS_TIMEOUT")) {
     const persona = host.personas.find((entry) => entry.personaId === conversation.personaId);
-    if (persona) mockInput = { mid: persona.syntheticMid, context: turn.route.contextId };
+    if (persona) mockInput = { mid: persona.syntheticMid, context };
   }
   return {
     ...registryPayload(inspection, call),

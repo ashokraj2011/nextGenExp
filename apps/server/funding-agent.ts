@@ -9,6 +9,7 @@ import {
   type FundingOptions, type FundingPreview, type FundingWorkflowDefinition,
 } from "../../packages/contracts/funding-workflow";
 import { requireCheck } from "../../packages/experience/verify";
+import { fundingOfferExpiry } from "./funding-offer";
 import type { Store, TurnRecord } from "./store";
 
 const statusRef = fundingToolRef("fundingStatus");
@@ -72,13 +73,12 @@ export class FundingAgent {
     const turn = this.store.latestTurn(root.scope.conversationId);
     requireCheck(turn?.public.status === "working" && turn.scope.principalId === root.scope.principalId
       && turn.scope.personaId === root.scope.personaId && turn.workflow?.sourceExperienceId === root.workflow.sourceExperienceId
+      && turn.workflow?.sourceOverviewTurnId === root.workflow.sourceOverviewTurnId
       && (turn.public.id === root.public.id || (turn.fundingRun?.id === runId && turn.fundingRun.rootTurnId === root.public.id))
       && turn.public.createdAt + TURN_DEADLINE > this.now(), "FUNDING_RUN_INACTIVE");
     const definition = resolveFundingWorkflow(root.workflow.recommendation, root.toolSetup?.fundingWorkflow);
     requireCheck(definition?.mode === "agent", "FUNDING_DEFINITION_REQUIRED");
-    const offer = this.store.experience(root.workflow.sourceExperienceId, root.scope.principalId).turn;
-    requireCheck(offer.scope.conversationId === root.scope.conversationId && offer.scope.personaId === root.scope.personaId
-      && offer.public.experience && offer.public.experience.expiresAt > this.now(), "FUNDING_OFFER_EXPIRED");
+    fundingOfferExpiry(this.store, turn, root.workflow, this.now());
     return { root, turn, definition };
   }
 

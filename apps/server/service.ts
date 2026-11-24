@@ -3,10 +3,10 @@ import { inputValuesSchema, type AgentLaunch } from "../../packages/contracts/ag
 import { fieldValueValid } from "./agentic-inputs";
 import { digestJson, type ChatHarness, type RunResult } from "@sfield/core";
 import demo from "../../fixtures/host.json";
-import { type FailureCode } from "../../packages/contracts/api";
+import { type Conversation, type FailureCode, type TurnAccepted } from "../../packages/contracts/api";
 import { DECISION_TTL, TURN_DEADLINE, contextCatalogSchema, propensitySchema, type SelectionMode, type PropensityResult } from "../../packages/contracts/domain";
 import {
-  fundingOptionsSchema, fundingPreviewApplies, fundingPreviewSchema, fundingPreviewWorkflow, fundingStatusSchema, fundingToolKey,
+  fundingOptionsSchema, fundingPreviewSchema, fundingPreviewWorkflow, fundingStatusSchema, fundingToolKey,
   fundingWorkflowIssue, resolveFundingWorkflow, treatmentRecommendationsSchema, type WorkflowLaunch,
 } from "../../packages/contracts/funding-workflow";
 import { goalProgressSchema, isHomeGoalSummary } from "../../packages/contracts/goal-progress";
@@ -18,11 +18,13 @@ import {
 } from "../../packages/contracts/routing-intents";
 import { FOLLOW_UP_EVENT, type DisplayExperience } from "../../packages/contracts/surface";
 import { normalizedIdsSchema, treatmentOverride } from "../../packages/contracts/tool-setup";
+import { overviewFundingOrigin, pendingActionsContext, pendingActionsFundingOrigin, workspaceFundingContext } from "../../packages/contracts/workspace";
 import { activeContextCatalog, fixtureRejections, tsFixtures } from "../../packages/ts-adapter";
 import { contentCatalog, lookupContent, modelBundle, resolveCandidates } from "../../packages/experience/content";
 import { compileChatReply, compileExperience, compileFundingOptions, compileFundingPreview, compileRuleCreation, makeId } from "../../packages/experience/compile";
 import { verifyContextProposal, verifyRoute, requireCheck, Rejected } from "../../packages/experience/verify";
-import { ApiError, Store, type ConversationRecord, type Stage, type TurnRecord } from "./store";
+import { ApiError, presentConversation, Store, type ConversationRecord, type Stage, type TurnRecord } from "./store";
+import { fundingOfferExpiry, fundingRecommendation, nextStepRecommendation } from "./funding-offer";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import { principalFor, type Runtime } from "./runtime";
 import { PznChatHistory } from "./chat-history";
@@ -43,12 +45,6 @@ function traceFor(result: RunResult) {
   return { state: result.state, errorCode: result.error?.code, elapsedMs, modelCalls, providerAttempts, toolCalls, totalTokens, tokensReported };
 }
 
-function fundingRecommendation(turn: TurnRecord, contentOrder: readonly string[]) {
-  if (turn.route && fundingPreviewApplies(turn.route.contextId, contentOrder)) {
-    return turn.decision?.workflowRecommendations?.find((item) => resolveFundingWorkflow(item, turn.toolSetup?.fundingWorkflow));
-  }
-}
-
 export class ExperienceService {
   private readonly controllers = new Map<string, AbortController>();
   private readonly jobs = new Map<string, Promise<void>>();
@@ -64,10 +60,10 @@ export class ExperienceService {
     this.history = new PznChatHistory(store, chat);
   }
 
-  createConversation(principalId: string, personaId: string, scenarioId: string) {
+  createConversation(principalId: string, personaId: string, scenarioId: string, audience?: Conversation["audience"]) {
     const persona = demo.personas.find((entry) => entry.personaId === personaId);
     if (!persona?.allowedScenarios.includes(scenarioId)) throw new ApiError(400, "demo_scope_invalid", "Select an available profile and scenario.");
-    return this.store.createConversation(principalId, personaId, scenarioId, this.now());
+    return this.store.createConversation(principalId, personaId, scenarioId, this.now(), audience);
   }
 
   conversationTurns(conversation: ConversationRecord) {
@@ -83,6 +79,9 @@ export class ExperienceService {
   }
 
   submit(conversation: ConversationRecord, message: string, requestId: string, origin = "message", retry?: TurnRecord, workflow?: WorkflowLaunch, agentLaunch?: AgentLaunch) {
+    if (conversation.audience === "admin" && !this.canCreateRule) {
+      throw new ApiError(404, "not_found", "This conversation is unavailable.");
+    }
     const { turn, created } = this.store.accept({
       conversation, message, requestId, origin, retry, workflow, agentLaunch, selectionMode: this.selectionMode, now: this.now(),
     });
@@ -93,7 +92,17 @@ export class ExperienceService {
   async retry(turn: TurnRecord, requestId: string) {
     const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
     const { message } = await this.turnView(turn);
-    return this.submit(conversation, message, requestId, "retry:" + turn.public.id, turn);
+    const origin = workspaceFundingContext(turn.origin) ? turn.origin : "retry:" + turn.public.id;
+    return this.submit(conversation, message, requestId, origin, turn);
+  }
+
+  previewWorkspaceFunding(conversation: ConversationRecord, requestId: string, source?: typeof pendingActionsContext) {
+    if (!this.runtime) throw new ApiError(409, "model_unavailable", "Connect a model to preview funding in chat.");
+    if (conversation.scenarioId !== demo.defaultScenarioId) {
+      throw new ApiError(409, "workspace_scope_invalid", "Open Overview to start a funding preview.");
+    }
+    const origin = source === pendingActionsContext ? pendingActionsFundingOrigin : overviewFundingOrigin;
+    return this.submit(conversation, fundingPreviewWorkflow.label, requestId, origin);
   }
 
   followUp(principalId: string, experienceId: string, envelope: ActionMessage, requestId: string) {
@@ -153,9 +162,10 @@ export class ExperienceService {
     for (const turn of this.store.workingTurns()) this.schedule(turn, true);
   }
 
-  private accepted(turn: TurnRecord) {
+  private accepted(turn: TurnRecord): TurnAccepted {
     const { id } = turn.public;
-    return { turnId: id, eventsUrl: "/api/turns/" + id + "/events", turn: turn.public };
+    const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
+    return { turnId: id, eventsUrl: "/api/turns/" + id + "/events", turn: turn.public, conversation: presentConversation(conversation) };
   }
 
   private schedule(turn: TurnRecord, recovering = false) {
@@ -185,7 +195,8 @@ export class ExperienceService {
   private async execute(id: string, recovering: boolean) {
     const initial = this.store.turn(id);
     if (this.closing || initial?.public.status !== "working") return;
-    const goalTurn = this.runtime?.experiences.shouldHandle(initial) && !initial.workflow;
+    const workspaceContext = workspaceFundingContext(initial.origin);
+    const goalTurn = !workspaceContext && !initial.workflow && this.runtime?.experiences.shouldHandle(initial);
     const deadline = initial.public.createdAt + (goalTurn ? this.runtime!.goalBudget.activeSeconds * 1_000 : TURN_DEADLINE);
     const remains = deadline - this.now();
     if (remains <= 0) {
@@ -219,6 +230,19 @@ export class ExperienceService {
     };
     try {
       runtime.experiences.execution.world.rememberPreference(initial);
+      if (workspaceContext) {
+        stage = "ts";
+        const launch = initial.workflow ?? await this.authorizeWorkspaceFunding(runtime, current(), workspaceContext, signal);
+        if (!launch) {
+          const now = this.now();
+          const result = compileChatReply("This funding preview is no longer available. Check Overview for your current next step.", "reply", now);
+          this.store.finish(id, { type: "completed", result }, now);
+          return;
+        }
+        stage = "workflow";
+        if (!await this.runFundingPreview(runtime, current(), launch, signal)) throw new TurnFailure("workflow_unavailable");
+        return;
+      }
       if (goalTurn) {
         stage = "experience";
         this.store.progress(id, "planning", this.now());
@@ -240,6 +264,7 @@ export class ExperienceService {
       if (!initial.catalog || !initial.propensity) await this.discover(runtime, current(), signal);
       const catalog = current().catalog!;
       const conversation = this.store.conversation(initial.scope.conversationId, initial.scope.principalId);
+      const canCreateRule = this.canCreateRule && conversation.audience === "admin";
 
       stage = "route";
       requireCheck(catalog.catalog.catalogVersion === activeContextCatalog.catalogVersion, "CATALOG_MISMATCH");
@@ -248,7 +273,7 @@ export class ExperienceService {
         const turn = current();
         const recent = await this.history.recent(conversation, turn.ordinal);
         current();
-        const intentCatalog = availableRoutingIntents(catalog.catalog, this.canCreateRule);
+        const intentCatalog = availableRoutingIntents(catalog.catalog, canCreateRule);
         const summaryFollowUp = resolveSummaryFollowUp(turn.public.message, recent, intentCatalog);
         const uiDescriptions = uiIntentHints(turn.uiLayouts, intentCatalog.map(({ intentId }) => intentId));
         const result = await runtime.model("route", turn, conversation, catalog.snapshotId, {
@@ -259,7 +284,7 @@ export class ExperienceService {
           ...(uiDescriptions.length && { uiDescriptions }),
           propensity: turn.propensity,
           allowedQuestions: routingQuestions,
-          canCreateRule: this.canCreateRule,
+          canCreateRule,
           recent,
           summaryFollowUpIntentId: summaryFollowUp?.intentId,
           request: turn.public.message,
@@ -267,7 +292,7 @@ export class ExperienceService {
         current();
         this.store.update(id, (row) => { row.trace.routeRun = traceFor(result); });
         completed(result, "route");
-        const modelProposal = verifyContextProposal(result.output, catalog, turn.scope, this.now(), this.canCreateRule);
+        const modelProposal = verifyContextProposal(result.output, catalog, turn.scope, this.now(), canCreateRule);
         const literalComparison = explicitBalanceComparison(turn.public.message, intentCatalog);
         const established = summaryFollowUp ?? literalComparison;
         const applyEstablished = established && modelProposal.intentId !== established.intentId;
@@ -507,20 +532,59 @@ export class ExperienceService {
     }
   }
 
+  private async authorizeWorkspaceFunding(runtime: Runtime, turn: TurnRecord, contextId: string, signal: AbortSignal): Promise<WorkflowLaunch | undefined> {
+    const id = turn.public.id;
+    this.store.progress(id, "eligibility", this.now());
+    const result = await runtime.registry(turn, "tsScopeId", 1, signal, (call) => call("recommendations", {
+      turnRef: id, routeDecisionId: id,
+    }));
+    runtime.current(id);
+    if (result.status !== "succeeded") {
+      this.store.update(id, (row) => { row.trace.failures.push({ stage: "ts", code: result.error?.code ?? "TS_UNAVAILABLE" }); });
+      throw new TurnFailure("ts_unavailable");
+    }
+    const { ids, candidates, rejections, content, workflow } = nextStepRecommendation(
+      treatmentRecommendationsSchema.parse(result.output), turn.toolSetup, contextId,
+    );
+    const current = runtime.current(id);
+    const now = this.now();
+    const launch = workflow && { recommendation: workflow, sourceOverviewTurnId: id };
+    this.store.update(id, (row) => {
+      row.trace.intentId = "suggest_next_step";
+      row.trace.ts = {
+        contextId, fixtureVersion: tsFixtures.fixtureVersion, baseline: ids,
+        source: treatmentOverride(row.toolSetup?.treatmentOverrides ?? [], demo.defaultScenarioId, contextId) ? "override" : "fixture",
+        partial: Boolean(rejections.length),
+        rejections: [
+          ...current.treatmentCcre?.results.flatMap(({ contentId, outcome }) => outcome === "excluded"
+            ? [{ contentId, stage: "simulated_ccre" as const, reasonCode: "RULE_FALSE" }] : []) ?? [],
+          ...rejections,
+        ],
+      };
+      row.trace.markers.tsResolved = now;
+      row.trace.finalOrder = content ? [content.contentId] : [];
+      row.decision = {
+        decisionId: makeId("decision"), scope: row.scope, contextId, routeDecisionId: id,
+        catalogVersion: contentCatalog.catalogVersion, issuedAt: now, expiresAt: now + DECISION_TTL,
+        selectionMode: row.selectionMode, partial: Boolean(rejections.length), candidates,
+        composerRunId: null, workflowRecommendations: workflow ? [workflow] : [],
+      };
+      row.workflow = launch;
+    });
+    return launch;
+  }
+
   private async runFundingPreview(runtime: Runtime, turn: TurnRecord, launch: WorkflowLaunch, signal: AbortSignal) {
-    const { turn: source } = this.store.experience(launch.sourceExperienceId, turn.scope.principalId);
     const definition = resolveFundingWorkflow(launch.recommendation, turn.toolSetup?.fundingWorkflow);
-    requireCheck(definition && !fundingWorkflowIssue(definition)
-      && source.scope.conversationId === turn.scope.conversationId && source.scope.personaId === turn.scope.personaId
-      && source.public.experience && source.public.experience.expiresAt > this.now()
-      && fundingRecommendation(source, source.trace.finalOrder ?? []), "FUNDING_WORKFLOW_NOT_OFFERED");
+    requireCheck(definition && !fundingWorkflowIssue(definition), "FUNDING_WORKFLOW_NOT_OFFERED");
+    const expiry = fundingOfferExpiry(this.store, turn, launch, this.now());
     const id = turn.public.id;
     this.store.progress(id, "workflow", this.now());
     if (definition.mode === "agent") {
       const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
       const recent = await this.history.recent(conversation, turn.ordinal);
       const result = await runtime.funding.execute(
-        turn, definition, principalFor(turn.scope.principalId), recent, source.public.experience.expiresAt, signal,
+        turn, definition, principalFor(turn.scope.principalId), recent, expiry, signal,
       );
       if (result.outcome === "other_topic") return false;
       const now = this.now();

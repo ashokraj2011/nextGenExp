@@ -1,9 +1,10 @@
 import { DecisionTrace } from "./decision-trace";
 import { useEffect, useState, type ReactNode } from "react";
-import { Code2, FileText } from "lucide-react";
-import type { Bootstrap, ConversationView, TurnView } from "../../packages/contracts/api";
+import { FileText } from "lucide-react";
+import type { Bootstrap, ConversationView } from "../../packages/contracts/api";
+import { adminPaths } from "../../packages/contracts/admin-paths";
+import { diagnosticHref } from "./admin-navigation";
 import { api, type Trace } from "./api";
-import { DeveloperDrawer } from "./developer-drawer";
 
 function Detail({ label, children }: { label: string; children: ReactNode }) {
   return <div><dt>{label}</dt><dd>{children}</dd></div>;
@@ -116,22 +117,20 @@ function TraceView({ trace }: { trace: Trace }) {
   </div>;
 }
 
-export function Inspector({ configuration, conversation, latest, close, create, openLogs }: {
+export function Inspector({ configuration, conversation, turnId, create }: {
   configuration: Bootstrap;
   conversation?: ConversationView;
-  latest?: TurnView;
-  close: () => void;
+  turnId?: string;
   create: (personaId: string, scenarioId: string) => Promise<boolean>;
-  openLogs: (turnId: string) => void;
 }) {
   const [personaId, setPersonaId] = useState(conversation?.personaId ?? configuration.defaultPersonaId);
   const [scenarioId, setScenarioId] = useState(conversation?.scenarioId ?? configuration.defaultScenarioId);
-  const [selectedTurn, setSelectedTurn] = useState("");
+  const [selectedTurn, setSelectedTurn] = useState(conversation?.turns.some(({ id }) => id === turnId) ? turnId! : "");
   const [trace, setTrace] = useState<Trace>();
   const [traceError, setTraceError] = useState(false);
   const [creating, setCreating] = useState(false);
   const turns = conversation?.turns ?? [];
-  const displayedTurn = turns.find((turn) => turn.id === selectedTurn) ?? latest;
+  const displayedTurn = turns.find((turn) => turn.id === selectedTurn) ?? turns.at(-1);
   const persona = configuration.personas.find((value) => value.personaId === personaId)!;
   useEffect(() => {
     if (!displayedTurn) { setTrace(undefined); return; }
@@ -145,11 +144,13 @@ export function Inspector({ configuration, conversation, latest, close, create, 
     return () => { disposed = true; };
   }, [displayedTurn?.id, displayedTurn?.progress, displayedTurn?.status, displayedTurn?.feedback]);
 
-  return <DeveloperDrawer title="Developer inspector" icon={<Code2 size={17} />} closeLabel="Close inspector" close={close}>
+  return <section className="admin-diagnostics-content inspector-inline" aria-label="Turn inspection details">
+    <details className="admin-test-settings">
+      <summary>Start a test chat</summary>
     <form className="demo-settings" onSubmit={async (event) => {
       event.preventDefault();
       setCreating(true);
-      try { if (await create(personaId, scenarioId)) close(); }
+      try { await create(personaId, scenarioId); }
       finally { setCreating(false); }
     }}>
       <h3>Demo setup</h3>
@@ -166,6 +167,7 @@ export function Inspector({ configuration, conversation, latest, close, create, 
       </select>
       <button className="secondary-button" type="submit" disabled={creating}>Start with these settings</button>
     </form>
+    </details>
     <section className="trace-selector">
       <label htmlFor="trace-turn">Chat message</label>
       {turns.length ? <select id="trace-turn" value={selectedTurn} onChange={(event) => setSelectedTurn(event.target.value)}>
@@ -173,9 +175,9 @@ export function Inspector({ configuration, conversation, latest, close, create, 
         {turns.map((turn, index) => <option value={turn.id} key={turn.id}>{index + 1}. {turn.message.slice(0, 70)}</option>)}
       </select> : <p>Send a question to see its execution trace.</p>}
     </section>
-    {displayedTurn && <button className="secondary-button inspector-logs-link" type="button" aria-haspopup="dialog"
-      onClick={() => openLogs(displayedTurn.id)}><FileText size={16} aria-hidden="true" />Open call logs</button>}
+    {displayedTurn && <a className="secondary-button inspector-logs-link"
+      href={diagnosticHref(adminPaths.logs, conversation?.id, displayedTurn.id)}><FileText size={16} aria-hidden="true" />Open call logs</a>}
     {traceError && <p role="alert">The turn trace is unavailable.</p>}
     {trace?.turnId === displayedTurn?.id && trace && <TraceView trace={trace} />}
-  </DeveloperDrawer>;
+  </section>;
 }

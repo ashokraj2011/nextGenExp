@@ -1,7 +1,7 @@
 import { CapabilityStudio } from "./capability-studio";
 import "./agentic.css";
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowLeft, ArrowUp, FlaskConical, MessageSquare, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, FlaskConical, MessageSquare, Trash2 } from "lucide-react";
 import {
   defaultAgentFundingWorkflow, defaultFundingWorkflow, fundingAgentToolLimit, fundingToolKey, fundingToolKeys,
   fundingToolRef, fundingTools, fundingWorkflowIssue,
@@ -13,7 +13,8 @@ import {
 } from "../../packages/contracts/tool-setup";
 import { api, toolSetupErrorMessage as messageFor } from "./api";
 import { CcreRuleEditor } from "./ccre-rule-editor";
-import { readProfileSession, rememberActiveConversation, saveProfileSession } from "./conversation-storage";
+import { rememberActiveConversation } from "./conversation-storage";
+import { adminPaths } from "../../packages/contracts/admin-paths";
 import { TreatmentPreviewResult } from "./treatment-preview";
 import "./admin.css";
 
@@ -201,12 +202,9 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
         setChatError("Save the settings before starting a test chat.");
         return;
       }
-      const conversation = await api.newConversation(personaId, scenarioId);
-      if (readProfileSession() !== null && !saveProfileSession(conversation.personaId)) {
-        throw new Error("Couldn’t open this profile in the chat. Please try again.");
-      }
-      rememberActiveConversation(conversation.id);
-      location.assign("/chat");
+      const conversation = await api.newAdminConversation(personaId, scenarioId);
+      rememberActiveConversation(conversation.id, true);
+      location.assign(adminPaths.chat);
     } catch (error) {
       setChatError(messageFor(error));
     } finally {
@@ -337,7 +335,6 @@ export function AdminPage() {
   const [loaded, setLoaded] = useState<Awaited<ReturnType<typeof api.toolSetup>>>();
   const [error, setError] = useState("");
   useEffect(() => {
-    document.title = "Tool setup · Financial planning";
     let mounted = true;
     void api.toolSetup().then((setup) => { if (mounted) setLoaded(setup); })
       .catch((error: unknown) => { if (mounted) setError(messageFor(error)); });
@@ -345,13 +342,6 @@ export function AdminPage() {
   }, []);
 
   return <div className="admin-page">
-    <header className="admin-bar"><div>
-      <span>Financial planning</span>
-      <nav className="admin-page-links" aria-label="Administration">
-        <a className="icon-button" href="/admin/ui">UI builder</a>
-        <a className="icon-button" href="/chat"><ArrowLeft size={16} aria-hidden="true" />Back to chat</a>
-      </nav>
-    </div></header>
     <main className="admin-main">
       {loaded ? <ToolSetupForm {...loaded} /> : <div className="admin-heading">
         <h1>Tool setup</h1>

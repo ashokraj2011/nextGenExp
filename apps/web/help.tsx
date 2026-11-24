@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, ArrowUpRight, BookOpenText, Braces, Database, Download, GitBranch, House, LayoutGrid, ListFilter, MessageSquare, Sparkles } from "lucide-react";
+import { ArrowUpRight, BookOpenText, Braces, Database, Download, GitBranch, House, LayoutGrid, ListFilter, MessageSquare, Sparkles } from "lucide-react";
 import { DeveloperDrawer } from "./developer-drawer";
 import { ExchangePath, InteractionDiagram, treatmentExample, TreatmentProposalDiagram, type DiagramExchange } from "./help-architecture";
 import { contractList, helpContracts, type ContractFile } from "./help-contracts";
@@ -88,7 +88,7 @@ function ExchangeDetails({ exchange, close }: { exchange: DiagramExchange; close
           { direction: "Request", label: example.input.label, source: JSON.stringify(example.input.value, null, 2), emphasized: !reply },
           { direction: "Response", label: example.output.label, source: JSON.stringify(example.output.value, null, 2), emphasized: reply },
         ]} />
-        <p className="help-example-note">These examples use sample IDs. Open <strong>Logs</strong> in chat to see a real run of the demo.</p>
+        <p className="help-example-note">These examples use sample IDs. Choose a conversation in <strong>Logs</strong> to see a recorded run.</p>
       </>}
     </DeveloperDrawer>
   </div>;
@@ -141,7 +141,6 @@ export function Help() {
   return <div className="help-page">
     <header className="help-topbar">
       <div className="help-width help-topbar-inner">
-        <a className="help-home" href="/">PZN Lab</a>
         <nav aria-label="Help sections">
           <a href="#architecture">Architecture</a>
           <a href="#goal-planning">Multi-step requests</a>
@@ -150,7 +149,6 @@ export function Help() {
           <a href="#proposal">Proposal</a>
           <a href="#contracts">Contracts</a>
         </nav>
-        <a className="help-back" href="/"><ArrowLeft size={16} aria-hidden="true" /> Back to chat</a>
       </div>
     </header>
     <main className="help-width help-main">
@@ -234,7 +232,7 @@ export function Help() {
             </nav>
           </section>
         </div>
-        <p className="help-example-note">Open <strong>Logs</strong> in chat to see the requests and responses recorded when you send a message.</p>
+        <p className="help-example-note">Choose a conversation and message in <strong>Logs</strong> to see the recorded requests and responses.</p>
       </section>
       <section id="proposal" className="help-section" aria-labelledby="proposal-title">
         <div className="help-section-heading help-reference-heading">

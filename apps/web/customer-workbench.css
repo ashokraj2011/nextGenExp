@@ -1,0 +1,5 @@
+.thread.customer-workbench { --thread-width: 1040px; }
+
+@media (min-width: 1120px) {
+  .customer-workbench .composer-starters { flex-wrap: wrap; overflow: visible; }
+}

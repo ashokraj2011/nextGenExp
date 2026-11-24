@@ -104,14 +104,12 @@ function drawSavings(canvas: HTMLCanvasElement, { history, targetCents }: Pick<G
   }
 }
 
-export function GoalProgressDetails({ goal }: { goal: GoalProgress }) {
+export function SavingsGrowthChart({ goal }: { goal: GoalProgress }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const { history, targetCents } = goal;
   const first = history[0];
   const latest = history[history.length - 1];
   const saved = latest.savedCents;
-  const remaining = Math.max(0, targetCents - saved);
-  const percent = Math.min(100, Math.floor(saved * 100 / targetCents));
   const change = saved - first.savedCents;
 
   useEffect(() => {
@@ -123,6 +121,29 @@ export function GoalProgressDetails({ goal }: { goal: GoalProgress }) {
     paint();
     return () => observer.disconnect();
   }, [goal]);
+
+  return <figure className="goal-figure">
+    <figcaption className="goal-chart-heading">
+      <div>
+        <h4>Savings growth</h4>
+        <p>{monthFull.format(monthDate(first.month))} to {monthFull.format(monthDate(latest.month))}</p>
+      </div>
+      <strong className="goal-change">{change > 0 ? "+" : ""}{formatPortfolioAmount(change)}</strong>
+    </figcaption>
+    <canvas
+      ref={canvas}
+      role="img"
+      aria-label={`Down payment savings from ${formatPortfolioAmount(first.savedCents)} to ${formatPortfolioAmount(saved)} toward a ${formatPortfolioAmount(targetCents)} target.`}
+    />
+    <div className="goal-legend" aria-hidden="true"><span>Saved</span><span>Target</span></div>
+  </figure>;
+}
+
+export function GoalProgressDetails({ goal }: { goal: GoalProgress }) {
+  const { history, targetCents } = goal;
+  const saved = history[history.length - 1].savedCents;
+  const remaining = Math.max(0, targetCents - saved);
+  const percent = Math.min(100, Math.floor(saved * 100 / targetCents));
 
   return <div className="goal-progress-details">
     <div className="goal-progress-layout">
@@ -137,21 +158,7 @@ export function GoalProgressDetails({ goal }: { goal: GoalProgress }) {
           <strong>{percent}% saved</strong>
         </div>
       </div>
-      <figure className="goal-figure">
-        <figcaption className="goal-chart-heading">
-          <div>
-            <h4>Savings growth</h4>
-            <p>{monthFull.format(monthDate(first.month))} to {monthFull.format(monthDate(latest.month))}</p>
-          </div>
-          <strong className="goal-change">{change > 0 ? "+" : ""}{formatPortfolioAmount(change)}</strong>
-        </figcaption>
-        <canvas
-          ref={canvas}
-          role="img"
-          aria-label={`Down payment savings from ${formatPortfolioAmount(first.savedCents)} to ${formatPortfolioAmount(saved)} toward a ${formatPortfolioAmount(targetCents)} target.`}
-        />
-        <div className="goal-legend" aria-hidden="true"><span>Saved</span><span>Target</span></div>
-      </figure>
+      <SavingsGrowthChart goal={goal} />
     </div>
     <details className="inline-details goal-history">
       <summary>View monthly values <ChevronDown size={14} aria-hidden="true" /></summary>

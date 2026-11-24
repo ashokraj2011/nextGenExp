@@ -1,12 +1,17 @@
 const activeConversationKey = "pzn-active-conversation";
+const adminConversationKey = "pzn-active-admin-conversation";
 const profileSessionKey = "pzn-profile-session";
 
-export function readActiveConversation() {
-  try { return localStorage.getItem(activeConversationKey); } catch { return null; }
+export function readActiveConversation(admin = false) {
+  try { return localStorage.getItem(admin ? adminConversationKey : activeConversationKey); } catch { return null; }
 }
 
-export function rememberActiveConversation(id: string) {
-  try { localStorage.setItem(activeConversationKey, id); } catch { /* Storage may be restricted. */ }
+export function rememberActiveConversation(id: string | null, admin = false) {
+  const key = admin ? adminConversationKey : activeConversationKey;
+  try {
+    if (id) localStorage.setItem(key, id);
+    else localStorage.removeItem(key);
+  } catch { /* Storage may be restricted. */ }
 }
 
 // A missing entry opens chat directly. An empty entry records a sign-out.

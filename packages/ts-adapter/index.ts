@@ -3,6 +3,7 @@ import { contextCatalogSchema, type ContextCatalog, type PropensityResult } from
 import { workflowRecommendationSchema, type TreatmentRecommendations } from "../contracts/funding-workflow";
 import { portfolioSnapshotSchema } from "../contracts/portfolio";
 import { mockCcreRuleSchema, normalizedIdsSchema, treatmentOverride, type MockCcreRule, type TreatmentOverride } from "../contracts/tool-setup";
+import { pendingActionsContext } from "../contracts/workspace";
 import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../portfolio-snapshot";
 import rawCatalog from "../../fixtures/contexts.json";
 import rawScenarios from "../../fixtures/treatment-scenarios.json";
@@ -40,9 +41,10 @@ export const fixtureEligibleSets = [
 ];
 export const activeContexts = catalog.contexts.filter((context) => context.active);
 export const activeContextCatalog: ContextCatalog = { ...catalog, contexts: activeContexts };
+export const treatmentContexts = [...activeContexts, { contextId: pendingActionsContext, displayName: "Pending actions" }];
 if (new Set(catalog.contexts.map((entry) => entry.contextId)).size !== catalog.contexts.length
   || scenariosById.size !== tsFixtures.scenarios.length
-  || activeContexts.some(({ contextId }) => !Object.hasOwn(tsFixtures.base, contextId))
+  || treatmentContexts.some(({ contextId }) => !Object.hasOwn(tsFixtures.base, contextId))
   || host.personas.some((persona) => persona.allowedScenarios.some((scenario) => !scenariosById.has(scenario)))) {
   throw new Error("Invalid TS fixture bindings");
 }
@@ -107,7 +109,7 @@ export class FixtureTsAdapter implements TsAdapter {
   async selectEligibleContent({ mid, context }: TreatmentRequest, signal?: AbortSignal) {
     signal?.throwIfAborted();
     const persona = this.personaFor(mid);
-    if (!activeContexts.some((entry) => entry.contextId === context)) {
+    if (!treatmentContexts.some((entry) => entry.contextId === context)) {
       throw new Error("UNCONFIGURED_TS_SCOPE");
     }
 

@@ -1,5 +1,5 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, LayoutGrid, LayoutTemplate, List, Plus, Type, X } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, Check, LayoutGrid, LayoutTemplate, List, Plus, Type, X } from "lucide-react";
 import {
   layoutComponents, maxLayoutDescription, maxLayoutSlots, maxLayoutTargets, maxLayouts, targetKey,
   type LayoutComponent, type LayoutSlot, type UiDesign, type UiLayoutCatalog, type UiLayoutChange, type UiLayoutRecord,
@@ -24,19 +24,6 @@ const starter = (): UiDesign => ({
 });
 const componentLabel = (id: LayoutComponent) => layoutComponents.find((component) => component.id === id)!.label;
 const normalized = (design: UiDesign) => JSON.stringify(design);
-
-function BuilderHeader() {
-  return <header className="ui-builder-header">
-    <div className="ui-builder-width ui-builder-nav">
-      <a href="/chat" className="ui-builder-brand">PZN Lab</a>
-      <nav aria-label="Administration">
-        <a href="/admin">Tool setup</a>
-        <a href="/admin/ui" aria-current="page">UI builder</a>
-      </nav>
-      <a href="/chat" className="ui-builder-back"><ArrowLeft size={16} aria-hidden="true" /> Back to chat</a>
-    </div>
-  </header>;
-}
 
 function LayoutPreview({ design }: { design: UiDesign }) {
   const [preview, setPreview] = useState<DisplayExperience>();
@@ -320,14 +307,12 @@ export function UiBuilder() {
   const [catalog, setCatalog] = useState<UiLayoutCatalog>();
   const [error, setError] = useState("");
   useEffect(() => {
-    document.title = "UI builder · PZN Lab";
     let active = true;
     void api.uiLayouts().then((value) => { if (active) setCatalog(value); },
       (reason: unknown) => { if (active) setError(toolSetupErrorMessage(reason)); });
     return () => { active = false; };
   }, []);
   return <div className="ui-builder">
-    <BuilderHeader />
     {catalog ? <UiWorkspace initial={catalog} /> : <main className="ui-builder-width ui-builder-main">
       <h1>UI builder</h1>{error ? <p className="ui-builder-error" role="alert">{error}</p> : <p role="status">Loading layouts…</p>}
     </main>}

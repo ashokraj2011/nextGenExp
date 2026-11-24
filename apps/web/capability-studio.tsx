@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { capabilityRef, type CapabilityManifest } from "../../packages/contracts/agentic";
 import { api, toolSetupErrorMessage } from "./api";
-import { readProfileSession, rememberActiveConversation, saveProfileSession } from "./conversation-storage";
+import { rememberActiveConversation } from "./conversation-storage";
+import { adminPaths } from "../../packages/contracts/admin-paths";
 
 type Setup = Awaited<ReturnType<typeof api.capabilities>>;
 function Studio({ initial }: { initial: Setup }) {
@@ -53,9 +54,8 @@ function Studio({ initial }: { initial: Setup }) {
   async function preview() {
     await run(async () => {
       const { conversation } = await api.previewCapability({ id: chosen.id, version: chosen.version }, persona, message);
-      if (readProfileSession() !== null) saveProfileSession(conversation.personaId);
-      rememberActiveConversation(conversation.id);
-      location.assign("/chat");
+      rememberActiveConversation(conversation.id, true);
+      location.assign(adminPaths.chat);
     });
   }
   async function simulate() {

@@ -2,7 +2,7 @@ import "./published-ui.css";
 import type { z } from "zod";
 import { CapabilityForm, FactSummary, SavingsChart, SavingsMetric, formEnvelope } from "./agentic-experience";
 import "./agentic.css";
-import { Component, createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { Component, createContext, lazy, Suspense, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { A2uiSurface, createComponentImplementation, MarkdownComponentContext, type ReactCatalogComponent } from "@a2ui/react";
 import {
   ActionMessageSchema, Catalog, CreateSurfaceMessageSchema, MessageProcessor, basicCatalog, injectBasicCatalogStyles,
@@ -16,9 +16,10 @@ import {
   PZN_CATALOG_ID, FOLLOW_UP_EVENT, contentCard, comparison, stepList, metricSummary, experienceRoot, followUpButton, ruleCreation, portfolioSnapshot,
   capabilityForm, factSummary, layoutText, savingsChart, savingsMetric, fundingOptions, fundingPreview, goalProgressCard, validatePznSurface, type DisplayBlock, type DisplayExperience,
 } from "../../packages/contracts/surface";
-import { RuleCreationBlock } from "./rule-creation-block";
 import { PortfolioSnapshotBlock } from "./portfolio-snapshot";
 import { GoalProgressDetails } from "./goal-progress";
+
+const RuleCreationBlock = lazy(() => import("./rule-creation-block").then(({ RuleCreationBlock }) => ({ default: RuleCreationBlock })));
 
 const icons = {
   PznContentCard: BookOpenText,
@@ -44,6 +45,8 @@ function LayoutText({ heading, body, tone }: z.infer<typeof layoutText.schema>) 
 
 function RuleBlock(props: Extract<DisplayBlock, { component: "PznRuleCreation" }>["props"]) {
   const { preview } = useContext(SurfaceActions);
+  const { allowRuleCreation } = useContext(ExperienceControls);
+  if (!preview && !allowRuleCreation) return null;
   return preview ? <section className="content-card">
     <h3>Create an eligibility rule</h3>
     <dl className="axe-facts">
@@ -51,7 +54,7 @@ function RuleBlock(props: Extract<DisplayBlock, { component: "PznRuleCreation" }
       <div><dt>Content</dt><dd>Available balance</dd></div>
       <div><dt>Condition</dt><dd>Customer status</dd></div>
     </dl>
-  </section> : <RuleCreationBlock {...props} />;
+  </section> : <Suspense fallback={<p role="status">Loading rule editor…</p>}><RuleCreationBlock {...props} /></Suspense>;
 }
 
 function surfaceClass({ layout, theme, preview }: { layout?: string; theme?: string; preview?: boolean }) {
@@ -271,6 +274,7 @@ class SurfaceBoundary extends Component<{ children: ReactNode; fallback: ReactNo
 }
 type SurfaceControls = {
   activeExperienceId?: string;
+  allowRuleCreation?: boolean;
   followUp: (id: string, envelope: ActionMessage) => void;
   rendered: (id: string, fallback?: boolean) => void;
 };

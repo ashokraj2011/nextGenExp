@@ -9,7 +9,7 @@ import { ASK_USER, defineTool, estimateJsonTokens, estimateTokens, SField, ToolE
 import type { ConfigDocument, DefineToolInput, JsonObject, JsonValue, Principal, RunRecord, RunResult, ToolHandlerContext, Verifier } from "@sfield/core";
 import { SqlitePersistence } from "@sfield/store-sqlite";
 import host from "../../fixtures/host.json";
-import { MAX_MESSAGE_LENGTH, metricReadingSchema, TURN_DEADLINE, type BalanceProof } from "../../packages/contracts/domain";
+import { MAX_MESSAGE_LENGTH, metricReadingSchema, TURN_DEADLINE, type BalanceProof, type Scope } from "../../packages/contracts/domain";
 import {
   fundingAgentId, fundingAgentToolLimit, fundingOptionsSchema, fundingToolRef, fundingToolVersion,
   resolveFundingWorkflow, treatmentRecommendationsVersion,
@@ -28,8 +28,10 @@ import {
   leavingWorkQuestion, portfolioSummaryQuestion, routingIntents, routingQuestions,
   ROUTING_HISTORY_TURNS, ROUTING_HISTORY_REQUEST_LENGTH, ROUTING_HISTORY_REPLY_LENGTH,
 } from "../../packages/contracts/routing-intents";
-import { sfieldTools, toolKeys, toolVersion, type MockCcreEvaluation, type ToolKey } from "../../packages/contracts/tool-setup";
-import { activeContextCatalog, fixtureEligibleSets, FixtureTsAdapter, type ContextScoresRequest } from "../../packages/ts-adapter";
+import { sfieldTools, toolKeys, toolVersion, type MockCcreEvaluation, type ToolKey, type ToolSetup } from "../../packages/contracts/tool-setup";
+import { activeContextCatalog, fixtureEligibleSets, FixtureTsAdapter, type ContextScoresRequest, type FixtureState } from "../../packages/ts-adapter";
+import { nextStepContext, workspaceFundingContext, type WorkspaceNextStep } from "../../packages/contracts/workspace";
+import { nextStepRecommendation } from "./funding-offer";
 import { mockRuleGlossary } from "../../packages/rule-glossary";
 import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import { fixtureGoalProgressProvider, type GoalProgressProvider } from "../../packages/goal-progress";
@@ -348,22 +350,43 @@ export class Runtime {
     return { persona, agentGuided: true };
   }
 
-  private treatmentAdapter(turn: TurnRecord, conversation: ConversationRecord) {
+  private treatmentAdapter(state: FixtureState, setup: ToolSetup | undefined, scope: Pick<Scope, "principalId" | "personaId">) {
     return new FixtureTsAdapter(
-      { scenarioId: conversation.scenarioId, ordinal: turn.ordinal },
-      turn.toolSetup?.treatmentOverrides, turn.toolSetup?.ccreRules, this.portfolioSnapshots, this.store.axe.fundingStatus(turn.scope),
+      state, setup?.treatmentOverrides, setup?.ccreRules, this.portfolioSnapshots, this.store.axe.fundingStatus(scope),
     );
+  }
+
+  private turnTreatmentAdapter(turn: TurnRecord, conversation: ConversationRecord) {
+    return this.treatmentAdapter({ scenarioId: conversation.scenarioId, ordinal: turn.ordinal }, turn.toolSetup, turn.scope);
+  }
+
+  async workspaceNextStep(principalId: string, personaId: string): Promise<WorkspaceNextStep | null> {
+    const persona = host.personas.find((entry) => entry.personaId === personaId);
+    if (!persona) return null;
+    const setup = this.store.toolSetup(principalId);
+    if (!setup.enabled.selection) return null;
+    const adapter = this.treatmentAdapter({ scenarioId: host.defaultScenarioId, ordinal: 1 }, setup, { principalId, personaId });
+    const result = await adapter.selectEligibleContent({ mid: persona.syntheticMid, context: nextStepContext }, AbortSignal.timeout(5000));
+    const { content, workflow } = nextStepRecommendation(result.recommendations, setup);
+    if (!content) return null;
+    const reason = content.contentId === "fund_account" && this.effectiveFundingStatus(persona, principalId) === "unfunded"
+      ? "This account is awaiting its first deposit" : undefined;
+    return { title: content.title, body: content.body, reason, canPreviewFunding: Boolean(workflow) };
   }
 
   private async selectTreatment({ turnRef, routeDecisionId }: JsonObject, ctx: ToolHandlerContext) {
     const { turn, conversation, persona } = this.scopedRegistryTurn(turnRef, ctx, "selection");
-    requireCheck(turn.route?.routeDecisionId === routeDecisionId && turn.route && turn.catalog && turn.attempts.route, "ROUTE_REQUIRED");
-    verifyRoute(turn.route, turn.catalog, turn.scope, turn.attempts.route.runId, this.now());
-    const input = { mid: persona.syntheticMid, context: turn.route.contextId };
+    let context: string | undefined = routeDecisionId === turn.public.id ? workspaceFundingContext(turn.origin) : undefined;
+    if (!context) {
+      requireCheck(turn.route?.routeDecisionId === routeDecisionId && turn.route && turn.catalog && turn.attempts.route, "ROUTE_REQUIRED");
+      verifyRoute(turn.route, turn.catalog, turn.scope, turn.attempts.route.runId, this.now());
+      context = turn.route.contextId;
+    }
+    const input = { mid: persona.syntheticMid, context };
     let ccre: MockCcreEvaluation | undefined;
     try {
-      const result = await this.treatmentAdapter(turn, conversation).selectEligibleContent(input, ctx.signal);
-      if (isPortfolioSummary(turn.route)) {
+      const result = await this.turnTreatmentAdapter(turn, conversation).selectEligibleContent(input, ctx.signal);
+      if (turn.route && isPortfolioSummary(turn.route)) {
         requireCheck(this.store.update(turn.public.id, (row) => { row.portfolioForRule = result.portfolio ?? undefined; }), "TURN_INACTIVE");
       }
       ccre = result.ccre;
@@ -400,7 +423,7 @@ export class Runtime {
         inputs: turnInputSchema, outputs: contextResultSchema,
         handler: ({ turnRef }, ctx) => {
           const { turn, conversation } = this.scopedRegistryTurn(turnRef, ctx, "catalog");
-          return this.treatmentAdapter(turn, conversation).listContexts(ctx.signal);
+          return this.turnTreatmentAdapter(turn, conversation).listContexts(ctx.signal);
         },
       }),
       read("propensity", {
@@ -418,7 +441,7 @@ export class Runtime {
               this.store.update(turn.public.id, (row) => { row.treatmentScores = { scopeId: ctx.runId, input }; });
             } catch { /* Diagnostic storage cannot change the tool result. */ }
           }
-          return this.treatmentAdapter(turn, conversation).getContextScores(input, ctx.signal);
+          return this.turnTreatmentAdapter(turn, conversation).getContextScores(input, ctx.signal);
         },
       }),
       read("selection", {

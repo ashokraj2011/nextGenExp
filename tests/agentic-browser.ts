@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { startTestPreview } from "./preview";
+import { openAdmin, openCustomerChat } from "./browser-navigation";
+import { adminPaths } from "../packages/contracts/admin-paths";
 
 const app = await startTestPreview();
 const browser = await chromium.launch();
@@ -19,24 +21,24 @@ try {
   await latest().getByRole("button", { name: "Save savings plan", exact: true }).click();
   await latest().getByText("Your savings plan was saved.", { exact: true }).waitFor();
 
-  await page.getByRole("button", { name: "Open developer inspector" }).click();
-  const dialog = page.getByRole("dialog", { name: "Developer inspector" });
-  await dialog.getByRole("heading", { name: "Experience decision trace" }).waitFor();
-  await dialog.getByText("Verified Experience IR", { exact: true }).click();
-  assert.match(await dialog.locator('pre[aria-label="Verified Experience IR"]').innerText(), /evidenceId/);
-  await dialog.getByRole("button", { name: "Close inspector" }).click();
-  await page.getByRole("button", { name: "Open call logs" }).click();
-  const logs = page.getByRole("dialog", { name: "Call logs" });
+  await openAdmin(page, "inspector");
+  const inspector = page.getByRole("region", { name: "Turn inspection details" });
+  await inspector.getByRole("heading", { name: "Experience decision trace" }).waitFor();
+  await inspector.getByText("Verified Experience IR", { exact: true }).click();
+  assert.match(await inspector.locator('pre[aria-label="Verified Experience IR"]').innerText(), /evidenceId/);
+  await inspector.getByRole("link", { name: "Open call logs", exact: true }).click();
+  const logs = page.getByRole("region", { name: "Call log details" });
   await logs.getByText("Experience Agent and tools").waitFor();
   await logs.getByText("savings.projection.calculate@1.0.0 · succeeded", { exact: true }).click();
   await logs.getByText("savings.projection.calculate@1.0.0 tool response", { exact: true }).waitFor();
-  await logs.getByRole("button", { name: "Close call logs" }).click();
+  await openCustomerChat(page);
 
   await page.setViewportSize({ width: 390, height: 840 });
+  await latest().getByRole("img", { name: /Projected savings rise/ }).waitFor();
   assert.ok(await latest().getByRole("img", { name: /Projected savings rise/ }).isVisible());
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
   await page.setViewportSize({ width: 1280, height: 840 });
-  await page.getByRole("link", { name: "Tool setup" }).click();
+  await openAdmin(page, "tools");
   await page.getByRole("heading", { name: "Capability Studio" }).waitFor();
   await page.getByText("Evaluation", { exact: true }).click();
   await page.getByRole("table", { name: "Test mode results" }).getByRole("rowheader", { name: "Multi-step" }).waitFor();
@@ -46,6 +48,7 @@ try {
   await page.getByLabel("Preview request").fill("How much do I need to save each month to reach my house deposit target?");
   await page.getByRole("button", { name: "Run capability in chat", exact: true }).click();
   await latest().getByRole("heading", { name: "Required monthly savings", exact: true }).waitFor();
+  assert.equal(new URL(page.url()).pathname, adminPaths.chat);
   console.log("Agentic chat, A2UI revisions, Inspector, Logs and Capability Studio passed.");
 } finally {
   await browser.close();
