@@ -1,3 +1,5 @@
+import { uiDesignSchema, uiLayoutChangeSchema } from "../../packages/contracts/ui-layout";
+import { previewUiLayout, uiTargetOptions, validateUiDesign } from "./ui-layouts";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { capabilityIdSchema, capabilityRef, customerEventSchema, versionSchema, type ExecutionBudget } from "../../packages/contracts/agentic";
 import { capabilityTools } from "../../packages/capabilities";
@@ -44,7 +46,7 @@ const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".woff2": "font/woff2", ".woff": "font/woff", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml",
 };
-const pagePaths = new Set(["/", "/chat", "/login", "/help", "/planning", "/admin", "/__test/a2ui"]);
+const pagePaths = new Set(["/", "/chat", "/login", "/help", "/planning", "/admin", "/admin/ui", "/__test/a2ui"]);
 
 function json(res: ServerResponse, body: unknown, status = 200) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
@@ -155,7 +157,7 @@ export async function startApp(options: Options) {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
     if (!pathname.startsWith("/api/")) {
-      if (pathname === "/admin" && !inspectorEnabled) throw new ApiError(404, "not_found", "This page is unavailable.");
+      if ((pathname === "/admin" || pathname === "/admin/ui") && !inspectorEnabled) throw new ApiError(404, "not_found", "This page is unavailable.");
       if (vite) {
         vite.middlewares(req, res, () => { if (!res.headersSent) res.writeHead(404).end(); });
       } else if (req.method === "GET") {
@@ -192,6 +194,19 @@ export async function startApp(options: Options) {
     }
     if (resource === "admin" && inspectorEnabled && !operation) {
       const toolSetupLimit = 768 * 1024;
+      if (id === "ui-layouts" && method === "GET") {
+        return json(res, { layouts: store.listUiLayouts(principalId), targets: uiTargetOptions(registry, principalId) });
+      }
+      if (id === "ui-layouts" && method === "POST") {
+        const change = await body(req, uiLayoutChangeSchema, 32 * 1024);
+        if (change.operation !== "unpublish") validateUiDesign(change.design, uiTargetOptions(registry, principalId), change.operation === "publish");
+        return json(res, store.changeUiLayout(principalId, change, now()));
+      }
+      if (id === "ui-layout-preview" && method === "POST") {
+        const design = await body(req, uiDesignSchema, 32 * 1024);
+        validateUiDesign(design, uiTargetOptions(registry, principalId), false);
+        return json(res, await previewUiLayout(design));
+      }
       if (id === "evaluation" && method === "GET") {
         return json(res, { mode, rows: await runtime?.evaluation(principalId) ?? [] });
       }

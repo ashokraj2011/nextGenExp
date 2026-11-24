@@ -7,6 +7,7 @@ export type ContextRoutingInput = {
   catalogSnapshotId: string;
   catalog: ContextCatalog;
   intentCatalog: readonly RoutingIntent[];
+  uiDescriptions?: { intentId: RoutingIntentId; description: string }[];
   propensity?: PropensityResult;
   allowedQuestions: readonly string[];
   canCreateRule: boolean;

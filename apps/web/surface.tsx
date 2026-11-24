@@ -1,3 +1,5 @@
+import "./published-ui.css";
+import type { z } from "zod";
 import { CapabilityForm, FactSummary, SavingsChart, SavingsMetric, formEnvelope } from "./agentic-experience";
 import "./agentic.css";
 import { Component, createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
@@ -12,7 +14,7 @@ import type { FundingOptions, FundingPreview } from "../../packages/contracts/fu
 import { formatPortfolioAmount } from "../../packages/contracts/portfolio";
 import {
   PZN_CATALOG_ID, FOLLOW_UP_EVENT, contentCard, comparison, stepList, metricSummary, experienceRoot, followUpButton, ruleCreation, portfolioSnapshot,
-  capabilityForm, factSummary, savingsChart, savingsMetric, fundingOptions, fundingPreview, goalProgressCard, validatePznSurface, type DisplayBlock, type DisplayExperience,
+  capabilityForm, factSummary, layoutText, savingsChart, savingsMetric, fundingOptions, fundingPreview, goalProgressCard, validatePznSurface, type DisplayBlock, type DisplayExperience,
 } from "../../packages/contracts/surface";
 import { RuleCreationBlock } from "./rule-creation-block";
 import { PortfolioSnapshotBlock } from "./portfolio-snapshot";
@@ -33,11 +35,35 @@ const blockLabels = {
   PznGoalProgress: "Home-buying goal",
 };
 
+function LayoutText({ heading, body, tone }: z.infer<typeof layoutText.schema>) {
+  return <section className={"layout-text layout-text-" + tone}>
+    {heading && <h3>{heading}</h3>}
+    {body && <p>{body}</p>}
+  </section>;
+}
+
+function RuleBlock(props: Extract<DisplayBlock, { component: "PznRuleCreation" }>["props"]) {
+  const { preview } = useContext(SurfaceActions);
+  return preview ? <section className="content-card">
+    <h3>Create an eligibility rule</h3>
+    <dl className="axe-facts">
+      <div><dt>Context</dt><dd>Balances</dd></div>
+      <div><dt>Content</dt><dd>Available balance</dd></div>
+      <div><dt>Condition</dt><dd>Customer status</dd></div>
+    </dl>
+  </section> : <RuleCreationBlock {...props} />;
+}
+
+function surfaceClass({ layout, theme, preview }: { layout?: string; theme?: string; preview?: boolean }) {
+  return "experience-flow" + (layout === "dashboard" ? " axe-dashboard" : "")
+    + (theme === "evergreen" ? " published-ui" : "") + (preview ? " preview-ui" : "");
+}
+
 function FundingPreviewBlock({ amountCents, method }: FundingPreview) {
-  const { enabled } = useContext(SurfaceActions);
+  const { enabled, preview } = useContext(SurfaceActions);
   return <section className="content-card" aria-label="Funding preview">
     <h3>Funding preview</h3>
-    {!enabled && <p className="disclosure">Earlier preview</p>}
+    {!enabled && !preview && <p className="disclosure">Earlier preview</p>}
     <p className="content-body">{formatPortfolioAmount(amountCents)} by {method.label.toLowerCase()}</p>
     <dl className="compare-grid">
       <div className="compare-column"><dt>From</dt><dd>{method.from}</dd></div>
@@ -69,7 +95,8 @@ function ContentBlock({ block, form }: { block: DisplayBlock; form?: { experienc
   if (block.component === factSummary.name) return <FactSummary {...block.props} />;
   if (block.component === capabilityForm.name) return form && <CapabilityForm props={block.props} enabled={form.enabled}
     dispatch={(id, values) => controls.followUp(form.experienceId, formEnvelope(form.experienceId, form.componentId, id, values))} />;
-  if (block.component === ruleCreation.name) return <RuleCreationBlock {...block.props} />;
+  if (block.component === layoutText.name) return <LayoutText {...block.props} />;
+  if (block.component === ruleCreation.name) return <RuleBlock {...block.props} />;
   if (block.component === portfolioSnapshot.name) return <PortfolioSnapshotBlock {...block.props} />;
   if (block.component === fundingPreview.name) return <FundingPreviewBlock {...block.props} />;
   if (block.component === fundingOptions.name) return <FundingOptionsBlock {...block.props} />;
@@ -145,9 +172,10 @@ function Introduction({ intro, question, partial }: { intro: string; question: s
   </>;
 }
 
-const SurfaceActions = createContext({ enabled: false });
+const SurfaceActions = createContext({ enabled: false, preview: false });
 const pznCatalog = new Catalog<ReactCatalogComponent>(PZN_CATALOG_ID, "1.0", [
   createComponentImplementation(experienceRoot, ({ props, buildChild }) => {
+    const { preview } = useContext(SurfaceActions);
     const children = Array.isArray(props.children) ? props.children.map((child) => (
       typeof child === "string" ? { id: child, basePath: undefined } : child
     )) : [];
@@ -155,7 +183,7 @@ const pznCatalog = new Catalog<ReactCatalogComponent>(PZN_CATALOG_ID, "1.0", [
     const content = children.slice(0, count);
     const followUps = children.slice(count);
     return (
-      <div className={"experience-flow" + (props.layout === "dashboard" ? " axe-dashboard" : "")} data-renderer="a2ui">
+      <div className={surfaceClass({ ...props, preview })} data-renderer="a2ui">
         <Introduction intro={props.intro} question={props.question} partial={props.partial} />
         {content.map(({ id, basePath }) => <div className="surface-child" key={id}>{buildChild(id, basePath)}</div>)}
         {followUps.length > 0 && <div className="follow-up-list">{followUps.map(({ id, basePath }) => <div key={id}>{buildChild(id, basePath)}</div>)}</div>}
@@ -170,7 +198,8 @@ const pznCatalog = new Catalog<ReactCatalogComponent>(PZN_CATALOG_ID, "1.0", [
   createComponentImplementation(portfolioSnapshot, ({ props }) => <PortfolioSnapshotBlock {...props} />),
   createComponentImplementation(fundingPreview, ({ props }) => <FundingPreviewBlock {...props} />),
   createComponentImplementation(fundingOptions, ({ props }) => <FundingOptionsBlock {...props} />),
-  createComponentImplementation(ruleCreation, ({ props }) => <RuleCreationBlock {...props} />),
+  createComponentImplementation(ruleCreation, ({ props }) => <RuleBlock {...props} />),
+  createComponentImplementation(layoutText, ({ props }) => <LayoutText {...props} />),
   createComponentImplementation(savingsChart, ({ props }) => <SavingsChart {...props} />),
   createComponentImplementation(savingsMetric, ({ props }) => <SavingsMetric {...props} />),
   createComponentImplementation(factSummary, ({ props }) => <FactSummary {...props} />),
@@ -252,10 +281,11 @@ export const ExperienceControls = createContext<SurfaceControls>({
 function CanonicalFallback({ experience, enabled }: { experience: DisplayExperience; enabled: boolean }) {
   const controls = useContext(ExperienceControls);
   const { experienceId } = experience;
+  const { preview } = useContext(SurfaceActions);
   const rendered = useRef(controls.rendered);
   rendered.current = controls.rendered;
   useEffect(() => rendered.current(experienceId, true), [experienceId]);
-  return <div className="experience-flow" data-renderer="fallback">
+  return <div className={surfaceClass({ ...experience, preview })} data-renderer="fallback">
     <Introduction intro={experience.intro} question={experience.question} partial={experience.partial} />
     {experience.blocks.map((block, index) => <ContentBlock key={index} block={block} form={{ experienceId, componentId: "block_" + (index + 1), enabled }} />)}
     {experience.actions.length > 0 && <div className="follow-up-list">
@@ -273,7 +303,7 @@ function CanonicalFallback({ experience, enabled }: { experience: DisplayExperie
   </div>;
 }
 
-function ExperiencePart({ data }: { data: DisplayExperience }) {
+function ExperiencePart({ data, preview = false }: { data: DisplayExperience; preview?: boolean }) {
   const { experienceId, messages, expiresAt } = data;
   const controls = useContext(ExperienceControls);
   const [expired, setExpired] = useState(() => Date.now() >= expiresAt);
@@ -283,8 +313,8 @@ function ExperiencePart({ data }: { data: DisplayExperience }) {
     const timer = setTimeout(() => setExpired(true), delay);
     return () => clearTimeout(timer);
   }, [expiresAt]);
-  const enabled = controls.activeExperienceId === experienceId && !expired;
-  return <SurfaceActions.Provider value={{ enabled }}>
+  const enabled = !preview && controls.activeExperienceId === experienceId && !expired;
+  return <SurfaceActions.Provider value={{ enabled, preview }}>
     <SurfaceBoundary key={experienceId} fallback={<CanonicalFallback experience={data} enabled={enabled} />}>
       <MountedSurface id={experienceId} input={messages[0]}
         onAction={(envelope) => controls.followUp(experienceId, envelope)}
@@ -292,6 +322,10 @@ function ExperiencePart({ data }: { data: DisplayExperience }) {
     </SurfaceBoundary>
   </SurfaceActions.Provider>;
 }
+export function ExperienceLayoutPreview({ data }: { data: DisplayExperience }) {
+  return <ExperiencePart data={data} preview />;
+}
+
 export const ExperienceDataUI = makeAssistantDataUI<DisplayExperience>({ name: "experience-surface", render: ExperiencePart });
 
 export function BasicSmoke({ input }: { input: CreateSurfaceMessage }) {

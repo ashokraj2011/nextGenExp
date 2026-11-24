@@ -101,6 +101,12 @@ The Experience Agent receives a capability shortlist and returns a structured pl
 
 Run `npm run eval:agentic -- --openai` with the server’s OpenAI key to evaluate the multi-step scenarios and measure them alongside fast-path requests. Omit `--openai` to use the configured gateway or Copilot ACP provider.
 
+### Build a layout for a chat intent
+
+Open **Tool setup → UI builder**. Name the layout and describe when it should appear. Attach a chat intent or a capability, add text sections and approved components, then arrange them in the order you want. The preview uses sample data.
+
+**Save draft** keeps a version available for editing. **Publish** applies the layout to new chat messages in the current workspace. Each attachment can use one published layout. Open **Inspector** on the resulting chat message to see the matched intent or capability and layout revision. Chat uses the verified results and actions for that turn, including any eligible results beyond the layout's component list.
+
 ### Intent routing and clarification
 
 sfield sends the latest message, up to four recent turns, and the available intent catalog to the Context Router. History includes clarification questions, assistant reply text, and titles of previously displayed cards. For demo content requests, the LLM selects an intent ID. The host verifies the choice and maps it to a task and Treatment Selector context.

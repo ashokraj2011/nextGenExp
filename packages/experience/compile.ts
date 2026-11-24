@@ -121,11 +121,12 @@ export function compileChatReply(text: string, outcome: "reply" | "no_match" | "
 }
 
 export function buildSurface(
-  displayFields: Pick<DisplayExperience, "status" | "outcome" | "intro" | "question" | "partial" | "expiresAt" | "layout">,
+  displayFields: Pick<DisplayExperience, "status" | "outcome" | "intro" | "question" | "partial" | "expiresAt" | "layout" | "theme">,
   blocks: DisplayBlock[],
   issued: IssuedAction[],
+  identity?: Pick<DisplayExperience, "experienceId" | "messageId">,
 ): CompiledExperience {
-  const experienceId = makeId("exp");
+  const { experienceId, messageId } = identity ?? { experienceId: makeId("exp"), messageId: makeId("msg") };
   const { intro, question, partial } = displayFields;
   const actions = issued.filter(({ agentAction }) => !agentAction).map(({ actionId, componentId, label }) => ({ actionId, componentId, label }));
   const nodes = [
@@ -140,11 +141,12 @@ export function buildSurface(
         id: "root", component: "PznExperience", intro: { "@path": "/intro" },
         children: nodes.map((node) => node.id), actionCount: actions.length, question, partial,
         ...(displayFields.layout && { layout: displayFields.layout }),
+        ...(displayFields.theme && { theme: displayFields.theme }),
       }, ...nodes],
     },
   }, experienceId);
   const display: DisplayExperience = {
-    ...displayFields, experienceId, messageId: makeId("msg"), blocks, actions,
+    ...displayFields, experienceId, messageId, blocks, actions,
     a2uiVersion: "1.0", messages: [message],
   };
   if (Buffer.byteLength(JSON.stringify(display)) > MAX_SURFACE_BYTES) throw new Error("Display payload exceeds limit");

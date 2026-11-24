@@ -347,7 +347,10 @@ export function AdminPage() {
   return <div className="admin-page">
     <header className="admin-bar"><div>
       <span>Financial planning</span>
-      <a className="icon-button" href="/chat"><ArrowLeft size={16} aria-hidden="true" />Back to chat</a>
+      <nav className="admin-page-links" aria-label="Administration">
+        <a className="icon-button" href="/admin/ui">UI builder</a>
+        <a className="icon-button" href="/chat"><ArrowLeft size={16} aria-hidden="true" />Back to chat</a>
+      </nav>
     </div></header>
     <main className="admin-main">
       {loaded ? <ToolSetupForm {...loaded} /> : <div className="admin-heading">

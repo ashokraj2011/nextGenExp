@@ -1,3 +1,4 @@
+import { uiIntentHints } from "../../packages/contracts/ui-layout";
 import { inputValuesSchema, type AgentLaunch } from "../../packages/contracts/agentic";
 import { fieldValueValid } from "./agentic-inputs";
 import { digestJson, type ChatHarness, type RunResult } from "@sfield/core";
@@ -249,11 +250,13 @@ export class ExperienceService {
         current();
         const intentCatalog = availableRoutingIntents(catalog.catalog, this.canCreateRule);
         const summaryFollowUp = resolveSummaryFollowUp(turn.public.message, recent, intentCatalog);
+        const uiDescriptions = uiIntentHints(turn.uiLayouts, intentCatalog.map(({ intentId }) => intentId));
         const result = await runtime.model("route", turn, conversation, catalog.snapshotId, {
           inputType: "PznContextRoutingInput",
           catalogSnapshotId: catalog.snapshotId,
           catalog: catalog.catalog,
           intentCatalog,
+          ...(uiDescriptions.length && { uiDescriptions }),
           propensity: turn.propensity,
           allowedQuestions: routingQuestions,
           canCreateRule: this.canCreateRule,

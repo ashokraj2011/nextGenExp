@@ -1,3 +1,5 @@
+import { maxLayouts, targetKey, type AppliedUiLayout, type UiLayoutChange, type UiLayoutRecord, type UiPublication, type UiTarget } from "../../packages/contracts/ui-layout";
+import { applyPublishedUi } from "../../packages/experience/ui-layout";
 import type { AgentLaunch } from "../../packages/contracts/agentic";
 import { cancelsJourney, explicitInputs } from "./agentic-inputs";
 import { AgenticStore } from "./agentic-store";
@@ -47,6 +49,7 @@ export type TurnTrace = {
   failures: { stage: string; code: string }[];
   routeRun?: StageTrace;
   composeRun?: StageTrace;
+  uiLayout?: AppliedUiLayout;
 };
 
 export type ConversationRecord = Conversation & {
@@ -76,6 +79,7 @@ export type TurnRecord = {
   origin: string;
   selectionMode: SelectionMode;
   toolSetup?: ToolSetup;
+  uiLayouts?: UiPublication[];
   attempts: Partial<Record<Stage, StageAttempt>>;
   trace: TurnTrace;
   catalogScopeId?: string;
@@ -127,6 +131,10 @@ export class Store {
       CREATE TABLE IF NOT EXISTS tool_setups (
         principal_id TEXT PRIMARY KEY REFERENCES local_sessions(id), record TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS ui_layouts (
+        principal_id TEXT NOT NULL REFERENCES local_sessions(id), id TEXT NOT NULL, updated_at INTEGER NOT NULL, record TEXT NOT NULL,
+        PRIMARY KEY (principal_id, id)
+      );
       CREATE TABLE IF NOT EXISTS gateway_exchanges (
         attempt_id TEXT PRIMARY KEY, record TEXT NOT NULL
       );
@@ -174,6 +182,45 @@ export class Store {
       INSERT INTO tool_setups (principal_id, record) VALUES (?, ?)
       ON CONFLICT(principal_id) DO UPDATE SET record = excluded.record
     `, principalId, JSON.stringify(setup));
+  }
+
+  listUiLayouts(principalId: string) {
+    return this.db.all<{ record: string }>("SELECT record FROM ui_layouts WHERE principal_id = ? ORDER BY updated_at DESC, id", principalId)
+      .map((row) => parse<UiLayoutRecord>(row)!);
+  }
+
+  changeUiLayout(principalId: string, change: UiLayoutChange, now: number) {
+    return this.db.tx(() => {
+      const layouts = this.listUiLayouts(principalId);
+      const current = "id" in change ? layouts.find(({ id }) => id === change.id) : undefined;
+      if ("id" in change) {
+        if (!current) return inaccessible();
+        if (current.revision !== change.revision) {
+          throw new ApiError(409, "ui_layout_changed", "This layout changed in another tab. Reload to get the latest version.");
+        }
+      } else if (layouts.length >= maxLayouts) {
+        throw new ApiError(409, "ui_layout_limit", "Edit an existing layout to continue.");
+      }
+      const id = current?.id ?? makeId("ui");
+      const revision = (current?.revision ?? 0) + 1;
+      const draft = change.operation === "unpublish" ? current!.draft : change.design;
+      let published = current?.published;
+      if (change.operation === "publish") {
+        const keys = new Set(draft.targets.map(targetKey));
+        const conflict = layouts.find((item) => item.id !== id && item.published?.design.targets.some((target) => keys.has(targetKey(target))));
+        if (conflict?.published) {
+          throw new ApiError(409, "ui_attachment_taken", `An attachment is already in use by “${conflict.published.design.name}”. Unpublish that layout or remove the attachment from it.`);
+        }
+        published = { id, revision, design: draft };
+      } else if (change.operation === "unpublish") {
+        published = undefined;
+      }
+      const record: UiLayoutRecord = { id, revision, updatedAt: now, draft, published };
+      this.db.run(`INSERT INTO ui_layouts VALUES (?, ?, ?, ?)
+        ON CONFLICT(principal_id, id) DO UPDATE SET updated_at=excluded.updated_at, record=excluded.record`,
+        principalId, id, now, JSON.stringify(record));
+      return record;
+    });
   }
 
   gatewayExchange(attemptId: string) {
@@ -280,6 +327,7 @@ export class Store {
 
       const id = makeId("turn");
       const setup = this.toolSetup(conversation.principalId);
+      const uiLayouts = this.listUiLayouts(conversation.principalId).flatMap(({ published }) => published ? [published] : []);
       const workflowDefinition = setup.fundingWorkflow ?? defaultAgentFundingWorkflow;
       const fundingInput = typeof explicitInputs(message).methodId === "string"
         && !/\b(?:compare|balance|portfolio|retire|address|goal|savings)\b/i.test(message);
@@ -302,6 +350,7 @@ export class Store {
         workflow: launch,
         agentLaunch: input.agentLaunch ?? retry?.agentLaunch,
         fundingRun: continuation,
+        ...(uiLayouts.length && { uiLayouts }),
         toolSetup: continuation ? latest?.toolSetup : setup.fundingWorkflow ? setup : { ...setup, fundingWorkflow: workflowDefinition },
         trace: { surface: "chat", sourcePageContext: null, selectionMode, markers: { accepted: now }, failures: [] },
       };
@@ -339,6 +388,32 @@ export class Store {
     if (record) this.events.emit(id);
   }
 
+  private applyUiLayout(turn: TurnRecord, result: CompiledExperience) {
+    if (!turn.uiLayouts?.length) return result;
+    const targets: UiTarget[] = [];
+    if (turn.trace.intentId) targets.push({ kind: "intent", id: turn.trace.intentId });
+    if (turn.workflow) targets.push({ kind: "capability", id: turn.workflow.recommendation.id });
+    const journey = turn.agentJourneyId && this.axe.get("journeys", turn.scope, turn.agentJourneyId);
+    if (journey && journey.turnId === turn.public.id) {
+      for (const step of journey.results) {
+        if (step.status === "completed" || step.status === "waiting_input") {
+          targets.push({ kind: "capability", id: step.capability.split("@")[0] });
+        }
+      }
+    }
+    try {
+      const applied = applyPublishedUi(result, turn.uiLayouts, targets);
+      if (applied) {
+        turn.trace.uiLayout = applied.attachment;
+        turn.trace.components = applied.result.display.blocks.map(({ component }) => component);
+        return applied.result;
+      }
+    } catch {
+      turn.trace.failures.push({ stage: "ui_layout", code: "UI_LAYOUT_RENDER_FALLBACK" });
+    }
+    return result;
+  }
+
   finish(
     id: string,
     outcome: { type: "completed"; result: CompiledExperience } | { type: "failed"; code: FailureCode } | { type: "cancelled" },
@@ -350,7 +425,7 @@ export class Store {
       turn.public.status = outcome.type;
       turn.trace.markers.terminal = now;
       if (outcome.type === "completed") {
-        const { display, issued } = outcome.result;
+        const { display, issued } = this.applyUiLayout(turn, outcome.result);
         turn.public.experience = display;
         turn.trace.markers.compiled = now;
         this.db.run("INSERT INTO experiences VALUES (?, ?, ?)", display.experienceId, id, JSON.stringify(issued));

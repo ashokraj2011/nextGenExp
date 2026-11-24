@@ -7,6 +7,7 @@ import { goalProgressSchema } from "./goal-progress";
 import { portfolioSnapshotSchema } from "./portfolio";
 import { contributionSchema, projectionSchema } from "../capabilities/calculations";
 import { inputFieldSchema } from "./agentic";
+import { layoutTextSchema } from "./ui-layout";
 import { ruleGlossarySchema } from "./rule-glossary";
 
 export const PZN_CATALOG_ID = "https://pzn.example.invalid/catalogs/v1.0/experience";
@@ -44,6 +45,7 @@ export const experienceRoot = { name: "PznExperience", schema: z.object({
   question: limitedText.nullable(),
   partial: z.boolean(),
   layout: z.enum(["stack", "dashboard"]).optional(),
+  theme: z.literal("evergreen").optional(),
 }).strict() } as const;
 export const followUpButton = { name: "PznFollowUp", schema: z.object({ actionId: id, label: limitedText }).strict() } as const;
 const demoKey = z.string().regex(/^[a-z][a-z0-9-]*$/).max(128);
@@ -69,13 +71,15 @@ export const capabilityForm = { name: "PznCapabilityForm", schema: z.object({
 }).strict() } as const;
 export type CapabilityFormProps = z.infer<typeof capabilityForm.schema>;
 
+export const layoutText = { name: "PznLayoutText", schema: layoutTextSchema } as const;
+
 export const catalogApis = [
   experienceRoot, contentCard, comparison, stepList, metricSummary, goalProgressCard, portfolioSnapshot,
-  fundingPreview, fundingOptions, followUpButton, ruleCreation, savingsChart, savingsMetric, factSummary, capabilityForm,
+  fundingPreview, fundingOptions, followUpButton, ruleCreation, savingsChart, savingsMetric, factSummary, capabilityForm, layoutText,
 ] as const;
 type BlockApi = typeof contentCard | typeof comparison | typeof stepList | typeof metricSummary | typeof goalProgressCard
   | typeof portfolioSnapshot | typeof fundingPreview | typeof fundingOptions
-  | typeof savingsChart | typeof savingsMetric | typeof factSummary | typeof capabilityForm;
+  | typeof savingsChart | typeof savingsMetric | typeof factSummary | typeof capabilityForm | typeof layoutText;
 type ShapeFor<T extends BlockApi> = T extends BlockApi ? { component: T["name"]; props: z.infer<T["schema"]> } : never;
 export type DisplayBlock = ShapeFor<BlockApi> | { component: typeof ruleCreation.name; props: RuleCreationProps };
 export type DisplayAction = { actionId: string; componentId: string; label: string };
@@ -91,6 +95,7 @@ export type DisplayExperience = {
   actions: DisplayAction[];
   expiresAt: number;
   layout?: "stack" | "dashboard";
+  theme?: "evergreen";
   a2uiVersion: "1.0";
   messages: [CreateSurfaceMessage];
 };

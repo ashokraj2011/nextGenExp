@@ -96,3 +96,5 @@
   .admin-tool input { appearance: auto; }
   .admin-tool input::before { content: none; }
 }
+
+.admin-page-links { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }

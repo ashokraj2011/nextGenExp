@@ -484,6 +484,8 @@ if (location.pathname === "/__test/a2ui") {
     const { default: message } = await import("../../fixtures/a2ui-v1-basic-smoke.json");
     root.render(<BasicSmoke input={CreateSurfaceMessageSchema.parse(message)} />);
   });
+} else if (location.pathname === "/admin/ui") {
+  void import("./ui-builder").then(({ UiBuilder }) => root.render(<UiBuilder />));
 } else if (location.pathname === "/admin") {
   void import("./admin").then(({ AdminPage }) => root.render(<AdminPage />));
 } else {

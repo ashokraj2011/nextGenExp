@@ -1,3 +1,5 @@
+import type { AppliedUiLayout, UiDesign, UiLayoutCatalog, UiLayoutChange, UiLayoutRecord } from "../../packages/contracts/ui-layout";
+import type { DisplayExperience } from "../../packages/contracts/surface";
 import type { CapabilityManifest, CapabilityRef, OutputKind } from "../../packages/contracts/agentic";
 import type { AgenticTrace } from "./decision-trace";
 import type { EvaluationRow } from "../../packages/contracts/evaluation";
@@ -31,6 +33,7 @@ async function request<T>(path: string, payload?: unknown) {
 type Stage = { state: string; elapsedMs: number; modelCalls: number; totalTokens: number; tokensReported: boolean; errorCode?: string };
 export type Trace = {
   agentic?: AgenticTrace;
+  uiLayout?: AppliedUiLayout;
   turnId: string;
   ordinal: number;
   surface: string;
@@ -76,6 +79,9 @@ export const api = {
   simulateFirstDeposit: (personaId: string, eventId: string) => request<{ accepted: boolean; fundingStatus: "funded" }>(
     "/api/admin/customer-events", { personaId, eventId, type: "account.first_deposit.completed" },
   ),
+  uiLayouts: () => request<UiLayoutCatalog>("/api/admin/ui-layouts"),
+  saveUiLayout: (change: UiLayoutChange) => request<UiLayoutRecord>("/api/admin/ui-layouts", change),
+  previewUiLayout: (design: UiDesign) => request<DisplayExperience>("/api/admin/ui-layout-preview", design),
   toolSetup: () => requestJson<ToolSetupView>("/api/admin/tools"),
   saveToolSetup: (setup: ToolSetup, revision?: string) => requestJson<ToolSetup>("/api/admin/tools", setup, revision),
   createCcreRule: (rule: MockCcreRule) => request<MockCcreRule>("/api/admin/ccre-rules", rule),

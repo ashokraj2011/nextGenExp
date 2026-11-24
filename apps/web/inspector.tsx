@@ -23,10 +23,19 @@ function TraceView({ trace }: { trace: Trace }) {
     catalog, propensity, selectedContextId, surface, sourcePageContext, routeDecisionId, contentDecisionId,
     catalogScopeId, glossaryScopeId, glossaryVersion, tsScopeId, portfolioScopeId, routerRunId, composerRunId, ts, finalOrder, components, failures,
   } = trace;
-  if (trace.agentic) return <DecisionTrace trace={trace.agentic} />;
+  const applied = trace.uiLayout && <section className="trace-stage">
+    <h3>Published UI</h3>
+    <dl className="trace-dl">
+      <Detail label="Layout">{trace.uiLayout.name}</Detail>
+      <Detail label="Revision">{trace.uiLayout.revision}</Detail>
+      <Detail label={trace.uiLayout.target.kind === "intent" ? "Intent" : "Capability"}><code>{trace.uiLayout.target.id}</code></Detail>
+    </dl>
+  </section>;
+  if (trace.agentic) return <>{applied}<DecisionTrace trace={trace.agentic} /></>;
   const creatingRule = trace.routeOutcome === "create_rule";
   const elapsed = trace.markers.terminal === undefined ? null : trace.markers.terminal - trace.markers.accepted;
   return <div className="trace-view">
+    {applied}
     <section>
       <h3>Routing</h3>
       <dl className="trace-dl">
