@@ -1,0 +1,25 @@
+.int-auth-card { gap: 12px; }
+.int-auth-card.is-compact { box-shadow: none; border-style: dashed; margin-top: 8px; }
+.int-auth-note { display: flex; gap: 6px; align-items: flex-start; font-size: 0.78rem; }
+.int-auth-section { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border, rgba(127, 127, 127, 0.2)); }
+.int-auth-section-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.int-auth-table { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+.int-auth-table > .pzn-btn { align-self: flex-start; }
+.int-auth-row { display: grid; grid-template-columns: minmax(110px, 1.4fr) minmax(90px, 0.9fr) 44px minmax(110px, 1.4fr) 80px 32px; gap: 6px; align-items: center; }
+.int-auth-row-outcome { grid-template-columns: minmax(110px, 1fr) minmax(150px, 2fr) 60px minmax(100px, 1fr) 32px; }
+.int-auth-row-cond { grid-template-columns: minmax(120px, 1.2fr) 80px minmax(120px, 1.5fr) 32px; }
+.int-auth-row-head { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; }
+.int-auth-row input:not([type="checkbox"]), .int-auth-row select { width: 100%; min-width: 0; padding: 5px 7px; font-size: 0.8rem; border-radius: 6px; border: 1px solid var(--border, rgba(127, 127, 127, 0.3)); background: var(--surface, transparent); color: inherit; }
+.int-auth-row input[type="checkbox"] { justify-self: center; }
+.int-auth-json { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.76rem; padding: 8px; border-radius: 8px; border: 1px solid var(--border, rgba(127, 127, 127, 0.3)); background: var(--surface, transparent); color: inherit; }
+.int-auth-check { display: flex; flex-direction: column; gap: 6px; }
+.int-auth-issues { margin: 0; padding-left: 18px; font-size: 0.78rem; }
+.int-auth-issues.is-fail { color: var(--danger, #c0392b); }
+.int-auth-issues.is-warn { color: var(--warning, #b7791f); }
+.int-auth-notes { margin: 0; padding-left: 18px; font-size: 0.76rem; opacity: 0.85; }
+.int-auth-check-label { display: inline-flex; gap: 6px; align-items: center; font-size: 0.82rem; }
+.int-auth-advanced { align-self: flex-start; }
+@media (max-width: 720px) {
+  .int-auth-row, .int-auth-row-outcome, .int-auth-row-cond { grid-template-columns: 1fr 1fr; }
+  .int-auth-row-head { display: none; }
+}

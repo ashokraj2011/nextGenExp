@@ -7,6 +7,7 @@ import {
   taskContractInputSchema,
   taskContractSchema,
   taskRunSchema,
+  type DraftCheck,
   type FieldProvenance,
   type Integration,
   type IntegrationTasksView,
@@ -17,6 +18,7 @@ import {
 } from "../../packages/contracts/integration-task";
 import type { ApprovalRecord } from "../../packages/contracts/approval";
 import type { ApprovalStore } from "./approval-store";
+import { callMcpTool, discoverMcpTools, McpTransportError } from "./integration-mcp";
 
 /* ============================================================================
  * Identity and digests
@@ -239,6 +241,16 @@ export class TaskCallExecutor {
         const handler = this.sandbox[contract.binding.target];
         if (!handler) return { state: "failed", error: { kind: "transport", retryable: false, message: `No sandbox handler "${contract.binding.target}"` } };
         response = await handler(input);
+      } else if (integration.transport === "mcp") {
+        try {
+          response = await callMcpTool(integration, contract, input, signal);
+        } catch (err) {
+          if (err instanceof McpTransportError) {
+            if (err.kind === "timeout") throw new TransportTimeout(err.message);
+            throw new TransportFailure(err.message, err.kind === "sent");
+          }
+          throw err;
+        }
       } else {
         response = await callHttp(integration, contract, input, signal);
       }
@@ -369,28 +381,95 @@ export class IntegrationTaskStore {
 
   upsertIntegration(raw: unknown): Integration {
     const integration = integrationSchema.parse(raw);
+    if (integration.transport !== "sandbox") {
+      let url: URL | null = null;
+      try { url = new URL(integration.baseUrl); } catch { /* invalid */ }
+      const local = url && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+      if (!url || !(url.protocol === "https:" || (url.protocol === "http:" && local))) {
+        throw new IntegrationTaskError("invalid_integration", `${integration.transport} integrations need an https:// URL (http:// only for localhost).`);
+      }
+    }
+    // Where calls go is part of every published version's binding digest: it cannot change underneath them.
+    const before = this.integration(integration.id);
+    if (before && (before.transport !== integration.transport || before.baseUrl !== integration.baseUrl)
+      && this.state.contracts.some((c) => c.integrationId === integration.id && c.status !== "draft")) {
+      throw new IntegrationTaskError("integration_in_use", `${integration.id} has published tasks, so its transport and URL are fixed. Create a new integration for a different endpoint.`);
+    }
     this.state.integrations = [integration, ...this.state.integrations.filter((i) => i.id !== integration.id)];
     this.save();
     return integration;
   }
 
   /** Creates or edits a draft. Published versions are immutable; change them by drafting a new version. */
-  upsertDraft(raw: TaskContractInput | unknown): TaskContract {
-    const input = taskContractInputSchema.parse(raw);
-    const integration = this.integration(input.integrationId);
-    if (!integration) throw new IntegrationTaskError("integration_not_found", `Integration "${input.integrationId}" does not exist.`);
+  private contractIssues(input: TaskContractInputParsed): string[] {
     const issues = [...schemaIssues(input.inputSchema, "inputSchema"), ...schemaIssues(input.outputSchema, "outputSchema")];
     if (input.effect === "read" && input.approvalPolicy.mode !== "none") issues.push("read tasks cannot require approval (they have no side effects)");
-    if (input.effect !== "read" && !input.idempotency.supported && input.reconcileTaskId === undefined) {
-      issues.push("write tasks need an idempotency key or a reconcile task so uncertain outcomes can be resolved");
+    if (input.effect !== "read" && !input.idempotency.supported && input.reconcileTaskId === undefined && input.manualReconcile !== true) {
+      issues.push("write tasks need an idempotency key, a reconcile task, or an explicit manual-reconcile acknowledgement so uncertain outcomes can be resolved");
     }
+    if (input.idempotency.supported && !input.idempotency.keyField) issues.push("idempotency is on but no key field is chosen");
     if (input.idempotency.supported && input.idempotency.keyField
       && !((input.inputSchema as SchemaLike).properties ?? {})[input.idempotency.keyField]) {
       issues.push(`idempotency key field "${input.idempotency.keyField}" is not in the input schema`);
     }
+    const props = (input.inputSchema as SchemaLike).properties ?? {};
+    for (const cond of input.approvalPolicy.when) if (!props[cond.field]) issues.push(`approval condition uses "${cond.field}", which is not an input field`);
+    if (input.approvalPolicy.mode === "conditional" && input.approvalPolicy.when.length === 0) issues.push("conditional approval needs at least one condition");
+    if (input.resourceIdField && !props[input.resourceIdField]) issues.push(`resource field "${input.resourceIdField}" is not an input field`);
     const codes = new Set(input.outcomeCodes.map((c) => c.code));
     for (const rule of input.outcomeMapping) if (!codes.has(rule.code)) issues.push(`mapping references undeclared outcome code ${rule.code}`);
+    if (!input.outcomeCodes.some((c) => c.success)) issues.push("declare at least one success outcome code");
     if (input.resultKind === "artifact" && !input.artifact) issues.push("artifact tasks must declare artifact.type and artifact.contentPath");
+    return issues;
+  }
+
+  /** Every version of one task, newest first. */
+  allVersions(integrationId: string, taskId: string) {
+    return this.state.contracts.filter((c) => c.integrationId === integrationId && c.taskId === taskId)
+      .sort((a, b) => compareSemver(b.version, a.version));
+  }
+
+  drafts() { return this.state.contracts.filter((c) => c.status === "draft"); }
+
+  digestOf(raw: TaskContractInput): string | undefined {
+    const parsed = taskContractInputSchema.safeParse(raw);
+    return parsed.success ? contractDigestOf(parsed.data) : undefined;
+  }
+
+  /** Dry run of saving and publishing a draft: same guards, nothing stored. */
+  validateDraft(raw: unknown): DraftCheck {
+    const parsed = taskContractInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false, issues: parsed.error.issues.slice(0, 12).map((i) => `${i.path.join(".") || "draft"}: ${i.message}`), breaking: [], publishBlockers: [] };
+    }
+    const input = parsed.data;
+    const ref = taskToolRef(input);
+    const issues = this.contractIssues(input);
+    if (!this.integration(input.integrationId)) issues.unshift(`integration "${input.integrationId}" does not exist`);
+    const existing = this.contract(ref);
+    if (existing && existing.status !== "draft") issues.push(`${ref} is already ${existing.status}; use a newer version`);
+    const previous = this.latestPublished(input.integrationId, input.taskId);
+    const publishBlockers: string[] = [];
+    let breaking: string[] = [];
+    if (previous && previous.ref !== ref) {
+      if (compareSemver(input.version, previous.version) <= 0) publishBlockers.push(`version ${input.version} must be newer than published ${previous.version}`);
+      breaking = breakingChanges(previous, input as unknown as TaskContract);
+      if (breaking.length && Number(input.version.split(".")[0]) <= Number(previous.version.split(".")[0])) {
+        publishBlockers.push(`breaking changes need a major version (e.g. ${Number(previous.version.split(".")[0]) + 1}.0.0)`);
+      }
+    }
+    if (input.reconcileTaskId) {
+      const reconcile = this.latestPublished(input.integrationId, input.reconcileTaskId);
+      if (!reconcile || reconcile.effect !== "read") publishBlockers.push(`reconcile task "${input.reconcileTaskId}" must be a published read task`);
+    }
+    return { ok: issues.length === 0, ref, issues, breaking, publishBlockers, ...(previous && previous.ref !== ref ? { previousVersion: previous.version } : {}) };
+  }
+
+  upsertDraft(raw: TaskContractInput | unknown): TaskContract {
+    const input = taskContractInputSchema.parse(raw);
+    const integration = this.integration(input.integrationId);
+    if (!integration) throw new IntegrationTaskError("integration_not_found", `Integration "${input.integrationId}" does not exist.`);
+    const issues = this.contractIssues(input);
     if (issues.length) throw new IntegrationTaskError("invalid_contract", issues.join("; "));
 
     const ref = taskToolRef(input);
@@ -678,6 +757,22 @@ export class IntegrationTaskService {
     }
     run = this.store.saveRun(this.applyResult(run, exec.result, exec.sfieldRunId));
     return { run };
+  }
+
+  /* ---------------- authoring (used by the chat copilot and the authoring routes) ---------------- */
+
+  validateDraft(raw: unknown) { return this.store.validateDraft(raw); }
+  integration(id: string) { return this.store.integration(id); }
+  allVersions(integrationId: string, taskId: string) { return this.store.allVersions(integrationId, taskId); }
+
+  async discoverMcp(integrationId: string) {
+    const integration = this.store.integration(integrationId);
+    if (!integration) throw new IntegrationTaskError("integration_not_found", `Integration "${integrationId}" does not exist.`);
+    try {
+      return { integrationId, candidates: await discoverMcpTools(integration, this.store) };
+    } catch (err) {
+      throw new IntegrationTaskError("mcp_discovery_failed", `Could not list tools from ${integration.baseUrl || integrationId}: ${err instanceof Error ? err.message : String(err)}`.slice(0, 400));
+    }
   }
 
   /** Publishes a draft and, when possible, registers it as a dedicated sfield tool right away (no restart). */

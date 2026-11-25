@@ -12,7 +12,7 @@ export const semverSchema = z.string().regex(/^\d+\.\d+\.\d+$/, "semver x.y.z");
 
 export const taskEffectSchema = z.enum(["read", "write", "destructive"]);
 export const taskResultKindSchema = z.enum(["data", "code", "artifact"]);
-export const taskTransportSchema = z.enum(["sandbox", "http"]);
+export const taskTransportSchema = z.enum(["sandbox", "http", "mcp"]);
 
 /** Run lifecycle. `outcome_unknown` and `succeeded_unverified_output` exist so uncertain writes are never retried blindly. */
 export const taskRunStateSchema = z.enum([
@@ -111,10 +111,12 @@ export const taskContractInputSchema = z.object({
   idempotency: taskIdempotencySchema,
   /** Read task of the same integration used to resolve `outcome_unknown` (looked up by idempotency key). */
   reconcileTaskId: slugSchema.optional(),
+  /** Explicit acknowledgement for writes with neither an idempotency key nor a reconcile task: an operator checks uncertain outcomes by hand. */
+  manualReconcile: z.boolean().optional(),
   /** Input field naming the business entity the call acts on (sfield resource). */
   resourceIdField: z.string().max(64).optional(),
   binding: z.object({
-    /** sandbox: handler name; http: path appended to integration.baseUrl. */
+    /** sandbox: handler name; http: path appended to integration.baseUrl; mcp: the MCP tool name. */
     target: z.string().trim().min(1).max(200),
     method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]).default("POST"),
   }).strict(),
@@ -166,6 +168,7 @@ export type Integration = z.infer<typeof integrationSchema>;
 export type TaskContractInput = z.input<typeof taskContractInputSchema>;
 export type TaskContract = z.infer<typeof taskContractSchema>;
 export type TaskRun = z.infer<typeof taskRunSchema>;
+export type TaskEffect = z.infer<typeof taskEffectSchema>;
 export type TaskRunState = z.infer<typeof taskRunStateSchema>;
 export type TaskErrorKind = z.infer<typeof taskErrorKindSchema>;
 export type FieldProvenance = z.infer<typeof fieldProvenanceSchema>;
@@ -206,6 +209,9 @@ export type IntegrationTasksView = {
  * Integrations chat (copilot) contracts
  * ========================================================================== */
 
+export const draftValidateRequestSchema = z.object({ draft: z.record(z.string(), z.unknown()) }).strict();
+export const integrationMcpDiscoverRequestSchema = z.object({ integrationId: slugSchema }).strict();
+
 export const integrationCopilotRequestSchema = z.object({
   message: z.string().trim().min(1).max(4000),
   history: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().max(1500) }).strict()).max(12).optional(),
@@ -219,7 +225,38 @@ export type IntegrationCopilotCard =
   | { kind: "task_form"; contract: ViewContract; prefill: Record<string, unknown>; provenance: Record<string, FieldProvenance> }
   | { kind: "task_run"; run: TaskRun; approvalId?: string }
   | { kind: "runs"; runs: TaskRun[]; filter?: string }
-  | { kind: "approvals" };
+  | { kind: "approvals" }
+  /** Authoring: everything below is saved or published only by an explicit click on the card. */
+  | { kind: "integration_form"; prefill: Partial<Integration>; existing: boolean }
+  | { kind: "task_draft"; draft: TaskContractInput; check: DraftCheck; origin: DraftOrigin; note?: string }
+  | { kind: "mcp_import"; integrationId: string; candidates: McpImportCandidate[]; error?: string }
+  | { kind: "publish_review"; contract: ViewContract; check: DraftCheck }
+  | { kind: "drafts"; drafts: ViewContract[] };
+
+/** Where an editable draft came from (shown to the author so model-written contracts get reviewed). */
+export type DraftOrigin = "assistant" | "template" | "new_version" | "existing_draft" | "mcp_import";
+
+/** Dry-run validation of a draft: the same guards as saving and publishing, without saving. */
+export type DraftCheck = {
+  ok: boolean;
+  ref?: string;
+  issues: string[];
+  /** Breaking changes against the latest published version of the same task. */
+  breaking: string[];
+  previousVersion?: string;
+  /** Publishing would be refused (e.g. a breaking change without a major bump). */
+  publishBlockers: string[];
+};
+
+export type McpImportCandidate = {
+  toolName: string;
+  description: string;
+  draft: TaskContractInput;
+  check: DraftCheck;
+  /** What the importer tightened or assumed (closed schemas, effect from annotations, default approval). */
+  notes: string[];
+  alreadyImported: boolean;
+};
 
 export type IntegrationCopilotResponse = {
   reply: string;

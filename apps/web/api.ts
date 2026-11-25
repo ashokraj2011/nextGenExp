@@ -50,7 +50,7 @@ import type { Bootstrap, Conversation, ConversationChange, ConversationView, Dom
 import { pendingActionsContext, type WorkspaceActionLog, type WorkspaceNextStep, type WorkspacePendingAction, type WorkspacePin } from "../../packages/contracts/workspace";
 import type { TurnPayloads } from "../../packages/contracts/inspector";
 import type { ContextCatalog, PropensityResult, SelectionMode } from "../../packages/contracts/domain";
-import type { IntegrationCopilotRequest, IntegrationCopilotResponse, IntegrationTasksView, TaskRun } from "../../packages/contracts/integration-task";
+import type { DraftCheck, Integration, IntegrationCopilotRequest, IntegrationCopilotResponse, IntegrationTasksView, McpImportCandidate, TaskContract, TaskContractInput, TaskRun } from "../../packages/contracts/integration-task";
 import type { MockCcreRule, ToolSetup, ToolSetupView, TreatmentPreview, TreatmentPreviewInput, TreatmentSource } from "../../packages/contracts/tool-setup";
 import type {
   PznAttribute,
@@ -357,4 +357,9 @@ export const api = {
   runIntegrationTask: (input: { toolRef: string; input: Record<string, unknown>; requestedBy?: string; provenance?: Record<string, string> }) => (
     request<{ run: TaskRun; approval?: ApprovalRecord }>("/api/integrations/tasks/run", input)
   ),
+  saveIntegration: (integration: Partial<Integration>) => request<{ integration: Integration; view: IntegrationTasksView }>("/api/integrations/integrations", integration),
+  validateIntegrationDraft: (draft: TaskContractInput) => request<DraftCheck>("/api/integrations/contracts/validate", { draft }),
+  saveIntegrationDraft: (draft: TaskContractInput) => request<{ contract: TaskContract; view: IntegrationTasksView }>("/api/integrations/contracts", draft),
+  publishIntegrationTask: (ref: string) => request<{ contract: TaskContract; breaking: string[]; sfieldRegistered: boolean; sfieldRoute: "dedicated" | "dispatcher" | "unavailable"; registrationNote?: string; view: IntegrationTasksView }>("/api/integrations/contracts/publish", { ref }),
+  discoverIntegrationMcp: (integrationId: string) => request<{ integrationId: string; candidates: McpImportCandidate[] }>("/api/integrations/mcp/discover", { integrationId }),
 };

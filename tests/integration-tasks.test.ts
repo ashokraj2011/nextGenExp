@@ -35,7 +35,7 @@ test("contract guards: closed schemas, local refs, approval rules, and semver on
     assert.throws(() => store.upsertDraft({ ...input, version: "1.0.1", effect: "read", approvalPolicy: { mode: "always", when: [], dualControl: false, expiresInMinutes: 30 } }),
       /read tasks cannot require approval/);
     assert.throws(() => store.upsertDraft({ ...input, version: "1.0.1", idempotency: { supported: false }, reconcileTaskId: undefined }),
-      /idempotency key or a reconcile task/);
+      /idempotency key, a reconcile task, or an explicit manual-reconcile/);
 
     const breakingInput = {
       ...input,
@@ -271,4 +271,92 @@ test("the approval check inside the sfield tool rejects missing, forged, replaye
   // Ungated input needs no approval, through either route.
   assert.equal((await call(CREATE, { input: { ...p1, priority: "P3", idempotencyKey: "idem_forged_test_2" } })).status, "succeeded");
   assert.equal((await call("int.dispatch.write@1.0.0", dispatch({ ...p1, priority: "P3", idempotencyKey: "idem_forged_test_3" }))).status, "succeeded");
+});
+
+test("chat authoring: connect an MCP server, import tools, publish, run, and draft tasks — nothing saved without a click", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "cep-int-author-"));
+  const gateway = await startFixtureGateway();
+  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: gateway.settings, mode: "test", inspectorEnabled: true });
+  t.after(async () => { await app.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
+  const client = await testClient(app.url);
+  type Card = { kind: string; [k: string]: unknown };
+  const chat = async (message: string) => (await client.request<{ reply: string; cards: Card[] }>("/api/integrations/copilot", { message }));
+  const card = <T,>(out: { cards: Card[] }, kind: string) => out.cards.find((c) => c.kind === kind) as unknown as T;
+  const mcpUrl = `${app.url}/api/integrations/demo-mcp`;
+
+  // 1. Connect: chat drafts the integration form; nothing exists until it is saved.
+  const connect = card<{ prefill: { transport: string; baseUrl: string; name: string; id: string } }>(await chat(`Connect an MCP server at ${mcpUrl} as Demo Commerce`), "integration_form");
+  assert.equal(connect.prefill.transport, "mcp");
+  assert.equal(connect.prefill.baseUrl, mcpUrl);
+  assert.equal(connect.prefill.name, "Demo Commerce");
+  assert.equal((await client.request<IntegrationTasksView>("/api/integrations")).integrations.some((i) => i.id === "demo_commerce"), false);
+  await client.request("/api/integrations/integrations", { id: "demo_commerce", name: "Demo Commerce", transport: "mcp", baseUrl: mcpUrl, timeoutMs: 5000 });
+  await client.request("/api/integrations/integrations", { id: "remote_plain", name: "x", transport: "mcp", baseUrl: "http://example.com/mcp" }, 409);
+
+  // 2. Import: tools/list becomes reviewable drafts with closed schemas, effect from annotations, safe defaults.
+  type Candidate = { toolName: string; draft: Record<string, any>; check: { ok: boolean; issues: string[] }; notes: string[] };
+  const imported = card<{ candidates: Candidate[] }>(await chat("Import tools from demo_commerce"), "mcp_import");
+  const byName = Object.fromEntries(imported.candidates.map((c) => [c.toolName, c]));
+  assert.deepEqual(Object.keys(byName).sort(), ["cancel_subscription", "lookup_order", "refund_order"]);
+  for (const c of imported.candidates) assert.equal(c.check.ok, true, `${c.toolName}: ${c.check.issues.join("; ")}`);
+  assert.equal(byName.lookup_order!.draft.effect, "read");
+  assert.equal(byName.lookup_order!.draft.outputSchema.additionalProperties, false, "server output schema is closed");
+  assert.equal(byName.refund_order!.draft.effect, "write");
+  assert.equal(byName.refund_order!.draft.idempotency.keyField, "requestId");
+  assert.equal(byName.refund_order!.draft.approvalPolicy.mode, "always");
+  assert.equal(byName.refund_order!.draft.inputSchema.additionalProperties, false);
+  assert.equal(byName.cancel_subscription!.draft.effect, "destructive", "MCP default without annotations");
+  assert.equal(byName.cancel_subscription!.draft.manualReconcile, true);
+  assert.equal((await client.request<IntegrationTasksView>("/api/integrations")).contracts.some((c) => c.integrationId === "demo_commerce"), false, "import saved nothing");
+  for (const c of imported.candidates) await client.request("/api/integrations/contracts", c.draft);
+  assert.equal(card<{ drafts: unknown[] }>(await chat("Show drafts"), "drafts").drafts.length, 3);
+
+  // 3. Publish from chat: a review card first; publishing registers a dedicated sfield tool (no restart).
+  const LOOKUP = "int.demo_commerce.lookup_order@1.0.0";
+  const review = card<{ contract: { ref: string }; check: { ok: boolean; publishBlockers: string[] } }>(await chat(`Publish ${LOOKUP}`), "publish_review");
+  assert.equal(review.contract.ref, LOOKUP);
+  assert.equal(review.check.ok, true);
+  const published = await client.request<{ sfieldRoute: string }>("/api/integrations/contracts/publish", { ref: LOOKUP });
+  assert.equal(published.sfieldRoute, "dedicated");
+  const found = await client.request<{ run: TaskRun }>("/api/integrations/tasks/run", { toolRef: LOOKUP, input: { orderId: "ORD-1001" } });
+  assert.equal(found.run.state, "succeeded", JSON.stringify(found.run));
+  assert.deepEqual(found.run.output, { found: true, orderId: "ORD-1001", status: "shipped", total: 129.5 });
+
+  // 4. An imported write: approval always, idempotency key filled into the MCP tool's requestId, tool errors mapped.
+  const REFUND = "int.demo_commerce.refund_order@1.0.0";
+  await client.request("/api/integrations/contracts/publish", { ref: REFUND });
+  const refund = await client.request<{ run: TaskRun; approval: ApprovalRecord }>("/api/integrations/tasks/run", { toolRef: REFUND, input: { orderId: "ORD-1001", amount: 10 } }, 202);
+  assert.match(String(refund.run.input.requestId), /^idem_/);
+  const approved = await client.request<{ taskRun: TaskRun }>(`/api/approvals/${refund.approval.id}/decide`, { decision: "approve", actor: "Finance Lead" });
+  assert.equal(approved.taskRun.state, "succeeded", JSON.stringify(approved.taskRun));
+  assert.match(String((approved.taskRun.output as { refundId: string }).refundId), /^RF-/);
+  const tooMuch = await client.request<{ run: TaskRun; approval: ApprovalRecord }>("/api/integrations/tasks/run", { toolRef: REFUND, input: { orderId: "ORD-1002", amount: 9999 } }, 202);
+  const rejected = await client.request<{ taskRun: TaskRun }>(`/api/approvals/${tooMuch.approval.id}/decide`, { decision: "approve", actor: "Finance Lead" });
+  assert.equal(rejected.taskRun.state, "failed");
+  assert.equal(rejected.taskRun.outcome?.code, "TOOL_ERROR");
+
+  // 5. Describe a task in plain English → an editable draft, validated, not saved.
+  const described = card<{ draft: Record<string, any>; check: { ok: boolean; issues: string[] }; origin: string }>(
+    await chat("Create a task to look up a customer by customerId and email on demo_commerce"), "task_draft");
+  assert.equal(described.origin, "template");
+  assert.equal(described.draft.integrationId, "demo_commerce");
+  assert.equal(described.draft.effect, "read");
+  assert.deepEqual(Object.keys(described.draft.inputSchema.properties).sort(), ["customerId", "email"]);
+  assert.equal(described.check.ok, true, described.check.issues.join("; "));
+  assert.equal((await client.request<IntegrationTasksView>("/api/integrations")).contracts.some((c) => c.taskId === described.draft.taskId), false);
+
+  // 6. New version from chat; a breaking change is flagged before publishing.
+  const next = card<{ draft: Record<string, any>; origin: string }>(await chat("Create a new version of lookup_order"), "task_draft");
+  assert.equal(next.origin, "new_version");
+  assert.equal(next.draft.version, "1.1.0");
+  const breakingDraft = { ...next.draft, inputSchema: { ...next.draft.inputSchema, required: [...next.draft.inputSchema.required, "region"], properties: { ...next.draft.inputSchema.properties, region: { type: "string" } } } };
+  const check = await client.request<{ ok: boolean; breaking: string[]; publishBlockers: string[] }>("/api/integrations/contracts/validate", { draft: breakingDraft });
+  assert.equal(check.ok, true);
+  assert.ok(check.breaking.some((b) => b.includes("region")));
+  assert.ok(check.publishBlockers.some((b) => b.includes("major")));
+  const open = await client.request<{ ok: boolean; issues: string[] }>("/api/integrations/contracts/validate", { draft: { ...next.draft, inputSchema: { type: "object", properties: { a: { type: "string" } } } } });
+  assert.equal(open.ok, false, "open schemas are rejected");
+
+  // 7. Where calls go is fixed once tasks are published.
+  await client.request("/api/integrations/integrations", { id: "demo_commerce", name: "Demo Commerce", transport: "mcp", baseUrl: "https://elsewhere.example/mcp" }, 409);
 });

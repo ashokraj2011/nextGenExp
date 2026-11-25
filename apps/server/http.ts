@@ -63,7 +63,8 @@ import { connectorInvokeToolRef, domainWriteToolRef, Runtime, sfieldNamespace } 
 import { WidgetLibraryStore } from "./widget-library";
 import { SelfServicePznStore } from "./self-service-pzn-store";
 import { IntegrationTaskError, IntegrationTaskService, IntegrationTaskStore } from "./integration-tasks";
-import { integrationCopilotRequestSchema, runTaskRequestSchema } from "../../packages/contracts/integration-task";
+import { createDemoMcpServer } from "./integration-mcp";
+import { draftValidateRequestSchema, integrationCopilotRequestSchema, integrationMcpDiscoverRequestSchema, runTaskRequestSchema } from "../../packages/contracts/integration-task";
 import { runIntegrationCopilot } from "./integration-copilot";
 import { runSelfServicePznCopilot } from "./self-service-pzn-copilot";
 import { applyPznOperationDirect, PznApprovalError, pznGateFor, pznToolRefForOperation, requestPznApproval, verifyPznApproval } from "./pzn-approvals";
@@ -363,6 +364,7 @@ export async function startApp(options: Options) {
   });
 
   const integrationService = new IntegrationTaskService(integrationTasks, approvalStore, () => runtime);
+  const demoMcp = createDemoMcpServer();
 
   async function executeApprovedRecord(principalId: string, record: ApprovalRecord) {
     if (record.targetKind === "integration_task") {
@@ -1627,6 +1629,24 @@ export async function startApp(options: Options) {
       if (id === "contracts" && !operation && method === "POST") {
         const raw = await body(req, z.record(z.string(), z.unknown()), 64 * 1024);
         return json(res, { contract: await guard(() => integrationTasks.upsertDraft(raw)), view: integrationService.view() });
+      }
+      if (id === "demo-mcp" && !operation && method === "POST") {
+        const out = demoMcp(await body(req, z.unknown(), 64 * 1024));
+        res.writeHead(out.status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...out.headers });
+        res.end(out.body === undefined ? "" : JSON.stringify(out.body));
+        return;
+      }
+      if (id === "integrations" && !operation && method === "POST") {
+        const raw = await body(req, z.record(z.string(), z.unknown()), 16 * 1024);
+        return json(res, { integration: await guard(() => integrationTasks.upsertIntegration(raw)), view: integrationService.view() });
+      }
+      if (id === "contracts" && operation === "validate" && method === "POST") {
+        const { draft } = await body(req, draftValidateRequestSchema, 64 * 1024);
+        return json(res, integrationTasks.validateDraft(draft));
+      }
+      if (id === "mcp" && operation === "discover" && method === "POST") {
+        const { integrationId } = await body(req, integrationMcpDiscoverRequestSchema);
+        return json(res, await guard(() => integrationService.discoverMcp(integrationId)));
       }
       if (id === "contracts" && operation === "publish" && method === "POST") {
         const { ref } = await body(req, z.object({ ref: z.string().min(3).max(120) }).strict());

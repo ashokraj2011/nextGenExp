@@ -33,7 +33,7 @@ function latest(view: IntegrationTasksView): Contract[] {
   return [...map.values()];
 }
 
-function RouteBadge({ contract }: { contract: Contract }) {
+export function RouteBadge({ contract }: { contract: Contract }) {
   if (contract.status !== "published") return null;
   const info = contract.sfieldRoute === "dedicated"
     ? { tone: "is-pass", label: "sfield tool", title: "Registered at startup as its own sfield tool (own schema and lock digest)." }
@@ -43,7 +43,7 @@ function RouteBadge({ contract }: { contract: Contract }) {
   return <span className={"pzn-badge " + info.tone} title={info.title}>{info.label}</span>;
 }
 
-function approvalLabel(c: TaskContract) {
+export function approvalLabel(c: TaskContract) {
   if (c.effect === "destructive") return "Approval: always (destructive)";
   if (c.approvalPolicy.mode === "none") return "No approval";
   if (c.approvalPolicy.mode === "always") return "Approval: always";

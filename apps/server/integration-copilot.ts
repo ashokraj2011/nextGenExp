@@ -10,6 +10,7 @@ import type {
 import { callConfiguredLlmJson } from "./dynamic-ui-generator";
 import type { GatewaySettings } from "./gateway";
 import type { IntegrationTaskService } from "./integration-tasks";
+import { AUTHORING_PROMPT, AUTHORING_TYPES, detectAuthoring, runAuthoringAction, type AuthoringAction } from "./integration-authoring";
 
 type Contract = ViewContract;
 
@@ -21,7 +22,8 @@ type Plan = {
     | { type: "task"; toolRef: string; input: Record<string, unknown> }
     | { type: "runs"; filter?: string }
     | { type: "reconcile"; runId: string }
-    | { type: "approvals" };
+    | { type: "approvals" }
+    | AuthoringAction;
   suggestedPrompts?: string[];
 };
 
@@ -60,6 +62,8 @@ function extractJson(text: string): string | undefined {
 }
 
 function deterministicPlan(message: string, view: IntegrationTasksView): Plan {
+  const authoring = detectAuthoring(message, view);
+  if (authoring) return { ...authoring, suggestedPrompts: authoringSuggestions(authoring.action) };
   const lower = message.toLowerCase();
   const tasks = latestTasks(view);
   const byId = (id: string) => tasks.find((c) => c.taskId === id);
@@ -129,13 +133,27 @@ function deterministicPlan(message: string, view: IntegrationTasksView): Plan {
   return { reply: "Here are the integrations and their tasks. Ask me to run one, show its contract, or review runs and approvals.", action: { type: "catalog" } };
 }
 
+function authoringSuggestions(action: AuthoringAction): string[] {
+  switch (action.type) {
+    case "integration": return ["Import tools from the MCP server", "Show integrations and tasks"];
+    case "mcp_import": return ["Show drafts", "Show integrations and tasks"];
+    case "drafts": return ["Create a task to look up an order by orderId", "Show integrations and tasks"];
+    case "publish": return ["Show drafts", "Show integrations and tasks"];
+    default: return ["Show drafts", "Show integrations and tasks", "Show pending approvals"];
+  }
+}
+
 function systemPrompt(view: IntegrationTasksView): string {
   const tasks = latestTasks(view).map((c) => ({
     toolRef: c.ref, effect: c.effect, description: c.description, inputSchema: c.inputSchema,
     approval: c.approvalPolicy.mode === "conditional" ? c.approvalPolicy.when : c.approvalPolicy.mode,
   }));
   const runs = view.runs.slice(0, 10).map((r) => ({ runId: r.runId, toolRef: r.toolRef, state: r.state }));
-  return `You help operators run governed integration tasks in CEP.
+  const integrations = view.integrations.map((i) => ({ id: i.id, name: i.name, transport: i.transport }));
+  const drafts = view.contracts.filter((c) => c.status === "draft").map((c) => c.ref);
+  return `You help operators build and run governed integration tasks in CEP.
+INTEGRATIONS: ${JSON.stringify(integrations)}
+DRAFTS: ${JSON.stringify(drafts)}
 TASKS: ${JSON.stringify(tasks)}
 RECENT RUNS: ${JSON.stringify(runs)}
 
@@ -149,7 +167,8 @@ Return ONLY JSON:
     {"type":"reconcile","runId":"trun_..."} |
     {"type":"approvals"},
   "suggestedPrompts": ["2-3 short follow-ups"] }
-Rules: use exact toolRefs from TASKS. Never invent idempotency keys. For write tasks the host shows a form for a person to confirm; do not claim anything was created.`;
+${AUTHORING_PROMPT}
+Rules: use exact toolRefs from TASKS/DRAFTS. Never invent idempotency keys. For write tasks the host shows a form for a person to confirm; do not claim anything was created, saved, or published.`;
 }
 
 export async function runIntegrationCopilot(
@@ -173,6 +192,10 @@ export async function runIntegrationCopilot(
       }
     } catch { /* fall back */ }
   }
+  // Authoring intents are recognised deterministically too, so a model answer that ignores them can't run a task instead.
+  const detected = detectAuthoring(req.message, view);
+  // When the user's words clearly name an authoring step, that step wins; the model may only enrich it (e.g. a drafted contract).
+  if (plan && detected && plan.action.type !== detected.action.type) plan = null;
   if (!plan) plan = deterministicPlan(req.message, view);
 
   const cards: IntegrationCopilotCard[] = [];
@@ -182,7 +205,12 @@ export async function runIntegrationCopilot(
 
   try {
     const action = plan.action;
-    switch (action.type) {
+    if (AUTHORING_TYPES.has(action.type)) {
+      const out = await runAuthoringAction(action as AuthoringAction, req.message, view, service);
+      cards.push(...out.cards);
+      actions.push({ tool: `authoring.${action.type}`, summary: out.summary, status: "ok" });
+      if (out.reply) reply = out.reply;
+    } else switch (action.type) {
       case "catalog":
         cards.push({ kind: "catalog", view });
         actions.push({ tool: "integrations.catalog", summary: `${view.integrations.length} integration(s), ${latestTasks(view).length} task(s)`, status: "ok" });
