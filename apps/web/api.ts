@@ -122,6 +122,12 @@ export const api = {
     "/api/admin/ui-layout-preview",
     personaId ? { design, personaId } : design,
   ),
+  generateUiLayout: (prompt: string) => request<{
+    design: UiDesign;
+    generatedBy: "copilot_llm" | "synthesizer";
+    boundKeys: string[];
+    summary: string;
+  }>("/api/admin/ui-layout-generate", { prompt }),
   widgets: () => request<{ widgets: SavedWidget[] }>("/api/admin/widgets"),
   generateWidget: (prompt: string) => request<{ widget: WidgetDraft }>("/api/admin/widget-generate", { prompt }),
   saveWidgetLibrary: (change: WidgetLibraryChange) => request<{ widget?: SavedWidget; widgets: SavedWidget[] }>("/api/admin/widgets", change),

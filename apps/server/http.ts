@@ -24,6 +24,7 @@ import {
 } from "../../packages/experience-registry";
 import { activeContexts } from "../../packages/ts-adapter";
 import { generateWidgetDraftWithLlm } from "./dynamic-ui-generator";
+import { generateBoundUiLayoutWithLlm } from "./ui-layout-generator";
 import { OpsIncidentStore } from "./ops-store";
 import { incidentDecisionInputSchema, incidentUpsertInputSchema } from "../../packages/contracts/ops";
 import { SalesDealStore } from "./sales-store";
@@ -631,6 +632,20 @@ export async function startApp(options: Options) {
           incident: opsStore.primaryIncident(),
           deal: salesStore.primaryDeal(),
         }));
+      }
+      if (id === "ui-layout-generate" && method === "POST") {
+        const { prompt } = await body(req, z.object({ prompt: z.string().trim().min(4).max(800) }).strict(), 8 * 1024);
+        const validTargets = uiTargetOptions(registry, principalId);
+        const customKeys = [...new Set(profileStore.list().flatMap((p) => (p.customAttributes ?? []).map((a) => `custom.${a.key}`)))];
+        const generated = await generateBoundUiLayoutWithLlm({
+          prompt,
+          gateway: options.gateway,
+          dataDir: options.dataDir,
+          validTargets,
+          customAttributeKeys: customKeys,
+        });
+        validateUiDesign(generated.design, validTargets, false);
+        return json(res, generated);
       }
       if (id === "widgets" && method === "GET") {
         return json(res, { widgets: widgetLibrary.list(principalId, now()) });

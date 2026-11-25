@@ -65,7 +65,7 @@ function stripJsonFences(raw: string): string {
   return trimmed;
 }
 
-async function callConfiguredLlmJson(
+export async function callConfiguredLlmJson(
   gateway: GatewaySettings,
   dataDir: string,
   systemPrompt: string,
