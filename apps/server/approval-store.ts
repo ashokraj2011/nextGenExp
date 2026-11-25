@@ -52,10 +52,15 @@ export function computeApprovalDigest(input: {
 export class ApprovalStore {
   private readonly filePath: string;
   private state: PersistedApprovals;
+  private onCreatedListener?: (record: ApprovalRecord) => void;
 
   constructor(dataDir: string) {
     this.filePath = join(dataDir, "approvals.json");
     this.state = this.load();
+  }
+
+  setOnCreated(listener: (record: ApprovalRecord) => void): void {
+    this.onCreatedListener = listener;
   }
 
   private load(): PersistedApprovals {
@@ -205,6 +210,9 @@ export class ApprovalStore {
     };
     const records = [record, ...this.state.records].slice(0, 150);
     this.save({ ...this.state, records });
+    try {
+      this.onCreatedListener?.(record);
+    } catch { /* non-blocking omnichannel notification */ }
     return record;
   }
 

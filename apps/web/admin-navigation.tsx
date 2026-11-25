@@ -1,4 +1,4 @@
-import { BookOpenText, Code2, FileText, GitBranch, MessageSquare, PanelsTopLeft, Settings2, UsersRound } from "lucide-react";
+import { Blocks, BookOpenText, Code2, FileText, GitBranch, MessageSquare, PanelsTopLeft, Settings2, UsersRound } from "lucide-react";
 import { adminPaths } from "../../packages/contracts/admin-paths";
 
 export function diagnosticHref(path: typeof adminPaths.logs | typeof adminPaths.inspector, thread?: string, turn?: string) {
@@ -13,6 +13,7 @@ const destinations = [
   { label: "Customer 360", path: adminPaths.customers, Icon: UsersRound },
   { label: "Intents & Catalog", path: adminPaths.intents, Icon: GitBranch },
   { label: "UI Builder", path: adminPaths.builder, Icon: PanelsTopLeft },
+  { label: "Embed SDK", path: adminPaths.embed, Icon: Blocks },
   { label: "Logs", path: adminPaths.logs, Icon: FileText },
   { label: "Inspector", path: adminPaths.inspector, Icon: Code2 },
   { label: "Architecture", path: adminPaths.help, Icon: BookOpenText },

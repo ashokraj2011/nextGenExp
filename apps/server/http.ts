@@ -36,6 +36,9 @@ import { TradeStore, type SettlementCallback } from "./trade-store";
 import { taxHarvestPreviewInputSchema, tradeJobCreateInputSchema, type TradeLegInput } from "../../packages/contracts/trading";
 import { ActionFlowStore } from "./action-flow-store";
 import { actionFlowUpsertSchema } from "../../packages/contracts/action-flow";
+import { OmnichannelStore } from "./omnichannel-store";
+import { omnichannelConfigSchema } from "../../packages/contracts/omnichannel";
+import { renderCepEmbedSdkScript, renderHostPortalDemoHtml } from "./embed-sdk";
 import { WriteAuditStore } from "./write-audit";
 import { recommendationArbitrateToolRef } from "../../packages/contracts/recommendation-provider";
 import { connectorInvokeToolRef, domainWriteToolRef, Runtime, sfieldNamespace } from "./runtime";
@@ -88,7 +91,7 @@ const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".woff2": "font/woff2", ".woff": "font/woff", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml",
 };
-const pagePaths = new Set(["/", "/chat", "/login", "/planning", "/__test/a2ui", ...Object.values(adminPaths)]);
+const pagePaths = new Set(["/", "/chat", "/embed", "/login", "/planning", "/__test/a2ui", ...Object.values(adminPaths)]);
 
 function json(res: ServerResponse, body: unknown, status = 200) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
@@ -130,10 +133,13 @@ async function serveAsset(pathname: string, root: string, res: ServerResponse) {
   if (!await stat(path).then((entry) => entry.isFile(), () => false)) {
     throw new ApiError(503, "build_unavailable", "Build the web app before starting this server.");
   }
+  const framePolicy = pathname === "/embed"
+    ? "frame-ancestors 'self' http://127.0.0.1:* http://localhost:* https:"
+    : "frame-ancestors 'none'";
   res.writeHead(200, {
     "Content-Type": MIME[extname(path)] ?? "application/octet-stream",
     "Cache-Control": pathname.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-store",
-    "Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+    "Content-Security-Policy": `default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; ${framePolicy}`,
   });
   res.end(await readFile(path));
 }
@@ -233,6 +239,11 @@ export async function startApp(options: Options) {
   const salesStore = new SalesDealStore(options.dataDir);
   const connectorStore = new ConnectorStore(options.dataDir);
   const approvalStore = new ApprovalStore(options.dataDir);
+  const omnichannelStore = new OmnichannelStore(options.dataDir);
+  approvalStore.setOnCreated((record) => {
+    const port = (server.address() as AddressInfo | null)?.port ?? options.port ?? 4180;
+    omnichannelStore.notifyApprovalSync(record, `http://127.0.0.1:${port}`);
+  });
   const actionFlowStore = new ActionFlowStore(options.dataDir);
   const tradeStore = new TradeStore(options.dataDir, profileStore);
   setActiveEquityLedger(tradeStore);
@@ -449,6 +460,23 @@ export async function startApp(options: Options) {
     res.setHeader("Referrer-Policy", "no-referrer");
     if (!pathname.startsWith("/api/")) {
       if ((isAdminPath(pathname) || pathname === "/help") && !inspectorEnabled) throw new ApiError(404, "not_found", "This page is unavailable.");
+      if (pathname === "/sdk/cep-embed.js" && req.method === "GET") {
+        res.writeHead(200, {
+          "Content-Type": "application/javascript; charset=utf-8",
+          "Cache-Control": "no-store",
+          "Access-Control-Allow-Origin": "*",
+        });
+        res.end(renderCepEmbedSdkScript(origin));
+        return;
+      }
+      if (pathname === "/embed-demo" && req.method === "GET") {
+        res.writeHead(200, {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store",
+        });
+        res.end(renderHostPortalDemoHtml(origin, url.searchParams));
+        return;
+      }
       if (pathname === "/help" && req.method === "GET") {
         res.writeHead(308, { Location: adminPaths.help + url.search, "Cache-Control": "no-store" });
         res.end();
@@ -703,6 +731,17 @@ export async function startApp(options: Options) {
         const updated = addCcreRule(current, rule);
         if (updated !== current) store.saveToolSetup(principalId, updated);
         return json(res, rule);
+      }
+      if (id === "omnichannel" && method === "GET") {
+        return json(res, omnichannelStore.view(origin));
+      }
+      if (id === "omnichannel" && method === "POST") {
+        const nextConfig = await body(req, omnichannelConfigSchema.partial(), 8 * 1024);
+        omnichannelStore.updateConfig(nextConfig);
+        return json(res, omnichannelStore.view(origin));
+      }
+      if (id === "omnichannel-test" && method === "POST") {
+        return json(res, await omnichannelStore.sendTestNotification(origin));
       }
     }
     if (resource === "conversations") {

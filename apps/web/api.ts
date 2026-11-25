@@ -24,6 +24,7 @@ import type {
   TradeJobCreateInput,
 } from "../../packages/contracts/trading";
 import type { ActionFlow, ActionFlowUpsertInput } from "../../packages/contracts/action-flow";
+import type { OmnichannelConfig, OmnichannelDelivery, OmnichannelView } from "../../packages/contracts/omnichannel";
 import type { Customer360AdminRecord, Customer360ProfileInput } from "../../packages/contracts/customer-360";
 import type {
   ExperienceRegistryView,
@@ -204,6 +205,9 @@ export const api = {
   cancelTradeJob: (jobId: string) => request<TradeJob>("/api/trading/" + jobId + "/cancel", {}),
   writeAudit: () => request<{ toolRef: string; entries: DomainWriteAuditEntry[] }>("/api/admin/write-audit"),
   engagementAnalytics: () => request<EngagementAnalyticsView>("/api/admin/engagement-analytics"),
+  omnichannel: () => request<OmnichannelView>("/api/admin/omnichannel"),
+  saveOmnichannel: (config: Partial<OmnichannelConfig>) => request<OmnichannelView>("/api/admin/omnichannel", config),
+  testOmnichannel: () => request<{ delivery: OmnichannelDelivery; view: OmnichannelView }>("/api/admin/omnichannel-test", {}),
   previewFunding: (conversationId: string, clientRequestId: string, source?: typeof pendingActionsContext) => request<TurnAccepted>(
     "/api/conversations/" + conversationId + "/preview-funding", { clientRequestId, source },
   ),

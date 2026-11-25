@@ -5,6 +5,7 @@ export const adminPaths = {
   builder: "/admin/ui",
   logs: "/admin/logs",
   inspector: "/admin/inspector",
+  embed: "/admin/embed",
   help: "/admin/help",
   chat: "/admin/chat",
 } as const;

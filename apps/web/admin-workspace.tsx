@@ -11,6 +11,7 @@ const Tools = lazy(() => import("./admin").then(({ AdminPage }) => ({ default: A
 const Customer360 = lazy(() => import("./customer-360-admin").then(({ Customer360Admin }) => ({ default: Customer360Admin })));
 const ExperienceRegistry = lazy(() => import("./experience-registry-admin").then(({ ExperienceRegistryAdmin }) => ({ default: ExperienceRegistryAdmin })));
 const Builder = lazy(() => import("./ui-builder").then(({ UiBuilder }) => ({ default: UiBuilder })));
+const EmbedStudio = lazy(() => import("./embed-studio").then(({ EmbedStudio }) => ({ default: EmbedStudio })));
 const Help = lazy(() => import("./help").then(({ Help }) => ({ default: Help })));
 const Diagnostics = lazy(() => import("./admin-diagnostics").then(({ AdminDiagnostics }) => ({ default: AdminDiagnostics })));
 
@@ -36,6 +37,7 @@ export function AdminWorkspace() {
           {path === adminPaths.customers && <Customer360 />}
           {path === adminPaths.intents && <ExperienceRegistry />}
           {path === adminPaths.builder && <Builder />}
+          {path === adminPaths.embed && <EmbedStudio />}
           {path === adminPaths.help && <Help />}
           {(path === adminPaths.logs || path === adminPaths.inspector) && <Diagnostics view={path === adminPaths.logs ? "logs" : "inspector"} selectThread={setThread} />}
         </Suspense>

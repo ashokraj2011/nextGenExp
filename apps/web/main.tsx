@@ -29,8 +29,9 @@ import { LabMark } from "./lab-mark";
 import { LiveMetricsHud } from "./live-metrics-rail";
 import { planningTopics } from "./planning-topics";
 import { ReasoningPanel } from "./reasoning-panel";
-import { ThemeToggle } from "./theme";
+import { applyTheme, readStoredTheme, ThemeToggle } from "./theme";
 import { BasicSmoke, ExperienceControls, ExperienceDataUI, installA2uiStyles } from "./surface";
+import { CEP_EMBED_PROTOCOL } from "../../packages/embed-sdk";
 import { usePendingActions, WorkspaceHome, WorkspaceOverview, type PendingActions } from "./workspace-overview";
 import { WorkspaceCustomization, WorkspaceMenu, type WorkspaceSection } from "./workspace-menu";
 import { ThreadList, ThreadSettings } from "./thread-list";
@@ -39,8 +40,25 @@ import "./customer-workbench.css";
 const homeGoalPrompt = "Show my home-buying goal and savings progress.";
 const portfolioPrompt = planningTopics.find(({ id }) => id === "portfolio")!.prompt;
 const adminChat = location.pathname === adminPaths.chat;
+const embedMode = location.pathname === "/embed";
 const createConversation = adminChat ? api.newAdminConversation : api.newConversation;
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+
+function applyEmbedAccent(accent: string | null) {
+  const root = document.documentElement.style;
+  if (!accent || !/^#[0-9a-fA-F]{3,8}$/.test(accent.trim())) return;
+  const color = accent.trim();
+  root.setProperty("--embed-accent", color);
+  root.setProperty("--embed-accent-pale", `color-mix(in srgb, ${color} 11%, transparent)`);
+  root.setProperty("--embed-accent-border", `color-mix(in srgb, ${color} 34%, transparent)`);
+}
+
+function postEmbedEvent(type: string, payload: Record<string, unknown>) {
+  if (!embedMode || window.parent === window) return;
+  try {
+    window.parent.postMessage({ protocol: CEP_EMBED_PROTOCOL, type, payload }, "*");
+  } catch { /* ignore cross-origin restrictions */ }
+}
 
 const starters = [
   ...(adminChat ? [{ Icon: BookOpenText, label: "Create a rule", message: "Create a rule" }] : []),
@@ -600,9 +618,14 @@ function App() {
       topic: planningTopics.find(({ id }) => id === query.get("topic")),
       showProfiles: query.get("view") === "profiles",
       showOverview: query.get("view") === "overview",
-      profileId: adminChat ? null : readProfileSession(),
+      profileId: adminChat ? null : (embedMode ? (query.get("personaId") || readProfileSession() || "persona_new_investor") : readProfileSession()),
+      embedBrand: query.get("brand")?.trim() || "CEP Assistant",
+      embedAccent: query.get("accent")?.trim() || "",
+      embedPrompt: query.get("prompt")?.trim() || "",
     };
   });
+  const [embedBrand, setEmbedBrand] = useState(entry.embedBrand);
+  const [embedAccent, setEmbedAccent] = useState(entry.embedAccent);
   const [signedInProfileId, setSignedInProfileId] = useState(entry.profileId);
   const [domainPack, setDomainPack] = useDomainPack();
   const [configuration, setConfiguration] = useState<Bootstrap>();
@@ -664,8 +687,11 @@ function App() {
     void (adminChat ? api.adminBootstrap() : api.bootstrap()).then(async (data) => {
       if (!mounted) return;
       if (entry.profileId && !data.personas.some(({ personaId }) => personaId === entry.profileId)) {
-        location.replace("/login");
-        return;
+        if (!embedMode) {
+          location.replace("/login");
+          return;
+        }
+        setSignedInProfileId(data.defaultPersonaId);
       }
       const threads = data.conversations.filter(({ audience }) => (audience === "admin") === adminChat);
       setConversations(threads);
@@ -873,15 +899,95 @@ function App() {
     if (configuration) void startConversation(conversation?.personaId ?? signedInProfileId ?? configuration.defaultPersonaId, conversation?.scenarioId ?? configuration.defaultScenarioId);
   };
 
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  const startConversationRef = useRef(startConversation);
+  startConversationRef.current = startConversation;
+  const embedReadyPosted = useRef(false);
+  const lastBalanceSig = useRef("");
+  const lastTurnPosted = useRef("");
+
+  useEffect(() => {
+    if (!embedMode) return;
+    applyEmbedAccent(embedAccent);
+  }, [embedAccent]);
+
+  useEffect(() => {
+    if (!embedMode) return;
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { protocol?: string; type?: string; payload?: Record<string, unknown> } | null;
+      if (!data || data.protocol !== CEP_EMBED_PROTOCOL || typeof data.type !== "string") return;
+      const payload = data.payload ?? {};
+      if (data.type === "cep:send_prompt" && typeof payload.prompt === "string" && payload.prompt.trim()) {
+        void sendRef.current(payload.prompt.trim());
+      } else if (data.type === "cep:set_theme" && (payload.theme === "dark" || payload.theme === "light")) {
+        applyTheme(payload.theme);
+      } else if (data.type === "cep:set_domain" && (payload.domain === "wealth" || payload.domain === "it_ops" || payload.domain === "sales_revops")) {
+        setDomainPack(payload.domain);
+      } else if (data.type === "cep:set_brand") {
+        if (typeof payload.brand === "string" && payload.brand.trim()) setEmbedBrand(payload.brand.trim());
+        if (typeof payload.accent === "string" && payload.accent.trim()) setEmbedAccent(payload.accent.trim());
+      } else if (data.type === "cep:set_persona" && typeof payload.personaId === "string" && configuration) {
+        void startConversationRef.current(payload.personaId, configuration.defaultScenarioId);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [configuration, setDomainPack]);
+
+  useEffect(() => {
+    if (!embedMode || !configuration || !activeProfile || embedReadyPosted.current) return;
+    embedReadyPosted.current = true;
+    postEmbedEvent("cep:ready", {
+      personaId: activeProfile.personaId,
+      displayName: activeProfile.displayName,
+      domain: domainPack.id,
+      theme: readStoredTheme(),
+    });
+    if (entry.embedPrompt) {
+      void sendRef.current(entry.embedPrompt);
+    }
+  }, [configuration, activeProfile, domainPack.id, entry.embedPrompt]);
+
+  useEffect(() => {
+    if (!embedMode || !activeProfile?.overview?.portfolio) return;
+    const p = activeProfile.overview.portfolio;
+    const totalCents = p.cashCents + p.equityCents + p.fixedIncomeCents;
+    const sig = `${activeProfile.personaId}:${p.cashCents}:${p.equityCents}:${totalCents}`;
+    if (sig === lastBalanceSig.current) return;
+    lastBalanceSig.current = sig;
+    postEmbedEvent("cep:balance_updated", {
+      personaId: activeProfile.personaId,
+      displayName: activeProfile.displayName,
+      cashCents: p.cashCents,
+      equityCents: p.equityCents,
+      totalCents,
+    });
+  }, [activeProfile]);
+
+  useEffect(() => {
+    if (!embedMode || !latest || latest.status === "working") return;
+    const key = `${latest.id}:${latest.status}`;
+    if (key === lastTurnPosted.current) return;
+    lastTurnPosted.current = key;
+    const intro = (latest.experience?.messages?.[0]?.createSurface?.dataModel as { intro?: string } | undefined)?.intro;
+    postEmbedEvent("cep:turn_completed", {
+      turnId: latest.id,
+      message: latest.message,
+      status: latest.status,
+      ...(intro ? { summary: intro } : {}),
+    });
+  }, [latest]);
+
   const modelStatus = adminChat
     ? (configuration?.mode === "test" ? "Test mode" : configuration?.gatewayConfigured ? "Model connected" : "Model offline")
     : (configuration?.copilotModel ? `Live · ${configuration.copilotModel}` : "Live Advisory");
   const managedThread = panel?.kind === "thread" ? visibleConversations.find(({ id }) => id === panel.id) : undefined;
   const canRunRailActions = Boolean(configuration) && !pending && latest?.status !== "working";
 
-  return <div className={"app-layout" + (railCollapsed ? " rail-collapsed" : "")}>
-    {railOpen && <button className="rail-scrim" aria-label="Close conversations" onClick={() => setRailOpen(false)} />}
-    <aside className={"rail" + (railOpen ? " rail-open" : "")} id="conversation-rail" aria-label="Workspace navigation">
+  return <div className={"app-layout" + (embedMode ? " embed-layout" : "") + (railCollapsed ? " rail-collapsed" : "")}>
+    {!embedMode && railOpen && <button className="rail-scrim" aria-label="Close conversations" onClick={() => setRailOpen(false)} />}
+    {!embedMode && <aside className={"rail" + (railOpen ? " rail-open" : "")} id="conversation-rail" aria-label="Workspace navigation">
       <div className="rail-header">
         <a className="rail-home" href={adminChat ? adminPaths.tools : "/"}>
           <LabMark />
@@ -951,35 +1057,53 @@ function App() {
           ? <button type="button" className="rail-account" onClick={signOut}><LogOut size={16} aria-hidden="true" />Sign out</button>
           : <a className="rail-account" href="/login"><LogIn size={16} aria-hidden="true" />Sign in</a>}
       </div>
-    </aside>
+    </aside>}
     <main className="workspace" inert={railOpen}>
-      <header className="topbar unified-topbar">
-        <div className="topbar-left">
-          <button className="icon-button rail-menu" ref={railTrigger} type="button" aria-label="Show conversations" aria-expanded={railOpen}
-            aria-controls="conversation-rail" onClick={() => setRailOpen((open) => !open)}><PanelLeft size={19} aria-hidden="true" /></button>
-          {railCollapsed && (
-            <button className="icon-button rail-expand-desktop" type="button" aria-label="Expand sidebar" title="Expand sidebar"
-              onClick={() => setRailCollapsed(false)}><PanelLeft size={18} aria-hidden="true" /></button>
-          )}
-          <span className="workspace-crumb">
-            {adminChat ? "Test chat" : (activeProfile?.displayName ?? "Workspace")}
-            <ChevronRight size={13} aria-hidden="true" />
-          </span>
-          <h1>{chat?.title ?? "Overview"}</h1>
-        </div>
-        <div className="topbar-center">
-          <WorkspaceMenu pins={pins} section={activeSection} onSelect={setSection} onCustomize={() => openPanel({ kind: "pins" })}
-            trigger={customizeTrigger} disabled={!configuration} />
-        </div>
-        <div className="topbar-actions">
-          <ThemeToggle compact />
-          {configuration && (
-            <span className="model-status" data-connected={configuration.gatewayConfigured}>
-              <span aria-hidden="true" />{modelStatus}
+      {embedMode ? (
+        <header className="topbar embed-topbar">
+          <div className="embed-topbar-brand">
+            <span className="embed-brand-dot" aria-hidden="true" />
+            <div className="embed-brand-copy">
+              <strong>{embedBrand}</strong>
+              <small>{activeProfile?.displayName ?? "Client"} · {domainPack.label}</small>
+            </div>
+          </div>
+          <div className="embed-topbar-actions">
+            <button type="button" className="embed-new-btn" disabled={pending || !configuration} onClick={startFreshChat} title="Start new conversation">
+              <Plus size={14} aria-hidden="true" />New
+            </button>
+            <ThemeToggle compact />
+          </div>
+        </header>
+      ) : (
+        <header className="topbar unified-topbar">
+          <div className="topbar-left">
+            <button className="icon-button rail-menu" ref={railTrigger} type="button" aria-label="Show conversations" aria-expanded={railOpen}
+              aria-controls="conversation-rail" onClick={() => setRailOpen((open) => !open)}><PanelLeft size={19} aria-hidden="true" /></button>
+            {railCollapsed && (
+              <button className="icon-button rail-expand-desktop" type="button" aria-label="Expand sidebar" title="Expand sidebar"
+                onClick={() => setRailCollapsed(false)}><PanelLeft size={18} aria-hidden="true" /></button>
+            )}
+            <span className="workspace-crumb">
+              {adminChat ? "Test chat" : (activeProfile?.displayName ?? "Workspace")}
+              <ChevronRight size={13} aria-hidden="true" />
             </span>
-          )}
-        </div>
-      </header>
+            <h1>{chat?.title ?? "Overview"}</h1>
+          </div>
+          <div className="topbar-center">
+            <WorkspaceMenu pins={pins} section={activeSection} onSelect={setSection} onCustomize={() => openPanel({ kind: "pins" })}
+              trigger={customizeTrigger} disabled={!configuration} />
+          </div>
+          <div className="topbar-actions">
+            <ThemeToggle compact />
+            {configuration && (
+              <span className="model-status" data-connected={configuration.gatewayConfigured}>
+                <span aria-hidden="true" />{modelStatus}
+              </span>
+            )}
+          </div>
+        </header>
+      )}
       <Chat key={draftKey} conversation={chat} configuration={configuration} activeProfile={activeProfile}
         pendingActions={pendingActions} pending={pending} section={activeSection} pins={pins} progressHistory={progressHistory}
         domainPack={domainPack}
