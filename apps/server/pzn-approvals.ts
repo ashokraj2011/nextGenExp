@@ -154,7 +154,7 @@ export function requestPznApproval(
       400,
     ),
     riskLevel: gate.riskLevel,
-    payload: { args, ...(token ? { stalenessToken: token } : {}) },
+    payload: { args, toolRef: pznToolRefForOperation(input.operation), ...(token ? { stalenessToken: token } : {}) },
     details,
     requester: input.requester?.trim() || "Recommendation Author",
     dualControl: gate.dualControl,
@@ -189,11 +189,15 @@ export function verifyPznApproval(
   if (!record || record.targetKind !== "pzn_change") {
     throw new PznApprovalError("APPROVAL_NOT_FOUND", `Approval ${approvalId} was not found.`);
   }
-  if (record.status !== "approved") {
-    throw new PznApprovalError("APPROVAL_NOT_APPROVED", `Approval ${approvalId} is ${record.status}, not approved.`);
+  if (record.status !== "executing") {
+    throw new PznApprovalError(
+      "APPROVAL_NOT_APPROVED",
+      `Approval ${approvalId} is ${record.status}; it must be approved and claimed for execution (each approval runs once).`,
+    );
   }
-  if (record.action !== operation || record.sfieldToolRef !== pznToolRefForOperation(operation)) {
-    throw new PznApprovalError("APPROVAL_SCOPE_MISMATCH", `Approval ${approvalId} does not authorize "${operation}".`);
+  const expectedToolRef = pznToolRefForOperation(operation);
+  if (record.action !== operation || record.sfieldToolRef !== expectedToolRef || record.payload.toolRef !== expectedToolRef) {
+    throw new PznApprovalError("APPROVAL_SCOPE_MISMATCH", `Approval ${approvalId} does not authorize "${operation}" on ${expectedToolRef}.`);
   }
   if (canonicalJson(record.payload.args ?? {}) !== canonicalJson(args)) {
     throw new PznApprovalError("APPROVAL_PAYLOAD_MISMATCH", `The requested change differs from what approval ${approvalId} authorized.`);

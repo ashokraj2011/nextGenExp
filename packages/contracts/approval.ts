@@ -1,9 +1,9 @@
 import { z } from "zod";
 
 export const approvalRiskLevelSchema = z.enum(["low", "medium", "high"]);
-export const approvalStatusSchema = z.enum(["pending", "approved", "denied", "executed", "expired"]);
-export const approvalTargetKindSchema = z.enum(["domain_write", "external_connector", "stock_trade", "workflow_step", "pzn_change"]);
-export const approvalDomainSchema = z.enum(["ops_incident", "sales_deal", "customer360", "external_connector", "stock_trade", "workflow", "pzn_self_service"]);
+export const approvalStatusSchema = z.enum(["pending", "approved", "executing", "denied", "executed", "expired"]);
+export const approvalTargetKindSchema = z.enum(["domain_write", "external_connector", "stock_trade", "workflow_step", "pzn_change", "integration_task"]);
+export const approvalDomainSchema = z.enum(["ops_incident", "sales_deal", "customer360", "external_connector", "stock_trade", "workflow", "pzn_self_service", "integration"]);
 export const pznDualControlModeSchema = z.enum(["off", "high_risk", "always"]);
 export type PznDualControlMode = z.infer<typeof pznDualControlModeSchema>;
 

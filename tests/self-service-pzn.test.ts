@@ -277,11 +277,19 @@ test("configurable approvals gate publish/destructive changes and enforce 4-eyes
     assert.throws(() => verifyPznApproval(approvals, env.pzn, "publish_context", { contextId: "appr_ctx" }), /requires an approved/);
     assert.throws(
       () => verifyPznApproval(approvals, env.pzn, "publish_context", { ...(publishApproval.payload.args as object), approvalId: publishApproval.id }),
-      /pending, not approved/,
+      /is pending/,
     );
 
     // 3. Self-approval is allowed here; then the approved change applies.
     assert.ok(approvals.decide(publishApproval.id, { decision: "approve", actor: "Author A" }).ok);
+    // Approved is not enough: execution needs an atomic claim, so an approval runs at most once.
+    assert.throws(
+      () => verifyPznApproval(approvals, env.pzn, "publish_context", { ...(publishApproval.payload.args as object), approvalId: publishApproval.id }),
+      /must be approved and claimed/,
+    );
+    assert.ok(approvals.claimForExecution(publishApproval.id).ok);
+    assert.equal(approvals.claimForExecution(publishApproval.id).ok, false, "a second claim (double-click / second approver) is rejected");
+    assert.equal(publishApproval.payload.toolRef, "cep.pzn.rule_metadata@1.0.0", "the approval is bound to the tool version");
     // Tampered args are rejected even with an approved id.
     assert.throws(
       () => verifyPznApproval(approvals, env.pzn, "publish_context", { contextId: "appr_ctx", notes: "tampered", approvalId: publishApproval.id }),
@@ -289,7 +297,13 @@ test("configurable approvals gate publish/destructive changes and enforce 4-eyes
     );
     const args = verifyPznApproval(approvals, env.pzn, "publish_context", { ...(publishApproval.payload.args as object), approvalId: publishApproval.id });
     applyPznOperationDirect(env.pzn, "publish_context", args);
+    approvals.markExecuted(publishApproval.id, { summary: "published", sfieldRunId: "offline" });
     assert.equal(env.pzn.getContext("appr_ctx")?.status, "published");
+    assert.throws(
+      () => verifyPznApproval(approvals, env.pzn, "publish_context", { ...(publishApproval.payload.args as object), approvalId: publishApproval.id }),
+      /is executed/,
+      "an executed approval cannot be replayed",
+    );
 
     // 4. Destructive change under high_risk mode requires a second approver.
     const unpublish = requestPznApproval(approvals, env.pzn, { operation: "unpublish_context", args: { contextId: "appr_ctx" }, requester: "Author A" });
@@ -298,6 +312,7 @@ test("configurable approvals gate publish/destructive changes and enforce 4-eyes
     const selfApprove = approvals.decide(unpublish.id, { decision: "approve", actor: "Author A" });
     assert.equal(selfApprove.ok, false);
     assert.ok(approvals.decide(unpublish.id, { decision: "approve", actor: "Approver B" }).ok);
+    assert.ok(approvals.claimForExecution(unpublish.id).ok);
 
     // 5. Staleness: if the context changes after the request, the approval no longer applies.
     env.pzn.upsertContext({

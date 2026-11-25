@@ -62,6 +62,8 @@ import { recommendationArbitrateToolRef } from "../../packages/contracts/recomme
 import { connectorInvokeToolRef, domainWriteToolRef, Runtime, sfieldNamespace } from "./runtime";
 import { WidgetLibraryStore } from "./widget-library";
 import { SelfServicePznStore } from "./self-service-pzn-store";
+import { IntegrationTaskError, IntegrationTaskService, IntegrationTaskStore } from "./integration-tasks";
+import { runTaskRequestSchema } from "../../packages/contracts/integration-task";
 import { runSelfServicePznCopilot } from "./self-service-pzn-copilot";
 import { applyPznOperationDirect, PznApprovalError, pznGateFor, pznToolRefForOperation, requestPznApproval, verifyPznApproval } from "./pzn-approvals";
 import {
@@ -182,6 +184,7 @@ export async function startApp(options: Options) {
   const now = Date.now;
   const widgetLibrary = new WidgetLibraryStore(options.dataDir);
   const selfServicePzn = new SelfServicePznStore(options.dataDir);
+  const integrationTasks = new IntegrationTaskStore(options.dataDir);
   const profileStore = new CustomerProfileStore(options.dataDir);
   setActiveCustomerProfileStore(profileStore);
   const experienceRegistry = new ExperienceRegistryStore(options.dataDir);
@@ -302,7 +305,7 @@ export async function startApp(options: Options) {
   try {
     runtime = options.gateway
       ? await Runtime.open(store, sfieldPath, options.gateway, now, inspectorEnabled, portfolioSnapshots, goalProgressProvider, options.goalBudget, {
-          customer360, opsStore, salesStore, profileStore, writeAudit, connectorStore, selfServicePzn, approvalStore,
+          customer360, opsStore, salesStore, profileStore, writeAudit, connectorStore, selfServicePzn, approvalStore, integrationTasks,
         })
       : null;
     await offline?.init({ namespace: sfieldNamespace, ownerId: newId("owner") });
@@ -358,10 +361,23 @@ export async function startApp(options: Options) {
     onTradeSettle: makeTradeSettler,
   });
 
+  const integrationService = new IntegrationTaskService(integrationTasks, approvalStore, () => runtime);
+
   async function executeApprovedRecord(principalId: string, record: ApprovalRecord) {
+    if (record.targetKind === "integration_task") {
+      try {
+        const out = await integrationService.resume(record);
+        return { approval: out.approval, execution: out.execution, taskRun: out.run };
+      } catch (err) {
+        const code = err instanceof IntegrationTaskError ? err.code : "integration_task_failed";
+        throw new ApiError(409, code, err instanceof Error ? err.message : "Integration task failed");
+      }
+    }
     if (record.targetKind === "pzn_change") {
       const args = (record.payload.args && typeof record.payload.args === "object" ? record.payload.args : {}) as Record<string, unknown>;
       const operation = record.action;
+      const claim = approvalStore.claimForExecution(record.id);
+      if (!claim.ok) throw new ApiError(409, claim.code, claim.message);
       try {
         if (runtime) {
           const exec = await runtime.executePznTool(principalId, pznToolRefForOperation(operation), operation, { ...args, approvalId: record.id });
@@ -384,6 +400,8 @@ export async function startApp(options: Options) {
         const finalRecord = approvalStore.markExecuted(record.id, { summary, sfieldRunId: "offline", auditId: audit.auditId }) ?? record;
         return { approval: finalRecord, execution: { summary, sfieldRunId: "offline", auditId: audit.auditId } };
       } catch (err) {
+        // Local store operations either commit or throw, so a failure here means nothing was applied; allow a retry.
+        approvalStore.releaseClaim(record.id);
         const code = err instanceof PznApprovalError ? err.code : "pzn_change_failed";
         throw new ApiError(409, code, `Approved, but the change could not be applied: ${err instanceof Error ? err.message : "unknown error"}`);
       }
@@ -1402,6 +1420,9 @@ export async function startApp(options: Options) {
         throw new ApiError(outcome.status, outcome.code, outcome.message);
       }
       if (outcome.record.status === "denied") {
+        if (outcome.record.targetKind === "integration_task") {
+          await integrationService.deny(outcome.record);
+        }
         if (outcome.record.targetKind === "workflow_step") {
           const runId = typeof outcome.record.payload.runId === "string" ? outcome.record.payload.runId : outcome.record.recordId;
           await workflowEngine.resumeAfterApproval(runId, outcome.record.id, false, decisionInput.actor, decisionInput.comment);
@@ -1423,6 +1444,7 @@ export async function startApp(options: Options) {
       return json(res, {
         approval: executed.approval,
         execution: executed.execution,
+        ...("taskRun" in executed ? { taskRun: executed.taskRun } : {}),
         view: approvalStore.view(),
       });
     }
@@ -1586,6 +1608,39 @@ export async function startApp(options: Options) {
         status: "succeeded",
       });
       return json(res, { deal: updated, view: salesStore.view(), auditId: audit.auditId });
+    }
+    if (resource === "integrations" && inspectorEnabled) {
+      const guard = async <T>(fn: () => Promise<T> | T) => {
+        try {
+          return await fn();
+        } catch (err) {
+          if (err instanceof IntegrationTaskError) {
+            const status = err.code === "sfield_runtime_required" ? 503 : err.code.endsWith("not_found") ? 404 : err.code === "invalid_contract" ? 400 : 409;
+            throw new ApiError(status, err.code, err.message);
+          }
+          if (err instanceof z.ZodError) throw new ApiError(400, "invalid_input", err.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ").slice(0, 400));
+          throw err;
+        }
+      };
+      if (!id && method === "GET") return json(res, integrationService.view());
+      if (id === "contracts" && !operation && method === "POST") {
+        const raw = await body(req, z.record(z.string(), z.unknown()), 64 * 1024);
+        return json(res, { contract: await guard(() => integrationTasks.upsertDraft(raw)), view: integrationService.view() });
+      }
+      if (id === "contracts" && operation === "publish" && method === "POST") {
+        const { ref } = await body(req, z.object({ ref: z.string().min(3).max(120) }).strict());
+        const published = await guard(() => integrationTasks.publish(ref));
+        return json(res, { ...published, sfieldRegistered: runtime?.registeredIntegrationTools().has(ref) ?? false, view: integrationService.view() });
+      }
+      if (id === "tasks" && operation === "run" && method === "POST") {
+        const data = await body(req, runTaskRequestSchema, 32 * 1024);
+        const out = await guard(() => integrationService.run(principalId, { ...data, requestedBy: data.requestedBy ?? "CEP Operator" }));
+        return json(res, out, out.approval ? 202 : 200);
+      }
+      if (id === "runs" && operation === "reconcile" && method === "POST") {
+        const { runId } = await body(req, z.object({ runId: z.string().min(3).max(64) }).strict());
+        return json(res, await guard(() => integrationService.reconcile(principalId, runId)));
+      }
     }
     if (resource === "pzn" && inspectorEnabled) {
       const invokePzn = async <T>(toolRef: string, opName: string, payload: unknown, fallback: () => T) => {

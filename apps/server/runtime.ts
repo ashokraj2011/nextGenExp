@@ -5,7 +5,7 @@ import { AgenticExecution } from "./agentic-execution";
 import { axeAgentConfig } from "./agentic-model";
 import { axeToolAction, ExperienceAgent } from "./experience-agent";
 import { dirname, resolve } from "node:path";
-import { ASK_USER, defineTool, estimateJsonTokens, estimateTokens, SField, ToolError } from "@sfield/core";
+import { ASK_USER, defineTool, digestJson, estimateJsonTokens, estimateTokens, SField, ToolError } from "@sfield/core";
 import type { ConfigDocument, DefineToolInput, JsonObject, JsonValue, Principal, RunRecord, RunResult, ToolHandlerContext, Verifier } from "@sfield/core";
 import { SqlitePersistence } from "@sfield/store-sqlite";
 import host from "../../fixtures/host.json";
@@ -58,6 +58,9 @@ import type { WriteAuditStore } from "./write-audit";
 import type { SelfServicePznStore } from "./self-service-pzn-store";
 import type { ApprovalStore } from "./approval-store";
 import { PznApprovalError, splitApprovalId, verifyPznApproval } from "./pzn-approvals";
+import { TaskCallExecutor, taskToolId, type IntegrationTaskRuntime, type IntegrationTaskStore } from "./integration-tasks";
+import { taskEnvelopeJsonSchema } from "../../packages/contracts/integration-task";
+import { SFieldError, type ExecutionScope } from "@sfield/core";
 import {
   pznDataDictionaryToolId,
   pznDataDictionaryToolInputJsonSchema,
@@ -254,7 +257,7 @@ function runtimeConfig(settings: GatewaySettings, model: JsonObject, budget: Exe
   };
 }
 
-export class Runtime {
+export class Runtime implements IntegrationTaskRuntime {
   private sf!: SField;
   readonly funding: FundingAgent;
   readonly experiences: ExperienceAgent;
@@ -273,6 +276,7 @@ export class Runtime {
     private readonly connectorStore?: ConnectorStore,
     private readonly selfServicePzn?: SelfServicePznStore,
     private readonly approvalStore?: ApprovalStore,
+    private readonly integrationTasks?: IntegrationTaskStore,
   ) {
     this.funding = new FundingAgent(store, () => this.sf, now);
     const execution = new AgenticExecution(store, () => this.sf, now, (turnId) => this.current(turnId), portfolioSnapshots, goalProgressProvider, goalBudget);
@@ -291,6 +295,7 @@ export class Runtime {
       connectorStore?: ConnectorStore;
       selfServicePzn?: SelfServicePznStore;
       approvalStore?: ApprovalStore;
+      integrationTasks?: IntegrationTaskStore;
     },
   ) {
     const record = inspectorEnabled ? (id: string, exchange: GatewayExchange) => store.saveGatewayExchange(id, exchange) : undefined;
@@ -303,6 +308,7 @@ export class Runtime {
       extraProviders?.profileStore, extraProviders?.writeAudit, extraProviders?.connectorStore,
       extraProviders?.selfServicePzn,
       extraProviders?.approvalStore,
+      extraProviders?.integrationTasks,
     );
     const agentTools = [...runtime.experiences.tools(), ...runtime.experiences.execution.tools()];
     const agentActions = new Set(agentTools.map(({ ref }) => axeToolAction(ref)));
@@ -312,19 +318,27 @@ export class Runtime {
       namespace: sfieldNamespace,
       ...gateway.options,
       authorizer: {
-        async authorize({ principal, action, effect, agentId }) {
+        async authorize({ principal, action, effect, agentId, resource, argumentsDigest, runId }) {
           const readAllowed = effect === "read" && (
-            actions.has(action) || agentActions.has(action)
+            actions.has(action) || agentActions.has(action) || action.startsWith("int.")
             || ((agentId === fundingAgentId || agentId === experienceAgentId) && action === ASK_USER.policy.action)
           );
-          const writeAllowed = effect === "write" && (
-            action === domainWriteToolId
-            || action === connectorInvokeToolId
-            || action === pznDataDictionaryToolId
-            || action === pznRuleMetadataToolId
-          ) && !agentId;
+          const writeAllowed = (effect === "write" || effect === "destructive") && !agentId && (
+            (effect === "write" && (
+              action === domainWriteToolId
+              || action === connectorInvokeToolId
+              || action === pznDataDictionaryToolId
+              || action === pznRuleMetadataToolId
+            ))
+            || action.startsWith("int.")
+          );
           return principal.tenantId === "pzn-local" && principal.roles.includes("pzn-demo") && (readAllowed || writeAllowed)
-            ? { decision: "allow", evidenceId: makeId("auth"), expiresAt: new Date(now() + axeBudget.activeSeconds * 1000).toISOString() }
+            ? {
+              decision: "allow",
+              // Deterministic per (run, principal, action, resource, arguments): sfield binds approvals to a prepared
+              // invocation digest that includes this evidence id, so a random id would invalidate every approval on re-prepare.
+              evidenceId: "auth_" + digestJson({ runId, tenantId: principal.tenantId, subjectId: principal.subjectId, action, effect, resourceType: resource.type, resourceId: String(resource.id), argumentsDigest } as JsonObject).replace(/^sha256:/, "").slice(0, 24),
+              expiresAt: new Date(now() + axeBudget.activeSeconds * 1000).toISOString() }
             : { decision: "deny", code: "TOOL_DENIED", reason: "The demo permits scoped reads and host-governed domain writes." };
         },
       },
@@ -345,7 +359,7 @@ export class Runtime {
           },
         },
       ],
-      tools: [...runtime.tools(), ...agentTools],
+      tools: [...runtime.tools(), ...agentTools, ...runtime.integrationTools()],
       verifiers: {
         contextSelection: runtime.verifier("contextSelection", "route"),
         experience: runtime.verifier("experience", "compose"),
@@ -750,6 +764,143 @@ export class Runtime {
       return { data, summary: out.summary, sfieldRunId: scope.id, sfieldToolRef: toolRef };
     } finally {
       await scope.close();
+    }
+  }
+
+  /* ---------------- Integration tasks: one sfield tool per published task version ---------------- */
+
+  private readonly integrationExecutor = new TaskCallExecutor();
+  private readonly registeredIntegrationRefs = new Set<string>();
+  private readonly pendingIntegrationCalls = new Map<string, {
+    scope: ExecutionScope; callId: string; toolRef: string; input: Record<string, unknown>; timer: NodeJS.Timeout;
+  }>();
+
+  registeredIntegrationTools(): ReadonlySet<string> {
+    return this.registeredIntegrationRefs;
+  }
+
+  /**
+   * Registered once at startup: sfield closes registration after the first run and pins tool digests in the lock.
+   * Tasks published later become available on the next restart (or a governed config reload in a later phase).
+   */
+  private integrationTools() {
+    const store = this.integrationTasks;
+    if (!store) return [];
+    return store.published().flatMap((contract) => {
+      const integration = store.integration(contract.integrationId);
+      if (!integration) return [];
+      const id = taskToolId(contract.integrationId, contract.taskId);
+      const writes = contract.effect !== "read";
+      const tool = defineTool({
+        id,
+        version: contract.version,
+        description: contract.description,
+        inputs: { type: "object", additionalProperties: false, required: ["input"], properties: { input: contract.inputSchema } } as unknown as JsonObject,
+        outputs: taskEnvelopeJsonSchema as unknown as JsonObject,
+        ...(writes ? {
+          resource: contract.resourceIdField
+            ? { type: `${contract.integrationId}_record`, id: { ref: `inputs.input.${contract.resourceIdField}` } }
+            : { type: `${contract.integrationId}_record`, id: { literal: contract.taskId } },
+        } : {}),
+        policy: {
+          action: id,
+          effect: contract.effect,
+          // Approval is decided per call by the host (scope preset) and enforced by sfield against the prepared digest.
+          requiresApproval: false,
+          maxAttempts: 1,
+          retrySafety: "never",
+          timeoutMs: integration.timeoutMs + 1_000,
+          classification: "public",
+          maxOutputBytes: 48_000,
+        },
+        handler: async (raw, ctx) => {
+          const input = (raw as { input: Record<string, unknown> }).input;
+          const current = store.contract(contract.ref);
+          if (!current || current.contractDigest !== contract.contractDigest || current.bindingDigest !== contract.bindingDigest) {
+            throw new ToolError("TASK_DEFINITION_CHANGED", JSON.stringify({ error: { kind: "policy_denied", retryable: false, message: `${contract.ref} changed since it was registered.` } }), { effect: "none" });
+          }
+          const res = await this.integrationExecutor.execute(integration, current, input, ctx.signal);
+          if (res.state === "failed") {
+            throw new ToolError(`TASK_${(res.error?.kind ?? "unknown").toUpperCase()}`, JSON.stringify({ outcome: res.outcome, error: res.error }), { effect: "none", retryable: res.error?.retryable ?? false });
+          }
+          if (res.state === "outcome_unknown") {
+            throw new ToolError("TASK_OUTCOME_UNKNOWN", JSON.stringify({ error: res.error }), { effect: "unknown" });
+          }
+          return {
+            state: res.state,
+            outcomeCode: res.outcome?.code ?? "UNMAPPED",
+            success: res.outcome?.success ?? true,
+            retryable: res.outcome?.retryable ?? false,
+            message: (res.error?.message ?? res.outcome?.meaning ?? "ok").slice(0, 400),
+            outputJson: JSON.stringify(res.output ?? null).slice(0, 40_000),
+            ...(res.artifact ? { artifactJson: JSON.stringify(res.artifact).slice(0, 40_000) } : {}),
+          };
+        },
+      });
+      this.registeredIntegrationRefs.add(contract.ref);
+      return [tool];
+    });
+  }
+
+  /**
+   * Runs a task in a host execution scope. Gated calls use the "supervised" preset, so sfield itself requires an
+   * approval bound to the prepared invocation digest (tool digest, binding identity, resource, normalized input).
+   */
+  async executeIntegrationTask(principalId: string, toolRef: string, input: Record<string, unknown>, gated: boolean) {
+    const scope = await this.sf.executions.open({
+      principal: principalFor(principalId),
+      purpose: `cep-int:${toolRef}`,
+      preset: gated ? "supervised" : "bounded_auto",
+      budget: { maxToolCalls: 2 },
+    });
+    try {
+      const result = await scope.registry.execute(toolRef, { input } as JsonObject, { signal: AbortSignal.timeout(20_000) });
+      await scope.close();
+      return { kind: "result" as const, result, sfieldRunId: scope.id };
+    } catch (err) {
+      const details = err instanceof SFieldError ? (err.details as { approvalId?: string; callId?: string } | undefined) : undefined;
+      if (err instanceof SFieldError && err.code === "APPROVAL_REQUIRED" && details?.approvalId && details.callId) {
+        // The scope stays open: sfield binds the approval to this run and call. Restart-safe resume is a later phase.
+        const approvalId = details.approvalId;
+        const timer = setTimeout(() => {
+          const pending = this.pendingIntegrationCalls.get(approvalId);
+          this.pendingIntegrationCalls.delete(approvalId);
+          void pending?.scope.close().catch(() => undefined);
+        }, 24 * 60 * 60 * 1000);
+        timer.unref();
+        this.pendingIntegrationCalls.set(approvalId, { scope, callId: details.callId, toolRef, input, timer });
+        return { kind: "pending" as const, sfieldApprovalId: approvalId, callId: details.callId, sfieldRunId: scope.id };
+      }
+      await scope.close().catch(() => undefined);
+      throw err;
+    }
+  }
+
+  async resumeIntegrationTask(sfieldApprovalId: string, approver: string, decision: "approve" | "deny") {
+    const pending = this.pendingIntegrationCalls.get(sfieldApprovalId);
+    if (!pending) throw new Error(`APPROVAL_CONTEXT_LOST: no pending sfield call for ${sfieldApprovalId}`);
+    this.pendingIntegrationCalls.delete(sfieldApprovalId);
+    clearTimeout(pending.timer);
+    try {
+      // sfield.approvals.decide() also wakes the scheduler, which re-claims this external scope's run and breaks the
+      // pending call ("epoch no longer owns run"). Record the decision through the same persistence call decide() uses,
+      // keeping its expiry rule; dispatch still validates the approval against the prepared invocation digest.
+      const persistence = this.sf.persistence;
+      const sfApproval = await persistence.getApproval(sfieldApprovalId);
+      if (!sfApproval) throw new Error(`APPROVAL_CONTEXT_LOST: sfield approval ${sfieldApprovalId} not found`);
+      const now = new Date().toISOString();
+      if (sfApproval.status === "pending" && sfApproval.expiresAt <= now) {
+        await persistence.decideApproval({ id: sfieldApprovalId, actor: { tenantId: "pzn-local", subjectId: "expiry" }, decision: "deny", comment: "expired", now });
+        throw new Error(`APPROVAL_CONTEXT_LOST: sfield approval ${sfieldApprovalId} expired`);
+      }
+      await persistence.decideApproval({ id: sfieldApprovalId, actor: { tenantId: "pzn-local", subjectId: approver.slice(0, 80) }, decision, now });
+      if (decision === "deny") return { kind: "denied" as const };
+      const result = await pending.scope.registry.execute(pending.toolRef, { input: pending.input } as JsonObject, {
+        callId: pending.callId, signal: AbortSignal.timeout(20_000),
+      });
+      return { kind: "result" as const, result, sfieldRunId: pending.scope.id };
+    } finally {
+      await pending.scope.close().catch(() => undefined);
     }
   }
 

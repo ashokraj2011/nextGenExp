@@ -271,6 +271,29 @@ export class ApprovalStore {
     return { ok: true, record: updated };
   }
 
+  /**
+   * Atomically moves an approved request to "executing" so it can run at most once,
+   * even with double-clicks or two concurrent approvers.
+   */
+  claimForExecution(id: string): { ok: true; record: ApprovalRecord } | { ok: false; code: string; message: string } {
+    this.sweepExpired();
+    const existing = this.state.records.find((r) => r.id === id);
+    if (!existing) return { ok: false, code: "approval_not_found", message: `Approval ${id} was not found.` };
+    if (existing.status !== "approved") {
+      return { ok: false, code: "approval_not_claimable", message: `Approval ${id} is ${existing.status}; only an approved request can execute, and only once.` };
+    }
+    const updated: ApprovalRecord = { ...existing, status: "executing" };
+    this.save({ ...this.state, records: this.state.records.map((r) => (r.id === id ? updated : r)) });
+    return { ok: true, record: updated };
+  }
+
+  /** Returns a claimed request to "approved" when execution definitely did not happen, so it can be retried. */
+  releaseClaim(id: string): void {
+    const existing = this.state.records.find((r) => r.id === id);
+    if (!existing || existing.status !== "executing") return;
+    this.save({ ...this.state, records: this.state.records.map((r) => (r.id === id ? { ...existing, status: "approved" as const } : r)) });
+  }
+
   markExecuted(
     id: string,
     executionResult: NonNullable<ApprovalRecord["executionResult"]>,
