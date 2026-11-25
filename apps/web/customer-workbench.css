@@ -2842,6 +2842,149 @@
   height: 26px;
 }
 
+/* Visual PII Firewall Badge & LLM X-Ray Split-Screen Diff */
+.reasoning-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.reasoning-header-row .reasoning-toggle {
+  flex: 1;
+  min-width: 240px;
+}
+
+.pii-shield-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.pii-shield-badge.is-on {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #86efac;
+}
+
+.pii-shield-badge.is-off {
+  background: #f3f2ef;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
+}
+
+.pii-xray-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--white);
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pii-xray-btn:hover,
+.pii-xray-btn.is-active {
+  background: #0f172a;
+  color: #ffffff;
+  border-color: #0f172a;
+}
+
+.pii-xray-drawer {
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #0f172a;
+  color: #e2e8f0;
+  display: grid;
+  gap: 10px;
+  font-size: 0.78rem;
+}
+
+.pii-xray-head strong {
+  color: #86efac;
+  font-size: 0.78rem;
+}
+
+.pii-xray-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 720px) {
+  .pii-xray-grid { grid-template-columns: 1fr; }
+}
+
+.pii-xray-col {
+  padding: 10px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: grid;
+  gap: 6px;
+}
+
+.pii-xray-col.is-scrubbed {
+  background: rgba(22, 163, 74, 0.12);
+  border-color: rgba(134, 239, 172, 0.35);
+}
+
+.pii-xray-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+}
+
+.pii-xray-col.is-scrubbed .pii-xray-label {
+  color: #86efac;
+}
+
+.pii-xray-col pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: #f8fafc;
+}
+
+.pii-xray-ctx {
+  padding-top: 6px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.16);
+  opacity: 0.85;
+}
+
+.pii-xray-vault {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 0.72rem;
+  color: #cbd5e1;
+}
+
+.pii-xray-vault code {
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(134, 239, 172, 0.15);
+  color: #bbf7d0;
+  font-size: 0.71rem;
+}
+
 .embed-ambient-metric {
   padding: 2px 8px;
   border-radius: 7px;

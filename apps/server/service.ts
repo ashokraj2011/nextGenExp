@@ -40,6 +40,7 @@ import type { ApprovalStore } from "./approval-store";
 import type { SettlementCallback, TradeStore } from "./trade-store";
 import type { ActionFlowStore } from "./action-flow-store";
 import { compileSavedWidgetToCanvas, type WidgetLibraryStore } from "./widget-library";
+import { rehydrateObjectStrings, rehydratePiiText, type PiiFirewallStore } from "./pii-firewall";
 import type { Customer360Service } from "./customer-360";
 import type { GatewaySettings } from "./gateway";
 import type { GoalProgressProvider } from "../../packages/goal-progress";
@@ -90,6 +91,7 @@ export class ExperienceService {
       workflowEngine?: WorkflowEngine;
       knowledgeBase?: KnowledgeBaseStore;
       widgetLibrary?: WidgetLibraryStore;
+      piiFirewall?: PiiFirewallStore;
       onTradeSettle?: (principalId: string) => SettlementCallback;
     },
   ) {
@@ -301,6 +303,29 @@ export class ExperienceService {
       if (!initial.workflow && !initial.route && this.dynamicUi) {
         const conversation = this.store.conversation(initial.scope.conversationId, initial.scope.principalId);
         const persona = findProfileById(conversation.personaId);
+
+        // Run Visual PII Firewall inspection (toggleable ON/OFF in Admin)
+        let activePiiTokenMap = new Map<string, string>();
+        let scrubbedProfileSummaryOverride: string | undefined;
+        if (this.dynamicUi.piiFirewall && this.dynamicUi.mode !== "test") {
+          const contextSeed = persona
+            ? `${persona.displayName} (Account ${persona.syntheticMid}, Cash $${((persona.cashCents ?? 0) / 100).toLocaleString("en-US")}, Equities $${((persona.equityCents ?? 0) / 100).toLocaleString("en-US")})`
+            : undefined;
+          const piiResult = this.dynamicUi.piiFirewall.inspectAndRecord({
+            turnId: id,
+            prompt: initial.public.message,
+            contextSummary: contextSeed,
+            knownNames: persona ? [persona.displayName, "Alice Morgan", "Jordan Lee", "Marcus Reed"] : ["Alice Morgan", "Jordan Lee", "Marcus Reed"],
+            personaName: persona?.displayName,
+          });
+          activePiiTokenMap = piiResult.tokenMap;
+          if (piiResult.trace.firewallEnabled && piiResult.scrubbedContextSummary) {
+            scrubbedProfileSummaryOverride = piiResult.scrubbedContextSummary;
+          }
+          this.store.update(id, (row) => {
+            row.public.piiRedaction = piiResult.trace;
+          });
+        }
 
         // 0. Multimodal Document-to-Action interception ([Attached: ...])
         const attachedDoc = hasAttachedDocumentBlock(initial.public.message);
@@ -684,10 +709,10 @@ export class ExperienceService {
               excludePromotions: runtime.experiences.execution.world.exclusions(initial),
             })
           : undefined;
-        const profileSummary = lookupInfo
+        const profileSummary = scrubbedProfileSummaryOverride ?? (lookupInfo
           ? `${lookupInfo.lookup.personaName} (${lookupInfo.lookup.highlights.join(", ")})`
-          : undefined;
-        const generated = await generateDynamicUi({
+          : undefined);
+        const generatedRaw = await generateDynamicUi({
           prompt: initial.public.message,
           profileSummary,
           gateway: this.dynamicUi.gateway,
@@ -706,6 +731,12 @@ export class ExperienceService {
           semanticRoute,
           signal,
         });
+        const generated = activePiiTokenMap.size > 0
+          ? {
+              intro: rehydratePiiText(generatedRaw.intro, activePiiTokenMap),
+              canvas: rehydrateObjectStrings(generatedRaw.canvas, activePiiTokenMap),
+            }
+          : generatedRaw;
         current();
         const now = this.now();
         const dynamicResult = compileDynamicCanvas(generated.intro, generated.canvas, now + DECISION_TTL);

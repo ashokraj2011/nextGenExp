@@ -8,6 +8,8 @@ import { api, toolSetupErrorMessage } from "./api";
 import { diagnosticHref } from "./admin-navigation";
 import { CallLogs, PendingActionLogs } from "./call-logs";
 import { EvalRunnerPanel } from "./eval-runner-panel";
+import { PiiFirewallPanel } from "./pii-firewall-panel";
+import { UxEvolutionPanel } from "./ux-evolution-panel";
 import { Inspector } from "./inspector";
 import { readActiveConversation, rememberActiveConversation } from "./conversation-storage";
 
@@ -407,6 +409,8 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
   const writeAuditView = view === "logs" && query.get("source") === "write_audit";
   const analyticsView = view === "logs" && query.get("source") === "analytics";
   const evalsView = view === "logs" && query.get("source") === "evals";
+  const piiView = view === "logs" && query.get("source") === "pii";
+  const uxEvolutionView = view === "logs" && query.get("source") === "ux-evolution";
 
   useEffect(() => {
     let active = true;
@@ -423,13 +427,13 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
   }, [query, selectThread]);
 
   useEffect(() => {
-    if (!selectedId || pendingActionView || approvalsView || writeAuditView || analyticsView || evalsView) return;
+    if (!selectedId || pendingActionView || approvalsView || writeAuditView || analyticsView || evalsView || piiView || uxEvolutionView) return;
     let active = true;
     void api.conversation(selectedId).then((row) => {
       if (active) setConversation(row);
     }, (error: unknown) => { if (active) setNotice(toolSetupErrorMessage(error)); });
     return () => { active = false; };
-  }, [selectedId, refresh, pendingActionView, approvalsView, writeAuditView, analyticsView, evalsView]);
+  }, [selectedId, refresh, pendingActionView, approvalsView, writeAuditView, analyticsView, evalsView, piiView, uxEvolutionView]);
 
   const loaded = conversation?.id === selectedId ? conversation : undefined;
   const requestedTurn = loaded?.id === query.get("thread") ? query.get("turn") ?? undefined : undefined;
@@ -438,14 +442,18 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
   const writeAuditQuery = new URLSearchParams({ source: "write_audit" });
   const analyticsQuery = new URLSearchParams({ source: "analytics" });
   const evalsQuery = new URLSearchParams({ source: "evals" });
+  const piiQuery = new URLSearchParams({ source: "pii" });
+  const uxEvolutionQuery = new URLSearchParams({ source: "ux-evolution" });
   if (selectedId) {
     pendingQuery.set("thread", selectedId);
     approvalsQuery.set("thread", selectedId);
     writeAuditQuery.set("thread", selectedId);
     analyticsQuery.set("thread", selectedId);
     evalsQuery.set("thread", selectedId);
+    piiQuery.set("thread", selectedId);
+    uxEvolutionQuery.set("thread", selectedId);
   }
-  const isChatCallsView = !pendingActionView && !approvalsView && !writeAuditView && !analyticsView && !evalsView;
+  const isChatCallsView = !pendingActionView && !approvalsView && !writeAuditView && !analyticsView && !evalsView && !piiView && !uxEvolutionView;
   return <main className="admin-main admin-diagnostics" aria-labelledby="diagnostics-title">
     <header className="admin-heading"><h1 id="diagnostics-title">{title}</h1></header>
     {view === "logs" && <nav className="log-sources" aria-label="Log sources">
@@ -461,12 +469,18 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
         href={adminPaths.logs + "?" + analyticsQuery}>Engagement analytics</a>
       <a className="rail-link" aria-current={evalsView ? "page" : undefined}
         href={adminPaths.logs + "?" + evalsQuery}>Guardrail Evals &amp; Audit</a>
+      <a className="rail-link" aria-current={piiView ? "page" : undefined}
+        href={adminPaths.logs + "?" + piiQuery}>PII Firewall &amp; X-Ray</a>
+      <a className="rail-link" aria-current={uxEvolutionView ? "page" : undefined}
+        href={adminPaths.logs + "?" + uxEvolutionQuery}>Self-Evolving UX</a>
     </nav>}
     {pendingActionView ? <PendingActionLogs profiles={configuration?.personas ?? []} />
       : approvalsView ? <ApprovalQueuePanel />
       : writeAuditView ? <WriteAuditLogs />
       : analyticsView ? <EngagementAnalyticsPanel />
       : evalsView ? <EvalRunnerPanel />
+      : piiView ? <PiiFirewallPanel />
+      : uxEvolutionView ? <UxEvolutionPanel />
       : <section className="admin-card diagnostics-picker">
       <label htmlFor={selectId}>Conversation</label>
       <div>

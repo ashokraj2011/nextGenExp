@@ -49,6 +49,9 @@ import { knowledgeDocumentUpsertSchema } from "../../packages/contracts/knowledg
 import { ScheduledJobStore } from "./scheduled-jobs";
 import { scheduledJobUpsertSchema } from "../../packages/contracts/scheduled-jobs";
 import { VerticalPackStore } from "./vertical-factory";
+import { PiiFirewallStore, scrubWithPiiFirewall } from "./pii-firewall";
+import { piiFirewallConfigSchema } from "../../packages/contracts/pii-firewall";
+import { UxEvolutionStore } from "./ux-evolution";
 import { extractDocumentAction } from "./document-extractor";
 import { OmnichannelStore } from "./omnichannel-store";
 import { omnichannelConfigSchema } from "../../packages/contracts/omnichannel";
@@ -264,6 +267,8 @@ export async function startApp(options: Options) {
   const proactiveStore = new ProactiveEventStore(options.dataDir);
   const knowledgeBase = new KnowledgeBaseStore(options.dataDir);
   const verticalFactory = new VerticalPackStore(options.dataDir);
+  const piiFirewall = new PiiFirewallStore(options.dataDir, (options.mode ?? "live") !== "test");
+  const uxEvolution = new UxEvolutionStore(options.dataDir);
   const evalRunner = new EvalRunnerStore(options.dataDir);
   const tradeStore = new TradeStore(options.dataDir, profileStore);
   const scheduledJobs = new ScheduledJobStore(options.dataDir, {
@@ -332,7 +337,7 @@ export async function startApp(options: Options) {
     chat: new ChatHarness(offline), close: () => offline.close(),
   }, {
     mode, gateway: options.gateway, dataDir: options.dataDir, customer360, portfolioSnapshots, goalProgressProvider,
-    opsStore, salesStore, connectorStore, approvalStore, tradeStore, actionFlowStore, workflowEngine, knowledgeBase, widgetLibrary,
+    opsStore, salesStore, connectorStore, approvalStore, tradeStore, actionFlowStore, workflowEngine, knowledgeBase, widgetLibrary, piiFirewall,
     onTradeSettle: makeTradeSettler,
   });
 
@@ -900,6 +905,59 @@ export async function startApp(options: Options) {
       if (id === "vertical-packs-delete" && method === "POST") {
         const { id: packId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());
         return json(res, verticalFactory.deletePack(packId));
+      }
+      if (id === "pii-firewall" && method === "GET") {
+        return json(res, piiFirewall.view());
+      }
+      if (id === "pii-firewall" && method === "POST") {
+        const patch = await body(req, piiFirewallConfigSchema.partial().strict());
+        return json(res, piiFirewall.updateConfig(patch));
+      }
+      if (id === "pii-firewall-test" && method === "POST") {
+        const { prompt, contextSummary } = await body(req, z.object({
+          prompt: z.string().trim().min(1).max(1600),
+          contextSummary: z.string().trim().max(800).optional(),
+        }).strict());
+        const knownNames = profileStore.list().map((p) => p.displayName);
+        const result = scrubWithPiiFirewall({
+          prompt,
+          contextSummary,
+          knownNames,
+          config: piiFirewall.getConfig(),
+        });
+        return json(res, { trace: result.trace });
+      }
+      if (id === "ux-evolution" && method === "GET") {
+        return json(res, uxEvolution.view());
+      }
+      if (id === "ux-evolution-scan" && method === "POST") {
+        const input = await body(req, z.object({ includeSampleTraffic: z.boolean().optional() }).strict());
+        const recentTurns = store.listAllCompletedTurns(200);
+        const existingWidgets = widgetLibrary.list(principalId, now());
+        return json(res, await uxEvolution.scanAndDraft({
+          turns: recentTurns,
+          existingWidgets,
+          gateway: options.gateway,
+          dataDir: options.dataDir,
+          includeSampleTraffic: input.includeSampleTraffic,
+        }));
+      }
+      if (id === "ux-evolution-approve" && method === "POST") {
+        const { id: proposalId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());
+        try {
+          return json(res, uxEvolution.approveProposal(proposalId, {
+            principalId,
+            widgetLibrary,
+            knowledgeBase,
+            now: now(),
+          }));
+        } catch (err) {
+          throw new ApiError(404, "ux_proposal_not_found", err instanceof Error ? err.message : "Proposal not found.");
+        }
+      }
+      if (id === "ux-evolution-dismiss" && method === "POST") {
+        const { id: proposalId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());
+        return json(res, uxEvolution.dismissProposal(proposalId));
       }
     }
     if (resource === "conversations") {

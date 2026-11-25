@@ -1,5 +1,6 @@
 import type { SelectionMode } from "./domain";
 import type { GoalProgress } from "./goal-progress";
+import type { PiiRedactionTrace } from "./pii-firewall";
 import type { PortfolioHistoryPoint, PortfolioSnapshot } from "./portfolio";
 import type { DisplayExperience } from "./surface";
 import type { WorkspacePin } from "./workspace";
@@ -123,6 +124,7 @@ export type TurnView = {
   semanticRoute?: SemanticRouteTrace;
   customerLookup?: CustomerLookupSummary;
   providerArbitration?: ProviderArbitrationTrace;
+  piiRedaction?: PiiRedactionTrace;
   nextBestAction?: NextBestActionCard;
   experience?: DisplayExperience;
   failureCode?: FailureCode;

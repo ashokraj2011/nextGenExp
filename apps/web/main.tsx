@@ -257,6 +257,7 @@ function AssistantMessage() {
                   semanticRoute={turn.semanticRoute}
                   customerLookup={turn.customerLookup}
                   providerArbitration={turn.providerArbitration}
+                  piiRedaction={turn.piiRedaction}
                 />
               )}
               <MessagePrimitive.Parts />

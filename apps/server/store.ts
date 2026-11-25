@@ -570,6 +570,20 @@ export class Store {
     return () => this.events.off(turnId, fn);
   }
 
+  listAllCompletedTurns(limit = 200): TurnRecord[] {
+    const rows = this.db.all<{ record: string }>(
+      "SELECT record FROM turns WHERE status = 'completed' ORDER BY rowid DESC LIMIT ?",
+      limit,
+    );
+    return rows.flatMap((row) => {
+      try {
+        return [JSON.parse(row.record) as TurnRecord];
+      } catch {
+        return [];
+      }
+    });
+  }
+
   engagementSummary() {
     const turnRows = this.db.all<{ record: string }>("SELECT record FROM turns");
     let turnsTotal = 0;

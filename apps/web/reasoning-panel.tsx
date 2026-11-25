@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { CheckCircle2, ChevronDown, ChevronUp, Layers, Loader2, MinusCircle, ShieldCheck, Sparkles, UserCheck } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronUp, Eye, Layers, Loader2, Lock, MinusCircle, ShieldAlert, ShieldCheck, Sparkles, UserCheck } from "lucide-react";
 import {
   progressLabels, type ActionMode, type CustomerLookupSummary, type Progress, type ProviderArbitrationTrace, type SemanticRouteTrace, type TurnStatus,
 } from "../../packages/contracts/api";
+import type { PiiRedactionTrace } from "../../packages/contracts/pii-firewall";
 import type { DisplayExperience } from "../../packages/contracts/surface";
 
 const progressDetails: Record<Progress, string> = {
@@ -77,7 +78,7 @@ function verifiedFactsFor(experience?: DisplayExperience): string[] {
   return facts;
 }
 
-export function ReasoningPanel({ status, progress, history, experience, actionMode, semanticRoute, customerLookup, providerArbitration }: {
+export function ReasoningPanel({ status, progress, history, experience, actionMode, semanticRoute, customerLookup, providerArbitration, piiRedaction }: {
   status: TurnStatus;
   progress: Progress;
   history: Progress[];
@@ -86,37 +87,97 @@ export function ReasoningPanel({ status, progress, history, experience, actionMo
   semanticRoute?: SemanticRouteTrace;
   customerLookup?: CustomerLookupSummary;
   providerArbitration?: ProviderArbitrationTrace;
+  piiRedaction?: PiiRedactionTrace;
 }) {
   const [expanded, setExpanded] = useState(status === "working");
+  const [xrayOpen, setXrayOpen] = useState(false);
   const isWorking = status === "working";
   const steps = history.length ? history : [progress];
   const open = isWorking ? true : expanded;
   const verifiedFacts = !isWorking ? verifiedFactsFor(experience) : [];
   const modeInfo = actionMode ? actionModeMeta[actionMode] : undefined;
-  const totalChecks = steps.length + (verifiedFacts.length > 0 ? 1 : 0) + (customerLookup ? 1 : 0) + (providerArbitration ? 1 : 0) + (semanticRoute ? 1 : 0);
+  const totalChecks = steps.length + (verifiedFacts.length > 0 ? 1 : 0) + (customerLookup ? 1 : 0) + (providerArbitration ? 1 : 0) + (semanticRoute ? 1 : 0) + (piiRedaction ? 1 : 0);
 
   return (
     <div className={"reasoning-panel" + (isWorking ? " reasoning-panel-live" : "")}>
-      <button
-        type="button"
-        className="reasoning-toggle"
-        aria-expanded={open}
-        onClick={() => { if (!isWorking) setExpanded((value) => !value); }}
-      >
-        <span className="reasoning-toggle-title">
-          <Sparkles size={14} aria-hidden="true" />
-          <strong>Advisory Reasoning</strong>
-          {modeInfo && !isWorking && (
-            <span className={"action-mode-badge " + modeInfo.tone}>{modeInfo.label}</span>
-          )}
-          <span className="reasoning-count">
-            {isWorking
-              ? `${progressLabels[progress]}…`
-              : `${totalChecks} pre-flight ${totalChecks === 1 ? "check" : "checks"} completed`}
+      <div className="reasoning-header-row">
+        <button
+          type="button"
+          className="reasoning-toggle"
+          aria-expanded={open}
+          onClick={() => { if (!isWorking) setExpanded((value) => !value); }}
+        >
+          <span className="reasoning-toggle-title">
+            <Sparkles size={14} aria-hidden="true" />
+            <strong>Advisory Reasoning</strong>
+            {modeInfo && !isWorking && (
+              <span className={"action-mode-badge " + modeInfo.tone}>{modeInfo.label}</span>
+            )}
+            {piiRedaction && !isWorking && (
+              <span className={"pii-shield-badge " + (piiRedaction.firewallEnabled ? "is-on" : "is-off")}>
+                {piiRedaction.firewallEnabled
+                  ? <><Lock size={11} aria-hidden="true" />PII Shield{piiRedaction.redactedCount > 0 ? ` · ${piiRedaction.redactedCount} scrubbed` : " · Clean"}</>
+                  : <><ShieldAlert size={11} aria-hidden="true" />PII Firewall OFF</>}
+              </span>
+            )}
+            <span className="reasoning-count">
+              {isWorking
+                ? `${progressLabels[progress]}…`
+                : `${totalChecks} pre-flight ${totalChecks === 1 ? "check" : "checks"} completed`}
+            </span>
           </span>
-        </span>
-        {!isWorking && (open ? <ChevronUp size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />)}
-      </button>
+          {!isWorking && (open ? <ChevronUp size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />)}
+        </button>
+        {piiRedaction && !isWorking && (
+          <button
+            type="button"
+            className={"pii-xray-btn" + (xrayOpen ? " is-active" : "")}
+            aria-pressed={xrayOpen}
+            title="Inspect exact scrubbed bytes sent to LLM vs. local re-hydrated view"
+            onClick={() => setXrayOpen((v) => !v)}
+          >
+            <Eye size={12} aria-hidden="true" />
+            LLM X-Ray
+          </button>
+        )}
+      </div>
+      {xrayOpen && piiRedaction && !isWorking && (
+        <div className="pii-xray-drawer" role="region" aria-label="LLM X-Ray PII Firewall Diff">
+          <div className="pii-xray-head">
+            <strong>
+              {piiRedaction.firewallEnabled
+                ? `Zero-Leakage PII Firewall ACTIVE — ${piiRedaction.redactedCount} token(s) scrubbed before LLM boundary`
+                : "PII Firewall is currently OFF — Raw prompt & context passed to model (toggle ON in Admin → Logs → PII Firewall)"}
+            </strong>
+          </div>
+          <div className="pii-xray-grid">
+            <div className="pii-xray-col">
+              <span className="pii-xray-label">Local View (User / Re-hydrated)</span>
+              <pre>{piiRedaction.originalPrompt}</pre>
+              {piiRedaction.originalContextSummary && (
+                <pre className="pii-xray-ctx">{piiRedaction.originalContextSummary}</pre>
+              )}
+            </div>
+            <div className="pii-xray-col is-scrubbed">
+              <span className="pii-xray-label">Exact Payload Sent to LLM</span>
+              <pre>{piiRedaction.scrubbedPrompt}</pre>
+              {piiRedaction.scrubbedContextSummary && (
+                <pre className="pii-xray-ctx">{piiRedaction.scrubbedContextSummary}</pre>
+              )}
+            </div>
+          </div>
+          {piiRedaction.tokens.length > 0 && (
+            <div className="pii-xray-vault">
+              <span>Local Token Vault:</span>
+              {piiRedaction.tokens.map((t) => (
+                <code key={t.token} title={`${t.category}: ${t.original}`}>
+                  {t.token} &larr; {t.masked} ({t.category})
+                </code>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {open && (
         <ul className="reasoning-steps" aria-live={isWorking ? "polite" : undefined}>
           {customerLookup && !isWorking && (

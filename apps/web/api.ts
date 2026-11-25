@@ -32,6 +32,8 @@ import type { ProactiveAlert, ProactiveTriggerInput, ProactiveView } from "../..
 import type { KnowledgeBaseView, KnowledgeDocumentUpsertInput, KnowledgeSearchResult } from "../../packages/contracts/knowledge-base";
 import type { ScheduledJobExecution, ScheduledJobsView, ScheduledJobUpsertInput } from "../../packages/contracts/scheduled-jobs";
 import type { VerticalPackRecord, VerticalPacksView } from "../../packages/contracts/vertical-pack";
+import type { PiiFirewallConfig, PiiFirewallView, PiiRedactionTrace } from "../../packages/contracts/pii-firewall";
+import type { UxEvolutionView, UxProposal } from "../../packages/contracts/ux-evolution";
 import type { Customer360AdminRecord, Customer360ProfileInput } from "../../packages/contracts/customer-360";
 import type {
   ExperienceRegistryView,
@@ -255,6 +257,13 @@ export const api = {
   verticalPacks: () => request<VerticalPacksView>("/api/admin/vertical-packs"),
   generateVerticalPack: (prompt: string) => request<{ pack: VerticalPackRecord; embedDemoUrl: string; view: VerticalPacksView }>("/api/admin/vertical-packs-generate", { prompt }),
   deleteVerticalPack: (id: string) => request<VerticalPacksView>("/api/admin/vertical-packs-delete", { id }),
+  piiFirewall: () => request<PiiFirewallView>("/api/admin/pii-firewall"),
+  savePiiFirewall: (patch: Partial<PiiFirewallConfig>) => request<PiiFirewallView>("/api/admin/pii-firewall", patch),
+  testPiiFirewall: (prompt: string, contextSummary?: string) => request<{ trace: PiiRedactionTrace }>("/api/admin/pii-firewall-test", { prompt, ...(contextSummary ? { contextSummary } : {}) }),
+  uxEvolution: () => request<UxEvolutionView>("/api/admin/ux-evolution"),
+  scanUxEvolution: (includeSampleTraffic = false) => request<{ created: UxProposal[]; view: UxEvolutionView }>("/api/admin/ux-evolution-scan", { includeSampleTraffic }),
+  approveUxProposal: (id: string) => request<{ proposal: UxProposal; view: UxEvolutionView }>("/api/admin/ux-evolution-approve", { id }),
+  dismissUxProposal: (id: string) => request<UxEvolutionView>("/api/admin/ux-evolution-dismiss", { id }),
   startWorkflow: (id: string, input: { personaId?: string; actorName?: string; initialInputs?: Record<string, string | number | boolean> } = {}) => (
     request<{ run: WorkflowRun; definition: WorkflowDefinition }>("/api/workflows/" + id + "/start", input)
   ),
