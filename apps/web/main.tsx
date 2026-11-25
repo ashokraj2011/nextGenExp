@@ -645,6 +645,112 @@ function messageFor(error: unknown) {
 type Panel = { kind: "profiles" } | { kind: "pins" } | { kind: "thread"; id: string };
 const narrowNavigation = "(max-width: 850px)";
 
+function buildWealthDomContext(section: WorkspaceSection, profile?: DemoPersona): CepEmbedScreenContext | null {
+  if (!profile) return null;
+  const p = profile.overview?.portfolio;
+  const totalCents = p ? p.cashCents + p.equityCents + p.fixedIncomeCents : 0;
+  const cashLabel = p ? formatPortfolioAmount(p.cashCents) : "$0";
+  const equityLabel = p ? formatPortfolioAmount(p.equityCents) : "$0";
+  const fixedLabel = p ? formatPortfolioAmount(p.fixedIncomeCents) : "$0";
+  const totalLabel = p ? formatPortfolioAmount(totalCents) : "$0";
+  const goal = profile.overview?.homeGoal;
+  const savedCents = goal?.history.at(-1)?.savedCents ?? 0;
+  const goalPct = goal && goal.targetCents > 0 ? Math.floor((savedCents * 100) / goal.targetCents) : 0;
+  const benMissing = profile.profile.beneficiaryStatus === "missing";
+  const unfunded = profile.profile.accountFundingStatus === "unfunded";
+
+  if (section === "portfolio") {
+    return {
+      id: "wealth-portfolio",
+      label: `Portfolio & Equity Book · ${totalLabel}`,
+      viewType: "wealth_portfolio",
+      summary: `Observing ${profile.displayName}'s live portfolio allocation (${equityLabel} equities, ${cashLabel} cash, ${fixedLabel} fixed income).`,
+      metrics: [
+        { label: "Total", value: totalLabel },
+        { label: "Equities", value: equityLabel },
+        { label: "Cash", value: cashLabel },
+      ],
+      suggestedActions: [
+        { label: "Sell 40% AAPL + Tax Harvest", prompt: "I want to sell 40% of my Apple shares" },
+        { label: "Inspect Live Stock Holdings", prompt: "whats in my equity book right now?" },
+        { label: "Check Wash-Sale Policy", prompt: "What is our policy on tax-loss harvesting and wash-sale rules?" },
+      ],
+    };
+  }
+  if (section === "savings") {
+    const targetLabel = goal ? formatPortfolioAmount(goal.targetCents) : "$100,000";
+    const savedLabel = formatPortfolioAmount(savedCents);
+    return {
+      id: "wealth-savings",
+      label: `Home Down Payment Goal · ${goalPct}% Funded`,
+      viewType: "wealth_savings_goal",
+      summary: `Observing ${profile.displayName}'s home down payment progress (${savedLabel} of ${targetLabel} target).`,
+      metrics: [
+        { label: "Saved", value: savedLabel },
+        { label: "Target", value: targetLabel },
+        { label: "Progress", value: `${goalPct}%` },
+      ],
+      suggestedActions: [
+        { label: "Simulate 2-Year Home Plan", prompt: "I want to buy a house in two years. Show me how close I am and help me explore a savings plan." },
+        { label: "Review Goal Progress", prompt: homeGoalPrompt },
+        { label: "Run Escrow Wire Workflow", prompt: "I want to initiate a wire transfer" },
+      ],
+    };
+  }
+  if (section === "account") {
+    return {
+      id: "wealth-account",
+      label: `Account Status · ${benMissing ? "Beneficiary Action Needed" : "In Good Standing"}`,
+      viewType: "wealth_account_status",
+      summary: `Observing account compliance for ${profile.displayName}: Funding is ${unfunded ? "Awaiting deposit" : "Funded"}, Beneficiaries are ${benMissing ? "Missing" : "On file"}.`,
+      metrics: [
+        { label: "Funding", value: unfunded ? "Awaiting deposit" : "Funded" },
+        { label: "Beneficiaries", value: benMissing ? "Missing" : "On file" },
+        { label: "Available Cash", value: cashLabel },
+      ],
+      suggestedActions: [
+        ...(benMissing ? [{ label: "Update Beneficiaries", prompt: "How do I update my beneficiary designation?" }] : []),
+        { label: "Update Mailing Address", prompt: "I need to update my mailing address." },
+        { label: "Check Wire Approval Limits", prompt: "What are the wire transfer approval limits and security rules?" },
+      ],
+    };
+  }
+  if (section === "next-step") {
+    return {
+      id: "wealth-next-step",
+      label: `Personalized Next Step · ${profile.displayName}`,
+      viewType: "wealth_next_step",
+      summary: `Observing Customer 360 next-best-action eligibility for ${profile.displayName} (${cashLabel} idle cash).`,
+      metrics: [
+        { label: "Total Value", value: totalLabel },
+        { label: "Idle Cash", value: cashLabel },
+        { label: "Status", value: unfunded ? "Unfunded" : "Funded" },
+      ],
+      suggestedActions: [
+        { label: "Review Portfolio Summary", prompt: portfolioPrompt },
+        { label: "Explain Balance Labels", prompt: "Explain the balance labels." },
+        { label: "Learn About Retirement", prompt: "I'd like to learn about retirement." },
+      ],
+    };
+  }
+  return {
+    id: "wealth-summary",
+    label: `Wealth Summary · ${totalLabel}`,
+    viewType: "wealth_summary",
+    summary: `Live DOM context for ${profile.displayName}: ${cashLabel} cash, ${equityLabel} equities${benMissing ? " · Beneficiary missing" : ""}. Switch topbar tabs to adapt actions automatically.`,
+    metrics: [
+      { label: "Total Value", value: totalLabel },
+      { label: "Cash", value: cashLabel },
+      { label: "Equities", value: equityLabel },
+    ],
+    suggestedActions: [
+      { label: "Sell 40% AAPL + Tax Harvest", prompt: "I want to sell 40% of my Apple shares" },
+      { label: "Run Wire Workflow (5-Step)", prompt: "I want to initiate a wire transfer" },
+      { label: "Review Portfolio Summary", prompt: portfolioPrompt },
+    ],
+  };
+}
+
 function App() {
   const [entry] = useState(() => {
     const query = new URLSearchParams(location.search);
@@ -661,6 +767,8 @@ function App() {
   const [embedBrand, setEmbedBrand] = useState(entry.embedBrand);
   const [embedAccent, setEmbedAccent] = useState(entry.embedAccent);
   const [screenContext, setScreenContext] = useState<CepEmbedScreenContext | null>(null);
+  const [ambientDismissed, setAmbientDismissed] = useState(false);
+  const workspaceMainRef = useRef<HTMLElement>(null);
   const [proactiveAlert, setProactiveAlert] = useState<ProactiveAlert | null>(null);
   const [signedInProfileId, setSignedInProfileId] = useState(entry.profileId);
   const [domainPack, setDomainPack] = useDomainPack();
@@ -689,6 +797,33 @@ function App() {
   const activeProfile = profilesById.get(conversation?.personaId ?? signedInProfileId ?? configuration?.defaultPersonaId ?? "");
   const pins = activeProfile?.pins ?? defaultWorkspacePins;
   const activeSection = section === "summary" || pins.includes(section) ? section : "summary";
+  const wealthDomContextJson = useMemo(() => {
+    if (adminChat || embedMode || domainPack.id !== "wealth") return undefined;
+    const ctx = buildWealthDomContext(activeSection, activeProfile);
+    return ctx ? JSON.stringify(ctx) : undefined;
+  }, [activeSection, activeProfile, domainPack.id]);
+
+  useEffect(() => {
+    if (adminChat || embedMode || domainPack.id !== "wealth") return;
+    const node = workspaceMainRef.current;
+    if (!node) return;
+    const readContext = () => {
+      const raw = node.getAttribute("data-cep-context");
+      if (!raw) return;
+      try {
+        const parsed = JSON.parse(raw) as CepEmbedScreenContext;
+        if (parsed && typeof parsed.label === "string") setScreenContext(parsed);
+      } catch { /* ignore malformed attribute */ }
+    };
+    readContext();
+    const observer = new MutationObserver(() => readContext());
+    observer.observe(node, { attributes: true, attributeFilter: ["data-cep-context"] });
+    return () => observer.disconnect();
+  }, [domainPack.id, wealthDomContextJson]);
+
+  useEffect(() => {
+    if (!embedMode && domainPack.id === "wealth") setAmbientDismissed(false);
+  }, [activeSection, domainPack.id]);
   const chat = overviewOpen ? undefined : conversation;
   const pendingActions = usePendingActions(!adminChat ? activeProfile?.personaId : undefined);
   const draftKey = chat?.id ?? "new:" + (conversation?.personaId ?? signedInProfileId ?? "");
@@ -1129,7 +1264,13 @@ function App() {
           : <a className="rail-account" href="/login"><LogIn size={16} aria-hidden="true" />Sign in</a>}
       </div>
     </aside>}
-    <main className="workspace" inert={railOpen}>
+    <main
+      ref={workspaceMainRef}
+      className="workspace"
+      inert={railOpen}
+      data-cep-active={wealthDomContextJson ? "true" : undefined}
+      data-cep-context={wealthDomContextJson}
+    >
       {embedMode ? (
         <header className="topbar embed-topbar">
           <div className="embed-topbar-brand">
@@ -1177,7 +1318,7 @@ function App() {
           </div>
         </header>
       )}
-      {embedMode && screenContext && (
+      {(embedMode || (!adminChat && domainPack.id === "wealth")) && screenContext && !ambientDismissed && (
         <section className="embed-ambient-bar" aria-label="Ambient host screen context">
           <div className="embed-ambient-top">
             <div className="embed-ambient-title">
@@ -1187,15 +1328,28 @@ function App() {
               </span>
               <strong>Viewing: {screenContext.label}</strong>
             </div>
-            {screenContext.metrics && screenContext.metrics.length > 0 && (
-              <div className="embed-ambient-metrics">
-                {screenContext.metrics.map((m) => (
-                  <span key={`${m.label}-${m.value}`} className="embed-ambient-metric">
-                    {m.label}: <b>{m.value}</b>
-                  </span>
-                ))}
-              </div>
-            )}
+            <div className="embed-ambient-right">
+              {screenContext.metrics && screenContext.metrics.length > 0 && (
+                <div className="embed-ambient-metrics">
+                  {screenContext.metrics.map((m) => (
+                    <span key={`${m.label}-${m.value}`} className="embed-ambient-metric">
+                      {m.label}: <b>{m.value}</b>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {!embedMode && (
+                <button
+                  type="button"
+                  className="icon-button embed-ambient-close"
+                  aria-label="Hide ambient context bar"
+                  title="Hide ambient context bar (reappears when you switch views)"
+                  onClick={() => setAmbientDismissed(true)}
+                >
+                  <X size={14} aria-hidden="true" />
+                </button>
+              )}
+            </div>
           </div>
           {screenContext.summary && <p className="embed-ambient-summary">{screenContext.summary}</p>}
           {screenContext.suggestedActions && screenContext.suggestedActions.length > 0 && (
