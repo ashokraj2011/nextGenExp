@@ -51,6 +51,24 @@ import { pendingActionsContext, type WorkspaceActionLog, type WorkspaceNextStep,
 import type { TurnPayloads } from "../../packages/contracts/inspector";
 import type { ContextCatalog, PropensityResult, SelectionMode } from "../../packages/contracts/domain";
 import type { MockCcreRule, ToolSetup, ToolSetupView, TreatmentPreview, TreatmentPreviewInput, TreatmentSource } from "../../packages/contracts/tool-setup";
+import type {
+  PznAttribute,
+  PznAttributeInput,
+  PznContext,
+  PznContextInput,
+  PznContextPublication,
+  PznNamespace,
+  PznNamespaceInput,
+  PznRule,
+  PznRuleEvalResult,
+  PznRuleInput,
+  PznRuleValue,
+  PznStudioWorkspaceState,
+  PznTextContent,
+  PznTextContentInput,
+  PznTsEvaluateRequest,
+  PznTsEvaluationResult,
+} from "../../packages/contracts/self-service-pzn";
 
 export class RequestError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
@@ -305,4 +323,29 @@ export const api = {
   debug: (id: string) => request<Trace>("/api/admin/inspector/" + id),
   payloads: (id: string) => request<TurnPayloads>("/api/admin/logs/" + id),
   pendingActionLogs: () => request<WorkspaceActionLog[]>("/api/admin/pending-action-logs"),
+  pznWorkspace: () => request<PznStudioWorkspaceState>("/api/pzn/workspace"),
+  pznSaveNamespace: (input: PznNamespaceInput) => request<{ namespace: PznNamespace; workspace: PznStudioWorkspaceState }>("/api/pzn/namespaces", input),
+  pznDeleteNamespace: (id: string) => request<{ workspace: PznStudioWorkspaceState }>("/api/pzn/namespaces/delete", { id }),
+  pznSaveAttribute: (input: PznAttributeInput) => request<{ attribute: PznAttribute; workspace: PznStudioWorkspaceState }>("/api/pzn/attributes", input),
+  pznDeleteAttribute: (namespaceId: string, attributeId: string) => request<{ workspace: PznStudioWorkspaceState }>("/api/pzn/attributes/delete", { namespaceId, attributeId }),
+  pznSaveContent: (input: PznTextContentInput) => request<{ content: PznTextContent; workspace: PznStudioWorkspaceState }>("/api/pzn/contents", input),
+  pznDeleteContent: (contentId: string) => request<{ workspace: PznStudioWorkspaceState }>("/api/pzn/contents/delete", { contentId }),
+  pznSaveRule: (input: PznRuleInput) => request<{ rule: PznRule; workspace: PznStudioWorkspaceState }>("/api/pzn/rules", input),
+  pznDeleteRule: (ruleId: string) => request<{ workspace: PznStudioWorkspaceState }>("/api/pzn/rules/delete", { ruleId }),
+  pznTestRule: (mid: string, rule: PznRuleInput, attributeOverrides?: Record<string, PznRuleValue>) => (
+    request<{ mid: string; customerDisplayName: string; resolvedAttributes: Record<string, unknown>; evaluation: PznRuleEvalResult }>(
+      "/api/pzn/rules/test",
+      { mid, rule, ...(attributeOverrides ? { attributeOverrides } : {}) },
+    )
+  ),
+  pznSaveContext: (input: PznContextInput) => request<{ context: PznContext; workspace: PznStudioWorkspaceState }>("/api/pzn/contexts", input),
+  pznPublishContext: (contextId: string, notes?: string, publishedBy?: string) => (
+    request<{ publication: PznContextPublication; workspace: PznStudioWorkspaceState }>(
+      "/api/pzn/contexts/publish",
+      { contextId, ...(notes ? { notes } : {}), ...(publishedBy ? { publishedBy } : {}) },
+    )
+  ),
+  pznUnpublishContext: (contextId: string) => request<{ context: PznContext; workspace: PznStudioWorkspaceState }>("/api/pzn/contexts/unpublish", { contextId }),
+  pznDeleteContext: (contextId: string) => request<{ workspace: PznStudioWorkspaceState }>("/api/pzn/contexts/delete", { contextId }),
+  pznEvaluateTs: (input: PznTsEvaluateRequest) => request<PznTsEvaluationResult>("/api/pzn/ts/evaluate", input),
 };

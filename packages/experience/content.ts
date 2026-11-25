@@ -5,6 +5,7 @@ import rawReads from "../../fixtures/demo-balance-reads.json";
 import { contentEntrySchema, metricValueSchema, type Candidate, type ContentEntry, type ContentDecision, type RouteDecision } from "../contracts/domain";
 import { getActiveCustomerProfileStore } from "../customer-profiles";
 import { findEffectiveContentById } from "../experience-registry/registry";
+import { getActiveSelfServicePznProvider } from "../recommendations/self-service-engine";
 
 export const contentCatalog = z.object({
   schemaVersion: z.literal("1.0"),
@@ -31,7 +32,9 @@ export function resolveCandidates(ids: string[]) {
   const candidates: Candidate[] = [];
   const rejections: { contentId: string; stage: "catalog_resolution"; reasonCode: string }[] = [];
   ids.forEach((contentId, index) => {
-    const content = findEffectiveContentById(contentId) ?? contentById.get(contentId);
+    const content = findEffectiveContentById(contentId)
+      ?? contentById.get(contentId)
+      ?? getActiveSelfServicePznProvider()?.findPublishedContentEntry(contentId);
     if (!content || content.publicationStatus !== "published") {
       rejections.push({ contentId, stage: "catalog_resolution", reasonCode: content ? "CONTENT_WITHDRAWN" : "CONTENT_NOT_FOUND" });
       return;
@@ -45,7 +48,9 @@ export function resolveCandidates(ids: string[]) {
 }
 
 export function lookupContent(candidate: Candidate): ContentEntry | undefined {
-  const content = findEffectiveContentById(candidate.contentId) ?? contentById.get(candidate.contentId);
+  const content = findEffectiveContentById(candidate.contentId)
+    ?? contentById.get(candidate.contentId)
+    ?? getActiveSelfServicePznProvider()?.findPublishedContentEntry(candidate.contentId);
   return content?.publicationStatus === "published" && content.version === candidate.contentVersion ? content : undefined;
 }
 

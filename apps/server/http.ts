@@ -61,6 +61,17 @@ import { WriteAuditStore } from "./write-audit";
 import { recommendationArbitrateToolRef } from "../../packages/contracts/recommendation-provider";
 import { connectorInvokeToolRef, domainWriteToolRef, Runtime, sfieldNamespace } from "./runtime";
 import { WidgetLibraryStore } from "./widget-library";
+import { SelfServicePznStore } from "./self-service-pzn-store";
+import {
+  pznAttributeInputSchema,
+  pznContextInputSchema,
+  pznNamespaceInputSchema,
+  pznRuleInputSchema,
+  pznRuleTestRequestSchema,
+  pznSlugSchema,
+  pznTextContentInputSchema,
+  pznTsEvaluateRequestSchema,
+} from "../../packages/contracts/self-service-pzn";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { capabilityIdSchema, capabilityRef, customerEventSchema, versionSchema, type ExecutionBudget } from "../../packages/contracts/agentic";
 import { capabilityTools } from "../../packages/capabilities";
@@ -165,6 +176,7 @@ async function serveAsset(pathname: string, root: string, res: ServerResponse) {
 export async function startApp(options: Options) {
   const now = Date.now;
   const widgetLibrary = new WidgetLibraryStore(options.dataDir);
+  const selfServicePzn = new SelfServicePznStore(options.dataDir);
   const profileStore = new CustomerProfileStore(options.dataDir);
   setActiveCustomerProfileStore(profileStore);
   const experienceRegistry = new ExperienceRegistryStore(options.dataDir);
@@ -1541,6 +1553,77 @@ export async function startApp(options: Options) {
       });
       return json(res, { deal: updated, view: salesStore.view(), auditId: audit.auditId });
     }
+    if (resource === "pzn" && inspectorEnabled) {
+      if (id === "workspace" && !operation && method === "GET") {
+        return json(res, selfServicePzn.getWorkspaceState());
+      }
+      if (id === "namespaces" && !operation && method === "POST") {
+        const data = await body(req, pznNamespaceInputSchema, 32 * 1024);
+        return json(res, { namespace: selfServicePzn.upsertNamespace(data), workspace: selfServicePzn.getWorkspaceState() });
+      }
+      if (id === "namespaces" && operation === "delete" && method === "POST") {
+        const { id: nsId } = await body(req, z.object({ id: pznSlugSchema }).strict());
+        selfServicePzn.deleteNamespace(nsId);
+        return json(res, { workspace: selfServicePzn.getWorkspaceState() });
+      }
+      if (id === "attributes" && !operation && method === "POST") {
+        const data = await body(req, pznAttributeInputSchema, 32 * 1024);
+        return json(res, { attribute: selfServicePzn.upsertAttribute(data), workspace: selfServicePzn.getWorkspaceState() });
+      }
+      if (id === "attributes" && operation === "delete" && method === "POST") {
+        const { namespaceId, attributeId } = await body(req, z.object({ namespaceId: pznSlugSchema, attributeId: pznSlugSchema }).strict());
+        selfServicePzn.deleteAttribute(namespaceId, attributeId);
+        return json(res, { workspace: selfServicePzn.getWorkspaceState() });
+      }
+      if (id === "contents" && !operation && method === "POST") {
+        const data = await body(req, pznTextContentInputSchema, 32 * 1024);
+        return json(res, { content: selfServicePzn.upsertContent(data), workspace: selfServicePzn.getWorkspaceState() });
+      }
+      if (id === "contents" && operation === "delete" && method === "POST") {
+        const { contentId } = await body(req, z.object({ contentId: pznSlugSchema }).strict());
+        selfServicePzn.deleteContent(contentId);
+        return json(res, { workspace: selfServicePzn.getWorkspaceState() });
+      }
+      if (id === "rules" && !operation && method === "POST") {
+        const data = await body(req, pznRuleInputSchema, 32 * 1024);
+        return json(res, { rule: selfServicePzn.upsertRule(data), workspace: selfServicePzn.getWorkspaceState() });
+      }
+      if (id === "rules" && operation === "delete" && method === "POST") {
+        const { ruleId } = await body(req, z.object({ ruleId: pznSlugSchema }).strict());
+        selfServicePzn.deleteRule(ruleId);
+        return json(res, { workspace: selfServicePzn.getWorkspaceState() });
+      }
+      if (id === "rules" && operation === "test" && method === "POST") {
+        const data = await body(req, pznRuleTestRequestSchema, 32 * 1024);
+        return json(res, selfServicePzn.testRule(data));
+      }
+      if (id === "contexts" && !operation && method === "POST") {
+        const data = await body(req, pznContextInputSchema, 32 * 1024);
+        return json(res, { context: selfServicePzn.upsertContext(data), workspace: selfServicePzn.getWorkspaceState() });
+      }
+      if (id === "contexts" && operation === "publish" && method === "POST") {
+        const data = await body(req, z.object({
+          contextId: pznSlugSchema,
+          publishedBy: z.string().max(80).optional(),
+          notes: z.string().max(240).optional(),
+        }).strict());
+        const publication = selfServicePzn.publishContext(data.contextId, data.publishedBy, data.notes);
+        return json(res, { publication, workspace: selfServicePzn.getWorkspaceState() });
+      }
+      if (id === "contexts" && operation === "unpublish" && method === "POST") {
+        const { contextId } = await body(req, z.object({ contextId: pznSlugSchema }).strict());
+        return json(res, { context: selfServicePzn.unpublishContext(contextId), workspace: selfServicePzn.getWorkspaceState() });
+      }
+      if (id === "contexts" && operation === "delete" && method === "POST") {
+        const { contextId } = await body(req, z.object({ contextId: pznSlugSchema }).strict());
+        selfServicePzn.deleteContext(contextId);
+        return json(res, { workspace: selfServicePzn.getWorkspaceState() });
+      }
+      if (id === "ts" && operation === "evaluate" && method === "POST") {
+        const data = await body(req, pznTsEvaluateRequestSchema, 32 * 1024);
+        return json(res, selfServicePzn.evaluateLiveTs(data));
+      }
+    }
     if (resource === "events" && !id && method === "POST") {
       const data = await body(req, eventBody);
       store.analytics(principalId, data.experienceId, data.eventId, data.type, now());
@@ -1605,6 +1688,7 @@ export async function startApp(options: Options) {
       tradeStore.close();
       workflowEngine.close();
       scheduledJobs.close();
+      selfServicePzn.close();
       if (getActiveCustomerProfileStore() === profileStore) setActiveCustomerProfileStore(null);
       if (getActiveEquityLedger() === tradeStore) setActiveEquityLedger(null);
       if (getActiveExperienceRegistryStore() === experienceRegistry) setActiveExperienceRegistryStore(null);

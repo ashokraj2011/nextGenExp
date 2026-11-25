@@ -8,6 +8,7 @@ import "./admin.css";
 import "./admin-workspace.css";
 
 const Tools = lazy(() => import("./admin").then(({ AdminPage }) => ({ default: AdminPage })));
+const RecommendationStudio = lazy(() => import("./recommendation-studio").then(({ RecommendationStudio }) => ({ default: RecommendationStudio })));
 const Customer360 = lazy(() => import("./customer-360-admin").then(({ Customer360Admin }) => ({ default: Customer360Admin })));
 const ExperienceRegistry = lazy(() => import("./experience-registry-admin").then(({ ExperienceRegistryAdmin }) => ({ default: ExperienceRegistryAdmin })));
 const Builder = lazy(() => import("./ui-builder").then(({ UiBuilder }) => ({ default: UiBuilder })));
@@ -34,6 +35,7 @@ export function AdminWorkspace() {
       <div className="workspace-page-scroll">
         <Suspense fallback={<p className="workspace-loading" role="status">Loading…</p>}>
           {path === adminPaths.tools && <Tools />}
+          {path === adminPaths.recommendations && <RecommendationStudio />}
           {path === adminPaths.customers && <Customer360 />}
           {path === adminPaths.intents && <ExperienceRegistry />}
           {path === adminPaths.builder && <Builder />}

@@ -12,6 +12,7 @@ import host from "../../fixtures/host.json";
 import { applyMockCcreRules } from "./mock-ccre";
 import { scoreContexts } from "./propensity";
 import { normalizeRecommendations, type Recommendation, type TreatmentV3 } from "./recommendations";
+import { getActiveSelfServicePznProvider } from "../recommendations/self-service-engine";
 import agenticRecommendations from "../../fixtures/agentic-recommendations.json";
 
 const rejectionSchema = z.object({
@@ -99,7 +100,15 @@ export class FixtureTsAdapter implements TsAdapter {
   async listContexts(signal?: AbortSignal): Promise<ContextCatalog> {
     signal?.throwIfAborted();
     if (this.state.scenarioId === "catalog-unavailable") throw new Error("TS_CONTEXT_CATALOG_UNAVAILABLE");
-    return activeContextCatalog;
+    const dynamicContexts = getActiveSelfServicePznProvider()?.listPublishedContextSummaries() ?? [];
+    if (!dynamicContexts.length) return activeContextCatalog;
+    const merged = [...activeContexts];
+    for (const ctx of dynamicContexts) {
+      if (!merged.some((existing) => existing.contextId === ctx.contextId)) {
+        merged.push(ctx);
+      }
+    }
+    return { ...catalog, contexts: merged };
   }
 
   async getContextScores({ mid, contextIds }: ContextScoresRequest, signal?: AbortSignal): Promise<PropensityResult> {
@@ -114,7 +123,43 @@ export class FixtureTsAdapter implements TsAdapter {
   async selectEligibleContent({ mid, context, overrideCashCents }: TreatmentRequest, signal?: AbortSignal) {
     signal?.throwIfAborted();
     const persona = this.personaFor(mid);
-    if (!treatmentContexts.some((entry) => entry.contextId === context)) {
+    const isBuiltInContext = treatmentContexts.some((entry) => entry.contextId === context);
+    const selfServiceProvider = getActiveSelfServicePznProvider();
+    const selfServicePub = selfServiceProvider?.getPublishedPublication(context);
+    if (selfServicePub && (!isBuiltInContext || selfServicePub.version > 1)) {
+      const overrides = overrideCashCents !== undefined ? { "portfolio.cash_usd": overrideCashCents / 100 } : undefined;
+      const evalResult = selfServiceProvider!.evaluatePublishedForTs(mid, context, overrides);
+      if (evalResult) {
+        const contentIds = evalResult.eligibleContents.map((c) => c.contentId);
+        const beforeRules = [
+          ...evalResult.eligibleContents.map((c) => c.contentId),
+          ...evalResult.filteredOutContents.map((c) => c.contentId),
+        ];
+        const ccreResults = [
+          ...evalResult.eligibleContents.map((c) => ({
+            name: c.attachedRuleIds.length ? c.reason : "Always eligible",
+            contentId: c.contentId,
+            outcome: "matched" as const,
+          })),
+          ...evalResult.filteredOutContents.map((c) => ({
+            name: c.reason,
+            contentId: c.contentId,
+            outcome: "excluded" as const,
+          })),
+        ];
+        const recommendations: TreatmentRecommendations = {
+          schemaVersion: "2.0",
+          recommendations: contentIds.map((id) => ({ kind: "content" as const, id })),
+        };
+        return {
+          contentIds,
+          ccre: { beforeRules, results: ccreResults },
+          portfolio: null,
+          recommendations,
+        };
+      }
+    }
+    if (!isBuiltInContext) {
       throw new Error("UNCONFIGURED_TS_SCOPE");
     }
 
