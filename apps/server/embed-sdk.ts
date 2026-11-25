@@ -685,6 +685,9 @@ export function renderHostPortalDemoHtml(baseOrigin: string, query: URLSearchPar
           <button type="button" class="action-trigger" data-prompt="Show the enterprise discount approval card for Acme Cloud Corp" data-domain="sales_revops">
             <span>Switch Domain &rarr; Sales Deal Desk</span><small>setDomain + prompt</small>
           </button>
+          <button type="button" class="action-trigger" id="fire-proactive-btn" style="border-color:#d97706;">
+            <span>Fire Live Proactive Event (AAPL +8.4%)</span><small>SSE push</small>
+          </button>
         </div>
       </div>
 
@@ -817,6 +820,18 @@ export function renderHostPortalDemoHtml(baseOrigin: string, query: URLSearchPar
       });
 
       document.querySelectorAll(".action-trigger").forEach(function (btn) {
+        if (btn.id === "fire-proactive-btn") {
+          btn.addEventListener("click", function () {
+            fetch("/api/proactive/trigger", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ eventType: "market.price_alert", personaId: state.personaId }),
+            }).then(function () {
+              addLog("out", "api:proactive.trigger", { eventType: "market.price_alert" });
+            });
+          });
+          return;
+        }
         btn.addEventListener("click", function () {
           var prompt = btn.getAttribute("data-prompt");
           var targetDomain = btn.getAttribute("data-domain");

@@ -39,6 +39,11 @@ import { ActionFlowStore } from "./action-flow-store";
 import { actionFlowUpsertSchema } from "../../packages/contracts/action-flow";
 import { WorkflowEngine } from "./workflow-engine";
 import { workflowDefinitionUpsertSchema } from "../../packages/contracts/workflow-definition";
+import { generateWorkflowWithLlm } from "./workflow-generator";
+import { discoverMcpServer, importMcpToolAsConnector } from "./mcp-discovery";
+import { mcpDiscoverRequestSchema, mcpImportRequestSchema } from "../../packages/contracts/mcp-discovery";
+import { ProactiveEventStore } from "./proactive-engine";
+import { proactiveTriggerInputSchema } from "../../packages/contracts/proactive-events";
 import { OmnichannelStore } from "./omnichannel-store";
 import { omnichannelConfigSchema } from "../../packages/contracts/omnichannel";
 import { EvalRunnerStore } from "./eval-runner";
@@ -250,6 +255,7 @@ export async function startApp(options: Options) {
   });
   const actionFlowStore = new ActionFlowStore(options.dataDir);
   const workflowEngine = new WorkflowEngine(options.dataDir, { approvalStore, connectorStore });
+  const proactiveStore = new ProactiveEventStore(options.dataDir);
   const evalRunner = new EvalRunnerStore(options.dataDir);
   const tradeStore = new TradeStore(options.dataDir, profileStore);
   setActiveEquityLedger(tradeStore);
@@ -811,6 +817,28 @@ export async function startApp(options: Options) {
           baseUrl: origin,
         }));
       }
+      if (id === "mcp-discover" && method === "POST") {
+        const input = await body(req, mcpDiscoverRequestSchema, 8 * 1024);
+        try {
+          return json(res, await discoverMcpServer({
+            serverUrl: input.serverUrl,
+            authHeaderName: input.authHeaderName,
+            authEnvVar: input.authEnvVar,
+            connectorStore,
+          }));
+        } catch (err) {
+          throw new ApiError(400, "mcp_discovery_failed", err instanceof Error ? err.message : "Could not discover MCP tools.");
+        }
+      }
+      if (id === "mcp-import" && method === "POST") {
+        const input = await body(req, mcpImportRequestSchema, 8 * 1024);
+        return json(res, importMcpToolAsConnector({
+          ...input,
+          requiresApproval: input.requiresApproval ?? input.effect === "write",
+          dualControl: input.dualControl ?? false,
+          connectorStore,
+        }));
+      }
     }
     if (resource === "conversations") {
       if (method === "POST" && !id) {
@@ -983,6 +1011,15 @@ export async function startApp(options: Options) {
       if (!id && method === "GET") {
         return json(res, workflowEngine.view());
       }
+      if (id === "generate" && !operation && method === "POST" && inspectorEnabled) {
+        const { prompt } = await body(req, z.object({ prompt: z.string().trim().min(4).max(800) }).strict(), 8 * 1024);
+        return json(res, await generateWorkflowWithLlm({
+          prompt,
+          gateway: options.gateway,
+          dataDir: options.dataDir,
+          connectors: connectorStore.list(),
+        }));
+      }
       if (!id && method === "POST" && inspectorEnabled) {
         const input = await body(req, workflowDefinitionUpsertSchema, 48 * 1024);
         return json(res, workflowEngine.upsertDefinition(input));
@@ -1008,6 +1045,36 @@ export async function startApp(options: Options) {
         } catch (err) {
           throw new ApiError(404, "workflow_not_found", err instanceof Error ? err.message : "Workflow not found.");
         }
+      }
+    }
+    if (resource === "proactive") {
+      if (id === "alerts" && !operation && method === "GET") {
+        return json(res, proactiveStore.view());
+      }
+      if (id === "trigger" && !operation && method === "POST") {
+        const input = await body(req, proactiveTriggerInputSchema, 8 * 1024);
+        return json(res, proactiveStore.trigger(input), 201);
+      }
+      if (id && operation === "dismiss" && method === "POST") {
+        return json(res, proactiveStore.dismiss(id));
+      }
+      if (id === "stream" && !operation && method === "GET") {
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          "Connection": "keep-alive",
+          "X-Accel-Buffering": "no",
+        });
+        streams.add(res);
+        res.write(`event: proactive.connected\ndata: ${JSON.stringify({ ok: true })}\n\n`);
+        const unsubscribe = proactiveStore.subscribe((alert) => {
+          if (!res.writableEnded) {
+            res.write(`event: proactive.alert\ndata: ${JSON.stringify(alert)}\n\n`);
+          }
+        });
+        const heartbeat = setInterval(() => { if (!res.writableEnded) res.write(": keepalive\n\n"); }, 15_000);
+        res.once("close", () => { unsubscribe(); clearInterval(heartbeat); streams.delete(res); });
+        return;
       }
     }
     if (resource === "workflow-runs" && id) {

@@ -1,4 +1,5 @@
 import { CapabilityStudio } from "./capability-studio";
+import { McpDiscoveryCard } from "./mcp-discovery-card";
 import "./agentic.css";
 import { useEffect, useState } from "react";
 import { ArrowDown, ArrowUp, FlaskConical, Layers, MessageSquare, Play, Plug, Plus, Trash2 } from "lucide-react";
@@ -668,8 +669,9 @@ export function AdminPage() {
         <h1>Tool setup</h1>
         {error ? <p role="alert">{error}</p> : <p role="status">Loading tool settings…</p>}
       </div>}
-      {loaded && <RecommendationProvidersCard key={providerTick} />}
-      {loaded && <ExternalConnectorsCard onUpdated={() => setProviderTick((n) => n + 1)} />}
+      {loaded && <RecommendationProvidersCard key={`rp-${providerTick}`} />}
+      {loaded && <ExternalConnectorsCard key={`ec-${providerTick}`} onUpdated={() => setProviderTick((n) => n + 1)} />}
+      {loaded && <McpDiscoveryCard onImported={() => setProviderTick((n) => n + 1)} />}
       {loaded && <CapabilityStudio />}
     </main>
   </div>;

@@ -27,6 +27,8 @@ import type { ActionFlow, ActionFlowUpsertInput } from "../../packages/contracts
 import type { WorkflowDefinition, WorkflowDefinitionUpsertInput, WorkflowRun, WorkflowsAdminView } from "../../packages/contracts/workflow-definition";
 import type { OmnichannelConfig, OmnichannelDelivery, OmnichannelView } from "../../packages/contracts/omnichannel";
 import type { ComplianceAuditPacket, EvalRunReport, EvalSuiteView } from "../../packages/contracts/eval-suite";
+import type { McpDiscoveryResult } from "../../packages/contracts/mcp-discovery";
+import type { ProactiveAlert, ProactiveTriggerInput, ProactiveView } from "../../packages/contracts/proactive-events";
 import type { Customer360AdminRecord, Customer360ProfileInput } from "../../packages/contracts/customer-360";
 import type {
   ExperienceRegistryView,
@@ -220,8 +222,26 @@ export const api = {
   runEvals: (mode: "deterministic" | "live_llm" = "deterministic") => request<{ report: EvalRunReport; runs: EvalRunReport[] }>("/api/admin/eval-run", { mode }),
   compliancePacket: () => request<ComplianceAuditPacket>("/api/admin/compliance-packet"),
   workflows: () => request<WorkflowsAdminView>("/api/workflows"),
+  generateWorkflow: (prompt: string) => request<{ definition: WorkflowDefinitionUpsertInput; generatedBy: "copilot_llm" | "synthesizer"; summary: string }>("/api/workflows/generate", { prompt }),
   saveWorkflow: (input: WorkflowDefinitionUpsertInput) => request<WorkflowsAdminView>("/api/workflows", input),
   deleteWorkflow: (id: string) => request<WorkflowsAdminView>("/api/workflows/" + id + "/delete", {}),
+  discoverMcp: (input: { serverUrl: string; authHeaderName?: string; authEnvVar?: string }) => (
+    request<McpDiscoveryResult>("/api/admin/mcp-discover", input)
+  ),
+  importMcpTool: (input: {
+    serverUrl: string;
+    toolName: string;
+    description: string;
+    effect: "read" | "write";
+    domain: "wealth" | "operations" | "sales" | "general";
+    requiresApproval?: boolean;
+    dualControl?: boolean;
+    authHeaderName?: string;
+    authEnvVar?: string;
+  }) => request<{ connector: ExternalConnector; connectors: ExternalConnector[] }>("/api/admin/mcp-import", input),
+  proactiveAlerts: () => request<ProactiveView>("/api/proactive/alerts"),
+  triggerProactiveEvent: (input: ProactiveTriggerInput) => request<{ alert: ProactiveAlert; view: ProactiveView }>("/api/proactive/trigger", input),
+  dismissProactiveAlert: (id: string) => request<ProactiveView>("/api/proactive/" + id + "/dismiss", {}),
   startWorkflow: (id: string, input: { personaId?: string; actorName?: string; initialInputs?: Record<string, string | number | boolean> } = {}) => (
     request<{ run: WorkflowRun; definition: WorkflowDefinition }>("/api/workflows/" + id + "/start", input)
   ),

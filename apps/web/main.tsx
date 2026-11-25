@@ -32,6 +32,7 @@ import { ReasoningPanel } from "./reasoning-panel";
 import { applyTheme, readStoredTheme, ThemeToggle } from "./theme";
 import { BasicSmoke, ExperienceControls, ExperienceDataUI, installA2uiStyles } from "./surface";
 import { CEP_EMBED_PROTOCOL } from "../../packages/embed-sdk";
+import type { ProactiveAlert } from "../../packages/contracts/proactive-events";
 import { usePendingActions, WorkspaceHome, WorkspaceOverview, type PendingActions } from "./workspace-overview";
 import { WorkspaceCustomization, WorkspaceMenu, type WorkspaceSection } from "./workspace-menu";
 import { ThreadList, ThreadSettings } from "./thread-list";
@@ -626,6 +627,7 @@ function App() {
   });
   const [embedBrand, setEmbedBrand] = useState(entry.embedBrand);
   const [embedAccent, setEmbedAccent] = useState(entry.embedAccent);
+  const [proactiveAlert, setProactiveAlert] = useState<ProactiveAlert | null>(null);
   const [signedInProfileId, setSignedInProfileId] = useState(entry.profileId);
   const [domainPack, setDomainPack] = useDomainPack();
   const [configuration, setConfiguration] = useState<Bootstrap>();
@@ -979,6 +981,31 @@ function App() {
     });
   }, [latest]);
 
+  useEffect(() => {
+    if (adminChat) return;
+    let alive = true;
+    const stream = new EventSource("/api/proactive/stream");
+    stream.addEventListener("proactive.alert", (evt) => {
+      if (!alive) return;
+      try {
+        const alert = JSON.parse((evt as MessageEvent).data) as ProactiveAlert;
+        setProactiveAlert(alert);
+        postEmbedEvent("cep:proactive_alert", {
+          id: alert.id,
+          eventType: alert.eventType,
+          severity: alert.severity,
+          domain: alert.domain,
+          title: alert.title,
+          metricValue: alert.metricValue,
+        });
+      } catch { /* ignore */ }
+    });
+    return () => {
+      alive = false;
+      stream.close();
+    };
+  }, []);
+
   const modelStatus = adminChat
     ? (configuration?.mode === "test" ? "Test mode" : configuration?.gatewayConfigured ? "Model connected" : "Model offline")
     : (configuration?.copilotModel ? `Live · ${configuration.copilotModel}` : "Live Advisory");
@@ -1103,6 +1130,45 @@ function App() {
             )}
           </div>
         </header>
+      )}
+      {proactiveAlert && (
+        <div className={`proactive-banner is-${proactiveAlert.severity}`} role="status">
+          <div className="proactive-banner-copy">
+            <span className="proactive-badge">{proactiveAlert.metricLabel}: <strong>{proactiveAlert.metricValue}</strong></span>
+            <div>
+              <strong>{proactiveAlert.title}</strong>
+              <p>{proactiveAlert.summary}</p>
+            </div>
+          </div>
+          <div className="proactive-banner-actions">
+            <button
+              type="button"
+              className="proactive-cta-btn"
+              onClick={() => {
+                const target = proactiveAlert;
+                setProactiveAlert(null);
+                void api.dismissProactiveAlert(target.id).catch(() => undefined);
+                if (target.domain !== domainPack.id) setDomainPack(target.domain);
+                void send(target.ctaPrompt);
+              }}
+            >
+              <Sparkles size={13} aria-hidden="true" />
+              {proactiveAlert.ctaLabel}
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Dismiss proactive alert"
+              onClick={() => {
+                const id = proactiveAlert.id;
+                setProactiveAlert(null);
+                void api.dismissProactiveAlert(id).catch(() => undefined);
+              }}
+            >
+              <X size={15} aria-hidden="true" />
+            </button>
+          </div>
+        </div>
       )}
       <Chat key={draftKey} conversation={chat} configuration={configuration} activeProfile={activeProfile}
         pendingActions={pendingActions} pending={pending} section={activeSection} pins={pins} progressHistory={progressHistory}

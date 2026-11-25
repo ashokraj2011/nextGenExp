@@ -757,3 +757,59 @@
   color: var(--muted);
   padding-left: 30px;
 }
+
+
+/* Copilot Prompt-to-Workflow Bar (/admin/intents -> Workflows) */
+.wf-copilot-bar {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--teal-border, var(--line-strong));
+  background: var(--paper);
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.wf-copilot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--teal-dark);
+  font-size: 0.88rem;
+}
+
+.wf-copilot-head strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wf-copilot-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wf-copilot-form input {
+  flex: 1;
+  min-width: 240px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--white);
+  color: var(--ink);
+  font-size: 0.84rem;
+}
+
+.wf-copilot-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
