@@ -1375,3 +1375,83 @@
   gap: 10px;
   flex-wrap: wrap;
 }
+
+/* Widget Availability for Consumption Toggle */
+.widget-consume-check {
+  align-items: flex-start !important;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--builder-green-soft);
+  border: 1px solid #cfe0cb;
+}
+
+.widget-consume-check span {
+  display: grid;
+  gap: 2px;
+}
+
+.widget-consume-check small {
+  font-weight: 400;
+  font-size: 0.74rem;
+  color: var(--builder-muted);
+}
+
+.widget-tile-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.widget-tile-meta > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.widget-tile-kind {
+  font-size: 0.72rem;
+  color: var(--builder-muted);
+}
+
+.widget-avail-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.widget-avail-pill.is-live {
+  background: var(--builder-green-soft);
+  border-color: #a9d3a0;
+  color: var(--builder-green-dark);
+}
+
+.widget-avail-pill.is-live:hover {
+  background: #dff0db;
+}
+
+.widget-avail-pill.is-draft {
+  background: #f3f2ef;
+  border-color: var(--builder-border);
+  color: var(--builder-muted);
+}
+
+.widget-avail-pill.is-draft:hover {
+  border-color: var(--builder-green);
+  color: var(--builder-green-dark);
+}
+
+.widget-avail-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}

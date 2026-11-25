@@ -396,6 +396,32 @@ export class WidgetLibraryStore {
       return { widgets: next.slice().sort((a, b) => b.updatedAt - a.updatedAt) };
     }
 
+    if (input.operation === "set_availability") {
+      let updatedWidget: SavedWidget | undefined;
+      const next = current.map((item) => {
+        if (item.id !== input.id) return item;
+        updatedWidget = { ...item, availableForConsumption: input.availableForConsumption, updatedAt: now };
+        return updatedWidget;
+      });
+      if (!updatedWidget) {
+        for (const [owner, list] of Object.entries(data)) {
+          const found = list.find((item) => item.id === input.id);
+          if (found) {
+            updatedWidget = { ...found, availableForConsumption: input.availableForConsumption, updatedAt: now };
+            data[owner] = list.map((item) => (item.id === input.id ? updatedWidget! : item));
+            break;
+          }
+        }
+      } else {
+        data[principalId] = next;
+      }
+      this.persist(data);
+      return {
+        ...(updatedWidget ? { widget: updatedWidget } : {}),
+        widgets: (data[principalId] ?? []).slice().sort((a, b) => b.updatedAt - a.updatedAt),
+      };
+    }
+
     const existing = input.id ? current.find((item) => item.id === input.id) : undefined;
     if (!existing && current.length >= MAX_WIDGETS_PER_PRINCIPAL) {
       throw new Error(`Widget library limit (${MAX_WIDGETS_PER_PRINCIPAL}) reached. Delete a widget before adding another.`);
@@ -403,6 +429,7 @@ export class WidgetLibraryStore {
 
     const saved: SavedWidget = {
       ...input.widget,
+      availableForConsumption: input.widget.availableForConsumption ?? existing?.availableForConsumption ?? false,
       id: existing?.id ?? ("wdg_" + randomBytes(12).toString("hex")),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
@@ -423,14 +450,14 @@ export class WidgetLibraryStore {
     const seen = new Set<string>();
     const candidates: SavedWidget[] = [];
     for (const w of data[principalId] ?? []) {
-      if (w.id.startsWith("wdg_seed") || seen.has(w.id)) continue;
+      if (!w.availableForConsumption || seen.has(w.id)) continue;
       seen.add(w.id);
       candidates.push(w);
     }
     for (const [owner, list] of Object.entries(data)) {
       if (owner === principalId) continue;
       for (const w of list) {
-        if (w.id.startsWith("wdg_seed") || seen.has(w.id)) continue;
+        if (!w.availableForConsumption || seen.has(w.id)) continue;
         seen.add(w.id);
         candidates.push(w);
       }

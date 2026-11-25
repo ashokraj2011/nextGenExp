@@ -229,6 +229,34 @@ export function WidgetStudio({
     }
   }
 
+  async function toggleAvailability(item: SavedWidget) {
+    if (saving) return;
+    setSaving(true);
+    setError("");
+    setNotice("");
+    const nextValue = !item.availableForConsumption;
+    try {
+      const result = await api.saveWidgetLibrary({
+        operation: "set_availability",
+        id: item.id,
+        availableForConsumption: nextValue,
+      });
+      onWidgetsChange(result.widgets);
+      if (editingId === item.id && draft) {
+        setDraft({ ...draft, availableForConsumption: nextValue });
+      }
+      setNotice(
+        nextValue
+          ? `"${item.name}" is now Live — available for chat consumption.`
+          : `"${item.name}" is now Draft Only — hidden from live chat consumption.`,
+      );
+    } catch (reason) {
+      setError(toolSetupErrorMessage(reason));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function deleteFromLibrary(id: string, name: string) {
     if (saving) return;
     setSaving(true);
@@ -327,6 +355,17 @@ export function WidgetStudio({
                 <input type="checkbox" checked={draft.accentTop} onChange={(e) => setDraft({ ...draft, accentTop: e.target.checked })} />
                 Top green accent border
               </label>
+              <label className="ui-checkbox widget-consume-check">
+                <input
+                  type="checkbox"
+                  checked={Boolean(draft.availableForConsumption)}
+                  onChange={(e) => setDraft({ ...draft, availableForConsumption: e.target.checked })}
+                />
+                <span>
+                  <strong>Available for consumption in chat</strong>
+                  <small>When enabled, CEP automatically renders this widget when a customer&apos;s prompt matches.</small>
+                </span>
+              </label>
             </div>
             <div className="widget-editor-cta-row">
               <button type="button" className="ui-button ui-button-primary" disabled={saving || !draft.name.trim() || !draft.title.trim()} onClick={() => void saveToLibrary()}>
@@ -355,7 +394,9 @@ export function WidgetStudio({
         <div className="widget-library-header">
           <div>
             <h2 id="widget-library-heading">Widget Library ({widgets.length})</h2>
-            <p>Reusable widgets ready to edit, preview, or insert into any CEP chat layout.</p>
+            <p>
+              Toggle <strong>Available in chat</strong> to control which widgets can be consumed live ({widgets.filter((w) => w.availableForConsumption).length} live · {widgets.filter((w) => !w.availableForConsumption).length} draft).
+            </p>
           </div>
           <label className="widget-library-search">
             <Search size={14} aria-hidden="true" />
@@ -379,8 +420,22 @@ export function WidgetStudio({
             {filtered.map((item) => (
               <div key={item.id} className="widget-library-tile">
                 <div className="widget-tile-meta">
-                  <strong>{item.name}</strong>
-                  <span>{widgetKindLabels[item.kind]}</span>
+                  <div>
+                    <strong>{item.name}</strong>
+                    <span className="widget-tile-kind">{widgetKindLabels[item.kind]}</span>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={Boolean(item.availableForConsumption)}
+                    disabled={saving}
+                    className={"widget-avail-pill" + (item.availableForConsumption ? " is-live" : " is-draft")}
+                    title={item.availableForConsumption ? "Click to mark unavailable for chat consumption" : "Click to mark available for live chat consumption"}
+                    onClick={() => void toggleAvailability(item)}
+                  >
+                    <span className="widget-avail-dot" aria-hidden="true" />
+                    {item.availableForConsumption ? "Available in chat" : "Not available (Draft)"}
+                  </button>
                 </div>
                 <LiveWidgetPreview widget={item} compact />
                 <div className="widget-tile-actions">

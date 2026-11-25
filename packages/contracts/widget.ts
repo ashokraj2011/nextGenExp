@@ -45,6 +45,7 @@ export const widgetDraftSchema = z.object({
   body: z.string().trim().max(320),
   ctaLabel: z.string().trim().max(48),
   accentTop: z.boolean(),
+  availableForConsumption: z.boolean().optional(),
   recommendedComponent: z.enum(componentIds),
   metrics: z.array(widgetMetricSchema).max(4).optional(),
   sliders: z.array(widgetSliderSchema).max(3).optional(),
@@ -60,7 +61,7 @@ export const widgetDraftSchema = z.object({
 export type WidgetDraft = z.infer<typeof widgetDraftSchema>;
 
 export const savedWidgetSchema = widgetDraftSchema.extend({
-  id: z.string().regex(/^wdg_[a-f0-9]{16,32}$/),
+  id: z.string().regex(/^wdg_[a-z0-9]{12,32}$/),
   createdAt: z.number().int().positive(),
   updatedAt: z.number().int().positive(),
 });
@@ -72,8 +73,9 @@ export const widgetGenerateRequestSchema = z.object({
 }).strict();
 
 export const widgetLibraryChangeSchema = z.union([
-  z.object({ operation: z.literal("save"), id: z.string().regex(/^wdg_[a-f0-9]{16,32}$/).optional(), widget: widgetDraftSchema }).strict(),
-  z.object({ operation: z.literal("delete"), id: z.string().regex(/^wdg_[a-f0-9]{16,32}$/) }).strict(),
+  z.object({ operation: z.literal("save"), id: z.string().regex(/^wdg_[a-z0-9]{12,32}$/).optional(), widget: widgetDraftSchema }).strict(),
+  z.object({ operation: z.literal("set_availability"), id: z.string().regex(/^wdg_[a-z0-9]{12,32}$/), availableForConsumption: z.boolean() }).strict(),
+  z.object({ operation: z.literal("delete"), id: z.string().regex(/^wdg_[a-z0-9]{12,32}$/) }).strict(),
 ]);
 
 export type WidgetLibraryChange = z.infer<typeof widgetLibraryChangeSchema>;
