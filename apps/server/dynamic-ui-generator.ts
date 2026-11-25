@@ -7,10 +7,13 @@ import type { GatewaySettings } from "./gateway";
 import type { OpsIncidentStore } from "./ops-store";
 import type { SalesDealStore } from "./sales-store";
 import type { SemanticRouteDecision } from "../../packages/contracts/capabilities-catalog";
+import type { ActionFlow } from "../../packages/contracts/action-flow";
+import type { TradeDraftState, TradeLegInput } from "../../packages/contracts/trading";
 import type { ConnectorStore } from "./connector-store";
 import type { ApprovalStore } from "./approval-store";
-import { parseStockTradePrompt, type TradeStore } from "./trade-store";
-import { connectorInvokeToolRef } from "./runtime";
+import type { ActionFlowStore } from "./action-flow-store";
+import { parseStockTradePrompt, type SettlementCallback, type TradeStore } from "./trade-store";
+import { connectorInvokeToolRef, domainWriteToolRef } from "./runtime";
 import { generateWidgetFromText } from "./widget-library";
 
 const dynamicUiTrigger = /\b(widget|table|bar chart|chart|graph|dashboard|visuali[sz]e|visuali[sz]ation|calculator|simulator|matrix|breakdown|dynamic ui|custom ui|interactive|approval\s+(?:card|flow|form|workflow|request|queue)|pending\s+approvals?|show\s+(?:my\s+)?approvals?|review\s+approvals?|hitl\s+queue|pagerduty|external\s+connector|invoke\s+connector|run\s+connector|trigger\s+webhook|timeline|roadmap|triage|incident\s+(?:triage|dashboard|timeline|queue|status|report|response)|rollback|deal\s+desk|sales\s+pipeline|discount\s+approval|close[- ]plan|intake\s+form|(?:sell|buy|purchase|trim|trade)\b.*\b(?:shares?|stocks?|aapl|apple|msft|microsoft|nvda|nvidia|intc|intel|boeing|pfizer|voo)\b|tax[- ]?loss\s+harvest(?:ing)?|(?:show|list|view|all|what|see)\b.*\b(?:my\s+)?(?:stocks?|holdings?|shares?|positions?|equities)\b|\bmy\s+(?:stocks?|holdings?|shares?|positions?)\b|stock\s+(?:holdings?|positions?|list)|build\s+(?:me\s+)?a\b|design\s+(?:me\s+)?a\b|generate\s+(?:me\s+)?a\b|create\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist|workflow)|make\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist))\b/i;
@@ -642,19 +645,117 @@ function buildConnectorActionCanvas(
   };
 }
 
+function buildActionFlowCanvas(
+  flow: ActionFlow,
+  connectorStore: ConnectorStore | undefined,
+  approvalStore: ApprovalStore | undefined,
+  requesterName: string | undefined,
+  prompt: string,
+): { intro: string; canvas: DynamicCanvasProps } {
+  const requester = requesterName || "CEP Operator";
+  const conn = flow.connectorId ? connectorStore?.findById(flow.connectorId) : undefined;
+  const action = flow.connectorAction || "trigger_action_flow";
+  const dualControl = flow.approvalMode === "hitl_4eyes";
+  const requiresApproval = flow.approvalMode !== "auto_execute";
+
+  if (requiresApproval && approvalStore) {
+    const approval = approvalStore.createPending({
+      targetKind: flow.targetKind === "external_connector" && conn ? "external_connector" : "domain_write",
+      sfieldToolRef: flow.targetKind === "external_connector" ? connectorInvokeToolRef : domainWriteToolRef,
+      domain: flow.targetKind === "external_connector" ? "external_connector" : "customer360",
+      recordId: conn?.id ?? flow.id,
+      action,
+      title: `No-Code Flow · ${flow.name}`,
+      summary: `${flow.description} (Policy: ${dualControl ? "4-eyes separate approver" : "inline Chat approval"}).`,
+      riskLevel: dualControl ? "high" : "medium",
+      payload: { flowId: flow.id, prompt, action, connectorId: conn?.id },
+      details: [
+        { label: "Action Flow", value: flow.name },
+        { label: "Domain", value: flow.domain },
+        { label: "Bound Target", value: conn ? `${conn.name} (${conn.url})` : flow.targetKind },
+        { label: "Action", value: action },
+        { label: "Approval Policy", value: dualControl ? "4-Eyes Dual Control" : "Inline HITL Approval" },
+      ],
+      requester,
+      dualControl,
+    });
+    return {
+      intro: `Matched admin-authored No-Code Action Flow **${flow.name}**. Review the prepared SHA-256 digest and approve inline below or in \`/admin/logs?source=approvals\`.`,
+      canvas: {
+        title: `No-Code Flow · ${flow.name}`.slice(0, 96),
+        badge: `Action Flow · ${flow.domain}`,
+        subtitle: `Approval ${approval.id} · ${dualControl ? "4-eyes dual control" : "inline approval"}`,
+        generatedBy: "synthesizer",
+        dataSource: "action-flows.json + approvals.json",
+        recordId: flow.id,
+        prompt,
+        nodes: [
+          {
+            type: "approval",
+            title: approval.title,
+            summary: approval.summary,
+            requester: approval.requester,
+            riskLevel: approval.riskLevel,
+            details: approval.details,
+            approveLabel: "Approve & run flow",
+            rejectLabel: "Deny flow",
+            recordId: approval.recordId,
+            domain: approval.domain === "customer360" ? "generic" : approval.domain,
+            approvalId: approval.id,
+            payloadDigest: approval.payloadDigest,
+            dualControl: approval.dualControl,
+            sfieldToolRef: approval.sfieldToolRef,
+            initialDecision: "pending",
+          },
+        ],
+        disclaimer: "Authored declaratively in /admin/intents (Action Flows) with zero code deploys. Governed by sfield and logged to Write Audit.",
+        suggestedFollowUp: "Show pending approvals",
+      },
+    };
+  }
+
+  return {
+    intro: `Matched No-Code Action Flow **${flow.name}** (${flow.description}).`,
+    canvas: {
+      title: flow.name,
+      badge: `Action Flow · ${flow.domain}`,
+      generatedBy: "synthesizer",
+      dataSource: "action-flows.json",
+      prompt,
+      nodes: [
+        {
+          type: "callout",
+          tone: "highlight",
+          title: `Bound to ${conn?.name ?? flow.targetKind}`,
+          body: `${flow.description} (Policy: ${flow.approvalMode}).`,
+        },
+      ],
+      disclaimer: "Authored declaratively in /admin/intents (Action Flows).",
+    },
+  };
+}
+
 function buildStockTradeCanvas(
   tradeStore: TradeStore,
   personaId: string,
   requesterName: string | undefined,
   prompt: string,
   extractedParams?: SemanticRouteDecision["extractedParams"],
+  options?: {
+    conversationId?: string;
+    initialStage?: "configure" | "tax_analysis" | "running";
+    initialJobId?: string;
+    overrideShares?: number;
+    overrideSymbol?: string;
+    overrideSide?: "buy" | "sell";
+  },
 ): { intro: string; canvas: DynamicCanvasProps } {
   const lexical = parseStockTradePrompt(prompt);
   const parsed = {
-    side: extractedParams?.side ?? lexical.side,
-    symbol: (extractedParams?.symbol ? extractedParams.symbol.toUpperCase() : lexical.symbol),
+    side: options?.overrideSide ?? extractedParams?.side ?? lexical.side,
+    symbol: (options?.overrideSymbol ?? (extractedParams?.symbol ? extractedParams.symbol.toUpperCase() : lexical.symbol)),
     percent: extractedParams?.percent ?? lexical.percent,
-    shares: extractedParams?.shares ?? lexical.shares,
+    shares: options?.overrideShares ?? extractedParams?.shares ?? lexical.shares,
   };
   const snapshot = tradeStore.snapshotFor(personaId);
   const target = snapshot.holdings.find((h) => h.symbol === parsed.symbol) ?? snapshot.holdings[0];
@@ -662,10 +763,34 @@ function buildStockTradeCanvas(
   const marketValueCents = target.shares * target.priceCents;
   const unrealizedCents = (target.priceCents - target.avgCostCents) * target.shares;
   const unrealizedSign = unrealizedCents >= 0 ? "+" : "-";
+  const resolvedShares = parsed.shares
+    ?? (parsed.percent && target.shares > 0 ? Math.max(1, Math.round((target.shares * parsed.percent) / 100)) : Math.max(1, Math.round(target.shares * 0.25)));
+  const washSaleWarnings = tradeStore.washSaleWarningsFor(personaId, target.symbol, parsed.side);
 
-  const intro = parsed.side === "sell"
-    ? `You currently hold **${target.shares} shares of ${target.name} (${target.symbol})** (${usd(marketValueCents)} at ${usd(target.priceCents)}/sh, avg cost ${usd(target.avgCostCents)}, unrealized ${unrealizedSign}${usd(Math.abs(unrealizedCents))}). Confirm the **quantity or percentage** you want to sell below and choose whether to run **Tax-Loss Harvesting analysis** before launching the timed execution job.`
-    : `Your available cash is **${usd(snapshot.cashCents)}** and you currently hold **${target.shares} shares of ${target.name} (${target.symbol})** at ${usd(target.priceCents)}/sh. Choose how many shares to buy below and launch the timed execution job.`;
+  if (options?.conversationId && options.initialStage !== "running") {
+    tradeStore.setDraft({
+      conversationId: options.conversationId,
+      personaId,
+      actorName: requesterName || "Customer",
+      side: parsed.side,
+      symbol: target.symbol,
+      shares: Math.min(Math.max(1, resolvedShares), parsed.side === "sell" ? Math.max(1, target.shares) : resolvedShares),
+      ...(parsed.percent ? { percent: parsed.percent } : {}),
+      stage: options.initialStage === "tax_analysis" ? "awaiting_execution" : "awaiting_tax_choice",
+      ...(options.initialStage === "tax_analysis" && parsed.side === "sell" && target.shares > 0
+        ? { taxAnalysis: tradeStore.analyzeTaxHarvest(personaId, target.symbol, Math.min(resolvedShares, target.shares)) }
+        : {}),
+      updatedAt: Date.now(),
+    });
+  }
+
+  const intro = options?.initialStage === "running" && options.initialJobId
+    ? `Launched timed execution job **\`${options.initialJobId}\`** for your **${parsed.side.toUpperCase()} ${resolvedShares} ${target.symbol}** order. Watch the live SSE countdown below — you can cancel before settlement or wait for your updated balance & portfolio receipt.`
+    : options?.initialStage === "tax_analysis"
+      ? `Completed **Tax-Loss Harvesting analysis** for selling **${resolvedShares} shares of ${target.symbol}**. Review the recommended offsetting loss trades below — click **Execute bundle** or reply **"execute bundle"** in Chat to launch the timed job.`
+      : parsed.side === "sell"
+        ? `You currently hold **${target.shares} shares of ${target.name} (${target.symbol})** (${usd(marketValueCents)} at ${usd(target.priceCents)}/sh, avg cost ${usd(target.avgCostCents)}, unrealized ${unrealizedSign}${usd(Math.abs(unrealizedCents))}). Confirm the quantity or percentage below — or reply **"yes"** in Chat to run Tax-Loss Harvesting analysis, **"change to 50%"**, or **"execute now"**.`
+        : `Your available cash is **${usd(snapshot.cashCents)}** and you currently hold **${target.shares} shares of ${target.name} (${target.symbol})** at ${usd(target.priceCents)}/sh. Choose how many shares to buy below and launch the timed execution job.`;
 
   return {
     intro,
@@ -695,6 +820,9 @@ function buildStockTradeCanvas(
           ...(parsed.percent ? { suggestedPercent: parsed.percent } : {}),
           ...(parsed.shares ? { suggestedShares: parsed.shares } : {}),
           askTaxHarvest: parsed.side === "sell",
+          ...(options?.initialStage ? { initialStage: options.initialStage } : {}),
+          ...(options?.initialJobId ? { initialJobId: options.initialJobId } : {}),
+          ...(washSaleWarnings.length > 0 ? { washSaleWarnings } : {}),
           holdings: snapshot.holdings.map((h) => ({
             symbol: h.symbol,
             name: h.name,
@@ -704,8 +832,8 @@ function buildStockTradeCanvas(
           })),
         },
       ],
-      disclaimer: "Simulated trade execution runs as an asynchronous timed job and settles cash and equity balances into your live CEP Customer 360 profile via sfield cep.domain.execute_write@1.0.0. Tax estimates are illustrative only.",
-      suggestedFollowUp: "Show my portfolio summary",
+      disclaimer: "Simulated trade execution runs as a durable SSE-streamed timed job with cancellation, 30-day wash-sale tracking, and sfield settlement into Customer 360.",
+      suggestedFollowUp: "Show all my stocks",
     },
   };
 }
@@ -797,15 +925,146 @@ export async function generateDynamicUi(input: {
   connectorStore?: ConnectorStore;
   approvalStore?: ApprovalStore;
   tradeStore?: TradeStore;
+  actionFlowStore?: ActionFlowStore;
+  matchedActionFlow?: ActionFlow;
   personaId?: string;
+  conversationId?: string;
+  principalId?: string;
+  onTradeSettle?: (principalId: string) => SettlementCallback;
   requesterName?: string;
   semanticRoute?: SemanticRouteDecision;
+  tradeContinuation?: {
+    draft: TradeDraftState;
+    intent: "tax_analysis" | "adjust_qty" | "execute";
+    percent?: number;
+    shares?: number;
+    includeHarvest?: boolean;
+  };
   signal?: AbortSignal;
 }): Promise<{ intro: string; canvas: DynamicCanvasProps }> {
-  const { prompt, profileSummary, gateway, dataDir, opsStore, salesStore, connectorStore, approvalStore, tradeStore, personaId, requesterName, semanticRoute } = input;
+  const {
+    prompt, profileSummary, gateway, dataDir, opsStore, salesStore, connectorStore, approvalStore,
+    tradeStore, matchedActionFlow, personaId, conversationId, principalId, onTradeSettle, requesterName, semanticRoute, tradeContinuation,
+  } = input;
+
+  if (matchedActionFlow) {
+    return buildActionFlowCanvas(matchedActionFlow, connectorStore, approvalStore, requesterName, prompt);
+  }
+
+  if (tradeContinuation && tradeStore) {
+    const { draft, intent, percent, shares, includeHarvest } = tradeContinuation;
+    const snap = tradeStore.snapshotFor(draft.personaId);
+    const target = snap.holdings.find((h) => h.symbol === draft.symbol) ?? snap.holdings[0];
+    const nextShares = shares
+      ?? (percent && target.shares > 0 ? Math.max(1, Math.round((target.shares * percent) / 100)) : draft.shares);
+
+    if (intent === "tax_analysis") {
+      return buildStockTradeCanvas(tradeStore, draft.personaId, draft.actorName, prompt, undefined, {
+        conversationId,
+        initialStage: "tax_analysis",
+        overrideSide: draft.side,
+        overrideSymbol: draft.symbol,
+        overrideShares: nextShares,
+      });
+    }
+    if (intent === "adjust_qty") {
+      return buildStockTradeCanvas(tradeStore, draft.personaId, draft.actorName, prompt, { percent }, {
+        conversationId,
+        initialStage: "configure",
+        overrideSide: draft.side,
+        overrideSymbol: draft.symbol,
+        overrideShares: nextShares,
+      });
+    }
+    // intent === "execute"
+    const legs: TradeLegInput[] = [
+      { symbol: draft.symbol, side: draft.side, shares: nextShares, reason: "primary" },
+    ];
+    if (includeHarvest && draft.side === "sell") {
+      const analysis = draft.taxAnalysis ?? tradeStore.analyzeTaxHarvest(draft.personaId, draft.symbol, nextShares);
+      for (const rec of analysis.recommendations) {
+        if (rec.recommendedShares > 0) {
+          legs.push({ symbol: rec.symbol, side: "sell", shares: rec.recommendedShares, reason: "tax_harvest" });
+        }
+      }
+    }
+    const grossCents = tradeStore.estimateGrossCents(draft.personaId, legs);
+    if (approvalStore && approvalStore.shouldGateTrade(grossCents)) {
+      const policy = approvalStore.getPolicy();
+      const usd = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      const approval = approvalStore.createPending({
+        targetKind: "stock_trade",
+        sfieldToolRef: domainWriteToolRef,
+        domain: "stock_trade",
+        recordId: draft.personaId,
+        action: "execute_trade_bundle",
+        title: `High-Value Trade Approval · ${legs.map((l) => `${l.side.toUpperCase()} ${l.shares} ${l.symbol}`).join(" + ")}`.slice(0, 120),
+        summary: `Gross trade value ${usd(grossCents)} exceeds the $${policy.highRiskTradeThresholdUsd.toLocaleString("en-US")} compliance threshold. Approve to launch the timed sfield settlement job.`,
+        riskLevel: "high",
+        payload: { personaId: draft.personaId, legs, taxHarvestAnalyzed: Boolean(includeHarvest), grossCents },
+        details: [
+          { label: "Gross Order Value", value: usd(grossCents) },
+          { label: "Compliance Threshold", value: `$${policy.highRiskTradeThresholdUsd.toLocaleString("en-US")}` },
+          { label: "Order Legs", value: legs.map((l) => `${l.side.toUpperCase()} ${l.shares} ${l.symbol}`).join(", ") },
+          { label: "4-Eyes Dual Control", value: policy.defaultDualControl ? "Required" : "Inline allowed" },
+        ],
+        requester: draft.actorName,
+        dualControl: policy.defaultDualControl,
+      });
+      if (conversationId) tradeStore.clearDraft(conversationId);
+      return {
+        intro: `This trade bundle (**${usd(grossCents)}**) exceeds the **$${policy.highRiskTradeThresholdUsd.toLocaleString("en-US")}** high-value compliance threshold, so it has been gated for **HITL Approval** (\`${approval.id}\`). Approve inline below or in \`/admin/logs?source=approvals\` to launch the timed settlement job.`,
+        canvas: {
+          title: "High-Value Trade Compliance Gate (HITL)",
+          badge: "Trade · HITL Approval",
+          subtitle: `Approval ${approval.id} · ${usd(grossCents)} gross order value`,
+          generatedBy: "synthesizer",
+          dataSource: "trades-portfolio.json + approvals.json",
+          prompt,
+          nodes: [
+            {
+              type: "approval",
+              title: approval.title,
+              summary: approval.summary,
+              requester: approval.requester,
+              riskLevel: "high",
+              details: approval.details,
+              approveLabel: "Approve & run trade",
+              rejectLabel: "Deny trade",
+              recordId: approval.recordId,
+              domain: "stock_trade",
+              approvalId: approval.id,
+              payloadDigest: approval.payloadDigest,
+              dualControl: approval.dualControl,
+              sfieldToolRef: approval.sfieldToolRef,
+              initialDecision: "pending",
+            },
+          ],
+          disclaimer: "High-value trades are cryptographically digest-bound and gated through sfield HITL approvals before settlement.",
+          suggestedFollowUp: "Show all my stocks",
+        },
+      };
+    }
+
+    const settler = onTradeSettle ? onTradeSettle(principalId ?? "chat") : async () => ({ sfieldRunId: "offline" });
+    const job = tradeStore.startTradeJob(
+      { personaId: draft.personaId, actor: draft.actorName, legs, taxHarvestAnalyzed: Boolean(includeHarvest), durationSeconds: 5 },
+      settler,
+    );
+    if (conversationId) tradeStore.clearDraft(conversationId);
+    return buildStockTradeCanvas(tradeStore, draft.personaId, draft.actorName, prompt, undefined, {
+      conversationId,
+      initialStage: "running",
+      initialJobId: job.jobId,
+      overrideSide: draft.side,
+      overrideSymbol: draft.symbol,
+      overrideShares: nextShares,
+    });
+  }
+
   const capId = semanticRoute?.capabilityId;
   if (tradeStore && (capId === "stock_trade" || (!capId && stockTradeTrigger.test(prompt)))) {
-    return buildStockTradeCanvas(tradeStore, personaId || "demo-learner", requesterName, prompt, semanticRoute?.extractedParams);
+    return buildStockTradeCanvas(tradeStore, personaId || "demo-learner", requesterName, prompt, semanticRoute?.extractedParams, { conversationId });
   }
   if (tradeStore && (capId === "stock_holdings" || (!capId && stockHoldingsTrigger.test(prompt)))) {
     return buildStockHoldingsCanvas(tradeStore, personaId || "demo-learner", prompt);

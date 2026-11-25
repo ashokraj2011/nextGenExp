@@ -7,10 +7,13 @@ import {
   type PortfolioBalanceSnapshot,
   type TaxHarvestAnalysis,
   type TaxHarvestRecommendation,
+  type TradeDraftState,
   type TradeFillReceipt,
   type TradeJob,
   type TradeJobCreateInput,
+  type TradeLegInput,
   type TradeSide,
+  type WashSaleLedgerEntry,
 } from "../../packages/contracts/trading";
 import type { CustomerProfileStore } from "../../packages/customer-profiles";
 import { makeId } from "../../packages/experience/compile";
@@ -18,6 +21,8 @@ import { makeId } from "../../packages/experience/compile";
 // Calibrated so default Alice Morgan equity portfolio equals exactly $27,500.00 (2,750,000 cents):
 // 50*228 + 12*425 + 25*140 + 120*22.50 + 15*160 + 96*25 = 11400 + 5100 + 3500 + 2700 + 2400 + 2400 = $27,500.00
 const BASE_EQUITY_CENTS = 2_750_000;
+const WASH_SALE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const DRAFT_TTL_MS = 15 * 60 * 1000;
 
 const DEFAULT_HOLDINGS: EquityHolding[] = [
   { symbol: "AAPL", name: "Apple Inc.", sector: "Technology", shares: 50, avgCostCents: 14800, priceCents: 22800, holdingPeriod: "long_term" },
@@ -42,7 +47,6 @@ const NAME_TO_SYMBOL: [RegExp, string][] = [
   [/\b(intel|intc)\b/i, "INTC"],
   [/\b(boeing|\bba\b)\b/i, "BA"],
   [/\b(pfizer|pfe)\b/i, "PFE"],
-  [/\b(voo|s&p\s*500|vanguard)\b/i, "VOO"],
 ];
 
 export interface ParsedStockTradePrompt {
@@ -69,7 +73,7 @@ export function parseStockTradePrompt(prompt: string): ParsedStockTradePrompt {
   const percent = pctMatch ? Math.min(100, Math.max(1, Number(pctMatch[1]))) : undefined;
 
   const sharesMatch = prompt.match(/\b(\d{1,5})\s*(?:shares?|sh\b|units?)\b/i)
-    ?? prompt.match(/\b(?:sell|buy|purchase|trim)\s+(\d{1,5})\s+(?:of\s+)?(?:aapl|apple|msft|microsoft|nvda|nvidia|intc|intel|ba|boeing|pfe|pfizer|voo)\b/i);
+    ?? prompt.match(/\b(?:sell|buy|purchase|trim)\s+(\d{1,5})\s+(?:of\s+)?(?:aapl|apple|msft|microsoft|nvda|nvidia|intc|intel|ba|boeing|pfe|pfizer)\b/i);
   const shares = !percent && sharesMatch ? Math.max(1, Number(sharesMatch[1])) : undefined;
 
   return {
@@ -80,15 +84,29 @@ export function parseStockTradePrompt(prompt: string): ParsedStockTradePrompt {
   };
 }
 
+export type SettlementCallback = (settlement: {
+  personaId: string;
+  actor: string;
+  cashDeltaCents: number;
+  equityDeltaCents: number;
+  nextCashCents: number;
+  nextEquityCents: number;
+  summary: string;
+  approvalId?: string;
+}) => Promise<{ sfieldRunId: string; auditId?: string }>;
+
 interface PersistedTradeState {
   byPersona: Record<string, EquityHolding[]>;
+  jobs: TradeJob[];
+  washSaleLedger: WashSaleLedgerEntry[];
+  drafts: Record<string, TradeDraftState>;
 }
 
 export class TradeStore {
   private readonly filePath: string;
   private state: PersistedTradeState;
-  private readonly jobs = new Map<string, TradeJob>();
-  private readonly timers = new Set<ReturnType<typeof setTimeout>>();
+  private readonly jobTimers = new Map<string, ReturnType<typeof setTimeout>[]>();
+  private readonly jobListeners = new Map<string, Set<(job: TradeJob) => void>>();
 
   constructor(dataDir: string, private readonly profileStore: CustomerProfileStore) {
     this.filePath = join(dataDir, "trades-portfolio.json");
@@ -99,22 +117,27 @@ export class TradeStore {
     if (existsSync(this.filePath)) {
       try {
         const raw = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<PersistedTradeState>;
-        if (raw && raw.byPersona && typeof raw.byPersona === "object") {
-          const clean: Record<string, EquityHolding[]> = {};
+        const cleanHoldings: Record<string, EquityHolding[]> = {};
+        if (raw.byPersona && typeof raw.byPersona === "object") {
           for (const [personaId, list] of Object.entries(raw.byPersona)) {
             if (Array.isArray(list)) {
               const valid = list
                 .map((h) => equityHoldingSchema.safeParse(h))
                 .filter((r): r is { success: true; data: EquityHolding } => r.success)
                 .map((r) => r.data);
-              if (valid.length > 0) clean[personaId] = valid;
+              if (valid.length > 0) cleanHoldings[personaId] = valid;
             }
           }
-          return { byPersona: clean };
         }
+        return {
+          byPersona: cleanHoldings,
+          jobs: Array.isArray(raw.jobs) ? raw.jobs.slice(0, 100) : [],
+          washSaleLedger: Array.isArray(raw.washSaleLedger) ? raw.washSaleLedger.slice(0, 200) : [],
+          drafts: raw.drafts && typeof raw.drafts === "object" ? raw.drafts : {},
+        };
       } catch { /* fall through */ }
     }
-    return { byPersona: {} };
+    return { byPersona: {}, jobs: [], washSaleLedger: [], drafts: {} };
   }
 
   private save(): void {
@@ -155,7 +178,6 @@ export class TradeStore {
   snapshotFor(personaId: string): PortfolioBalanceSnapshot {
     const profile = this.profileStore.findByPersonaId(personaId);
     const holdings = this.holdingsFor(personaId);
-    // Single Source of Truth: equities total is always derived directly from live share lots.
     const equityCents = holdings.reduce((sum, h) => sum + h.shares * h.priceCents, 0);
     const cashCents = profile?.cashCents ?? 12_500_00;
     const fixedIncomeCents = profile?.fixedIncomeCents ?? 10_000_00;
@@ -166,6 +188,61 @@ export class TradeStore {
       totalCents: cashCents + equityCents + fixedIncomeCents,
       holdings,
     };
+  }
+
+  estimateGrossCents(personaId: string, legs: TradeLegInput[]): number {
+    const holdings = this.holdingsFor(personaId);
+    return legs.reduce((sum, leg) => {
+      const h = holdings.find((item) => item.symbol === leg.symbol.toUpperCase());
+      return sum + (h ? h.priceCents * leg.shares : 0);
+    }, 0);
+  }
+
+  washSaleWarningsFor(personaId: string, rawSymbol: string, side: TradeSide): string[] {
+    const symbol = rawSymbol.toUpperCase();
+    const cutoff = Date.now() - WASH_SALE_WINDOW_MS;
+    const recent = this.state.washSaleLedger.filter(
+      (entry) => entry.personaId === personaId && entry.symbol === symbol && Date.parse(entry.executedAt) >= cutoff,
+    );
+    const warnings: string[] = [];
+    if (side === "buy") {
+      const priorLossSell = recent.find((e) => e.side === "sell" && e.realizedGainLossCents < 0);
+      if (priorLossSell) {
+        const daysAgo = Math.max(0, Math.floor((Date.now() - Date.parse(priorLossSell.executedAt)) / (24 * 60 * 60 * 1000)));
+        warnings.push(
+          `Wash-Sale Conflict (${symbol}): You harvested a $${(Math.abs(priorLossSell.realizedGainLossCents) / 100).toFixed(2)} loss on ${symbol} ${daysAgo === 0 ? "today" : `${daysAgo}d ago`}. Repurchasing within 30 days disallows that tax loss.`,
+        );
+      }
+    } else {
+      const priorBuy = recent.find((e) => e.side === "buy");
+      if (priorBuy) {
+        warnings.push(
+          `Wash-Sale Warning (${symbol}): You purchased ${priorBuy.shares} shares of ${symbol} within the past 30 days. Selling ${symbol} at a loss may trigger an IRS wash sale.`,
+        );
+      }
+    }
+    return warnings;
+  }
+
+  setDraft(draft: TradeDraftState): void {
+    this.state.drafts[draft.conversationId] = draft;
+    this.save();
+  }
+
+  getDraft(conversationId: string): TradeDraftState | undefined {
+    const found = this.state.drafts[conversationId];
+    if (!found) return undefined;
+    if (Date.now() - found.updatedAt > DRAFT_TTL_MS || found.stage === "completed") {
+      return undefined;
+    }
+    return { ...found };
+  }
+
+  clearDraft(conversationId: string): void {
+    if (this.state.drafts[conversationId]) {
+      delete this.state.drafts[conversationId];
+      this.save();
+    }
   }
 
   analyzeTaxHarvest(personaId: string, rawSymbol: string, shares: number): TaxHarvestAnalysis {
@@ -184,6 +261,8 @@ export class TradeStore {
     const estimatedTaxBeforeCents = realizedGainCents > 0
       ? Math.round((realizedGainCents * effectiveTaxRatePct) / 100)
       : 0;
+
+    const washSaleWarnings = this.washSaleWarningsFor(personaId, symbol, "sell");
 
     const lossCandidates = holdings
       .filter((h) => h.symbol !== symbol && h.shares > 0 && h.priceCents < h.avgCostCents)
@@ -205,6 +284,8 @@ export class TradeStore {
       );
       if (neededShares <= 0) continue;
       const estimatedLossCents = neededShares * candidate.lossPerShareCents;
+      const candidateWarnings = this.washSaleWarningsFor(personaId, candidate.holding.symbol, "sell");
+      washSaleWarnings.push(...candidateWarnings);
       recommendations.push({
         symbol: candidate.holding.symbol,
         name: candidate.holding.name,
@@ -218,6 +299,7 @@ export class TradeStore {
         holdingPeriod: candidate.holding.holdingPeriod,
         replacementHint: REPLACEMENT_HINTS[candidate.holding.symbol]
           ?? `Avoid repurchasing ${candidate.holding.symbol} within 30 days to comply with the IRS wash-sale rule.`,
+        ...(candidateWarnings[0] ? { washSaleConflict: candidateWarnings[0] } : {}),
       });
       remainingGainToOffset = Math.max(0, remainingGainToOffset - estimatedLossCents);
     }
@@ -251,14 +333,42 @@ export class TradeStore {
       estimatedTaxAfterCents,
       estimatedTaxSavingsCents,
       feedbackSummary,
-      washSaleNotice: "IRS Wash-Sale Rule: do not repurchase substantially identical securities within 30 days before or after harvesting a tax loss.",
+      washSaleNotice: "IRS 30-Day Wash-Sale Rule: do not repurchase substantially identical securities within 30 days before or after harvesting a tax loss.",
+      washSaleWarnings,
+    };
+  }
+
+  private findJobMut(jobId: string): TradeJob | undefined {
+    return this.state.jobs.find((j) => j.jobId === jobId);
+  }
+
+  private emitJob(jobId: string): void {
+    const snap = this.getJob(jobId);
+    if (!snap) return;
+    const listeners = this.jobListeners.get(jobId);
+    if (!listeners) return;
+    for (const fn of listeners) {
+      try { fn(snap); } catch { /* ignore listener errors */ }
+    }
+  }
+
+  subscribeJob(jobId: string, listener: (job: TradeJob) => void): () => void {
+    let set = this.jobListeners.get(jobId);
+    if (!set) {
+      set = new Set();
+      this.jobListeners.set(jobId, set);
+    }
+    set.add(listener);
+    return () => {
+      set?.delete(listener);
+      if (set && set.size === 0) this.jobListeners.delete(jobId);
     };
   }
 
   getJob(jobId: string): TradeJob | undefined {
-    const job = this.jobs.get(jobId);
+    const job = this.findJobMut(jobId);
     if (!job) return undefined;
-    if (job.status !== "completed" && job.status !== "failed") {
+    if (job.status !== "completed" && job.status !== "failed" && job.status !== "cancelled") {
       const elapsedMs = Date.now() - Date.parse(job.createdAt);
       const elapsedSeconds = Math.min(job.durationSeconds, Math.max(0, Math.round(elapsedMs / 100) / 10));
       const remainingSeconds = Math.max(0, Math.ceil((job.durationSeconds * 1000 - elapsedMs) / 1000));
@@ -268,29 +378,54 @@ export class TradeStore {
   }
 
   listJobs(personaId?: string): TradeJob[] {
-    const list = [...this.jobs.values()]
+    return this.state.jobs
       .filter((j) => !personaId || j.personaId === personaId)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    return list.map((j) => this.getJob(j.jobId) ?? j);
+      .map((j) => this.getJob(j.jobId) ?? j);
+  }
+
+  private clearJobTimers(jobId: string): void {
+    const list = this.jobTimers.get(jobId);
+    if (!list) return;
+    for (const t of list) clearTimeout(t);
+    this.jobTimers.delete(jobId);
+  }
+
+  cancelJob(jobId: string): { ok: true; job: TradeJob } | { ok: false; message: string } {
+    const job = this.findJobMut(jobId);
+    if (!job) return { ok: false, message: "Trade job not found." };
+    if (job.status === "completed" || job.status === "settling") {
+      return { ok: false, message: "Order is already settling or completed and cannot be cancelled." };
+    }
+    if (job.status === "cancelled" || job.status === "failed") {
+      return { ok: true, job: this.getJob(jobId)! };
+    }
+    this.clearJobTimers(jobId);
+    job.status = "cancelled";
+    job.stageLabel = "Order cancelled before execution — no shares or balances changed";
+    job.remainingSeconds = 0;
+    job.completedAt = new Date().toISOString();
+    this.save();
+    this.emitJob(jobId);
+    return { ok: true, job: this.getJob(jobId)! };
+  }
+
+  reconcilePendingJobs(onSettle: SettlementCallback): void {
+    for (const job of this.state.jobs) {
+      if (job.status === "queued" || job.status === "validating" || job.status === "routing" || job.status === "executing" || job.status === "settling") {
+        void this.finalizeJob(job.jobId, onSettle);
+      }
+    }
   }
 
   startTradeJob(
     rawInput: TradeJobCreateInput,
-    onSettle: (settlement: {
-      personaId: string;
-      actor: string;
-      cashDeltaCents: number;
-      equityDeltaCents: number;
-      nextCashCents: number;
-      nextEquityCents: number;
-      summary: string;
-    }) => Promise<{ sfieldRunId: string; auditId?: string }>,
+    onSettle: SettlementCallback,
+    approvalId?: string,
   ): TradeJob {
     const input = tradeJobCreateInputSchema.parse(rawInput);
     const holdings = this.holdingsFor(input.personaId);
     const beforeSnapshot = this.snapshotFor(input.personaId);
 
-    // Pre-validate every leg against current holdings and available cash
     let projectedCashCents = beforeSnapshot.cashCents;
     const sharesBySymbol = new Map(holdings.map((h) => [h.symbol, h.shares]));
 
@@ -329,43 +464,60 @@ export class TradeStore {
       remainingSeconds: durationSeconds,
       createdAt: new Date().toISOString(),
       taxHarvestAnalyzed: input.taxHarvestAnalyzed ?? false,
+      ...(approvalId ? { approvalId } : {}),
       legs: input.legs.map((l) => ({ ...l, symbol: l.symbol.toUpperCase() })),
       beforeSnapshot,
     };
-    this.jobs.set(jobId, job);
+    this.state.jobs = [job, ...this.state.jobs].slice(0, 100);
+    this.save();
+
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    this.jobTimers.set(jobId, timers);
 
     const schedule = (delayMs: number, fn: () => void) => {
-      const t = setTimeout(() => {
-        this.timers.delete(t);
-        fn();
-      }, delayMs);
+      const t = setTimeout(() => { fn(); }, delayMs);
       t.unref();
-      this.timers.add(t);
+      timers.push(t);
     };
 
     const totalMs = durationSeconds * 1000;
+    // Emit 1s countdown heartbeats for live SSE streams
+    for (let sec = 1; sec < durationSeconds; sec += 1) {
+      schedule(sec * 1000, () => {
+        const cur = this.findJobMut(jobId);
+        if (cur && cur.status !== "completed" && cur.status !== "failed" && cur.status !== "cancelled") {
+          this.emitJob(jobId);
+        }
+      });
+    }
     schedule(Math.round(totalMs * 0.2), () => {
-      const cur = this.jobs.get(jobId);
-      if (cur && cur.status !== "completed" && cur.status !== "failed") {
+      const cur = this.findJobMut(jobId);
+      if (cur && cur.status === "queued") {
         cur.status = "validating";
-        cur.stageLabel = "Validating share lots, cost basis & wash-sale guardrails";
+        cur.stageLabel = "Validating share lots, cost basis & 30-day wash-sale ledger";
         cur.progressPct = 34;
+        this.save();
+        this.emitJob(jobId);
       }
     });
     schedule(Math.round(totalMs * 0.48), () => {
-      const cur = this.jobs.get(jobId);
-      if (cur && cur.status !== "completed" && cur.status !== "failed") {
+      const cur = this.findJobMut(jobId);
+      if (cur && (cur.status === "queued" || cur.status === "validating")) {
         cur.status = "routing";
         cur.stageLabel = `Routing ${job.legs.length} order leg${job.legs.length === 1 ? "" : "s"} to simulated execution venue`;
         cur.progressPct = 60;
+        this.save();
+        this.emitJob(jobId);
       }
     });
     schedule(Math.round(totalMs * 0.76), () => {
-      const cur = this.jobs.get(jobId);
-      if (cur && cur.status !== "completed" && cur.status !== "failed") {
+      const cur = this.findJobMut(jobId);
+      if (cur && (cur.status === "routing" || cur.status === "validating")) {
         cur.status = "executing";
         cur.stageLabel = "Fills matched — settling cash & portfolio positions via sfield";
         cur.progressPct = 84;
+        this.save();
+        this.emitJob(jobId);
       }
     });
     schedule(totalMs, () => {
@@ -375,23 +527,15 @@ export class TradeStore {
     return this.getJob(jobId)!;
   }
 
-  private async finalizeJob(
-    jobId: string,
-    onSettle: (settlement: {
-      personaId: string;
-      actor: string;
-      cashDeltaCents: number;
-      equityDeltaCents: number;
-      nextCashCents: number;
-      nextEquityCents: number;
-      summary: string;
-    }) => Promise<{ sfieldRunId: string; auditId?: string }>,
-  ): Promise<void> {
-    const job = this.jobs.get(jobId);
-    if (!job || job.status === "completed" || job.status === "failed") return;
+  private async finalizeJob(jobId: string, onSettle: SettlementCallback): Promise<void> {
+    const job = this.findJobMut(jobId);
+    if (!job || job.status === "completed" || job.status === "failed" || job.status === "cancelled") return;
+    this.clearJobTimers(jobId);
     job.status = "settling";
     job.stageLabel = "Persisting settled positions & updating Customer 360 balances";
     job.progressPct = 94;
+    this.save();
+    this.emitJob(jobId);
 
     try {
       const holdings = this.holdingsFor(job.personaId);
@@ -399,6 +543,7 @@ export class TradeStore {
       const receipts: TradeFillReceipt[] = [];
       let cashDeltaCents = 0;
       let equityDeltaCents = 0;
+      const settledIso = new Date().toISOString();
 
       for (const leg of job.legs) {
         const holding = holdings.find((h) => h.symbol === leg.symbol);
@@ -424,6 +569,15 @@ export class TradeStore {
             previousShares,
             newShares: holding.shares,
           });
+          this.state.washSaleLedger.unshift({
+            id: makeId("ws"),
+            personaId: job.personaId,
+            symbol: holding.symbol,
+            side: "sell",
+            shares: leg.shares,
+            realizedGainLossCents,
+            executedAt: settledIso,
+          });
         } else {
           const totalOldCost = holding.shares * holding.avgCostCents;
           const totalNewShares = holding.shares + leg.shares;
@@ -443,8 +597,18 @@ export class TradeStore {
             previousShares,
             newShares: holding.shares,
           });
+          this.state.washSaleLedger.unshift({
+            id: makeId("ws"),
+            personaId: job.personaId,
+            symbol: holding.symbol,
+            side: "buy",
+            shares: leg.shares,
+            realizedGainLossCents: 0,
+            executedAt: settledIso,
+          });
         }
       }
+      this.state.washSaleLedger = this.state.washSaleLedger.slice(0, 200);
 
       const nextCashCents = Math.max(0, before.cashCents + cashDeltaCents);
       const nextEquityCents = holdings.reduce((sum, h) => sum + h.shares * h.priceCents, 0);
@@ -452,7 +616,6 @@ export class TradeStore {
         .map((r) => `${r.side.toUpperCase()} ${r.shares} ${r.symbol} @ $${(r.fillPriceCents / 100).toFixed(2)}${r.reason === "tax_harvest" ? " (TLH)" : ""}`)
         .join(" + ");
 
-      // Persist holdings ledger first so CustomerProfileStore.portfolioSnapshot derives exact live equity.
       this.state.byPersona[job.personaId] = holdings;
       this.save();
 
@@ -464,6 +627,7 @@ export class TradeStore {
         nextCashCents,
         nextEquityCents,
         summary,
+        ...(job.approvalId ? { approvalId: job.approvalId } : {}),
       });
 
       const afterSnapshot = this.snapshotFor(job.personaId);
@@ -472,23 +636,27 @@ export class TradeStore {
       job.progressPct = 100;
       job.elapsedSeconds = job.durationSeconds;
       job.remainingSeconds = 0;
-      job.completedAt = new Date().toISOString();
+      job.completedAt = settledIso;
       job.receipts = receipts;
       job.beforeSnapshot = before;
       job.afterSnapshot = afterSnapshot;
       job.sfieldRunId = settlementResult.sfieldRunId;
       job.auditId = settlementResult.auditId;
       job.summary = summary;
+      this.save();
+      this.emitJob(jobId);
     } catch (err) {
       job.status = "failed";
       job.stageLabel = "Trade execution failed";
       job.error = err instanceof Error ? err.message : "Trade settlement failed.";
       job.remainingSeconds = 0;
+      this.save();
+      this.emitJob(jobId);
     }
   }
 
   close(): void {
-    for (const t of this.timers) clearTimeout(t);
-    this.timers.clear();
+    for (const id of [...this.jobTimers.keys()]) this.clearJobTimers(id);
+    this.jobListeners.clear();
   }
 }

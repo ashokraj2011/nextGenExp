@@ -2,8 +2,8 @@ import { z } from "zod";
 
 export const approvalRiskLevelSchema = z.enum(["low", "medium", "high"]);
 export const approvalStatusSchema = z.enum(["pending", "approved", "denied", "executed", "expired"]);
-export const approvalTargetKindSchema = z.enum(["domain_write", "external_connector"]);
-export const approvalDomainSchema = z.enum(["ops_incident", "sales_deal", "customer360", "external_connector"]);
+export const approvalTargetKindSchema = z.enum(["domain_write", "external_connector", "stock_trade"]);
+export const approvalDomainSchema = z.enum(["ops_incident", "sales_deal", "customer360", "external_connector", "stock_trade"]);
 
 export const approvalDetailSchema = z.object({
   label: z.string().trim().min(1).max(64),
@@ -14,6 +14,7 @@ export const approvalExecutionResultSchema = z.object({
   summary: z.string().trim().min(1).max(320),
   sfieldRunId: z.string().trim().min(1).max(80),
   auditId: z.string().trim().max(80).optional(),
+  jobId: z.string().trim().max(80).optional(),
   statusCode: z.number().int().optional(),
   responsePreview: z.string().max(600).optional(),
 }).strict();
@@ -46,6 +47,8 @@ export const approvalPolicySettingsSchema = z.object({
   gateHighRiskOpsRollbacks: z.boolean().default(true),
   gateHighRiskSalesDiscounts: z.boolean().default(true),
   gateExternalConnectorWrites: z.boolean().default(true),
+  gateHighRiskTrades: z.boolean().default(true),
+  highRiskTradeThresholdUsd: z.number().int().min(1000).max(1_000_000).default(10_000),
   defaultDualControl: z.boolean().default(false),
 }).strict();
 

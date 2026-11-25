@@ -21,6 +21,8 @@ const defaultPolicy: ApprovalPolicySettings = {
   gateHighRiskOpsRollbacks: true,
   gateHighRiskSalesDiscounts: true,
   gateExternalConnectorWrites: true,
+  gateHighRiskTrades: true,
+  highRiskTradeThresholdUsd: 10_000,
   defaultDualControl: false,
 };
 
@@ -138,6 +140,10 @@ export class ApprovalStore {
   shouldGateConnector(conn: ExternalConnector): boolean {
     if (conn.requiresApproval) return true;
     return this.state.policy.gateExternalConnectorWrites && conn.effect === "write";
+  }
+
+  shouldGateTrade(grossCents: number): boolean {
+    return this.state.policy.gateHighRiskTrades && grossCents > this.state.policy.highRiskTradeThresholdUsd * 100;
   }
 
   shouldGateDomainWrite(input: {

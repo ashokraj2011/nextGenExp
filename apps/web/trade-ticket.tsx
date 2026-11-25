@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   Calculator,
@@ -10,7 +10,9 @@ import {
   Timer,
   TrendingDown,
   TrendingUp,
+  XCircle,
 } from "lucide-react";
+import type { ApprovalRecord } from "../../packages/contracts/approval";
 import type { DynamicCanvasNode } from "../../packages/contracts/dynamic-canvas";
 import type { TaxHarvestAnalysis, TradeJob, TradeLegInput, TradeSide } from "../../packages/contracts/trading";
 import { api } from "./api";
@@ -53,19 +55,113 @@ export function TradeTicketNode({
   }, [node.existingShares, node.side, node.suggestedPercent, node.suggestedShares]);
 
   const [shares, setShares] = useState<number>(initialShares);
-  const [phase, setPhase] = useState<"configure" | "tax_analysis" | "running" | "completed">("configure");
+  const [phase, setPhase] = useState<"configure" | "tax_analysis" | "pending_approval" | "running" | "completed" | "cancelled">(
+    node.initialStage === "running" && node.initialJobId ? "running" : "configure",
+  );
   const [taxLoading, setTaxLoading] = useState(false);
   const [analysis, setAnalysis] = useState<TaxHarvestAnalysis | null>(null);
   const [selectedHarvest, setSelectedHarvest] = useState<Record<string, { included: boolean; shares: number }>>({});
+  const [pendingApproval, setPendingApproval] = useState<ApprovalRecord | null>(null);
+  const [approverName, setApproverName] = useState(node.actorName || "Compliance Approver");
+  const [approvalBusy, setApprovalBusy] = useState(false);
   const [job, setJob] = useState<TradeJob | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState("");
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const streamRef = useRef<EventSource | null>(null);
+  const didAutoInitRef = useRef(false);
+
+  const attachJobStream = useCallback((jobId: string) => {
+    if (streamRef.current) {
+      streamRef.current.close();
+      streamRef.current = null;
+    }
+    setPhase("running");
+    const source = new EventSource(`/api/trading/${jobId}/events`);
+    streamRef.current = source;
+    source.addEventListener("job.update", (ev: Event) => {
+      try {
+        const latest = JSON.parse((ev as MessageEvent).data) as TradeJob;
+        setJob(latest);
+        if (latest.status === "completed") {
+          source.close();
+          streamRef.current = null;
+          setPhase("completed");
+          notifyDomainDataUpdated();
+        } else if (latest.status === "cancelled") {
+          source.close();
+          streamRef.current = null;
+          setPhase("cancelled");
+        } else if (latest.status === "failed") {
+          source.close();
+          streamRef.current = null;
+          setError(latest.error ?? "Trade execution job failed.");
+          setPhase("configure");
+        }
+      } catch { /* ignore malformed event */ }
+    });
+    source.onerror = () => {
+      // Fallback one-shot status read if SSE closes early
+      void api.tradeJobStatus(jobId).then((latest) => {
+        setJob(latest);
+        if (latest.status === "completed") {
+          source.close();
+          streamRef.current = null;
+          setPhase("completed");
+          notifyDomainDataUpdated();
+        } else if (latest.status === "cancelled") {
+          source.close();
+          streamRef.current = null;
+          setPhase("cancelled");
+        }
+      }).catch(() => undefined);
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+      if (streamRef.current) streamRef.current.close();
     };
   }, []);
+
+  const runTaxHarvestAnalysis = useCallback(async (targetSymbol = selectedHolding.symbol, targetShares = shares) => {
+    if (targetShares <= 0 || targetShares > selectedHolding.shares) {
+      setError(`Enter a valid quantity between 1 and ${selectedHolding.shares} shares.`);
+      return;
+    }
+    setTaxLoading(true);
+    setError("");
+    try {
+      const res = await api.taxHarvestPreview({
+        personaId: node.personaId,
+        symbol: targetSymbol,
+        shares: targetShares,
+      });
+      setAnalysis(res);
+      setSelectedHarvest(
+        Object.fromEntries(
+          res.recommendations.map((rec) => [
+            rec.symbol,
+            { included: true, shares: rec.recommendedShares },
+          ]),
+        ),
+      );
+      setPhase("tax_analysis");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not analyze tax-loss harvesting.");
+    } finally {
+      setTaxLoading(false);
+    }
+  }, [node.personaId, selectedHolding.shares, selectedHolding.symbol, shares]);
+
+  useEffect(() => {
+    if (didAutoInitRef.current) return;
+    didAutoInitRef.current = true;
+    if (node.initialStage === "tax_analysis") {
+      void runTaxHarvestAnalysis(node.symbol, initialShares);
+    } else if (node.initialStage === "running" && node.initialJobId) {
+      attachJobStream(node.initialJobId);
+    }
+  }, [attachJobStream, initialShares, node.initialJobId, node.initialStage, node.symbol, runTaxHarvestAnalysis]);
 
   const grossCents = shares * selectedHolding.priceCents;
   const estGainCents = side === "sell"
@@ -93,36 +189,6 @@ export function TradeTicketNode({
     setAnalysis(null);
     setPhase("configure");
     setError("");
-  }
-
-  async function runTaxHarvestAnalysis() {
-    if (shares <= 0 || shares > selectedHolding.shares) {
-      setError(`Enter a valid quantity between 1 and ${selectedHolding.shares} shares.`);
-      return;
-    }
-    setTaxLoading(true);
-    setError("");
-    try {
-      const res = await api.taxHarvestPreview({
-        personaId: node.personaId,
-        symbol: selectedHolding.symbol,
-        shares,
-      });
-      setAnalysis(res);
-      setSelectedHarvest(
-        Object.fromEntries(
-          res.recommendations.map((rec) => [
-            rec.symbol,
-            { included: true, shares: rec.recommendedShares },
-          ]),
-        ),
-      );
-      setPhase("tax_analysis");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not analyze tax-loss harvesting.");
-    } finally {
-      setTaxLoading(false);
-    }
   }
 
   const harvestTotals = useMemo(() => {
@@ -182,38 +248,73 @@ export function TradeTicketNode({
         taxHarvestAnalyzed: Boolean(analysis),
         durationSeconds: 5,
       });
-      setJob(started);
-      setPhase("running");
-
-      if (pollRef.current) clearInterval(pollRef.current);
-      pollRef.current = setInterval(() => {
-        void api.tradeJobStatus(started.jobId).then((latest) => {
-          setJob(latest);
-          if (latest.status === "completed") {
-            if (pollRef.current) {
-              clearInterval(pollRef.current);
-              pollRef.current = null;
-            }
-            setPhase("completed");
-            notifyDomainDataUpdated();
-          } else if (latest.status === "failed") {
-            if (pollRef.current) {
-              clearInterval(pollRef.current);
-              pollRef.current = null;
-            }
-            setError(latest.error ?? "Trade job failed.");
-            setPhase("configure");
-          }
-        }).catch(() => undefined);
-      }, 500);
+      if ("approval" in started && started.status === "pending_approval") {
+        setPendingApproval(started.approval);
+        setApproverName(started.approval.dualControl ? "Compliance Approver" : node.actorName);
+        setPhase("pending_approval");
+        return;
+      }
+      const startedJob = started as TradeJob;
+      setJob(startedJob);
+      attachJobStream(startedJob.jobId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not launch trade job.");
     }
   }
 
+  async function decideTradeApproval(decision: "approve" | "deny") {
+    if (!pendingApproval || approvalBusy) return;
+    setApprovalBusy(true);
+    setError("");
+    try {
+      const res = await api.decideApproval(pendingApproval.id, {
+        decision,
+        actor: approverName.trim() || "Compliance Approver",
+      });
+      if (decision === "deny") {
+        setPendingApproval(null);
+        setPhase("cancelled");
+        return;
+      }
+      const nextJobId = res.job?.jobId ?? res.execution?.jobId ?? res.approval.executionResult?.jobId;
+      if (res.job) setJob(res.job);
+      if (nextJobId) {
+        setPendingApproval(null);
+        attachJobStream(nextJobId);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Approval decision failed.");
+    } finally {
+      setApprovalBusy(false);
+    }
+  }
+
+  async function cancelActiveJob() {
+    if (!job || cancelling) return;
+    setCancelling(true);
+    setError("");
+    try {
+      const cancelled = await api.cancelTradeJob(job.jobId);
+      setJob(cancelled);
+      setPhase("cancelled");
+      if (streamRef.current) {
+        streamRef.current.close();
+        streamRef.current = null;
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Order could not be cancelled.");
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  const allWashSaleWarnings = [
+    ...(node.washSaleWarnings ?? []),
+    ...(analysis?.washSaleWarnings ?? []),
+  ].filter((msg, idx, arr) => arr.indexOf(msg) === idx);
+
   return (
     <div className="dyn-trade-ticket">
-      {/* Position & Balance Overview Strip */}
       <dl className="dyn-metrics-grid">
         <div>
           <dt>Existing {selectedHolding.symbol} Position</dt>
@@ -249,9 +350,15 @@ export function TradeTicketNode({
         </div>
       </dl>
 
+      {allWashSaleWarnings.map((warn) => (
+        <p key={warn} className="dyn-tax-washsale" role="alert">
+          <ShieldAlert size={14} aria-hidden="true" />
+          {warn}
+        </p>
+      ))}
+
       {error && <p className="dyn-form-error" role="alert">{error}</p>}
 
-      {/* STEP 1 & 2: Configure Order + Tax-Loss Harvesting Question */}
       {(phase === "configure" || phase === "tax_analysis") && (
         <div className="dyn-trade-builder">
           <div className="dyn-trade-controls">
@@ -322,8 +429,8 @@ export function TradeTicketNode({
                 </strong>
                 <p>
                   {side === "sell"
-                    ? `Selling ${shares} shares of ${selectedHolding.symbol} (${pctOfHolding}% of your ${selectedHolding.shares}-share position) creates an estimated ${estGainCents >= 0 ? `capital gain of ${fmtCents(estGainCents)}` : `capital loss of ${fmtCents(Math.abs(estGainCents))}`}. We can scan your other holdings for offsetting loss lots, or skip straight to the timed trade execution job.`
-                    : `Buying ${shares} shares of ${selectedHolding.symbol} for ${fmtCents(grossCents)} will execute as a timed settlement job and update your live cash and equity portfolio.`}
+                    ? `Selling ${shares} shares of ${selectedHolding.symbol} (${pctOfHolding}% of your ${selectedHolding.shares}-share position) creates an estimated ${estGainCents >= 0 ? `capital gain of ${fmtCents(estGainCents)}` : `capital loss of ${fmtCents(Math.abs(estGainCents))}`}. Click below or reply "yes" / "execute now" in Chat.`
+                    : `Buying ${shares} shares of ${selectedHolding.symbol} for ${fmtCents(grossCents)} will execute as a durable SSE-streamed settlement job and update your live cash and equity portfolio.`}
                 </p>
               </div>
               <div className="dyn-approval-actions">
@@ -351,7 +458,6 @@ export function TradeTicketNode({
             </div>
           )}
 
-          {/* Tax-Loss Harvesting Feedback & Recommended Loss Trades */}
           {phase === "tax_analysis" && analysis && (
             <div className="dyn-tax-panel">
               <div className="dyn-tax-head">
@@ -485,33 +591,94 @@ export function TradeTicketNode({
         </div>
       )}
 
-      {/* STEP 3: Live Timed Job Progress */}
-      {phase === "running" && job && (
+      {/* High-Value Trade HITL Compliance Gate */}
+      {phase === "pending_approval" && pendingApproval && (
+        <div className="dyn-approval is-pending" role="status">
+          <div className="dyn-approval-head">
+            <div>
+              <h4>{pendingApproval.title}</h4>
+              <span className="dyn-approval-req">Requested by {pendingApproval.requester}</span>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "4px", fontSize: "0.74rem", opacity: 0.85 }}>
+                <code>{pendingApproval.id}</code>
+                <code>{pendingApproval.sfieldToolRef}</code>
+                <code>sha256:{pendingApproval.payloadDigest.slice(0, 12)}</code>
+                {pendingApproval.dualControl && <strong>4-eyes dual control</strong>}
+              </div>
+            </div>
+            <span className="dyn-risk-pill risk-high">
+              <ShieldAlert size={12} aria-hidden="true" />HITL Gate
+            </span>
+          </div>
+          <p className="dyn-approval-summary">{pendingApproval.summary}</p>
+          <dl className="dyn-approval-details">
+            {pendingApproval.details.map((d) => (
+              <div key={d.label}><dt>{d.label}</dt><dd>{d.value}</dd></div>
+            ))}
+          </dl>
+          <label className="dyn-form-field">
+            <span>Approver</span>
+            <input value={approverName} onChange={(e) => setApproverName(e.target.value)} />
+          </label>
+          <div className="dyn-approval-actions">
+            <button type="button" className="axe-primary-button" disabled={approvalBusy} onClick={() => void decideTradeApproval("approve")}>
+              <CheckCircle2 size={14} aria-hidden="true" />{approvalBusy ? "Approving…" : "Approve & launch trade job"}
+            </button>
+            <button type="button" className="secondary-button" disabled={approvalBusy} onClick={() => void decideTradeApproval("deny")}>
+              <XCircle size={14} aria-hidden="true" />Deny trade
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Live SSE Timed Job Progress + Cancel Order */}
+      {phase === "running" && (
         <div className="dyn-trade-timer" role="status" aria-live="polite">
           <div className="dyn-trade-timer-head">
             <div>
               <h4>
                 <Timer size={16} aria-hidden="true" style={{ verticalAlign: "-3px", marginRight: "6px" }} />
-                Executing Trade Job <code>{job.jobId}</code>
+                Executing Trade Job <code>{job?.jobId ?? node.initialJobId}</code> (Live SSE)
               </h4>
-              <p>{job.stageLabel}</p>
+              <p>{job?.stageLabel ?? "Connecting to live execution stream…"}</p>
             </div>
-            <span className="dyn-trade-countdown">
-              <Clock size={14} aria-hidden="true" />
-              {job.remainingSeconds}s remaining
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span className="dyn-trade-countdown">
+                <Clock size={14} aria-hidden="true" />
+                {job?.remainingSeconds ?? 5}s remaining
+              </span>
+              {job && (job.status === "queued" || job.status === "validating" || job.status === "routing") && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={cancelling}
+                  onClick={() => void cancelActiveJob()}
+                >
+                  <XCircle size={13} aria-hidden="true" />{cancelling ? "Cancelling…" : "Cancel order"}
+                </button>
+              )}
+            </div>
           </div>
           <div className="dyn-bar-track" aria-hidden="true">
-            <span className="is-highlight" style={{ width: `${job.progressPct}%`, transition: "width 0.4s ease" }} />
+            <span className="is-highlight" style={{ width: `${job?.progressPct ?? 12}%`, transition: "width 0.35s ease" }} />
           </div>
           <div className="dyn-trade-timer-foot">
-            <span>Status: <strong>{job.status}</strong> ({job.progressPct}%)</span>
-            <span>{job.legs.map((l) => `${l.side.toUpperCase()} ${l.shares} ${l.symbol}`).join(" · ")}</span>
+            <span>Status: <strong>{job?.status ?? "queued"}</strong> ({job?.progressPct ?? 12}%)</span>
+            <span>{(job?.legs ?? []).map((l) => `${l.side.toUpperCase()} ${l.shares} ${l.symbol}`).join(" · ")}</span>
           </div>
         </div>
       )}
 
-      {/* STEP 4: Completed Trade Settlement Receipt & Live Balance/Portfolio Diff */}
+      {/* Cancelled state */}
+      {phase === "cancelled" && (
+        <div className="dyn-approval-result" role="status">
+          <XCircle size={16} aria-hidden="true" />
+          <span>
+            <strong>Order Cancelled</strong> — {job?.stageLabel ?? "Trade order cancelled before execution. No shares or balances were modified."}
+          </span>
+        </div>
+      )}
+
+      {/* Completed Settlement Receipt */}
       {phase === "completed" && job && job.afterSnapshot && job.beforeSnapshot && (
         <div className="dyn-trade-settled" role="status">
           <div className="dyn-approval-result">
@@ -520,6 +687,7 @@ export function TradeTicketNode({
               <strong>Trade Job Completed ({job.jobId})</strong> — {job.summary}
               {job.sfieldRunId ? ` · sfield run ${job.sfieldRunId}` : ""}
               {job.auditId ? ` · audit ${job.auditId}` : ""}
+              {job.approvalId ? ` · approval ${job.approvalId}` : ""}
             </span>
           </div>
 
@@ -549,7 +717,7 @@ export function TradeTicketNode({
             <div>
               <span>Total Portfolio Value</span>
               <strong>{fmtCents(job.afterSnapshot.totalCents)}</strong>
-              <small>Synced to Customer 360 &amp; Overview</small>
+              <small>Synced penny-for-penny to Customer 360</small>
             </div>
           </div>
 
@@ -589,19 +757,11 @@ export function TradeTicketNode({
 
           {onFollowUp && (
             <div className="dyn-approval-actions">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => onFollowUp("Show my portfolio summary")}
-              >
-                Verify updated portfolio summary
+              <button type="button" className="secondary-button" onClick={() => onFollowUp("Show all my stocks")}>
+                View updated stock holdings
               </button>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => onFollowUp(`Simulate another trade in my stock holdings`)}
-              >
-                Simulate another stock trade
+              <button type="button" className="secondary-button" onClick={() => onFollowUp("Show my portfolio summary")}>
+                Verify portfolio snapshot
               </button>
             </div>
           )}

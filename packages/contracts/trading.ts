@@ -32,6 +32,7 @@ export const tradeJobCreateInputSchema = z.object({
   legs: z.array(tradeLegInputSchema).min(1).max(8),
   taxHarvestAnalyzed: z.boolean().default(false),
   durationSeconds: z.number().int().min(2).max(12).default(5),
+  bypassApprovalGate: z.boolean().optional(),
 }).strict();
 
 export type TradeSide = z.infer<typeof tradeSideSchema>;
@@ -40,6 +41,16 @@ export type EquityHolding = z.infer<typeof equityHoldingSchema>;
 export type TradeLegInput = z.infer<typeof tradeLegInputSchema>;
 export type TaxHarvestPreviewInput = z.infer<typeof taxHarvestPreviewInputSchema>;
 export type TradeJobCreateInput = z.input<typeof tradeJobCreateInputSchema>;
+
+export interface WashSaleLedgerEntry {
+  id: string;
+  personaId: string;
+  symbol: string;
+  side: TradeSide;
+  shares: number;
+  realizedGainLossCents: number;
+  executedAt: string;
+}
 
 export interface TaxHarvestRecommendation {
   symbol: string;
@@ -53,6 +64,7 @@ export interface TaxHarvestRecommendation {
   estimatedLossCents: number;
   holdingPeriod: HoldingPeriod;
   replacementHint: string;
+  washSaleConflict?: string;
 }
 
 export interface TaxHarvestAnalysis {
@@ -73,6 +85,7 @@ export interface TaxHarvestAnalysis {
   estimatedTaxSavingsCents: number;
   feedbackSummary: string;
   washSaleNotice: string;
+  washSaleWarnings: string[];
 }
 
 export interface TradeFillReceipt {
@@ -96,7 +109,7 @@ export interface PortfolioBalanceSnapshot {
   holdings: EquityHolding[];
 }
 
-export type TradeJobStatus = "queued" | "validating" | "routing" | "executing" | "settling" | "completed" | "failed";
+export type TradeJobStatus = "queued" | "validating" | "routing" | "executing" | "settling" | "completed" | "cancelled" | "failed";
 
 export interface TradeJob {
   jobId: string;
@@ -111,6 +124,7 @@ export interface TradeJob {
   createdAt: string;
   completedAt?: string;
   taxHarvestAnalyzed: boolean;
+  approvalId?: string;
   legs: TradeLegInput[];
   receipts?: TradeFillReceipt[];
   beforeSnapshot?: PortfolioBalanceSnapshot;
@@ -119,4 +133,18 @@ export interface TradeJob {
   auditId?: string;
   summary?: string;
   error?: string;
+}
+
+export interface TradeDraftState {
+  conversationId: string;
+  personaId: string;
+  actorName: string;
+  side: TradeSide;
+  symbol: string;
+  shares: number;
+  percent?: number;
+  stage: "awaiting_tax_choice" | "awaiting_execution" | "running" | "completed";
+  taxAnalysis?: TaxHarvestAnalysis;
+  activeJobId?: string;
+  updatedAt: number;
 }

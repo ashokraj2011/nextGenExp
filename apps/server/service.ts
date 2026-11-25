@@ -34,7 +34,8 @@ import type { OpsIncidentStore } from "./ops-store";
 import type { SalesDealStore } from "./sales-store";
 import type { ConnectorStore } from "./connector-store";
 import type { ApprovalStore } from "./approval-store";
-import type { TradeStore } from "./trade-store";
+import type { SettlementCallback, TradeStore } from "./trade-store";
+import type { ActionFlowStore } from "./action-flow-store";
 import type { Customer360Service } from "./customer-360";
 import type { GatewaySettings } from "./gateway";
 import type { GoalProgressProvider } from "../../packages/goal-progress";
@@ -81,6 +82,8 @@ export class ExperienceService {
       connectorStore?: ConnectorStore;
       approvalStore?: ApprovalStore;
       tradeStore?: TradeStore;
+      actionFlowStore?: ActionFlowStore;
+      onTradeSettle?: (principalId: string) => SettlementCallback;
     },
   ) {
     const chat = runtime?.chat ?? offlineHistory?.chat;
@@ -290,6 +293,101 @@ export class ExperienceService {
       }
       if (!initial.workflow && !initial.route && this.dynamicUi) {
         const conversation = this.store.conversation(initial.scope.conversationId, initial.scope.principalId);
+        const persona = findProfileById(conversation.personaId);
+        const activeDraft = this.dynamicUi.tradeStore?.getDraft(conversation.id);
+        const matchedActionFlow = this.dynamicUi.actionFlowStore?.matchPrompt(initial.public.message);
+
+        // 1. Conversational continuation for an active stock trade draft in this thread
+        if (activeDraft && this.dynamicUi.tradeStore) {
+          const msg = initial.public.message.trim();
+          const wantsTax = /^(?:yes|yeah|yep|sure|ok|please)\b/i.test(msg)
+            || /\b(?:analyze|run|check|do|show)\s+(?:tax|tlh|loss|harvest)/i.test(msg);
+          const wantsExec = /\b(?:execute|confirm|place|submit|run\s+(?:the\s+)?(?:trade|order|bundle)|go\s+ahead|proceed)\b/i.test(msg)
+            || /^no\b/i.test(msg);
+          const pctAdjust = msg.match(/\b(\d{1,3})\s*(?:%|percent\b)/i);
+          const shareAdjust = !pctAdjust ? msg.match(/\b(\d{1,5})\s*(?:shares?|sh\b)\b/i) : null;
+
+          if (wantsTax || wantsExec || pctAdjust || shareAdjust) {
+            stage = "compose";
+            this.store.progress(id, "composition", this.now());
+            const generated = await generateDynamicUi({
+              prompt: msg,
+              gateway: this.dynamicUi.gateway,
+              dataDir: this.dynamicUi.dataDir,
+              opsStore: this.dynamicUi.opsStore,
+              salesStore: this.dynamicUi.salesStore,
+              connectorStore: this.dynamicUi.connectorStore,
+              approvalStore: this.dynamicUi.approvalStore,
+              tradeStore: this.dynamicUi.tradeStore,
+              actionFlowStore: this.dynamicUi.actionFlowStore,
+              personaId: conversation.personaId,
+              conversationId: conversation.id,
+              principalId: initial.scope.principalId,
+              onTradeSettle: this.dynamicUi.onTradeSettle,
+              requesterName: persona?.displayName,
+              tradeContinuation: {
+                draft: activeDraft,
+                intent: wantsExec ? "execute" : wantsTax ? "tax_analysis" : "adjust_qty",
+                ...(pctAdjust ? { percent: Math.min(100, Math.max(1, Number(pctAdjust[1]))) } : {}),
+                ...(shareAdjust ? { shares: Math.max(1, Number(shareAdjust[1])) } : {}),
+                includeHarvest: wantsExec && (Boolean(activeDraft.taxAnalysis) || /\b(?:bundle|harvest|tax|all)\b/i.test(msg)),
+              },
+              signal,
+            });
+            current();
+            const now = this.now();
+            const dynamicResult = compileDynamicCanvas(generated.intro, generated.canvas, now + DECISION_TTL);
+            this.store.update(id, (row) => {
+              row.public.actionMode = "dynamic_ui";
+              row.public.semanticRoute = {
+                capabilityId: "stock_trade",
+                capabilityLabel: "Conversational Trade Continuation",
+                method: "deterministic",
+                confidence: 0.96,
+                reasoning: `Continued active ${activeDraft.side.toUpperCase()} ${activeDraft.symbol} trade draft conversationally.`,
+              };
+              row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
+            });
+            this.store.finish(id, { type: "completed", result: dynamicResult }, now);
+            return;
+          }
+        }
+
+        // 2. Admin-authored No-Code Action Flow match
+        if (matchedActionFlow) {
+          stage = "compose";
+          this.store.progress(id, "composition", this.now());
+          const generated = await generateDynamicUi({
+            prompt: initial.public.message,
+            gateway: this.dynamicUi.gateway,
+            dataDir: this.dynamicUi.dataDir,
+            connectorStore: this.dynamicUi.connectorStore,
+            approvalStore: this.dynamicUi.approvalStore,
+            actionFlowStore: this.dynamicUi.actionFlowStore,
+            matchedActionFlow,
+            personaId: conversation.personaId,
+            conversationId: conversation.id,
+            requesterName: persona?.displayName,
+            signal,
+          });
+          current();
+          const now = this.now();
+          const dynamicResult = compileDynamicCanvas(generated.intro, generated.canvas, now + DECISION_TTL);
+          this.store.update(id, (row) => {
+            row.public.actionMode = "dynamic_ui";
+            row.public.semanticRoute = {
+              capabilityId: "external_connector",
+              capabilityLabel: `No-Code Flow · ${matchedActionFlow.name}`,
+              method: "deterministic",
+              confidence: 0.97,
+              reasoning: `Matched admin-authored No-Code Action Flow "${matchedActionFlow.name}" (${matchedActionFlow.approvalMode}).`,
+            };
+            row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
+          });
+          this.store.finish(id, { type: "completed", result: dynamicResult }, now);
+          return;
+        }
+
         const recentForRoute = await this.history.recent(conversation, initial.ordinal);
         const recentSummary = recentForRoute.length > 0
           ? recentForRoute.slice(-2).map((r) => `User: "${r.request}" -> ${r.intentId ?? r.contextId ?? "reply"}`).join(" | ")
@@ -315,7 +413,6 @@ export class ExperienceService {
         if (semanticRoute.capabilityId !== "verified_experience") {
         stage = "compose";
         this.store.progress(id, "composition", this.now());
-        const persona = findProfileById(conversation.personaId);
         const lookupInfo = this.dynamicUi.customer360 && persona
           ? this.dynamicUi.customer360.evaluate({
               principalId: initial.scope.principalId,
@@ -337,7 +434,11 @@ export class ExperienceService {
           connectorStore: this.dynamicUi.connectorStore,
           approvalStore: this.dynamicUi.approvalStore,
           tradeStore: this.dynamicUi.tradeStore,
+          actionFlowStore: this.dynamicUi.actionFlowStore,
           personaId: conversation.personaId,
+          conversationId: conversation.id,
+          principalId: initial.scope.principalId,
+          onTradeSettle: this.dynamicUi.onTradeSettle,
           requesterName: persona?.displayName,
           semanticRoute,
           signal,

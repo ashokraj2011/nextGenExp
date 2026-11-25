@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  ArrowDown, ArrowRight, ArrowUp, BookOpen, GitBranch, Layers, Plus, RotateCcw, Save, Sparkles, Trash2,
+  ArrowDown, ArrowRight, ArrowUp, BookOpen, GitBranch, Layers, Plus, RotateCcw, Save, Sparkles, Trash2, Zap,
 } from "lucide-react";
+import { ActionFlowsPanel } from "./action-flows-panel";
 import { adminPaths } from "../../packages/contracts/admin-paths";
 import { componentNames, type ComponentName } from "../../packages/contracts/domain";
 import type {
@@ -17,7 +18,7 @@ import type {
 import { api } from "./api";
 import "./experience-registry-admin.css";
 
-type Tab = "intents" | "content" | "nba";
+type Tab = "intents" | "content" | "nba" | "flows";
 
 const conditionLabels: Record<NbaConditionKind, string> = {
   unfunded_account: "Account is unfunded",
@@ -408,13 +409,18 @@ export function ExperienceRegistryAdmin() {
         <button type="button" role="tab" aria-selected={tab === "nba"} className={"reg-tab" + (tab === "nba" ? " is-active" : "")} onClick={() => { setTab("nba"); setNotice(null); }}>
           <Sparkles size={15} aria-hidden="true" />NBA Priority Rules {view ? `(${view.nbaRules.length})` : ""}
         </button>
+        <button type="button" role="tab" aria-selected={tab === "flows"} className={"reg-tab" + (tab === "flows" ? " is-active" : "")} onClick={() => { setTab("flows"); setNotice(null); }}>
+          <Zap size={15} aria-hidden="true" />Action Flows (No-Code)
+        </button>
       </div>
 
       {notice && (
         <p className={"reg-notice " + (notice.tone === "error" ? "is-error" : "is-ok")} role="status">{notice.text}</p>
       )}
 
-      {loading || !view ? (
+      {tab === "flows" ? (
+        <ActionFlowsPanel />
+      ) : loading || !view ? (
         <p className="workspace-loading" role="status">Loading Experience Registry…</p>
       ) : tab === "intents" ? (
         <div className="reg-grid">

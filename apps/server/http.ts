@@ -32,8 +32,10 @@ import { ConnectorStore } from "./connector-store";
 import { connectorInvokeInputSchema, connectorUpsertSchema } from "../../packages/contracts/connector";
 import { ApprovalStore } from "./approval-store";
 import { approvalDecisionInputSchema, approvalPolicySettingsSchema, type ApprovalRecord } from "../../packages/contracts/approval";
-import { TradeStore } from "./trade-store";
-import { taxHarvestPreviewInputSchema, tradeJobCreateInputSchema } from "../../packages/contracts/trading";
+import { TradeStore, type SettlementCallback } from "./trade-store";
+import { taxHarvestPreviewInputSchema, tradeJobCreateInputSchema, type TradeLegInput } from "../../packages/contracts/trading";
+import { ActionFlowStore } from "./action-flow-store";
+import { actionFlowUpsertSchema } from "../../packages/contracts/action-flow";
 import { WriteAuditStore } from "./write-audit";
 import { recommendationArbitrateToolRef } from "../../packages/contracts/recommendation-provider";
 import { connectorInvokeToolRef, domainWriteToolRef, Runtime, sfieldNamespace } from "./runtime";
@@ -231,6 +233,7 @@ export async function startApp(options: Options) {
   const salesStore = new SalesDealStore(options.dataDir);
   const connectorStore = new ConnectorStore(options.dataDir);
   const approvalStore = new ApprovalStore(options.dataDir);
+  const actionFlowStore = new ActionFlowStore(options.dataDir);
   const tradeStore = new TradeStore(options.dataDir, profileStore);
   setActiveEquityLedger(tradeStore);
   const writeAudit = new WriteAuditStore(options.dataDir);
@@ -251,11 +254,72 @@ export async function startApp(options: Options) {
     throw error;
   }
   const mode = options.mode ?? "live";
+  const makeTradeSettler = (principalId: string): SettlementCallback => async (settlement) => {
+    const toDollars = (cents: number) => (Math.max(0, cents) / 100).toFixed(2);
+    const profile = profileStore.findByPersonaId(settlement.personaId);
+    const nextAvailable = Math.max(0, (profile?.availableBalanceCents ?? settlement.nextCashCents) + settlement.cashDeltaCents);
+    const nextCurrent = Math.max(0, (profile?.currentBalanceCents ?? settlement.nextCashCents) + settlement.cashDeltaCents);
+    const updates: Record<string, string> = {
+      "portfolio.cash": toDollars(settlement.nextCashCents),
+      "portfolio.equities": toDollars(settlement.nextEquityCents),
+      "balances.available": toDollars(nextAvailable),
+      "balances.current": toDollars(nextCurrent),
+    };
+    if (runtime) {
+      const governed = await runtime.executeGovernedWrite(principalId, {
+        domain: "customer360",
+        recordId: settlement.personaId,
+        action: "settle_stock_trade",
+        actor: settlement.actor,
+        note: settlement.summary,
+        updates,
+        ...(settlement.approvalId ? { approvalId: settlement.approvalId } : {}),
+      }, AbortSignal.timeout(5000));
+      return { sfieldRunId: governed.sfieldRunId, auditId: governed.audit?.auditId };
+    }
+    profileStore.applyBindings(settlement.personaId, updates, now());
+    const audit = writeAudit.record({
+      sfieldRunId: "offline",
+      sfieldToolRef: domainWriteToolRef,
+      domain: "stock_trade",
+      recordId: settlement.personaId,
+      action: "settle_stock_trade",
+      actor: settlement.actor,
+      summary: settlement.summary,
+      status: "succeeded",
+      ...(settlement.approvalId ? { approvalId: settlement.approvalId } : {}),
+    });
+    return { sfieldRunId: "offline", auditId: audit.auditId };
+  };
+  tradeStore.reconcilePendingJobs(makeTradeSettler("system-reconcile"));
+
   const experience = new ExperienceService(store, runtime, selectionMode, now, inspectorEnabled, offline && {
     chat: new ChatHarness(offline), close: () => offline.close(),
-  }, { mode, gateway: options.gateway, dataDir: options.dataDir, customer360, portfolioSnapshots, goalProgressProvider, opsStore, salesStore, connectorStore, approvalStore, tradeStore });
+  }, {
+    mode, gateway: options.gateway, dataDir: options.dataDir, customer360, portfolioSnapshots, goalProgressProvider,
+    opsStore, salesStore, connectorStore, approvalStore, tradeStore, actionFlowStore,
+    onTradeSettle: makeTradeSettler,
+  });
 
   async function executeApprovedRecord(principalId: string, record: ApprovalRecord) {
+    if (record.targetKind === "stock_trade") {
+      const legs = Array.isArray(record.payload.legs) ? (record.payload.legs as TradeLegInput[]) : [];
+      const personaId = typeof record.payload.personaId === "string" ? record.payload.personaId : record.recordId;
+      const taxHarvestAnalyzed = Boolean(record.payload.taxHarvestAnalyzed);
+      const actor = record.decidedBy ?? record.requester;
+      const job = tradeStore.startTradeJob(
+        { personaId, actor, legs, taxHarvestAnalyzed, durationSeconds: 5 },
+        makeTradeSettler(principalId),
+        record.id,
+      );
+      const summary = `Approved trade bundle queued as ${job.jobId} (${legs.map((l) => `${l.side.toUpperCase()} ${l.shares} ${l.symbol}`).join(" + ")})`;
+      const finalRecord = approvalStore.markExecuted(record.id, {
+        summary,
+        sfieldRunId: job.jobId,
+        jobId: job.jobId,
+      }) ?? record;
+      return { approval: finalRecord, job, execution: { summary, sfieldRunId: job.jobId, jobId: job.jobId } };
+    }
     if (record.targetKind === "external_connector") {
       const action = record.action;
       const actor = record.decidedBy ?? record.requester;
@@ -797,6 +861,17 @@ export async function startApp(options: Options) {
       });
       return json(res, { status: "executed", execution: { ...execution, sfieldRunId: "offline", auditId: audit.auditId } });
     }
+    if (resource === "admin" && id === "action-flows" && !operation && method === "GET" && inspectorEnabled) {
+      return json(res, { flows: actionFlowStore.list() });
+    }
+    if (resource === "admin" && id === "action-flows" && !operation && method === "POST" && inspectorEnabled) {
+      const input = await body(req, actionFlowUpsertSchema);
+      return json(res, actionFlowStore.upsert(input));
+    }
+    if (resource === "admin" && id === "action-flow-delete" && !operation && method === "POST" && inspectorEnabled) {
+      const { id: flowId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());
+      return json(res, actionFlowStore.remove(flowId));
+    }
     if (resource === "trading") {
       if (id && operation === "portfolio" && method === "GET") {
         return json(res, tradeStore.snapshotFor(id));
@@ -811,42 +886,35 @@ export async function startApp(options: Options) {
       }
       if (id === "jobs" && !operation && method === "POST") {
         const input = await body(req, tradeJobCreateInputSchema);
-        try {
-          const job = tradeStore.startTradeJob(input, async (settlement) => {
-            const toDollars = (cents: number) => (Math.max(0, cents) / 100).toFixed(2);
-            const profile = profileStore.findByPersonaId(settlement.personaId);
-            const nextAvailable = Math.max(0, (profile?.availableBalanceCents ?? settlement.nextCashCents) + settlement.cashDeltaCents);
-            const nextCurrent = Math.max(0, (profile?.currentBalanceCents ?? settlement.nextCashCents) + settlement.cashDeltaCents);
-            const updates: Record<string, string> = {
-              "portfolio.cash": toDollars(settlement.nextCashCents),
-              "portfolio.equities": toDollars(settlement.nextEquityCents),
-              "balances.available": toDollars(nextAvailable),
-              "balances.current": toDollars(nextCurrent),
-            };
-            if (runtime) {
-              const governed = await runtime.executeGovernedWrite(principalId, {
-                domain: "customer360",
-                recordId: settlement.personaId,
-                action: "settle_stock_trade",
-                actor: settlement.actor,
-                note: settlement.summary,
-                updates,
-              }, AbortSignal.timeout(5000));
-              return { sfieldRunId: governed.sfieldRunId, auditId: governed.audit?.auditId };
-            }
-            profileStore.applyBindings(settlement.personaId, updates, now());
-            const audit = writeAudit.record({
-              sfieldRunId: "offline",
-              sfieldToolRef: domainWriteToolRef,
-              domain: "customer360",
-              recordId: settlement.personaId,
-              action: "settle_stock_trade",
-              actor: settlement.actor,
-              summary: settlement.summary,
-              status: "succeeded",
-            });
-            return { sfieldRunId: "offline", auditId: audit.auditId };
+        const legs = input.legs.map((l) => ({ ...l, symbol: l.symbol.toUpperCase(), reason: l.reason ?? "primary" as const }));
+        const grossCents = tradeStore.estimateGrossCents(input.personaId, legs);
+        if (!input.bypassApprovalGate && approvalStore.shouldGateTrade(grossCents)) {
+          const policy = approvalStore.getPolicy();
+          const usd = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+          const approval = approvalStore.createPending({
+            targetKind: "stock_trade",
+            sfieldToolRef: domainWriteToolRef,
+            domain: "stock_trade",
+            recordId: input.personaId,
+            action: "execute_trade_bundle",
+            title: `High-Value Trade Approval · ${legs.map((l) => `${l.side.toUpperCase()} ${l.shares} ${l.symbol}`).join(" + ")}`.slice(0, 120),
+            summary: `Gross trade value ${usd(grossCents)} exceeds the $${policy.highRiskTradeThresholdUsd.toLocaleString("en-US")} compliance threshold. Approve to launch the timed sfield settlement job.`,
+            riskLevel: "high",
+            payload: { personaId: input.personaId, legs, taxHarvestAnalyzed: Boolean(input.taxHarvestAnalyzed), grossCents },
+            details: [
+              { label: "Gross Order Value", value: usd(grossCents) },
+              { label: "Threshold", value: `$${policy.highRiskTradeThresholdUsd.toLocaleString("en-US")}` },
+              { label: "Order Legs", value: legs.map((l) => `${l.side.toUpperCase()} ${l.shares} ${l.symbol}`).join(", ") },
+              { label: "Tax Harvesting", value: input.taxHarvestAnalyzed ? "Analyzed" : "Skipped" },
+              { label: "4-Eyes Dual Control", value: policy.defaultDualControl ? "Required" : "Inline allowed" },
+            ],
+            requester: input.actor ?? "Customer",
+            dualControl: policy.defaultDualControl,
           });
+          return json(res, { status: "pending_approval", approval, approvalsView: approvalStore.view() }, 202);
+        }
+        try {
+          const job = tradeStore.startTradeJob(input, makeTradeSettler(principalId));
           return json(res, job, 202);
         } catch (err) {
           throw new ApiError(400, "trade_rejected", err instanceof Error ? err.message : "Trade order could not be queued.");
@@ -856,6 +924,34 @@ export async function startApp(options: Options) {
         const job = tradeStore.getJob(id);
         if (!job) throw new ApiError(404, "job_not_found", "Trade job not found.");
         return json(res, job);
+      }
+      if (id && operation === "cancel" && method === "POST") {
+        const result = tradeStore.cancelJob(id);
+        if (!result.ok) throw new ApiError(409, "trade_cancel_failed", result.message);
+        return json(res, result.job);
+      }
+      if (id && operation === "events" && method === "GET") {
+        const currentJob = tradeStore.getJob(id);
+        if (!currentJob) throw new ApiError(404, "job_not_found", "Trade job not found.");
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          "Connection": "keep-alive",
+          "X-Accel-Buffering": "no",
+        });
+        res.flushHeaders();
+        streams.add(res);
+        const send = (job: typeof currentJob) => {
+          if (res.writableEnded || res.destroyed) return;
+          res.write(`event: job.update\ndata: ${JSON.stringify(job)}\n\n`);
+          if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") {
+            res.end();
+          }
+        };
+        const unsubscribe = tradeStore.subscribeJob(id, send);
+        res.once("close", () => { unsubscribe(); streams.delete(res); });
+        send(currentJob);
+        return;
       }
     }
     if (resource === "approvals" && !id && method === "GET") {

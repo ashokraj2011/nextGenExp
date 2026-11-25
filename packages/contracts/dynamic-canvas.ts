@@ -105,7 +105,7 @@ export const dynamicApprovalNodeSchema = z.object({
   approveLabel: z.string().trim().min(1).max(40),
   rejectLabel: z.string().trim().min(1).max(40),
   recordId: z.string().trim().max(64).optional(),
-  domain: z.enum(["ops_incident", "sales_deal", "external_connector", "generic"]).optional(),
+  domain: z.enum(["ops_incident", "sales_deal", "external_connector", "stock_trade", "generic"]).optional(),
   approvalId: z.string().trim().max(64).optional(),
   payloadDigest: z.string().trim().max(128).optional(),
   dualControl: z.boolean().optional(),
@@ -143,6 +143,9 @@ export const dynamicTradeTicketNodeSchema = z.object({
   suggestedPercent: z.number().min(1).max(100).optional(),
   suggestedShares: z.number().int().positive().optional(),
   askTaxHarvest: z.boolean(),
+  initialStage: z.enum(["configure", "tax_analysis", "running"]).optional(),
+  initialJobId: z.string().trim().max(80).optional(),
+  washSaleWarnings: z.array(z.string().max(240)).max(6).optional(),
   holdings: z.array(z.object({
     symbol: z.string().trim().min(1).max(12),
     name: z.string().trim().min(1).max(64),

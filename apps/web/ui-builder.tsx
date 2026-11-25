@@ -26,6 +26,54 @@ const starter = (): UiDesign => ({
   ],
   targets: [{ kind: "intent", id: "compare_balances" }],
 });
+
+const itOpsStarter = (): UiDesign => ({
+  name: "IT Ops · Live P1 Incident Card",
+  description: "Data-bound SRE incident triage card hydrated directly from incidents.json.",
+  layout: "stack",
+  slots: [
+    {
+      kind: "widget",
+      id: "ops_incident_card",
+      badge: "IT Ops · {{incident.severity}}",
+      title: "{{incident.id}} — {{incident.title}}",
+      body: "Service {{incident.service}} ({{incident.currentRelease}} in {{incident.environment}}) is currently {{incident.status}}.",
+      accentTop: true,
+      metrics: [
+        { id: "m_err", label: "Error Rate", binding: "incident.errorRate", staticValue: "", subtext: "Live edge 5xx rate", tone: "caution" },
+        { id: "m_lat", label: "p95 Latency", binding: "incident.p95Latency", staticValue: "", subtext: "{{incident.service}}", tone: "caution" },
+        { id: "m_stat", label: "Rollback Status", binding: "incident.rollbackStatus", staticValue: "", subtext: "Prev: {{incident.previousRelease}}", tone: "default" },
+      ],
+      ctaLabel: "Open P1 Rollback Approval",
+      ctaPrompt: "Build an IT incident triage dashboard for our active P1 alert",
+    },
+  ],
+  targets: [],
+});
+
+const salesRevOpsStarter = (): UiDesign => ({
+  name: "Sales RevOps · Deal Desk Card",
+  description: "Data-bound CRM Deal Desk card hydrated directly from deals.json.",
+  layout: "stack",
+  slots: [
+    {
+      kind: "widget",
+      id: "sales_deal_card",
+      badge: "RevOps · {{deal.id}}",
+      title: "{{deal.accountName}} — {{deal.stage}}",
+      body: "{{deal.title}} owned by {{deal.owner}} targeting close date {{deal.closeDate}}.",
+      accentTop: true,
+      metrics: [
+        { id: "m_arr", label: "Annual Value (ARR)", binding: "deal.arr", staticValue: "", subtext: "{{deal.stage}}", tone: "positive" },
+        { id: "m_disc", label: "Requested Discount", binding: "deal.discountPct", staticValue: "", subtext: "Status: {{deal.discountStatus}}", tone: "caution" },
+        { id: "m_prob", label: "Win Probability", binding: "deal.winProbability", staticValue: "", subtext: "Close {{deal.closeDate}}", tone: "default" },
+      ],
+      ctaLabel: "Open Deal Desk Approval",
+      ctaPrompt: "Build a Q4 deal desk and discount approval dashboard for DEAL-904",
+    },
+  ],
+  targets: [],
+});
 const componentLabel = (id: LayoutComponent) => layoutComponents.find((component) => component.id === id)!.label;
 const normalized = (design: UiDesign) => JSON.stringify(design);
 const fieldTypes: { value: CustomFormFieldType; label: string }[] = [
@@ -747,6 +795,33 @@ function UiWorkspace({ initial, initialWidgets, customers }: {
           {records.map((item) => <button key={item.id} type="button" aria-current={selected === item.id ? "true" : undefined} disabled={busy}
             onClick={() => select(item.id)}><strong>{item.draft.name}</strong><small>{statusOf(item, edits[item.id] ?? item.draft)}</small></button>)}
         </nav>
+        <div style={{ borderTop: "1px solid var(--line)", padding: "12px", display: "grid", gap: "6px" }}>
+          <small style={{ fontWeight: 700, textTransform: "uppercase", fontSize: "0.7rem", color: "var(--muted)" }}>Multi-Domain Starter Templates</small>
+          <button
+            type="button"
+            className="ui-button ui-button-outline"
+            disabled={busy || records.length >= maxLayouts}
+            onClick={() => {
+              setEdits((prev) => ({ ...prev, new: itOpsStarter() }));
+              select("new");
+              setNotice("Loaded IT Ops P1 Incident starter template (pre-bound to live incident.* fields).");
+            }}
+          >
+            IT Ops · P1 Incident Card
+          </button>
+          <button
+            type="button"
+            className="ui-button ui-button-outline"
+            disabled={busy || records.length >= maxLayouts}
+            onClick={() => {
+              setEdits((prev) => ({ ...prev, new: salesRevOpsStarter() }));
+              select("new");
+              setNotice("Loaded Sales RevOps Deal Desk starter template (pre-bound to live deal.* fields).");
+            }}
+          >
+            Sales RevOps · Deal Desk Card
+          </button>
+        </div>
       </aside>
 
       <section className="ui-work-card ui-editor" aria-labelledby="layout-details-heading">

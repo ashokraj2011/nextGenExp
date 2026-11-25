@@ -23,6 +23,7 @@ import type {
   TradeJob,
   TradeJobCreateInput,
 } from "../../packages/contracts/trading";
+import type { ActionFlow, ActionFlowUpsertInput } from "../../packages/contracts/action-flow";
 import type { Customer360AdminRecord, Customer360ProfileInput } from "../../packages/contracts/customer-360";
 import type {
   ExperienceRegistryView,
@@ -189,13 +190,18 @@ export const api = {
   saveApprovalPolicy: (policy: Partial<ApprovalPolicySettings>) => request<{ policy: ApprovalPolicySettings; view: ApprovalsView }>("/api/approvals/policy", policy),
   decideApproval: (approvalId: string, input: ApprovalDecisionInput) => request<{
     approval: ApprovalRecord;
-    execution?: { summary?: string; sfieldRunId?: string; audit?: DomainWriteAuditEntry; statusCode?: number; responsePreview?: string };
+    job?: TradeJob;
+    execution?: { summary?: string; sfieldRunId?: string; audit?: DomainWriteAuditEntry; jobId?: string; statusCode?: number; responsePreview?: string };
     view: ApprovalsView;
   }>("/api/approvals/" + approvalId + "/decide", input),
+  actionFlows: () => request<{ flows: ActionFlow[] }>("/api/admin/action-flows"),
+  saveActionFlow: (input: ActionFlowUpsertInput) => request<{ flow: ActionFlow; flows: ActionFlow[] }>("/api/admin/action-flows", input),
+  deleteActionFlow: (id: string) => request<{ deleted: boolean; flows: ActionFlow[] }>("/api/admin/action-flow-delete", { id }),
   tradingPortfolio: (personaId: string) => request<PortfolioBalanceSnapshot>("/api/trading/" + personaId + "/portfolio"),
   taxHarvestPreview: (input: TaxHarvestPreviewInput) => request<TaxHarvestAnalysis>("/api/trading/tax-harvest", input),
-  startTradeJob: (input: TradeJobCreateInput) => request<TradeJob>("/api/trading/jobs", input),
+  startTradeJob: (input: TradeJobCreateInput) => request<TradeJob | { status: "pending_approval"; approval: ApprovalRecord; approvalsView: ApprovalsView }>("/api/trading/jobs", input),
   tradeJobStatus: (jobId: string) => request<TradeJob>("/api/trading/" + jobId + "/status"),
+  cancelTradeJob: (jobId: string) => request<TradeJob>("/api/trading/" + jobId + "/cancel", {}),
   writeAudit: () => request<{ toolRef: string; entries: DomainWriteAuditEntry[] }>("/api/admin/write-audit"),
   engagementAnalytics: () => request<EngagementAnalyticsView>("/api/admin/engagement-analytics"),
   previewFunding: (conversationId: string, clientRequestId: string, source?: typeof pendingActionsContext) => request<TurnAccepted>(

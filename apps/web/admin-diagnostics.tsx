@@ -117,6 +117,14 @@ function ApprovalQueuePanel() {
             />
             Gate Deal Desk discounts (&gt;15%)
           </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "0.85rem" }}>
+            <input
+              type="checkbox"
+              checked={data.policy.gateHighRiskTrades}
+              onChange={(e) => void togglePolicy({ gateHighRiskTrades: e.target.checked })}
+            />
+            Gate high-value stock trades (&gt;${data.policy.highRiskTradeThresholdUsd.toLocaleString("en-US")})
+          </label>
         </div>
       )}
 
