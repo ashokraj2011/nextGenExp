@@ -10,7 +10,9 @@ import { portfolioSnapshotSchema } from "../contracts/portfolio";
 import type { PortfolioSnapshotProvider } from "../portfolio-snapshot";
 import type { GoalProgressProvider } from "../goal-progress";
 import { readDemoBalance } from "../experience/content";
-import { contributionSchema, projectionSchema, requiredContribution, savingsProjection } from "./calculations";
+import {
+  contributionSchema, projectionSchema, requiredContribution, savingsProjection, type InvestingEligibility,
+} from "./calculations";
 
 const V1 = "1.0.0";
 const toolRef = (id: string, version = V1) => id + "@" + version;
@@ -43,10 +45,22 @@ type BusinessContext = {
   prior: Partial<Record<OutputKind, unknown>>;
   portfolio: PortfolioSnapshotProvider;
   goals: GoalProgressProvider;
+  evaluateHypotheticalCash?: (cashAfterCents: number) => Promise<InvestingEligibility | undefined>;
 };
 
 const months: InputField = { id: "months", label: "Months until purchase", type: "integer", required: true, min: 1, max: 120, unit: "months", default: 24 };
 const monthly: InputField = { id: "monthlyCents", label: "Monthly contribution", type: "integer", required: true, min: 0, max: 500_000, unit: "cents", presentation: "slider", default: 100_000 };
+const transferFromCash: InputField = {
+  id: "transferFromCashCents",
+  label: "Move from portfolio cash today",
+  type: "integer",
+  required: false,
+  min: 0,
+  max: 5_000_000,
+  unit: "cents",
+  presentation: "slider",
+  default: 0,
+};
 const fundingFields: InputField[] = [
   { id: "amountCents", label: "Funding amount", type: "integer", required: true, min: 1, max: amountCentsMax, unit: "cents", presentation: "amount" },
   { id: "methodId", label: "Funding method", type: "choice", required: true, optionsFrom: "fundingOptions" },
@@ -92,8 +106,33 @@ export const capabilityTools: readonly CapabilityTool[] = [
   },
   {
     ref: toolRef("savings.projection.calculate"), label: "Calculate savings projection", output: "projection", schema: projectionSchema,
-    authorizedBy: cap(simulationId), contexts: ["goals"], invariant: "projection_matches_inputs", uses: ["progress"], requiredFields: [months, monthly],
-    invoke({ prior, values }) { return savingsProjection(prior.progress, Number(values.months), Number(values.monthlyCents)); },
+    authorizedBy: cap(simulationId), contexts: ["goals"], invariant: "projection_matches_inputs", uses: ["progress"], requiredFields: [months, monthly, transferFromCash],
+    async invoke({ prior, values, portfolio, mid, signal, evaluateHypotheticalCash }) {
+      const parsedPriorPortfolio = portfolioSnapshotSchema.safeParse(prior.portfolio);
+      let portfolioCashBeforeCents = parsedPriorPortfolio.success ? parsedPriorPortfolio.data.cashCents : undefined;
+      if (portfolioCashBeforeCents === undefined) {
+        try {
+          const snap = await portfolio.read(mid, signal);
+          const parsedSnap = portfolioSnapshotSchema.safeParse(snap);
+          if (parsedSnap.success) portfolioCashBeforeCents = parsedSnap.data.cashCents;
+        } catch { /* portfolio read optional */ }
+      }
+      const rawTransfer = typeof values.transferFromCashCents === "number" ? values.transferFromCashCents : 0;
+      const clampedTransfer = portfolioCashBeforeCents !== undefined
+        ? Math.max(0, Math.min(rawTransfer, portfolioCashBeforeCents))
+        : Math.max(0, rawTransfer);
+      const cashAfterCents = portfolioCashBeforeCents !== undefined
+        ? Math.max(0, portfolioCashBeforeCents - clampedTransfer)
+        : undefined;
+      const investingEligibility = cashAfterCents !== undefined && evaluateHypotheticalCash
+        ? await evaluateHypotheticalCash(cashAfterCents)
+        : undefined;
+      return savingsProjection(prior.progress, Number(values.months), Number(values.monthlyCents), {
+        transferFromCashCents: clampedTransfer,
+        portfolioCashBeforeCents,
+        investingEligibility,
+      });
+    },
   },
   {
     ref: toolRef("savings.contribution.calculate"), label: "Calculate required savings", output: "contribution", schema: contributionSchema,
@@ -179,7 +218,7 @@ export const builtinCapabilities = [
     goals: ["explore a savings plan", "simulate monthly savings", "try a different contribution"],
     phrases: ["savings plan", "savings projection", "if i save"],
     keywords: ["savings plan", "monthly savings", "savings projection", "if i save", "save per month", "monthly contribution"],
-    tools: toolsFor(simulationId), components: ["Chart", "Form"], completion: "projection", inputs: [monthly, months], route: "goal", planningCompanions: [cap(portfolioId)],
+    tools: toolsFor(simulationId), components: ["Chart", "Form"], completion: "projection", inputs: [monthly, transferFromCash, months], route: "goal", planningCompanions: [cap(portfolioId)],
   }),
   defineCapability({
     id: fundingId, version: fundingVersion, title: "Account funding preview",

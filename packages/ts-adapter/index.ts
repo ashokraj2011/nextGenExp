@@ -51,7 +51,7 @@ if (new Set(catalog.contexts.map((entry) => entry.contextId)).size !== catalog.c
 }
 
 export type FixtureState = Readonly<{ scenarioId: string; ordinal: number }>;
-type TreatmentRequest = { mid: string; context: string };
+type TreatmentRequest = { mid: string; context: string; overrideCashCents?: number };
 export type ContextScoresRequest = { mid: string; contextIds: string[] };
 export interface TsAdapter {
   listContexts(signal?: AbortSignal): Promise<ContextCatalog>;
@@ -111,7 +111,7 @@ export class FixtureTsAdapter implements TsAdapter {
     return (await this.selectEligibleContent(request, signal)).contentIds;
   }
 
-  async selectEligibleContent({ mid, context }: TreatmentRequest, signal?: AbortSignal) {
+  async selectEligibleContent({ mid, context, overrideCashCents }: TreatmentRequest, signal?: AbortSignal) {
     signal?.throwIfAborted();
     const persona = this.personaFor(mid);
     if (!treatmentContexts.some((entry) => entry.contextId === context)) {
@@ -132,11 +132,12 @@ export class FixtureTsAdapter implements TsAdapter {
     const needsPortfolio = activeRules.some(({ contentId, condition }) => (
       ids.includes(contentId) && condition.kind === "attribute" && condition.namespaceId === "portfolio"
     ));
-    const reading = needsPortfolio ? await this.portfolios.read(mid, signal) : null;
+    const reading = needsPortfolio && overrideCashCents === undefined ? await this.portfolios.read(mid, signal) : null;
     signal?.throwIfAborted();
     const portfolio = reading ? portfolioSnapshotSchema.parse(reading) : null;
+    const effectiveCashCents = overrideCashCents !== undefined ? overrideCashCents : portfolio?.cashCents;
     const result = applyMockCcreRules([...ids], activeRules, {
-      ...this.state, contextId: context, personaId: persona.personaId, portfolioCashCents: portfolio?.cashCents, fundingStatus: this.fundingStatus,
+      ...this.state, contextId: context, personaId: persona.personaId, portfolioCashCents: effectiveCashCents, fundingStatus: this.fundingStatus,
     });
     const recommendations: TreatmentRecommendations = {
       schemaVersion: "2.0",

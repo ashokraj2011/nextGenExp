@@ -691,7 +691,7 @@ function UiWorkspace({ initial, initialWidgets, customers }: {
   const attached = new Set(activeDesign.targets.map(targetKey));
   const names = new Map(initial.targets.map((option) => [targetKey(option.target), option]));
   const choices = initial.targets.filter(({ target }) => !attached.has(targetKey(target)));
-  const canPublish = Boolean(activeDesign.name.trim() && activeDesign.description.trim() && activeDesign.targets.length
+  const canPublish = Boolean(activeDesign.name.trim() && activeDesign.targets.length
     && activeDesign.slots.some(({ kind }) => kind === "block" || kind === "form" || kind === "widget")
     && activeDesign.slots.every((slot) => (
       slot.kind === "block"

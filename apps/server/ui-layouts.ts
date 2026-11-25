@@ -103,7 +103,21 @@ export async function previewUiLayout(
     } },
     PznPortfolioSnapshot: { component: "PznPortfolioSnapshot", props: portfolio },
     PznGoalProgress: { component: "PznGoalProgress", props: { ...sampleDetails("home_down_payment_progress").shared, goal } },
-    PznSavingsChart: { component: "PznSavingsChart", props: savingsProjection(goal, 24, 100_000) },
+    PznSavingsChart: { component: "PznSavingsChart", props: savingsProjection(goal, 24, 100_000, {
+      transferFromCashCents: Math.min(1_000_000, portfolio.cashCents),
+      portfolioCashBeforeCents: portfolio.cashCents,
+      investingEligibility: {
+        eligible: portfolio.cashCents - Math.min(1_000_000, portfolio.cashCents) > 1_000_000,
+        contentId: "portfolio_cash_investing",
+        ruleName: "Cash above $10,000",
+        thresholdCents: 1_000_000,
+        cashAfterCents: Math.max(0, portfolio.cashCents - Math.min(1_000_000, portfolio.cashCents)),
+        reason: portfolio.cashCents - Math.min(1_000_000, portfolio.cashCents) > 1_000_000
+          ? "Treatment Selector (portsum) kept the Cash Investing card eligible: hypothetical cash stays above the $10,000 CCRE rule."
+          : "Treatment Selector (portsum) removed the Cash Investing card: hypothetical cash drops to or below the $10,000 CCRE rule.",
+        evaluatedBy: "treatment-selector",
+      },
+    }) },
     PznSavingsMetric: { component: "PznSavingsMetric", props: requiredContribution(goal, 24) },
     PznContentCard: { component: "PznContentCard", props: { ...education.shared, body: education.body, description: education.description } },
     PznStepList: { component: "PznStepList", props: { ...address.shared, body: address.body, steps: address.steps } },
@@ -113,6 +127,7 @@ export async function previewUiLayout(
       title: "Monthly savings planner", submitLabel: "Recalculate", actionId: "preview_only",
       fields: [
         { field: { id: "monthlyCents", label: "Monthly contribution", type: "integer", min: 0, max: 500_000, required: true, unit: "cents", presentation: "slider" }, value: 100_000 },
+        { field: { id: "transferFromCashCents", label: "Move from portfolio cash today", type: "integer", min: 0, max: Math.max(100_000, Math.floor(portfolio.cashCents / 100) * 100), required: false, unit: "cents", presentation: "slider" }, value: Math.min(1_000_000, Math.floor(portfolio.cashCents / 100) * 100) },
         { field: { id: "months", label: "Months until purchase", type: "integer", min: 1, max: 120, required: true, unit: "months" }, value: 24 },
       ],
     } },

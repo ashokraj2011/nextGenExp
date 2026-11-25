@@ -10,6 +10,7 @@ import { makeId } from "../../packages/experience/compile";
 import { Rejected, requireCheck } from "../../packages/experience/verify";
 import { FixtureTsAdapter, type TsAdapter } from "../../packages/ts-adapter";
 import { normalizeRecommendations } from "../../packages/ts-adapter/recommendations";
+import { formatPortfolioAmount } from "../../packages/contracts/portfolio";
 import { capabilityTools, type CapabilityTool } from "../../packages/capabilities";
 import { CapabilityRegistry, describe } from "./capability-registry";
 import { EligibilityAuthority, type EligibilityDecision } from "./eligibility-authority";
@@ -150,6 +151,34 @@ export class AgenticExecution {
     const value = await tool.invoke({
       personaId: scope.persona.personaId, mid, fundingStatus, values, prior, eligibleContent: decision.contentIds, now: this.now(),
       signal: ctx.signal, goals: this.goals, portfolio: this.portfolios,
+      evaluateHypotheticalCash: async (cashAfterCents: number) => {
+        try {
+          const tsResult = await scope.adapter.selectEligibleContent(
+            { mid, context: "portsum", overrideCashCents: cashAfterCents },
+            ctx.signal,
+          );
+          const contentId = "portfolio_cash_investing";
+          const eligible = tsResult.contentIds.includes(contentId);
+          const ruleHit = tsResult.ccre?.results?.find((ev) => ev.contentId === contentId);
+          const ruleName = ruleHit?.name || "Cash above $10,000";
+          const thresholdCents = 1_000_000;
+          const cashStr = formatPortfolioAmount(cashAfterCents);
+          const reason = eligible
+            ? `Treatment Selector (portsum) kept the Cash Investing card eligible: remaining portfolio cash (${cashStr}) stays above the $10,000 CCRE rule ("${ruleName}").`
+            : `Treatment Selector (portsum) removed the Cash Investing card: remaining portfolio cash (${cashStr}) is at or below the $10,000 CCRE rule ("${ruleName}").`;
+          return {
+            eligible,
+            contentId,
+            ruleName,
+            thresholdCents,
+            cashAfterCents,
+            reason,
+            evaluatedBy: "treatment-selector" as const,
+          };
+        } catch {
+          return undefined;
+        }
+      },
     });
     ctx.signal.throwIfAborted();
     return response(tool.schema.parse(value));

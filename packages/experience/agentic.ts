@@ -95,11 +95,26 @@ export function compileAgenticExperience(
     if (component === "Form") {
       if (!defaults.some((entry) => entry.stepId === stepId && entry.component === "Form")) continue;
       const options = fundingOptionsSchema.safeParse(step.records.find(({ outputKind }) => outputKind === "fundingOptions")?.payload);
-      const fields = step.manifest.inputs.map((field) => ({
-        field,
-        value: journey.inputs[field.id] ?? (field.type === "integer" ? field.default : undefined),
-        ...(field.type === "choice" && options.success && { choices: options.data.methods.map(({ methodId, label }) => ({ id: methodId, label })) }),
-      }));
+      const verifiedPortfolioCash = (() => {
+        for (const s of verified.values()) {
+          const rec = s.records.find(({ outputKind }) => outputKind === "portfolio");
+          if (rec && rec.payload && typeof rec.payload === "object" && typeof (rec.payload as { cashCents?: unknown }).cashCents === "number") {
+            return (rec.payload as { cashCents: number }).cashCents;
+          }
+        }
+        const proj = step.records.find(({ outputKind }) => outputKind === "projection")?.payload as { portfolioCashBeforeCents?: number } | undefined;
+        return typeof proj?.portfolioCashBeforeCents === "number" ? proj.portfolioCashBeforeCents : undefined;
+      })();
+      const fields = step.manifest.inputs.map((rawField) => {
+        const field = rawField.id === "transferFromCashCents" && rawField.type === "integer" && verifiedPortfolioCash !== undefined
+          ? { ...rawField, max: Math.max(100_000, Math.floor(verifiedPortfolioCash / 100) * 100) }
+          : rawField;
+        return {
+          field,
+          value: journey.inputs[field.id] ?? (field.type === "integer" ? field.default : undefined),
+          ...(field.type === "choice" && options.success && { choices: options.data.methods.map(({ methodId, label }) => ({ id: methodId, label })) }),
+        };
+      });
       if (!fields.length || fields.some(({ field, choices }) => field.type === "choice" && !choices?.length)) continue;
       const sign = (operation: "revise" | "save", label: string) => {
         const actionId = makeId("action");
