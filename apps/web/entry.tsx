@@ -27,6 +27,9 @@ if (location.pathname === "/embed") {
 } else if (isAdminPath(location.pathname) && location.pathname !== adminPaths.chat) {
   document.title = "Administration · CEP";
   void import("./admin-workspace").then(({ AdminWorkspace }) => createRoot(document.getElementById("root")!).render(<AdminWorkspace />));
+} else if (location.pathname === "/recommendations") {
+  document.title = "Recommendations Workspace · CEP";
+  void import("./recommendation-workspace").then(({ RecommendationWorkspace }) => createRoot(document.getElementById("root")!).render(<RecommendationWorkspace />));
 } else if (location.pathname === "/login") {
   document.title = "Sign in · CEP";
   void import("./login").then(({ Login }) => createRoot(document.getElementById("root")!).render(<Login />));

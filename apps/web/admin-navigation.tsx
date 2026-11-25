@@ -25,6 +25,7 @@ const workspaceDestinations = [
   { label: "Wealth (/wealth)", path: "/wealth", Icon: Landmark },
   { label: "IT Ops (/it-ops)", path: "/it-ops", Icon: Activity },
   { label: "RevOps (/revops)", path: "/revops", Icon: Briefcase },
+  { label: "Recommendations (/recommendations)", path: "/recommendations", Icon: Layers },
 ] as const;
 
 export function AdminNavigation({ thread }: { thread?: string }) {

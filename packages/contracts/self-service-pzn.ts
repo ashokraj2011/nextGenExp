@@ -327,6 +327,9 @@ export type PznCopilotCard =
   | { kind: "dictionary"; namespaces: PznDictionaryNamespaceView[]; highlightKey?: string }
   | { kind: "content"; content: PznTextContent }
   | { kind: "rule"; rule: PznRule }
+  | { kind: "rule_builder_widget"; initialNamespaceId?: string; initialAttributeId?: string }
+  | { kind: "rules_catalog_widget"; rules: PznRule[] }
+  | { kind: "context_matrix_widget"; contexts: PznContext[]; contents: PznTextContent[]; rules: PznRule[] }
   | {
       kind: "context";
       context: PznContext;

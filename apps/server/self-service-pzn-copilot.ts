@@ -85,7 +85,10 @@ type PlannedOp =
       attributeOverrides?: Record<string, PznRuleValue>;
     }
   | { op: "show_dictionary"; namespaceId?: string }
-  | { op: "show_catalog" };
+  | { op: "show_catalog" }
+  | { op: "show_rule_builder"; initialNamespaceId?: string; initialAttributeId?: string }
+  | { op: "show_rules" }
+  | { op: "show_context_matrix" };
 
 interface LlmCopilotPlan {
   reply?: string;
@@ -163,6 +166,9 @@ RETURN STRICT JSON ONLY:
     // { "op": "evaluate_ts", "contextId": "slug", "mids": ["DEMO-MID-1001"], "useDraft": false, "attributeOverrides": {"portfolio.cash_usd": 5000} }
     // { "op": "show_dictionary", "namespaceId": "optional_ns" }
     // { "op": "show_catalog" }
+    // { "op": "show_rule_builder", "initialNamespaceId": "portfolio", "initialAttributeId": "cash_usd" }
+    // { "op": "show_rules" }
+    // { "op": "show_context_matrix" }
   ],
   "suggestedPrompts": ["2 to 4 concise follow-up prompts the user can click next"]
 }
@@ -184,6 +190,42 @@ function deterministicPlan(message: string, ws: PznStudioWorkspaceState, activeC
     }
     return activeContextId ?? ws.contexts[0]?.contextId ?? "wealth-next-best-offers";
   })();
+
+  // 0. Explicit interactive widget requests (define rule widget, show rules, show context matrix)
+  if (/^\s*(open|show|launch)?\s*(the\s+)?(rule builder|define a rule|create a rule|new rule widget)\s*$/i.test(lower)
+    || /(open|launch|show)\s+(me\s+)?(the\s+)?(interactive\s+)?rule\s*(builder|widget|editor)/i.test(lower)) {
+    return {
+      reply: "Opened the **Interactive Rule Builder Widget** below — pick any Data Dictionary namespace & attribute (with inline business definitions), test live against a Customer MID, and save directly.",
+      operations: [{ op: "show_rule_builder", initialNamespaceId: "portfolio", initialAttributeId: "cash_usd" }],
+      suggestedPrompts: [
+        "Show all rules and their Data Dictionary clauses",
+        "Show all contexts with attached contents and rules",
+        `Test ${targetCtxId} for Alice Morgan and Jordan Lee`,
+      ],
+    };
+  }
+  if (/(show|list|view)\s+(all\s+)?(my\s+)?rules\b/i.test(lower) && !/(context|attach)/i.test(lower)) {
+    return {
+      reply: `Here are all **${ws.rules.length} governed rules** in the catalog with their Data Dictionary clauses and business definitions.`,
+      operations: [{ op: "show_rules" }],
+      suggestedPrompts: [
+        "Open the interactive rule builder widget",
+        "Show all contexts with attached contents and rules",
+        `Test ${targetCtxId} for Alice Morgan and Jordan Lee`,
+      ],
+    };
+  }
+  if (/(show|list|view)\s+(all\s+)?(my\s+)?contexts?\b/i.test(lower) || /attached\s+contents?/i.test(lower)) {
+    return {
+      reply: `Here is the **Contexts, Attached Contents & Rules Matrix** showing every placement, its publication version, attached text contents, and attached filtering rules.`,
+      operations: [{ op: "show_context_matrix" }],
+      suggestedPrompts: [
+        "Open the interactive rule builder widget",
+        `Test ${targetCtxId} for Alice Morgan and Jordan Lee`,
+        "Create a Treasury Ladder offer for cash > $20,000, attach to context treasury_nudge, and publish it",
+      ],
+    };
+  }
 
   // 1. Dictionary inspection
   if (/(data dictionary|dictionary|namespaces?|attributes?|business def)/i.test(lower) && !/(create|add|new|define)\s+(a\s+)?(namespace|attribute)/i.test(lower)) {
@@ -639,6 +681,32 @@ export async function runSelfServicePznCopilot(
             contentsCount: wsNow.contents.length,
             rulesCount: wsNow.rules.length,
             attrCount: wsNow.dictionary.namespaces.reduce((acc, ns) => acc + ns.attributes.length, 0),
+          });
+          break;
+        }
+        case "show_rule_builder": {
+          actionsExecuted.push({ tool: "widget.ruleBuilder", summary: "Mounted Interactive Rule Builder Widget (Data Dictionary–bound)", status: "ok" });
+          cards.push({
+            kind: "rule_builder_widget",
+            ...(op.initialNamespaceId ? { initialNamespaceId: slug(op.initialNamespaceId) } : {}),
+            ...(op.initialAttributeId ? { initialAttributeId: slug(op.initialAttributeId) } : {}),
+          });
+          break;
+        }
+        case "show_rules": {
+          const wsNow = store.getWorkspaceState();
+          actionsExecuted.push({ tool: "rules.list", summary: `Loaded ${wsNow.rules.length} Data Dictionary rule(s)`, status: "ok" });
+          cards.push({ kind: "rules_catalog_widget", rules: wsNow.rules });
+          break;
+        }
+        case "show_context_matrix": {
+          const wsNow = store.getWorkspaceState();
+          actionsExecuted.push({ tool: "contexts.matrix", summary: `Loaded ${wsNow.contexts.length} context(s) with attached contents & rules`, status: "ok" });
+          cards.push({
+            kind: "context_matrix_widget",
+            contexts: wsNow.contexts,
+            contents: wsNow.contents,
+            rules: wsNow.rules,
           });
           break;
         }

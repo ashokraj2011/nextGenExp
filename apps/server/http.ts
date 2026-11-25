@@ -122,7 +122,7 @@ const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".woff2": "font/woff2", ".woff": "font/woff", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml",
 };
-const pagePaths = new Set(["/", "/chat", "/wealth", "/it-ops", "/revops", "/embed", "/login", "/planning", "/__test/a2ui", ...Object.values(adminPaths)]);
+const pagePaths = new Set(["/", "/chat", "/wealth", "/it-ops", "/revops", "/recommendations", "/embed", "/login", "/planning", "/__test/a2ui", ...Object.values(adminPaths)]);
 
 function json(res: ServerResponse, body: unknown, status = 200) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });

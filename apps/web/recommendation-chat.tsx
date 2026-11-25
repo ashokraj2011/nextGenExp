@@ -21,6 +21,7 @@ import type {
 } from "../../packages/contracts/self-service-pzn";
 import { pznOperatorLabels } from "../../packages/contracts/self-service-pzn";
 import { api, toolSetupErrorMessage } from "./api";
+import { ContextMatrixWidget, RuleBuilderWidget, RulesCatalogWidget } from "./recommendation-widgets";
 
 type ChatMessage = {
   id: string;
@@ -73,17 +74,57 @@ function formatRichText(text: string) {
   });
 }
 
-function InlineCard({
+export function InlineCard({
   card,
   workspace,
+  activeMid,
   busy,
+  onWorkspaceChange,
   onSendPrompt,
 }: {
   card: PznCopilotCard;
   workspace: PznStudioWorkspaceState;
+  activeMid?: string;
   busy: boolean;
+  onWorkspaceChange?: (ws: PznStudioWorkspaceState) => void;
   onSendPrompt: (prompt: string) => void;
 }) {
+  const effectiveMid = activeMid ?? workspace.customers[0]?.syntheticMid ?? "DEMO-MID-1001";
+
+  if (card.kind === "rule_builder_widget") {
+    return (
+      <RuleBuilderWidget
+        workspace={workspace}
+        activeMid={effectiveMid}
+        initialNamespaceId={card.initialNamespaceId}
+        initialAttributeId={card.initialAttributeId}
+        onWorkspaceChange={(ws) => onWorkspaceChange?.(ws)}
+        onRunPrompt={onSendPrompt}
+      />
+    );
+  }
+
+  if (card.kind === "rules_catalog_widget") {
+    return (
+      <RulesCatalogWidget
+        workspace={workspace}
+        activeMid={effectiveMid}
+        onRunPrompt={onSendPrompt}
+      />
+    );
+  }
+
+  if (card.kind === "context_matrix_widget") {
+    return (
+      <ContextMatrixWidget
+        workspace={workspace}
+        activeMid={effectiveMid}
+        onWorkspaceChange={(ws) => onWorkspaceChange?.(ws)}
+        onRunPrompt={onSendPrompt}
+      />
+    );
+  }
+
   if (card.kind === "dictionary") {
     return (
       <div className="pzn-chat-card">
@@ -503,6 +544,9 @@ export function RecommendationChatExperience({
               <Plus size={13} /> New Chat
             </button>
           )}
+          <a href="/recommendations" className="pzn-btn pzn-btn-sm" style={{ textDecoration: "none" }}>
+            <Layers size={13} /> Open Full Workspace
+          </a>
           <div className="pzn-mode-switch" role="group" aria-label="Studio mode">
             <button type="button" className="is-active" aria-pressed="true">
               <MessageSquare size={13} /> Chat Studio
@@ -575,6 +619,7 @@ export function RecommendationChatExperience({
                             card={card}
                             workspace={workspace}
                             busy={busy}
+                            onWorkspaceChange={onWorkspaceChange}
                             onSendPrompt={(p) => void send(p)}
                           />
                         ))}
