@@ -56,11 +56,11 @@ import type { SalesDealStore } from "./sales-store";
 import type { ConnectorStore } from "./connector-store";
 import type { WriteAuditStore } from "./write-audit";
 import type { SelfServicePznStore } from "./self-service-pzn-store";
-import type { ApprovalStore } from "./approval-store";
+import { canonicalJson, type ApprovalStore } from "./approval-store";
 import { PznApprovalError, splitApprovalId, verifyPznApproval } from "./pzn-approvals";
-import { TaskCallExecutor, taskToolId, type IntegrationTaskRuntime, type IntegrationTaskStore } from "./integration-tasks";
-import { taskEnvelopeJsonSchema } from "../../packages/contracts/integration-task";
-import { SFieldError, type ExecutionScope } from "@sfield/core";
+import { needsApproval, TaskCallExecutor, taskToolId, type IntegrationTaskRuntime, type IntegrationTaskStore } from "./integration-tasks";
+import { taskEnvelopeJsonSchema, type TaskContract } from "../../packages/contracts/integration-task";
+import { SFieldError, sharedValidator, type ExecutionScope } from "@sfield/core";
 import {
   pznDataDictionaryToolId,
   pznDataDictionaryToolInputJsonSchema,
@@ -767,100 +767,174 @@ export class Runtime implements IntegrationTaskRuntime {
     }
   }
 
-  /* ---------------- Integration tasks: one sfield tool per published task version ---------------- */
+  /* ---------------- Integration tasks: dedicated tool per task version + dispatcher tools ---------------- */
 
   private readonly integrationExecutor = new TaskCallExecutor();
   private readonly registeredIntegrationRefs = new Set<string>();
   private readonly pendingIntegrationCalls = new Map<string, {
-    scope: ExecutionScope; callId: string; toolRef: string; input: Record<string, unknown>; timer: NodeJS.Timeout;
+    scope: ExecutionScope; callId: string; sfieldToolRef: string; toolInputs: JsonObject; timer: NodeJS.Timeout;
   }>();
 
   registeredIntegrationTools(): ReadonlySet<string> {
     return this.registeredIntegrationRefs;
   }
 
+  /** Dispatcher tools exist from startup, so a task version published later runs without a restart. */
+  dispatcherRef(effect: "read" | "write" | "destructive"): string {
+    return `int.dispatch.${effect}@1.0.0`;
+  }
+
   /**
-   * Registered once at startup: sfield closes registration after the first run and pins tool digests in the lock.
-   * Tasks published later become available on the next restart (or a governed config reload in a later phase).
+   * One governed call. Approval is enforced here, inside the sfield tool, against our approval record
+   * (status "executing" = approved and claimed once; exact task version, binding and input). sfield's own
+   * digest-bound approval is layered on top whenever the original call is still open.
    */
+  private async runTaskCall(contract: TaskContract, input: Record<string, unknown>, approvalId: string | undefined, signal: AbortSignal) {
+    const store = this.integrationTasks!;
+    const integration = store.integration(contract.integrationId);
+    if (!integration?.enabled) {
+      throw new ToolError("TASK_TRANSPORT", JSON.stringify({ error: { kind: "transport", retryable: false, message: `Integration "${contract.integrationId}" is unavailable.` } }), { effect: "none" });
+    }
+    if (needsApproval(contract, input)) {
+      const record = approvalId ? this.approvalStore?.findById(approvalId) : undefined;
+      const payload = (record?.payload ?? {}) as { taskRef?: string; contractDigest?: string; bindingDigest?: string; input?: unknown };
+      const ok = record && record.targetKind === "integration_task" && record.status === "executing"
+        && payload.taskRef === contract.ref && payload.contractDigest === contract.contractDigest
+        && payload.bindingDigest === contract.bindingDigest && canonicalJson(payload.input ?? {}) === canonicalJson(input);
+      if (!ok) {
+        throw new ToolError("TASK_POLICY_DENIED", JSON.stringify({ error: {
+          kind: "policy_denied", retryable: false,
+          message: approvalId
+            ? `Approval ${approvalId} does not authorize this exact call (it must be approved, claimed once, and match the task version, binding and input).`
+            : `${contract.ref} requires an approved change request for this input.`,
+        } }), { effect: "none" });
+      }
+    }
+    const res = await this.integrationExecutor.execute(integration, contract, input, signal);
+    if (res.state === "failed") {
+      throw new ToolError(`TASK_${(res.error?.kind ?? "unknown").toUpperCase()}`, JSON.stringify({ outcome: res.outcome, error: res.error }), { effect: "none", retryable: res.error?.retryable ?? false });
+    }
+    if (res.state === "outcome_unknown") {
+      throw new ToolError("TASK_OUTCOME_UNKNOWN", JSON.stringify({ error: res.error }), { effect: "unknown" });
+    }
+    return {
+      state: res.state,
+      outcomeCode: res.outcome?.code ?? "UNMAPPED",
+      success: res.outcome?.success ?? true,
+      retryable: res.outcome?.retryable ?? false,
+      message: (res.error?.message ?? res.outcome?.meaning ?? "ok").slice(0, 400),
+      outputJson: JSON.stringify(res.output ?? null).slice(0, 40_000),
+      ...(res.artifact ? { artifactJson: JSON.stringify(res.artifact).slice(0, 40_000) } : {}),
+    };
+  }
+
   private integrationTools() {
     const store = this.integrationTasks;
     if (!store) return [];
-    return store.published().flatMap((contract) => {
+    const policyFor = (action: string, effect: "read" | "write" | "destructive", timeoutMs: number) => ({
+      action, effect,
+      // Approval is decided per call (scope preset) and also enforced in the handler; see runTaskCall.
+      requiresApproval: false, maxAttempts: 1, retrySafety: "never" as const, timeoutMs,
+      classification: "public" as const, maxOutputBytes: 48_000,
+    });
+
+    // 1. Dedicated tools for versions published before startup: per-task schema, policy, and lock digest.
+    const dedicated = store.published().flatMap((contract) => {
       const integration = store.integration(contract.integrationId);
       if (!integration) return [];
       const id = taskToolId(contract.integrationId, contract.taskId);
-      const writes = contract.effect !== "read";
       const tool = defineTool({
         id,
         version: contract.version,
         description: contract.description,
-        inputs: { type: "object", additionalProperties: false, required: ["input"], properties: { input: contract.inputSchema } } as unknown as JsonObject,
+        inputs: {
+          type: "object", additionalProperties: false, required: ["input"],
+          properties: { input: contract.inputSchema, approvalId: { type: "string", maxLength: 64 } },
+        } as unknown as JsonObject,
         outputs: taskEnvelopeJsonSchema as unknown as JsonObject,
-        ...(writes ? {
+        ...(contract.effect !== "read" ? {
           resource: contract.resourceIdField
             ? { type: `${contract.integrationId}_record`, id: { ref: `inputs.input.${contract.resourceIdField}` } }
             : { type: `${contract.integrationId}_record`, id: { literal: contract.taskId } },
         } : {}),
-        policy: {
-          action: id,
-          effect: contract.effect,
-          // Approval is decided per call by the host (scope preset) and enforced by sfield against the prepared digest.
-          requiresApproval: false,
-          maxAttempts: 1,
-          retrySafety: "never",
-          timeoutMs: integration.timeoutMs + 1_000,
-          classification: "public",
-          maxOutputBytes: 48_000,
-        },
+        policy: policyFor(id, contract.effect, integration.timeoutMs + 1_000),
         handler: async (raw, ctx) => {
-          const input = (raw as { input: Record<string, unknown> }).input;
+          const { input, approvalId } = raw as { input: Record<string, unknown>; approvalId?: string };
           const current = store.contract(contract.ref);
           if (!current || current.contractDigest !== contract.contractDigest || current.bindingDigest !== contract.bindingDigest) {
             throw new ToolError("TASK_DEFINITION_CHANGED", JSON.stringify({ error: { kind: "policy_denied", retryable: false, message: `${contract.ref} changed since it was registered.` } }), { effect: "none" });
           }
-          const res = await this.integrationExecutor.execute(integration, current, input, ctx.signal);
-          if (res.state === "failed") {
-            throw new ToolError(`TASK_${(res.error?.kind ?? "unknown").toUpperCase()}`, JSON.stringify({ outcome: res.outcome, error: res.error }), { effect: "none", retryable: res.error?.retryable ?? false });
-          }
-          if (res.state === "outcome_unknown") {
-            throw new ToolError("TASK_OUTCOME_UNKNOWN", JSON.stringify({ error: res.error }), { effect: "unknown" });
-          }
-          return {
-            state: res.state,
-            outcomeCode: res.outcome?.code ?? "UNMAPPED",
-            success: res.outcome?.success ?? true,
-            retryable: res.outcome?.retryable ?? false,
-            message: (res.error?.message ?? res.outcome?.meaning ?? "ok").slice(0, 400),
-            outputJson: JSON.stringify(res.output ?? null).slice(0, 40_000),
-            ...(res.artifact ? { artifactJson: JSON.stringify(res.artifact).slice(0, 40_000) } : {}),
-          };
+          return this.runTaskCall(current, input, approvalId, ctx.signal);
         },
       });
       this.registeredIntegrationRefs.add(contract.ref);
       return [tool];
     });
+
+    // 2. Dispatchers (one per effect) for versions published after startup. Both digests are inputs, so the
+    //    prepared-invocation digest (and therefore any sfield approval) is bound to the exact contract and binding.
+    const dispatchers = (["read", "write", "destructive"] as const).map((effect) => defineTool({
+      id: `int.dispatch.${effect}`,
+      version: "1.0.0",
+      description: `Runs a published ${effect} integration task by reference, validated against its stored contract.`,
+      inputs: {
+        type: "object", additionalProperties: false, required: ["taskRef", "contractDigest", "bindingDigest", "inputJson"],
+        properties: {
+          taskRef: { type: "string", minLength: 3, maxLength: 120 },
+          contractDigest: { type: "string", minLength: 8, maxLength: 100 },
+          bindingDigest: { type: "string", minLength: 8, maxLength: 100 },
+          inputJson: { type: "string", maxLength: 32_000 },
+          approvalId: { type: "string", maxLength: 64 },
+        },
+      } as unknown as JsonObject,
+      outputs: taskEnvelopeJsonSchema as unknown as JsonObject,
+      ...(effect !== "read" ? { resource: { type: "integration_task", id: { ref: "inputs.taskRef" } } } : {}),
+      policy: policyFor(`int.dispatch.${effect}`, effect, 31_000),
+      handler: async (raw, ctx) => {
+        const { taskRef, contractDigest, bindingDigest, inputJson, approvalId } = raw as {
+          taskRef: string; contractDigest: string; bindingDigest: string; inputJson: string; approvalId?: string;
+        };
+        const deny = (message: string) => new ToolError("TASK_POLICY_DENIED", JSON.stringify({ error: { kind: "policy_denied", retryable: false, message } }), { effect: "none" });
+        const contract = store.contract(taskRef);
+        if (!contract || contract.status !== "published") throw deny(`${taskRef} is not a published task.`);
+        if (contract.effect !== effect) throw deny(`${taskRef} is a ${contract.effect} task, not ${effect}.`);
+        if (contract.contractDigest !== contractDigest || contract.bindingDigest !== bindingDigest) throw deny(`${taskRef} changed since this call was prepared.`);
+        let input: Record<string, unknown>;
+        try { input = JSON.parse(inputJson) as Record<string, unknown>; } catch { throw deny("inputJson is not valid JSON."); }
+        const valid = sharedValidator().validate(contract.inputSchema as JsonObject, input);
+        if (!valid.ok) {
+          throw new ToolError("TASK_VALIDATION_INPUT", JSON.stringify({ error: {
+            kind: "validation_input", retryable: false,
+            message: `Input does not match ${taskRef}: ${valid.errors.slice(0, 3).map((e) => `${e.path} ${e.message}`).join("; ")}`,
+          } }), { effect: "none" });
+        }
+        return this.runTaskCall(contract, input, approvalId, ctx.signal);
+      },
+    }));
+
+    return [...dedicated, ...dispatchers];
   }
 
   /**
-   * Runs a task in a host execution scope. Gated calls use the "supervised" preset, so sfield itself requires an
-   * approval bound to the prepared invocation digest (tool digest, binding identity, resource, normalized input).
+   * Runs a task tool in a host execution scope. Gated calls use the "supervised" preset, so sfield itself also
+   * requires an approval bound to the prepared invocation digest before dispatch.
    */
-  async executeIntegrationTask(principalId: string, toolRef: string, input: Record<string, unknown>, gated: boolean) {
+  async executeIntegrationTask(principalId: string, sfieldToolRef: string, toolInputs: JsonObject, gated: boolean) {
     const scope = await this.sf.executions.open({
       principal: principalFor(principalId),
-      purpose: `cep-int:${toolRef}`,
+      purpose: `cep-int:${sfieldToolRef}`,
       preset: gated ? "supervised" : "bounded_auto",
       budget: { maxToolCalls: 2 },
     });
     try {
-      const result = await scope.registry.execute(toolRef, { input } as JsonObject, { signal: AbortSignal.timeout(20_000) });
+      const result = await scope.registry.execute(sfieldToolRef, toolInputs, { signal: AbortSignal.timeout(35_000) });
       await scope.close();
       return { kind: "result" as const, result, sfieldRunId: scope.id };
     } catch (err) {
       const details = err instanceof SFieldError ? (err.details as { approvalId?: string; callId?: string } | undefined) : undefined;
       if (err instanceof SFieldError && err.code === "APPROVAL_REQUIRED" && details?.approvalId && details.callId) {
-        // The scope stays open: sfield binds the approval to this run and call. Restart-safe resume is a later phase.
+        // Keep the scope open while it waits: sfield binds its approval to this run and call. If the server
+        // restarts, the approved call falls back to a fresh scope (enforced by runTaskCall).
         const approvalId = details.approvalId;
         const timer = setTimeout(() => {
           const pending = this.pendingIntegrationCalls.get(approvalId);
@@ -868,12 +942,16 @@ export class Runtime implements IntegrationTaskRuntime {
           void pending?.scope.close().catch(() => undefined);
         }, 24 * 60 * 60 * 1000);
         timer.unref();
-        this.pendingIntegrationCalls.set(approvalId, { scope, callId: details.callId, toolRef, input, timer });
+        this.pendingIntegrationCalls.set(approvalId, { scope, callId: details.callId, sfieldToolRef, toolInputs, timer });
         return { kind: "pending" as const, sfieldApprovalId: approvalId, callId: details.callId, sfieldRunId: scope.id };
       }
       await scope.close().catch(() => undefined);
       throw err;
     }
+  }
+
+  hasPendingIntegrationCall(sfieldApprovalId: string): boolean {
+    return this.pendingIntegrationCalls.has(sfieldApprovalId);
   }
 
   async resumeIntegrationTask(sfieldApprovalId: string, approver: string, decision: "approve" | "deny") {
@@ -895,8 +973,8 @@ export class Runtime implements IntegrationTaskRuntime {
       }
       await persistence.decideApproval({ id: sfieldApprovalId, actor: { tenantId: "pzn-local", subjectId: approver.slice(0, 80) }, decision, now });
       if (decision === "deny") return { kind: "denied" as const };
-      const result = await pending.scope.registry.execute(pending.toolRef, { input: pending.input } as JsonObject, {
-        callId: pending.callId, signal: AbortSignal.timeout(20_000),
+      const result = await pending.scope.registry.execute(pending.sfieldToolRef, pending.toolInputs, {
+        callId: pending.callId, signal: AbortSignal.timeout(35_000),
       });
       return { kind: "result" as const, result, sfieldRunId: pending.scope.id };
     } finally {

@@ -367,7 +367,7 @@ export async function startApp(options: Options) {
   async function executeApprovedRecord(principalId: string, record: ApprovalRecord) {
     if (record.targetKind === "integration_task") {
       try {
-        const out = await integrationService.resume(record);
+        const out = await integrationService.resume(record, principalId);
         return { approval: out.approval, execution: out.execution, taskRun: out.run };
       } catch (err) {
         const code = err instanceof IntegrationTaskError ? err.code : "integration_task_failed";
@@ -1631,7 +1631,7 @@ export async function startApp(options: Options) {
       if (id === "contracts" && operation === "publish" && method === "POST") {
         const { ref } = await body(req, z.object({ ref: z.string().min(3).max(120) }).strict());
         const published = await guard(() => integrationTasks.publish(ref));
-        return json(res, { ...published, sfieldRegistered: runtime?.registeredIntegrationTools().has(ref) ?? false, view: integrationService.view() });
+        return json(res, { ...published, sfieldRegistered: runtime?.registeredIntegrationTools().has(ref) ?? false, sfieldRoute: runtime?.registeredIntegrationTools().has(ref) ? "dedicated" : runtime ? "dispatcher" : "unavailable", view: integrationService.view() });
       }
       if (id === "tasks" && operation === "run" && method === "POST") {
         const data = await body(req, runTaskRequestSchema, 32 * 1024);

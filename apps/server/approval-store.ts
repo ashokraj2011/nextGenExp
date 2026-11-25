@@ -184,6 +184,8 @@ export class ApprovalStore {
     requester: string;
     dualControl?: boolean;
     ttlMs?: number;
+    /** Lets a caller reserve the id up front (e.g. to bind it into a tool call before the record exists). */
+    id?: string;
   }): ApprovalRecord {
     this.sweepExpired();
     const payloadDigest = computeApprovalDigest({
@@ -196,7 +198,7 @@ export class ApprovalStore {
     });
     const now = Date.now();
     const record: ApprovalRecord = {
-      id: makeId("apr"),
+      id: input.id ?? makeId("apr"),
       status: "pending",
       riskLevel: input.riskLevel,
       targetKind: input.targetKind,

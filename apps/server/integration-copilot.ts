@@ -5,12 +5,13 @@ import type {
   IntegrationCopilotResponse,
   IntegrationTasksView,
   TaskContract,
+  ViewContract,
 } from "../../packages/contracts/integration-task";
 import { callConfiguredLlmJson } from "./dynamic-ui-generator";
 import type { GatewaySettings } from "./gateway";
 import type { IntegrationTaskService } from "./integration-tasks";
 
-type Contract = TaskContract & { sfieldRegistered: boolean };
+type Contract = ViewContract;
 
 type Plan = {
   reply: string;
@@ -33,8 +34,9 @@ function latestTasks(view: IntegrationTasksView): Contract[] {
     const key = `${c.integrationId}.${c.taskId}`;
     const prev = byTask.get(key);
     const newer = !prev || c.version.localeCompare(prev.version, undefined, { numeric: true }) > 0;
-    // Prefer a version sfield can actually run.
-    if (!prev || (c.sfieldRegistered && (!prev.sfieldRegistered || newer))) byTask.set(key, c);
+    // Newest version sfield can run (dedicated tool or dispatcher); unavailable versions only as a last resort.
+    const runs = (x: Contract) => x.sfieldRoute !== "unavailable";
+    if (!prev || (runs(c) && !runs(prev)) || (runs(c) === runs(prev) && newer)) byTask.set(key, c);
   }
   return [...byTask.values()];
 }
@@ -202,7 +204,7 @@ export async function runIntegrationCopilot(
         const provenance = Object.fromEntries(Object.keys(prefill).map((k) => [k, "model_proposed" as FieldProvenance]));
         const required = (contract.inputSchema as { required?: string[] }).required ?? [];
         const complete = required.every((k) => prefill[k] !== undefined && prefill[k] !== "");
-        if (contract.effect === "read" && complete && contract.sfieldRegistered) {
+        if (contract.effect === "read" && complete && contract.sfieldRoute !== "unavailable") {
           const out = await service.run(principalId, { toolRef: contract.ref, input: prefill, requestedBy: "Integrations Chat", provenance });
           cards.push({ kind: "task_run", run: out.run });
           actions.push({ tool: contract.ref, summary: `${out.run.state}${out.run.outcome ? ` (${out.run.outcome.code})` : ""}`, status: out.run.state === "failed" ? "error" : "ok" });

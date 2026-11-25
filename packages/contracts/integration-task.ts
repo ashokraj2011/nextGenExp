@@ -193,9 +193,12 @@ export const runTaskRequestSchema = z.object({
   provenance: z.record(z.string(), fieldProvenanceSchema).optional(),
 }).strict();
 
+/** How a published version reaches sfield: its own tool (registered at startup) or an effect-specific dispatcher. */
+export type ViewContract = TaskContract & { sfieldRegistered: boolean; sfieldRoute: "dedicated" | "dispatcher" | "unavailable" };
+
 export type IntegrationTasksView = {
   integrations: Integration[];
-  contracts: (TaskContract & { sfieldRegistered: boolean })[];
+  contracts: ViewContract[];
   runs: TaskRun[];
 };
 
@@ -211,9 +214,9 @@ export type IntegrationCopilotRequest = z.infer<typeof integrationCopilotRequest
 
 export type IntegrationCopilotCard =
   | { kind: "catalog"; view: IntegrationTasksView }
-  | { kind: "contract"; contract: TaskContract & { sfieldRegistered: boolean } }
+  | { kind: "contract"; contract: ViewContract }
   /** Writes are never run from chat text: the model prefills a form, a person confirms it. */
-  | { kind: "task_form"; contract: TaskContract & { sfieldRegistered: boolean }; prefill: Record<string, unknown>; provenance: Record<string, FieldProvenance> }
+  | { kind: "task_form"; contract: ViewContract; prefill: Record<string, unknown>; provenance: Record<string, FieldProvenance> }
   | { kind: "task_run"; run: TaskRun; approvalId?: string }
   | { kind: "runs"; runs: TaskRun[]; filter?: string }
   | { kind: "approvals" };

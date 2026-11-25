@@ -1,22 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Clock, Copy, FileCode2, ListChecks, Play, Plug, RefreshCw, ShieldCheck, XCircle } from "lucide-react";
 import type { ApprovalRecord } from "../../packages/contracts/approval";
-import type { FieldProvenance, IntegrationTasksView, TaskContract, TaskRun } from "../../packages/contracts/integration-task";
+import type { FieldProvenance, IntegrationTasksView, TaskContract, TaskRun, ViewContract } from "../../packages/contracts/integration-task";
 import { api, toolSetupErrorMessage } from "./api";
 import { ApprovalRequestCard } from "./recommendation-approvals";
 
-type Contract = TaskContract & { sfieldRegistered: boolean };
+type Contract = ViewContract;
 type SchemaProp = { type?: string | string[]; enum?: (string | number)[]; maxLength?: number; minLength?: number; minimum?: number; maximum?: number; description?: string };
 
 const STATE_INFO: Record<TaskRun["state"], { label: string; tone: "pass" | "warn" | "fail"; hint: string }> = {
   succeeded: { label: "Succeeded", tone: "pass", hint: "The integration confirmed the result and it matched the contract." },
   succeeded_unverified_output: { label: "Applied · output unverified", tone: "warn", hint: "The change went through, but the response didn't match the contract. It will not be retried." },
   outcome_unknown: { label: "Outcome unknown", tone: "warn", hint: "No reliable response. The change may or may not have been applied. Reconcile before retrying." },
-  pending_approval: { label: "Waiting for approval", tone: "warn", hint: "sfield is holding this exact call until it is approved." },
+  pending_approval: { label: "Waiting for approval", tone: "warn", hint: "sfield is holding this exact call until it is approved. The approval survives a server restart." },
   executing: { label: "Running", tone: "warn", hint: "In progress." },
   failed: { label: "Failed", tone: "fail", hint: "Nothing was applied, or the system rejected it." },
   denied: { label: "Denied", tone: "fail", hint: "An approver denied it. Nothing was sent." },
-  expired: { label: "Expired", tone: "fail", hint: "The approval window passed or the pending call was lost. Request it again." },
+  expired: { label: "Expired", tone: "fail", hint: "The approval window passed. Request it again." },
 };
 
 const toneClass = (tone: "pass" | "warn" | "fail") => (tone === "pass" ? "is-pass" : tone === "warn" ? "is-warn" : "is-fail");
@@ -26,9 +26,21 @@ function latest(view: IntegrationTasksView): Contract[] {
   for (const c of view.contracts.filter((x) => x.status === "published")) {
     const key = `${c.integrationId}.${c.taskId}`;
     const prev = map.get(key);
-    if (!prev || (c.sfieldRegistered && !prev.sfieldRegistered) || (c.sfieldRegistered === prev.sfieldRegistered && c.version.localeCompare(prev.version, undefined, { numeric: true }) > 0)) map.set(key, c);
+    const runs = (x: Contract) => x.sfieldRoute !== "unavailable";
+    const newer = !prev || c.version.localeCompare(prev.version, undefined, { numeric: true }) > 0;
+    if (!prev || (runs(c) && !runs(prev)) || (runs(c) === runs(prev) && newer)) map.set(key, c);
   }
   return [...map.values()];
+}
+
+function RouteBadge({ contract }: { contract: Contract }) {
+  if (contract.status !== "published") return null;
+  const info = contract.sfieldRoute === "dedicated"
+    ? { tone: "is-pass", label: "sfield tool", title: "Registered at startup as its own sfield tool (own schema and lock digest)." }
+    : contract.sfieldRoute === "dispatcher"
+      ? { tone: "is-pass", label: "sfield dispatcher · live", title: "Published after startup. Runs now through the sfield dispatcher, bound to this contract and binding digest. No restart needed." }
+      : { tone: "is-warn", label: "runtime unavailable", title: "The sfield runtime is not configured." };
+  return <span className={"pzn-badge " + info.tone} title={info.title}>{info.label}</span>;
 }
 
 function approvalLabel(c: TaskContract) {
@@ -65,10 +77,10 @@ export function CatalogCard({ view, onPrompt }: { view: IntegrationTasksView; on
                     <span className="pzn-badge">v{t.version}</span>
                     <span className={"pzn-badge " + (t.effect === "read" ? "" : t.effect === "write" ? "is-warn" : "is-fail")}>{t.effect}</span>
                     {t.resultKind !== "data" && <span className="pzn-badge">returns {t.artifact?.type ?? t.resultKind}</span>}
-                    <span className={"pzn-badge " + (t.sfieldRegistered ? "is-pass" : "is-warn")}>{t.sfieldRegistered ? "sfield tool" : "restart to activate"}</span>
+                    <RouteBadge contract={t} />
                   </div>
                   <div className="pzn-btn-row">
-                    <button type="button" className="pzn-btn pzn-btn-sm pzn-btn-primary" disabled={!t.sfieldRegistered} onClick={() => onPrompt(`Run ${t.ref}`)}>
+                    <button type="button" className="pzn-btn pzn-btn-sm pzn-btn-primary" disabled={t.sfieldRoute === "unavailable"} onClick={() => onPrompt(`Run ${t.ref}`)}>
                       <Play size={12} /> Run
                     </button>
                     <button type="button" className="pzn-btn pzn-btn-sm" onClick={() => onPrompt(`Show the contract for ${t.ref}`)}>Contract</button>
@@ -135,7 +147,8 @@ export function ContractCard({ contract, onPrompt }: { contract: Contract; onPro
         {contract.reconcileTaskId && <span>Reconcile with: {contract.reconcileTaskId}</span>}
         <span>Binding <code className="pzn-code">{contract.bindingDigest.replace(/^sha256:/, "").slice(0, 10)}</code></span>
       </div>
-      {contract.sfieldRegistered && (
+      <div className="pzn-btn-row"><RouteBadge contract={contract} /></div>
+      {contract.sfieldRoute !== "unavailable" && contract.status === "published" && (
         <div className="pzn-btn-row">
           <button type="button" className="pzn-btn pzn-btn-sm pzn-btn-primary" onClick={() => onPrompt(`Run ${contract.ref}`)}><Play size={12} /> Run this task</button>
         </div>
