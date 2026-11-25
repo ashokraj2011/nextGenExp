@@ -14,6 +14,7 @@ const ExperienceRegistry = lazy(() => import("./experience-registry-admin").then
 const Builder = lazy(() => import("./ui-builder").then(({ UiBuilder }) => ({ default: UiBuilder })));
 const EmbedStudio = lazy(() => import("./embed-studio").then(({ EmbedStudio }) => ({ default: EmbedStudio })));
 const Help = lazy(() => import("./help").then(({ Help }) => ({ default: Help })));
+const GatewayAdmin = lazy(() => import("./gateway-admin").then(({ GatewayAdmin }) => ({ default: GatewayAdmin })));
 const Diagnostics = lazy(() => import("./admin-diagnostics").then(({ AdminDiagnostics }) => ({ default: AdminDiagnostics })));
 
 export function AdminWorkspace() {
@@ -41,6 +42,7 @@ export function AdminWorkspace() {
           {path === adminPaths.builder && <Builder />}
           {path === adminPaths.embed && <EmbedStudio />}
           {path === adminPaths.help && <Help />}
+          {path === adminPaths.gateway && <GatewayAdmin />}
           {(path === adminPaths.logs || path === adminPaths.inspector) && <Diagnostics view={path === adminPaths.logs ? "logs" : "inspector"} selectThread={setThread} />}
         </Suspense>
       </div>

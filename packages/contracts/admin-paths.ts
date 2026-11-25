@@ -9,6 +9,7 @@ export const adminPaths = {
   embed: "/admin/embed",
   help: "/admin/help",
   chat: "/admin/chat",
+  gateway: "/admin/gateway",
 } as const;
 
 export const isAdminPath = (path: string) => path === adminPaths.tools || path.startsWith("/admin/");

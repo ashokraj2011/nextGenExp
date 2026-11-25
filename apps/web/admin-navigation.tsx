@@ -1,4 +1,4 @@
-import { Activity, Blocks, BookOpenText, Briefcase, Code2, FileText, GitBranch, Landmark, Layers, MessageSquare, Plug, PanelsTopLeft, Settings2, UsersRound } from "lucide-react";
+import { Activity, Blocks, Cpu, BookOpenText, Briefcase, Code2, FileText, GitBranch, Landmark, Layers, MessageSquare, Plug, PanelsTopLeft, Settings2, UsersRound } from "lucide-react";
 import { adminPaths } from "../../packages/contracts/admin-paths";
 
 export function diagnosticHref(path: typeof adminPaths.logs | typeof adminPaths.inspector, thread?: string, turn?: string) {
@@ -10,6 +10,7 @@ export function diagnosticHref(path: typeof adminPaths.logs | typeof adminPaths.
 
 const destinations = [
   { label: "Tool setup", path: adminPaths.tools, Icon: Settings2 },
+  { label: "Model gateway", path: adminPaths.gateway, Icon: Cpu },
   { label: "Recommendations", path: adminPaths.recommendations, Icon: Layers },
   { label: "Customer 360", path: adminPaths.customers, Icon: UsersRound },
   { label: "Intents & Catalog", path: adminPaths.intents, Icon: GitBranch },

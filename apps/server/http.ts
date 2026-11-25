@@ -60,7 +60,7 @@ import { EvalRunnerStore } from "./eval-runner";
 import { renderCepEmbedSdkScript, renderHostPortalDemoHtml } from "./embed-sdk";
 import { WriteAuditStore } from "./write-audit";
 import { recommendationArbitrateToolRef } from "../../packages/contracts/recommendation-provider";
-import { connectorInvokeToolRef, domainWriteToolRef, Runtime, sfieldNamespace } from "./runtime";
+import { checkGatewayCapacity, connectorInvokeToolRef, domainWriteToolRef, Runtime, sfieldNamespace } from "./runtime";
 import { WidgetLibraryStore } from "./widget-library";
 import { SelfServicePznStore } from "./self-service-pzn-store";
 import { IntegrationTaskError, IntegrationTaskService, IntegrationTaskStore } from "./integration-tasks";
@@ -112,6 +112,7 @@ import { addCcreRule, previewTreatmentSelector, toolSetupTag, toolSetupView, val
 import { readWorkspacePendingActions } from "./workspace-actions";
 
 import { operatorAccess } from "./operator-access";
+import { configDigest, GatewayConfigStore, gatewayConfigSchema, mergeStoredKey, testGatewayConfig } from "./gateway-config";
 
 type Options = {
   operators?: Record<string, string>;
@@ -120,6 +121,8 @@ type Options = {
    * The server only answers on 127.0.0.1/localhost, and a signed-in operator still wins (so dual control can be tested).
    */
   operatorAuth?: "on" | "off";
+  /** Called after a gateway configuration is activated or reset; main.ts restarts the app in-process. */
+  onGatewayActivated?: () => void;
   dataDir: string;
   gateway: GatewaySettings | null;
   projectRoot: string;
@@ -214,6 +217,7 @@ export async function startApp(options: Options) {
     throw new Error("PZN_OPERATOR_AUTH=off is for local demos only and is refused under NODE_ENV=production.");
   }
   const localOperator = options.operatorAuth === "off" ? "local-operator" : undefined;
+  const gatewayConfig = new GatewayConfigStore(options.dataDir);
   const profile = options.gateway?.profile;
   const sessionCookie = profile === "openai" ? "pzn_openai_session" : profile === "copilot_acp" ? "pzn_copilot_session" : "pzn_session";
   const sessionPattern = new RegExp("(?:^|;\\s*)" + sessionCookie + "=(local_[a-f0-9]{32})(?:;|$)");
@@ -737,6 +741,41 @@ export async function startApp(options: Options) {
         });
         return json(res, { updatedFields: applied.updatedFields, auditId: audit.auditId });
       }
+    }
+    if (resource === "admin" && id === "gateway" && inspectorEnabled) {
+      const actor = requireOperator();
+      const restartSupported = Boolean(options.onGatewayActivated);
+      const parseConfig = async () => {
+        const { config } = await body(req, z.object({ config: z.record(z.string(), z.unknown()) }).strict(), 32 * 1024);
+        const parsed = gatewayConfigSchema.safeParse(config);
+        if (!parsed.success) throw new ApiError(400, "invalid_gateway_config", parsed.error.issues.map((i) => `${i.path.join(".") || "config"}: ${i.message}`).join("; ").slice(0, 400));
+        return mergeStoredKey(parsed.data, gatewayConfig.active());
+      };
+      if (!operation && method === "GET") return json(res, gatewayConfig.view(options.gateway, restartSupported));
+      if (operation === "test" && method === "POST") {
+        const config = await parseConfig();
+        const result = await testGatewayConfig(config, { dataDir: options.dataDir, capacityCheck: checkGatewayCapacity });
+        gatewayConfig.saveTest(result);
+        return json(res, result);
+      }
+      if (operation === "activate" && method === "POST") {
+        const config = await parseConfig();
+        const last = gatewayConfig.read().lastTest;
+        if (!last?.ok || last.configDigest !== configDigest(config) || Date.now() - Date.parse(last.testedAt) > 30 * 60_000) {
+          throw new ApiError(409, "test_required", "Test this exact configuration successfully (within the last 30 minutes) before activating it.");
+        }
+        gatewayConfig.activate(config, actor);
+        json(res, { activated: true, restarting: restartSupported, view: gatewayConfig.view(options.gateway, restartSupported) });
+        if (restartSupported) setTimeout(() => options.onGatewayActivated?.(), 250);
+        return;
+      }
+      if (operation === "reset" && method === "POST") {
+        gatewayConfig.reset();
+        json(res, { reset: true, restarting: restartSupported, view: gatewayConfig.view(options.gateway, restartSupported) });
+        if (restartSupported) setTimeout(() => options.onGatewayActivated?.(), 250);
+        return;
+      }
+      throw new ApiError(404, "not_found", "This item is unavailable.");
     }
     if (resource === "admin" && inspectorEnabled && !operation) {
       const toolSetupLimit = 768 * 1024;

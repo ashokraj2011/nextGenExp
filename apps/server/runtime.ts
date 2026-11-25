@@ -192,6 +192,11 @@ function requireToolEnabled(turn: TurnRecord, key: ToolKey) {
   if (turn.toolSetup?.enabled[key] === false) throw new ToolError("TOOL_DISABLED");
 }
 
+/** The same capacity rule the runtime applies at startup, for testing a gateway configuration before activating it. */
+export function checkGatewayCapacity(settings: GatewaySettings) {
+  checkModelCapacity(settings, compileRouterInstructions(), compileComposerInstructions());
+}
+
 function checkModelCapacity(settings: GatewaySettings, routerText: string, composerText: string) {
   const usable = Math.min(12_000, settings.contextWindow - settings.maxOutputTokens - 384);
   const questions = estimateJsonTokens(host.clarificationQuestions);

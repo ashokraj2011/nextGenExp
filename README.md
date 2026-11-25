@@ -61,6 +61,14 @@ Copy `.env.example` to `.env` and set `LLM_PROVIDER=gateway`, `LLM_BASE_URL`, `L
 
 ---
 
+### Model gateway (sfield)
+
+**Administration → Model gateway** (`/admin/gateway`) configures the LLM that sfield binds for every agent run, chat copilot and tool call: an OpenAI-compatible gateway (base URL, model, API key or env var, extra headers/body fields, context and output limits, adapter quirks), the OpenAI API, or GitHub Copilot (ACP).
+
+1. **Test connection** checks the settings with the same rules as the environment variables, runs sfield's context-capacity check for the router and composer prompts, and makes a real model call that must return JSON.
+2. **Activate** is enabled only after a passing test of exactly those settings (within 30 minutes). It saves the configuration to `llm-gateway.json` in the data directory (mode 600; a stored key is never sent back to the browser) and restarts the app in place so sfield re-binds the model. Pending approvals resume after the restart.
+3. A saved configuration overrides the launch environment on every start. **Use environment settings instead** removes it. If a saved configuration can't start, the server falls back to the environment settings.
+
 ### Operator sign-in
 
 Customer chat opens at `/`. The admin, integration, sales and operations workspaces prompt for an operator account. On first start the server saves the local operator username and generated password in `operator-credentials.json` inside the active data directory. For Copilot on port 4180 the default path is `.pzn-data/copilot/operator-credentials.json`. To use separate identities for approvals, set `PZN_OPERATORS_JSON` to a JSON object mapping two or more usernames to passwords of at least 12 characters each. Customer sign-in uses the local profile picker.

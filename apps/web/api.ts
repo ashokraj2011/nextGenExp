@@ -362,5 +362,9 @@ export const api = {
   validateIntegrationDraft: (draft: TaskContractInput) => request<DraftCheck>("/api/integrations/contracts/validate", { draft }),
   saveIntegrationDraft: (draft: TaskContractInput) => request<{ contract: TaskContract; view: IntegrationTasksView }>("/api/integrations/contracts", draft),
   publishIntegrationTask: (ref: string) => request<{ contract: TaskContract; breaking: string[]; sfieldRegistered: boolean; sfieldRoute: "dedicated" | "dispatcher" | "unavailable"; registrationNote?: string; view: IntegrationTasksView }>("/api/integrations/contracts/publish", { ref }),
+  gatewayConfig: () => request<import("./gateway-admin").GatewayView>("/api/admin/gateway"),
+  testGateway: (config: unknown) => request<import("./gateway-admin").GatewayTest>("/api/admin/gateway/test", { config }),
+  activateGateway: (config: unknown) => request<{ activated: boolean; restarting: boolean; view: import("./gateway-admin").GatewayView }>("/api/admin/gateway/activate", { config }),
+  resetGateway: () => request<{ reset: boolean; restarting: boolean; view: import("./gateway-admin").GatewayView }>("/api/admin/gateway/reset", {}),
   discoverIntegrationMcp: (integrationId: string) => request<{ integrationId: string; candidates: McpImportCandidate[] }>("/api/integrations/mcp/discover", { integrationId }),
 };
