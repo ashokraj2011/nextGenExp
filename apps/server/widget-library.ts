@@ -1,9 +1,123 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { dynamicCanvasSchema, type DynamicCanvasNode, type DynamicCanvasProps } from "../../packages/contracts/dynamic-canvas";
 import {
   savedWidgetSchema, type SavedWidget, type WidgetDraft, type WidgetKind, type WidgetLibraryChange,
 } from "../../packages/contracts/widget";
+
+const WIDGET_STOPWORDS = new Set([
+  "this", "that", "with", "from", "have", "what", "when", "where", "which", "would", "could", "should",
+  "about", "into", "your", "their", "there", "here", "today", "tomorrow", "please", "help", "want", "need",
+  "show", "make", "build", "create", "generate", "design", "widget", "card", "component", "block", "layout",
+  "just", "very", "more", "some", "also", "like", "give", "tell", "know", "take", "open", "view", "check",
+  "account", "balance", "balances", "portfolio", "rule", "rules", "wire", "transfer", "stock", "stocks",
+]);
+
+function extractWidgetTokens(text: string): string[] {
+  return [...new Set(
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length >= 4 && !WIDGET_STOPWORDS.has(w)),
+  )];
+}
+
+export function compileSavedWidgetToCanvas(
+  widget: SavedWidget,
+  userPrompt: string,
+  personaName?: string,
+): { intro: string; canvas: DynamicCanvasProps } {
+  const nodes: DynamicCanvasNode[] = [];
+  const greetingPrefix = personaName ? `${personaName}: ` : "";
+
+  nodes.push({
+    type: "callout",
+    tone: widget.accentTop ? "highlight" : "info",
+    title: `${greetingPrefix}${widget.title}`.slice(0, 90),
+    body: widget.body.slice(0, 600),
+  });
+
+  if (widget.metrics && widget.metrics.length > 0) {
+    nodes.push({
+      type: "metrics",
+      items: widget.metrics.slice(0, 4).map((m) => ({
+        label: m.label.slice(0, 48),
+        value: m.value.slice(0, 36),
+        ...(m.delta ? { delta: m.delta.slice(0, 32) } : {}),
+      })),
+    });
+  }
+
+  if (widget.columns && widget.columns.length === 2) {
+    nodes.push({
+      type: "comparison",
+      columns: widget.columns.map((c) => ({
+        title: c.title.slice(0, 56),
+        points: c.points.slice(0, 6).map((p) => p.slice(0, 160)),
+      })),
+    });
+  }
+
+  if (widget.goal && widget.goal.target > 0) {
+    nodes.push({
+      type: "progress",
+      label: `${widget.name} · ${widget.goal.unitLabel}`.slice(0, 160),
+      current: Math.max(0, widget.goal.saved),
+      target: widget.goal.target,
+      currentDisplay: fmtUsd(widget.goal.saved).slice(0, 32),
+      targetDisplay: fmtUsd(widget.goal.target).slice(0, 32),
+    });
+  }
+
+  if (widget.steps && widget.steps.length > 0) {
+    nodes.push({
+      type: "checklist",
+      title: widget.title.slice(0, 90),
+      items: widget.steps.slice(0, 8).map((s) => s.slice(0, 160)),
+    });
+  }
+
+  if (widget.sliders && widget.sliders.length > 0) {
+    const allowedIds = new Set(["amount", "monthly", "rate", "years"]);
+    const fallbackIds: ("monthly" | "years" | "rate")[] = ["monthly", "years", "rate"];
+    nodes.push({
+      type: "sliders",
+      title: widget.title.slice(0, 90),
+      formula: "compound_monthly",
+      resultLabel: "Projected Total",
+      inputs: widget.sliders.slice(0, 3).map((s, idx) => ({
+        id: (allowedIds.has(s.id) ? s.id : fallbackIds[idx] ?? "amount") as "amount" | "monthly" | "rate" | "years",
+        label: s.label.slice(0, 48),
+        min: s.min,
+        max: s.max,
+        step: Math.max(0.1, s.step),
+        value: s.value,
+        unit: (s.unit === "percent" || s.unit === "years" ? s.unit : "usd") as "usd" | "percent" | "years",
+      })),
+    });
+  }
+
+  const canvas = dynamicCanvasSchema.parse({
+    title: widget.name.slice(0, 96),
+    badge: (widget.badge || "Saved Widget").slice(0, 44),
+    subtitle: widget.title.slice(0, 200),
+    generatedBy: "synthesizer",
+    dataSource: `Widget Library (${widget.id})`,
+    recordId: widget.id,
+    prompt: userPrompt.slice(0, 400),
+    nodes: nodes.slice(0, 5),
+    disclaimer: "Rendered from your saved custom widget in CEP UI Studio → Widget Library.",
+    ...(widget.ctaLabel ? { suggestedFollowUp: widget.ctaLabel.slice(0, 120) } : {}),
+  });
+
+  const intro = personaName
+    ? `${widget.badge ? `**${widget.badge}**, ${personaName}! ` : ""}Matched your saved **${widget.name}** widget from the Widget Library.`
+    : `Matched your saved **${widget.name}** widget from the Widget Library.`;
+
+  return { intro, canvas };
+}
 
 const MAX_WIDGETS_PER_PRINCIPAL = 48;
 
@@ -297,5 +411,50 @@ export class WidgetLibraryStore {
     data[principalId] = next;
     this.persist(data);
     return { widget: saved, widgets: next.slice().sort((a, b) => b.updatedAt - a.updatedAt) };
+  }
+
+  matchCustomWidget(principalId: string, prompt: string): SavedWidget | undefined {
+    const trimmed = prompt.trim();
+    if (trimmed.length < 3 || /\bcreate\s+(?:a\s+)?rule\b/i.test(trimmed)) return undefined;
+    const tokens = extractWidgetTokens(trimmed);
+    if (tokens.length === 0) return undefined;
+
+    const data = this.load();
+    const seen = new Set<string>();
+    const candidates: SavedWidget[] = [];
+    for (const w of data[principalId] ?? []) {
+      if (w.id.startsWith("wdg_seed") || seen.has(w.id)) continue;
+      seen.add(w.id);
+      candidates.push(w);
+    }
+    for (const [owner, list] of Object.entries(data)) {
+      if (owner === principalId) continue;
+      for (const w of list) {
+        if (w.id.startsWith("wdg_seed") || seen.has(w.id)) continue;
+        seen.add(w.id);
+        candidates.push(w);
+      }
+    }
+
+    let best: { widget: SavedWidget; score: number } | undefined;
+    for (const w of candidates) {
+      const nameLower = w.name.toLowerCase();
+      const badgeLower = w.badge.toLowerCase();
+      const titleLower = w.title.toLowerCase();
+      const promptLower = w.prompt.toLowerCase();
+      const bodyLower = w.body.toLowerCase();
+      let score = 0;
+      for (const tok of tokens) {
+        if (nameLower.includes(tok)) score += 5;
+        if (badgeLower.includes(tok)) score += 4;
+        if (titleLower.includes(tok)) score += 3;
+        if (promptLower.includes(tok)) score += 2;
+        if (bodyLower.includes(tok)) score += 1;
+      }
+      if (score >= 5 && (!best || score > best.score)) {
+        best = { widget: w, score };
+      }
+    }
+    return best?.widget;
   }
 }

@@ -39,6 +39,7 @@ import { extractDocumentAction, hasAttachedDocumentBlock } from "./document-extr
 import type { ApprovalStore } from "./approval-store";
 import type { SettlementCallback, TradeStore } from "./trade-store";
 import type { ActionFlowStore } from "./action-flow-store";
+import { compileSavedWidgetToCanvas, type WidgetLibraryStore } from "./widget-library";
 import type { Customer360Service } from "./customer-360";
 import type { GatewaySettings } from "./gateway";
 import type { GoalProgressProvider } from "../../packages/goal-progress";
@@ -88,6 +89,7 @@ export class ExperienceService {
       actionFlowStore?: ActionFlowStore;
       workflowEngine?: WorkflowEngine;
       knowledgeBase?: KnowledgeBaseStore;
+      widgetLibrary?: WidgetLibraryStore;
       onTradeSettle?: (principalId: string) => SettlementCallback;
     },
   ) {
@@ -617,6 +619,31 @@ export class ExperienceService {
               method: "deterministic",
               confidence: 0.97,
               reasoning: `Matched admin-authored No-Code Action Flow "${matchedActionFlow.name}" (${matchedActionFlow.approvalMode}).`,
+            };
+            row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
+          });
+          this.store.finish(id, { type: "completed", result: dynamicResult }, now);
+          return;
+        }
+
+        // 2b. Saved Custom Widget Library match (e.g. "Birthday Celebration" widget)
+        const matchedWidget = this.dynamicUi.mode !== "test"
+          ? this.dynamicUi.widgetLibrary?.matchCustomWidget(initial.scope.principalId, initial.public.message)
+          : undefined;
+        if (matchedWidget) {
+          stage = "compose";
+          this.store.progress(id, "composition", this.now());
+          const now = this.now();
+          const built = compileSavedWidgetToCanvas(matchedWidget, initial.public.message, persona?.displayName);
+          const dynamicResult = compileDynamicCanvas(built.intro, built.canvas, now + DECISION_TTL);
+          this.store.update(id, (row) => {
+            row.public.actionMode = "dynamic_ui";
+            row.public.semanticRoute = {
+              capabilityId: "verified_experience",
+              capabilityLabel: `Saved Widget · ${matchedWidget.name}`,
+              method: "deterministic",
+              confidence: 0.97,
+              reasoning: `Matched custom saved widget "${matchedWidget.name}" (${matchedWidget.id}) from Widget Library.`,
             };
             row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
           });

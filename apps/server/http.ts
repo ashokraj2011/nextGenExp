@@ -332,7 +332,7 @@ export async function startApp(options: Options) {
     chat: new ChatHarness(offline), close: () => offline.close(),
   }, {
     mode, gateway: options.gateway, dataDir: options.dataDir, customer360, portfolioSnapshots, goalProgressProvider,
-    opsStore, salesStore, connectorStore, approvalStore, tradeStore, actionFlowStore, workflowEngine, knowledgeBase,
+    opsStore, salesStore, connectorStore, approvalStore, tradeStore, actionFlowStore, workflowEngine, knowledgeBase, widgetLibrary,
     onTradeSettle: makeTradeSettler,
   });
 
