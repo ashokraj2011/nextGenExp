@@ -12,13 +12,14 @@ import { parseStockTradePrompt, type TradeStore } from "./trade-store";
 import { connectorInvokeToolRef } from "./runtime";
 import { generateWidgetFromText } from "./widget-library";
 
-const dynamicUiTrigger = /\b(widget|table|bar chart|chart|graph|dashboard|visuali[sz]e|visuali[sz]ation|calculator|simulator|matrix|breakdown|dynamic ui|custom ui|interactive|approval\s+(?:card|flow|form|workflow|request|queue)|pending\s+approvals?|show\s+(?:my\s+)?approvals?|review\s+approvals?|hitl\s+queue|pagerduty|external\s+connector|invoke\s+connector|run\s+connector|trigger\s+webhook|timeline|roadmap|triage|incident\s+(?:triage|dashboard|timeline|queue|status|report|response)|rollback|deal\s+desk|sales\s+pipeline|discount\s+approval|close[- ]plan|intake\s+form|(?:sell|buy|purchase|trim|trade)\b.*\b(?:shares?|stocks?|aapl|apple|msft|microsoft|nvda|nvidia|intc|intel|boeing|pfizer|voo)\b|tax[- ]?loss\s+harvest(?:ing)?|stock\s+holdings?|build\s+(?:me\s+)?a\b|design\s+(?:me\s+)?a\b|generate\s+(?:me\s+)?a\b|create\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist|workflow)|make\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist))\b/i;
+const dynamicUiTrigger = /\b(widget|table|bar chart|chart|graph|dashboard|visuali[sz]e|visuali[sz]ation|calculator|simulator|matrix|breakdown|dynamic ui|custom ui|interactive|approval\s+(?:card|flow|form|workflow|request|queue)|pending\s+approvals?|show\s+(?:my\s+)?approvals?|review\s+approvals?|hitl\s+queue|pagerduty|external\s+connector|invoke\s+connector|run\s+connector|trigger\s+webhook|timeline|roadmap|triage|incident\s+(?:triage|dashboard|timeline|queue|status|report|response)|rollback|deal\s+desk|sales\s+pipeline|discount\s+approval|close[- ]plan|intake\s+form|(?:sell|buy|purchase|trim|trade)\b.*\b(?:shares?|stocks?|aapl|apple|msft|microsoft|nvda|nvidia|intc|intel|boeing|pfizer|voo)\b|tax[- ]?loss\s+harvest(?:ing)?|(?:show|list|view|all|what|see)\b.*\b(?:my\s+)?(?:stocks?|holdings?|shares?|positions?|equities)\b|\bmy\s+(?:stocks?|holdings?|shares?|positions?)\b|stock\s+(?:holdings?|positions?|list)|build\s+(?:me\s+)?a\b|design\s+(?:me\s+)?a\b|generate\s+(?:me\s+)?a\b|create\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist|workflow)|make\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist))\b/i;
 const nonDynamicGuard = /\b(weather|stock price|tomorrow|create a? ?rule)\b/i;
 const opsIncidentTrigger = /\b(incident|triage|rollback|sre|sev\s*[0-3]|p[1-3]\b|latency|5xx|error rate|it ops|operations dashboard|post-incident|production alert|inc-\d+)\b/i;
 const salesDealTrigger = /\b(deal\s*desk|deal-\d+|sales\s*pipeline|pipeline\s*(?:breakdown|chart|table|forecast)|revops|discount\s*approval|pricing\s*exception|mutual\s*action\s*plan|close[- ]plan|acme\s*cloud|enterprise\s*renewal)\b/i;
 const approvalQueueTrigger = /\b(pending\s+approvals?|approval\s+queue|show\s+(?:my\s+)?approvals?|review\s+approvals?|hitl\s+queue)\b/i;
 const connectorActionTrigger = /\b(pagerduty|external\s+connector|invoke\s+connector|run\s+connector|trigger\s+webhook|servicenow\s+webhook)\b/i;
-const stockTradeTrigger = /\b((?:sell|buy|purchase|trim|trade|simulate\s+(?:a\s+)?(?:sell|buy|trade))\b.*\b(?:shares?|stocks?|aapl|apple|msft|microsoft|nvda|nvidia|intc|intel|boeing|pfizer|voo)\b|tax[- ]?loss\s+harvest(?:ing)?|stock\s+holdings?)\b/i;
+const stockTradeTrigger = /\b((?:sell|buy|purchase|trim|trade|simulate\s+(?:a\s+)?(?:sell|buy|trade))\b.*\b(?:shares?|stocks?|aapl|apple|msft|microsoft|nvda|nvidia|intc|intel|boeing|pfizer|voo)\b|tax[- ]?loss\s+harvest(?:ing)?)\b/i;
+const stockHoldingsTrigger = /\b((?:show|list|view|see|all|what)\b.*\b(?:my\s+)?(?:stocks?|holdings?|shares?|positions?)\b|my\s+(?:stocks?|holdings?|shares?|positions?)|stock\s+(?:holdings?|positions?|list))\b/i;
 
 export function isDynamicUiRequest(message: string): boolean {
   const clean = message.trim();
@@ -693,6 +694,83 @@ function buildStockTradeCanvas(
   };
 }
 
+function buildStockHoldingsCanvas(
+  tradeStore: TradeStore,
+  personaId: string,
+  prompt: string,
+): { intro: string; canvas: DynamicCanvasProps } {
+  const snapshot = tradeStore.snapshotFor(personaId);
+  const usd = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const activeHoldings = snapshot.holdings.filter((h) => h.shares > 0);
+  const marketTotalCents = activeHoldings.reduce((sum, h) => sum + h.shares * h.priceCents, 0);
+  const unrealizedTotalCents = activeHoldings.reduce((sum, h) => sum + (h.priceCents - h.avgCostCents) * h.shares, 0);
+  const tlhCount = activeHoldings.filter((h) => h.priceCents < h.avgCostCents).length;
+  const activeBars = activeHoldings
+    .map((h) => ({
+      label: `${h.symbol} (${h.shares} sh)`,
+      value: Math.round((h.shares * h.priceCents) / 100),
+      displayValue: usd(h.shares * h.priceCents),
+      highlight: h.priceCents < h.avgCostCents,
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8);
+
+  const nodes: DynamicCanvasNode[] = [
+    {
+      type: "metrics",
+      items: [
+        { label: "Active Positions", value: `${activeHoldings.length} stocks`, delta: `${tlhCount} tax-loss eligible` },
+        { label: "Holdings Market Value", value: usd(marketTotalCents), delta: `${unrealizedTotalCents >= 0 ? "+" : ""}${usd(unrealizedTotalCents)} P/L` },
+        { label: "Cash Balance", value: usd(snapshot.cashCents), delta: "Live Customer 360" },
+        { label: "Total Portfolio", value: usd(snapshot.totalCents), delta: `Fixed income ${usd(snapshot.fixedIncomeCents)}` },
+      ],
+    },
+    {
+      type: "table",
+      caption: "Live Stock Holdings & Cost Basis (trades-portfolio.json)",
+      columns: ["Stock", "Shares", "Avg Cost → Price", "Market Value", "Unrealized P/L"],
+      rows: snapshot.holdings.map((h) => {
+        const mv = h.shares * h.priceCents;
+        const pl = (h.priceCents - h.avgCostCents) * h.shares;
+        const plText = h.shares === 0
+          ? "Closed (0 sh)"
+          : `${pl >= 0 ? "+" : ""}${usd(pl)}${pl < 0 ? " (TLH)" : ""}`;
+        return [
+          `${h.symbol} · ${h.name}`,
+          `${h.shares} sh`,
+          `${usd(h.avgCostCents)} → ${usd(h.priceCents)}`,
+          usd(mv),
+          plText,
+        ];
+      }),
+    },
+  ];
+
+  if (activeBars.length >= 2) {
+    nodes.push({
+      type: "barchart",
+      title: "Equity Allocation by Stock (highlighted = unrealized loss / TLH candidate)",
+      unit: "usd",
+      bars: activeBars,
+    });
+  }
+
+  return {
+    intro: `Here are all **${activeHoldings.length} active stock positions** in your live portfolio (${usd(marketTotalCents)} total equity holdings, ${usd(snapshot.cashCents)} cash, ${tlhCount} tax-loss harvesting candidate${tlhCount === 1 ? "" : "s"}). Ask to buy or sell any ticker (for example, *"I want to sell 40% of my Apple shares"*) to open the trade & tax-harvest simulator.`,
+    canvas: {
+      title: "Live Stock Holdings & Tax-Lot Positions",
+      badge: "Live Equity Holdings",
+      subtitle: `${activeHoldings.length} active tickers · Cash ${usd(snapshot.cashCents)} · ${tlhCount} TLH candidate${tlhCount === 1 ? "" : "s"}`,
+      generatedBy: "synthesizer",
+      dataSource: "trades-portfolio.json + Customer 360",
+      prompt,
+      nodes,
+      disclaimer: "Holdings reflect live simulated trades settled through sfield cep.domain.execute_write@1.0.0. Highlighted rows indicate unrealized losses eligible for Tax-Loss Harvesting.",
+      suggestedFollowUp: "I want to sell 40% of my Apple shares",
+    },
+  };
+}
+
 export async function generateDynamicUi(input: {
   prompt: string;
   profileSummary?: string;
@@ -710,6 +788,9 @@ export async function generateDynamicUi(input: {
   const { prompt, profileSummary, gateway, dataDir, opsStore, salesStore, connectorStore, approvalStore, tradeStore, personaId, requesterName } = input;
   if (tradeStore && stockTradeTrigger.test(prompt)) {
     return buildStockTradeCanvas(tradeStore, personaId || "demo-learner", requesterName, prompt);
+  }
+  if (tradeStore && stockHoldingsTrigger.test(prompt)) {
+    return buildStockHoldingsCanvas(tradeStore, personaId || "demo-learner", prompt);
   }
   if (approvalStore && isApprovalQueuePrompt(prompt)) {
     return buildApprovalQueueCanvas(approvalStore, prompt);
