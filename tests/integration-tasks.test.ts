@@ -126,15 +126,15 @@ test("integration tasks run through sfield with native digest-bound approvals, r
   assert.equal(artifact.run.artifact?.type, "json_schema");
   assert.equal(artifact.run.artifact?.validation.ok, true);
 
-  // 10. A version published after startup runs immediately through the sfield dispatcher (no restart),
-  //     bound to its contract and binding digests; approvals still apply.
+  // 10. A version published after startup is registered as its own dedicated sfield tool via sfield.reload
+  //     (candidate lock passes governance first) and runs immediately; approvals still apply.
   const current = view.contracts.find((c) => c.ref === CREATE)!;
   const { ref: _r, status: _s, contractDigest: _c, bindingDigest: _b, updatedAt: _u, publishedAt: _p, sfieldRegistered: _reg, sfieldRoute: _route, ...input } = current;
   await client.request("/api/integrations/contracts", { ...input, version: "1.1.0", description: "Create a ticket (minor wording change)." });
   const V11 = "int.itsm_sandbox.create_ticket@1.1.0";
   const published = await client.request<{ sfieldRegistered: boolean; sfieldRoute: string }>("/api/integrations/contracts/publish", { ref: V11 });
-  assert.equal(published.sfieldRegistered, false);
-  assert.equal(published.sfieldRoute, "dispatcher");
+  assert.equal(published.sfieldRegistered, true);
+  assert.equal(published.sfieldRoute, "dedicated");
   const viaDispatcher = await run({ title: "Cache misses on edge", priority: "P3", service: "edge" }, 200, V11);
   assert.equal(viaDispatcher.run.state, "succeeded", JSON.stringify(viaDispatcher.run));
   assert.equal(viaDispatcher.run.version, "1.1.0");
@@ -143,12 +143,12 @@ test("integration tasks run through sfield with native digest-bound approvals, r
   assert.equal(badDispatch.run.state, "failed");
   assert.equal(badDispatch.run.error?.kind, "validation_input");
   const p1v11 = await run({ title: "Edge outage", priority: "P1", service: "edge" }, 202, V11);
-  assert.equal(p1v11.approval?.sfieldToolRef, "int.dispatch.write@1.0.0");
+  assert.equal(p1v11.approval?.sfieldToolRef, V11);
   const decidedV11 = await client.request<{ approval: ApprovalRecord; taskRun: TaskRun }>(`/api/approvals/${p1v11.approval!.id}/decide`, { decision: "approve", actor: "On-call Lead" });
   assert.equal(decidedV11.taskRun.state, "succeeded");
   assert.equal(decidedV11.approval.status, "executed");
   const viewAfter = await client.request<IntegrationTasksView>("/api/integrations");
-  assert.equal(viewAfter.contracts.find((c) => c.ref === V11)?.sfieldRoute, "dispatcher");
+  assert.equal(viewAfter.contracts.find((c) => c.ref === V11)?.sfieldRoute, "dedicated");
   assert.equal(viewAfter.contracts.find((c) => c.ref === CREATE)?.sfieldRoute, "dedicated");
 
   // 11. Chat: a write is drafted into a form (never run from text); every guessed field is marked model-proposed.
@@ -200,7 +200,11 @@ test("pending integration approvals survive a server restart and still execute e
   assert.equal(decided.taskRun.outcome?.code, "CREATED");
   assert.equal(decided.taskRun.idempotencyKey, pending.run.idempotencyKey, "the approved idempotency key is reused");
   assert.equal(decided.approval.status, "executed");
-  assert.match(decided.execution.summary, /restart-safe/);
+  assert.match(decided.execution.summary, /resumed after restart/);
+  // sfield checked the original approval in the original run: same sfield run and approval ids, no re-grant.
+  assert.equal(decided.taskRun.sfieldRunId, pending.run.sfieldRunId);
+  const sfApprovals = await app.internals.runtime!.sfieldApprovals(pending.run.sfieldRunId!);
+  assert.deepEqual(sfApprovals.map((a) => a.id), [pending.run.sfieldApprovalId], "exactly one sfield approval, the original");
   await client.request(`/api/approvals/${pending.approval.id}/decide`, { decision: "approve", actor: "On-call Lead" }, 409);
 
   // Denial after a restart also works and sends nothing.
@@ -212,4 +216,59 @@ test("pending integration approvals survive a server restart and still execute e
   await client.request(`/api/approvals/${p1b.approval.id}/decide`, { decision: "deny", actor: "On-call Lead" });
   const view = await client.request<IntegrationTasksView>("/api/integrations");
   assert.equal(view.runs.find((r) => r.runId === p1b.run.runId)?.state, "denied");
+});
+
+test("the approval check inside the sfield tool rejects missing, forged, replayed, and mismatched approvals", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "cep-int-forged-"));
+  const gateway = await startFixtureGateway();
+  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: gateway.settings, mode: "test", inspectorEnabled: true });
+  t.after(async () => { await app.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
+  const client = await testClient(app.url);
+  const runtime = app.internals.runtime!;
+  const approvals = app.internals.approvalStore;
+  const view = await client.request<IntegrationTasksView>("/api/integrations");
+  const create = view.contracts.find((c) => c.ref === CREATE)!;
+  const p1 = { title: "Checkout outage", priority: "P1", service: "checkout", idempotencyKey: "idem_forged_test_1" };
+
+  // Calls go straight to the tool in an ungated scope (bounded_auto lets writes through), so only the handler can stop them.
+  const call = async (ref: string, inputs: Record<string, unknown>) => {
+    const out = await runtime.executeIntegrationTask("attacker", ref, inputs as never, false);
+    assert.equal(out.kind, "result");
+    return (out as { result: { status: string; error?: { code: string; message: string } } }).result;
+  };
+  const denied = (r: { status: string; error?: { code: string } }, why: string) => {
+    assert.equal(r.status, "failed", why);
+    assert.equal(r.error?.code, "TASK_POLICY_DENIED", why);
+  };
+  const dispatch = (input: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    taskRef: CREATE, contractDigest: create.contractDigest, bindingDigest: create.bindingDigest, inputJson: JSON.stringify(input), ...extra,
+  });
+
+  denied(await call(CREATE, { input: p1 }), "no approval id");
+  denied(await call(CREATE, { input: p1, approvalId: "apr_forged000000000000" }), "forged approval id");
+  denied(await call("int.dispatch.write@1.0.0", dispatch(p1, { approvalId: "apr_forged000000000000" })), "forged id via dispatcher");
+
+  // A real request that is still pending (not approved) does not authorize anything.
+  const pending = await client.request<{ run: TaskRun; approval: ApprovalRecord }>("/api/integrations/tasks/run",
+    { toolRef: CREATE, input: p1, requestedBy: "Author A" }, 202);
+  const id = pending.approval.id;
+  denied(await call(CREATE, { input: p1, approvalId: id }), "pending approval");
+
+  // Approved and claimed, but for different input / task / digests → still denied.
+  approvals.decide(id, { decision: "approve", actor: "On-call Lead" } as never);
+  assert.ok(approvals.claimForExecution(id).ok);
+  denied(await call(CREATE, { input: { ...p1, service: "payments" }, approvalId: id }), "input changed after approval");
+  denied(await call(CREATE, { input: { ...p1, priority: "P1", title: "Something else" }, approvalId: id }), "title changed after approval");
+  denied(await call("int.dispatch.write@1.0.0", dispatch(p1, { approvalId: id, contractDigest: "sha256:stale0000000000" })), "stale contract digest");
+  denied(await call("int.dispatch.read@1.0.0", { ...dispatch(p1, { approvalId: id }) }), "write task through the read dispatcher");
+
+  // The exact approved call is the only one that runs.
+  const ok = await call(CREATE, { input: p1, approvalId: id });
+  assert.equal(ok.status, "succeeded", JSON.stringify(ok));
+  approvals.markExecuted(id, { summary: "test", sfieldRunId: "run_test" });
+  denied(await call(CREATE, { input: p1, approvalId: id }), "replay of an executed approval");
+
+  // Ungated input needs no approval, through either route.
+  assert.equal((await call(CREATE, { input: { ...p1, priority: "P3", idempotencyKey: "idem_forged_test_2" } })).status, "succeeded");
+  assert.equal((await call("int.dispatch.write@1.0.0", dispatch({ ...p1, priority: "P3", idempotencyKey: "idem_forged_test_3" }))).status, "succeeded");
 });

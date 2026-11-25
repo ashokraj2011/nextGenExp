@@ -1422,7 +1422,7 @@ export async function startApp(options: Options) {
       }
       if (outcome.record.status === "denied") {
         if (outcome.record.targetKind === "integration_task") {
-          await integrationService.deny(outcome.record);
+          await integrationService.deny(outcome.record, principalId);
         }
         if (outcome.record.targetKind === "workflow_step") {
           const runId = typeof outcome.record.payload.runId === "string" ? outcome.record.payload.runId : outcome.record.recordId;
@@ -1630,8 +1630,8 @@ export async function startApp(options: Options) {
       }
       if (id === "contracts" && operation === "publish" && method === "POST") {
         const { ref } = await body(req, z.object({ ref: z.string().min(3).max(120) }).strict());
-        const published = await guard(() => integrationTasks.publish(ref));
-        return json(res, { ...published, sfieldRegistered: runtime?.registeredIntegrationTools().has(ref) ?? false, sfieldRoute: runtime?.registeredIntegrationTools().has(ref) ? "dedicated" : runtime ? "dispatcher" : "unavailable", view: integrationService.view() });
+        const published = await guard(() => integrationService.publish(ref));
+        return json(res, { ...published, view: integrationService.view() });
       }
       if (id === "tasks" && operation === "run" && method === "POST") {
         const data = await body(req, runTaskRequestSchema, 32 * 1024);
@@ -1831,6 +1831,8 @@ export async function startApp(options: Options) {
 
   return {
     url: "http://127.0.0.1:" + (server.address() as AddressInfo).port,
+    /** For tests: direct access to the sfield runtime and approval store (e.g. to call tools with forged approvals). */
+    internals: { runtime, approvalStore },
     async close() {
       for (const stream of streams) stream.end();
       await vite?.close();

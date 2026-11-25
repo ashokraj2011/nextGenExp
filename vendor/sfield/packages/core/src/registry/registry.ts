@@ -122,6 +122,18 @@ export class ToolRegistry {
     this.byId.set(def.id, list);
   }
 
+  /**
+   * Adds a new code tool after the first run. Only called by SField.reload once the candidate lock that contains it
+   * passed governance; existing refs are never replaced.
+   */
+  registerLate(def: ToolDefinition): ToolDefinition {
+    if (this.defs.has(def.ref)) throw new SFieldError("DUPLICATE_TOOL", `${def.ref} is already registered`, { path: `tools.${def.id}` });
+    if (!def.handler) throw new SFieldError("INVALID_CONFIG", `tools.${def.id}: code tools need a handler`, { path: `tools.${def.id}.handler` });
+    this.put(def);
+    this.functionAdapter.bind(def, def.handler);
+    return def;
+  }
+
   freeze(): void {
     this.frozen = true;
   }

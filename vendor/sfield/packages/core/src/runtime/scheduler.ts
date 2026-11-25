@@ -63,6 +63,9 @@ export class Scheduler {
   async wakeup(runId: string): Promise<void> {
     const run = await this.persistence.getRun(runId);
     if (!run) return;
+    // External execution scopes are driven by their host loop (registry.execute with the same callId), not by the
+    // agent runtime. Scheduling one here re-claims its scope and breaks the host's pending call.
+    if (run.kind === "external") return;
     this.telemetry?.event?.("sfield.run.wakeup", { runId });
     this.schedule(runId, run.scopeId).catch(() => undefined);
   }

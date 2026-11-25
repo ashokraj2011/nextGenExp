@@ -20,6 +20,8 @@ import { compileConfig, GENERIC_PARAMS, PROVIDER_PARAMS, shorthandIdentity, type
 import { explainConfig, formatExplanation } from "./config/explain.js";
 import { HOST_DEFAULTS } from "./config/defaults.js";
 import { ToolRegistry, type ToolDescription } from "./registry/registry.js";
+import { normalizeTool, type ToolSpec } from "./registry/define-tool.js";
+import type { PolicyPreset } from "./policy/presets.js";
 import { PluginManager } from "./plugins/manager.js";
 import { AnthropicProvider } from "./gateway/providers/anthropic.js";
 import { OpenAICompatibleProvider } from "./gateway/providers/openai-compatible.js";
@@ -219,21 +221,33 @@ export class SField {
    * atomically. Existing runs stay pinned to their version; an unapproved or invalid candidate leaves the running
    * configuration untouched.
    */
-  async reload(input: { config?: string | JsonObject; overrides?: JsonObject[] } = {}): Promise<{ digest: string; previous: string; changed: boolean }> {
+  async reload(input: { config?: string | JsonObject; overrides?: JsonObject[]; tools?: DefineToolInput[] } = {}): Promise<{ digest: string; previous: string; changed: boolean; added: string[] }> {
     const previous = this.i.current.config.digest;
     const options: SFieldCreateOptions = { ...this.i.options, config: input.config ?? this.i.options.config, overrides: input.overrides ?? this.i.options.overrides };
+    // Additional code tools are additive only: an id@version that already exists must be byte-identical (§8.1).
+    const extra = (input.tools ?? []).map((t) => normalizeTool(t as ToolSpec, { source: "registerTool", defaultEffect: "read" }))
+      .filter((def) => {
+        const existing = this.i.registry.get(def.ref);
+        if (existing && existing.digest !== def.digest) throw new SFieldError("DUPLICATE_TOOL", `${def.ref} is already registered with a different definition`, { path: `tools.${def.id}`, suggestion: "Publish a new version instead of changing a registered one" });
+        if (!def.handler) throw new SFieldError("INVALID_CONFIG", `tools.${def.id}: code tools need a handler`, { path: `tools.${def.id}.handler` });
+        return !existing;
+      });
     const { loaded, ctx, configDir } = await prepareCompile(options, { validateOnly: true, registry: this.i.registry, plugins: this.i.plugins });
+    ctx.registrations.codeTools = [...ctx.registrations.codeTools, ...extra];
     const candidate = compileConfig(loaded, ctx);
-    if (candidate.digest === previous) return { digest: previous, previous, changed: false };
+    if (candidate.digest === previous) return { digest: previous, previous, changed: false, added: [] };
+    // Governance sees the candidate lock (including the new tools) before anything is registered.
     await checkLockApproved(candidate.digest, this.i.options.governance, this.i.deployment, { lockApprovals: this.i.persistence.lockApprovals, evalReports: this.i.persistence.evalReports });
+    for (const def of extra) this.i.registry.registerLate(def);
     for (const t of Object.values(candidate.tools)) this.i.registry.registerConfigured(t);
     this.i.registry.verifyLock(candidate.lock);
     const version = assembleVersion(candidate, options, this.i.plugins, this.i.secrets, configDir);
     this.i.versions.set(candidate.digest, version);
     this.i.current = version;
     this.i.options = options;
-    await this.i.persistence.appendAudit([{ id: newId("aud"), at: nowIso(), tenantId: "host", type: "config_reloaded", data: { previous, digest: candidate.digest }, preset: this.i.preset?.name }]);
-    return { digest: candidate.digest, previous, changed: true };
+    const added = extra.map((d) => d.ref);
+    await this.i.persistence.appendAudit([{ id: newId("aud"), at: nowIso(), tenantId: "host", type: "config_reloaded", data: { previous, digest: candidate.digest, added }, preset: this.i.preset?.name }]);
+    return { digest: candidate.digest, previous, changed: true, added };
   }
 
   // ------------------------------------------------------------ surfaces (§7.2)
@@ -261,11 +275,38 @@ export class SField {
     list: (filter: { tenantId?: string; runId?: string; status?: InputRequestRecord["status"][] } = {}): Promise<InputRequestRecord[]> => this.i.persistence.listInputRequests(filter),
   };
 
+  private readonly openScopes = new Set<ExternalExecutionScope>();
+
+  private scopeDeps() {
+    return { config: this.i.current.config, persistence: this.i.persistence, registry: this.i.registry, pipeline: this.i.pipeline, approvals: this.i.approvals, bus: this.i.bus, ownerId: this.i.ownerId, leaseMs: 30_000, presetName: this.i.preset?.name, onEnd: (s: ExternalExecutionScope) => void this.openScopes.delete(s) };
+  }
+
   readonly executions = {
-    open: async (input: Omit<ExecutionScopeOptions, "principal"> & { principal?: Principal }): Promise<ExecutionScope> => {
+    open: async (input: Omit<ExecutionScopeOptions, "principal" | "runId"> & { principal?: Principal }): Promise<ExecutionScope> => {
+      if (this.closed) throw new SFieldError("STATE_UNAVAILABLE", "sfield is closing");
       const principal = this.i.runs.resolvePrincipal(input.principal);
-      const scope = new ExternalExecutionScope({ config: this.i.current.config, persistence: this.i.persistence, registry: this.i.registry, pipeline: this.i.pipeline, approvals: this.i.approvals, bus: this.i.bus, ownerId: this.i.ownerId, leaseMs: 30_000, presetName: this.i.preset?.name }, { ...input, principal });
-      return scope.open();
+      const scope = new ExternalExecutionScope(this.scopeDeps(), { ...input, principal });
+      await scope.open();
+      this.openScopes.add(scope);
+      return scope;
+    },
+    /**
+     * Resumes an external scope by id (for example after a restart), with its original principal, preset, and pinned
+     * configuration digest. Calls waiting for approval continue with `registry.execute(ref, inputs, { callId })`.
+     */
+    resume: async (input: { runId: string; principal?: Principal; preset?: PolicyPreset; budget?: ExecutionScopeOptions["budget"] }): Promise<ExecutionScope> => {
+      if (this.closed) throw new SFieldError("STATE_UNAVAILABLE", "sfield is closing");
+      const caller = this.i.runs.resolvePrincipal(input.principal);
+      const run = await this.i.persistence.getRun(input.runId);
+      if (!run) throw new SFieldError("NOT_FOUND", `execution scope ${input.runId} not found`);
+      if (run.tenantId !== caller.tenantId) throw new SFieldError("ACCESS_DENIED", "principal tenant does not match the execution scope");
+      const scope = new ExternalExecutionScope(this.scopeDeps(), {
+        principal: run.principal, purpose: run.agentId.replace(/^external:/, ""), runId: run.runId,
+        ...(input.preset ? { preset: input.preset } : {}), ...(input.budget ? { budget: input.budget } : {}),
+      });
+      await scope.reopen();
+      this.openScopes.add(scope);
+      return scope;
     },
   };
 
@@ -396,6 +437,8 @@ export class SField {
   async close(opts: { drainMs?: number } = {}): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    // Open external scopes are suspended, not finished: their pending calls resume after restart without waiting for a lease.
+    await Promise.all([...this.openScopes].map((s) => s.suspend().catch(() => undefined)));
     await this.i.scheduler.drain(opts.drainMs ?? 5000);
     this.i.stopController.abort();
     await this.i.plugins.stop(AbortSignal.timeout(5000));

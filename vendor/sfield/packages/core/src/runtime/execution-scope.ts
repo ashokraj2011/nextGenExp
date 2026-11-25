@@ -18,6 +18,8 @@ export interface ExecutionScopeOptions {
   purpose: string;
   budget?: { maxCostMicroUsd?: number; maxToolCalls?: number };
   preset?: PolicyPreset;
+  /** Resume an existing external scope by run id instead of opening a new one. */
+  runId?: string;
 }
 
 export interface ExecutionScopeDeps {
@@ -30,6 +32,8 @@ export interface ExecutionScopeDeps {
   ownerId: string;
   leaseMs: number;
   presetName?: string;
+  /** Called once when the scope is closed or suspended (lets the host track open scopes). */
+  onEnd?: (scope: ExternalExecutionScope) => void;
 }
 
 export interface ExecutionScope {
@@ -44,6 +48,11 @@ export interface ExecutionScope {
   modelCall(usage: { inputTokens: number; outputTokens: number; costMicroUsd?: number; model?: string }): Promise<void>;
   checkpoint(note?: string): Promise<void>;
   close(): Promise<RunResult>;
+  /**
+   * Releases ownership without finishing the run, so the scope (and any call waiting for approval) can be resumed
+   * later, by id, by this or another process: `sfield.executions.resume({ runId })`.
+   */
+  suspend(): Promise<void>;
 }
 
 export class ExternalExecutionScope implements ExecutionScope {
@@ -61,7 +70,7 @@ export class ExternalExecutionScope implements ExecutionScope {
     private readonly deps: ExecutionScopeDeps,
     opts: ExecutionScopeOptions,
   ) {
-    this.id = newId("run");
+    this.id = opts.runId ?? newId("run");
     this.principal = opts.principal;
     this.preset = opts.preset ?? "supervised";
     this.budget = { maxCostMicroUsd: opts.budget?.maxCostMicroUsd ?? 1_000_000, maxToolCalls: opts.budget?.maxToolCalls ?? 50 };
@@ -105,6 +114,39 @@ export class ExternalExecutionScope implements ExecutionScope {
     return this;
   }
 
+  /** Re-acquires an existing external scope after a restart. Pending calls keep their callId and approval. */
+  async reopen(): Promise<this> {
+    const p = this.deps.persistence;
+    const run = await p.getRun(this.id);
+    if (!run) throw new SFieldError("NOT_FOUND", `execution scope ${this.id} not found`);
+    if (run.kind !== "external") throw new SFieldError("ACCESS_DENIED", `run ${this.id} is not an external execution scope`);
+    if (run.state !== "running") throw new SFieldError("STATE_UNAVAILABLE", `execution scope ${this.id} is ${run.state}`, { runId: this.id });
+    if (run.expiresAt <= nowIso()) throw new SFieldError("STATE_UNAVAILABLE", `execution scope ${this.id} expired at ${run.expiresAt}`, { runId: this.id });
+    const claim = await p.claim(this.id, this.deps.ownerId, this.deps.leaseMs);
+    if (!claim) {
+      throw new SFieldError("OWNERSHIP_UNAVAILABLE", `execution scope ${this.id} is still leased by its previous owner`, {
+        runId: this.id, retryable: true, suggestion: `Retry after the lease expires (at most ${Math.ceil(this.deps.leaseMs / 1000)}s), or suspend scopes on shutdown`,
+      });
+    }
+    this.claim = claim;
+    this.run = run;
+    this.calls = (await p.listCalls(this.id)).length;
+    this.renew = setInterval(() => void this.deps.persistence.renew(this.claim, this.deps.leaseMs).catch(() => undefined), Math.max(1000, this.deps.leaseMs / 3));
+    this.renew.unref();
+    this.deps.registry.freeze();
+    await p.appendAudit([{ id: newId("aud"), at: nowIso(), tenantId: this.principal.tenantId, runId: this.id, type: "external_scope_resumed", principal: { tenantId: this.principal.tenantId, subjectId: this.principal.subjectId }, data: { epoch: claim.epoch, calls: this.calls } }]);
+    return this;
+  }
+
+  async suspend(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    if (this.renew) clearInterval(this.renew);
+    await this.deps.persistence.appendAudit([{ id: newId("aud"), at: nowIso(), tenantId: this.principal.tenantId, runId: this.id, type: "external_scope_suspended", principal: { tenantId: this.principal.tenantId, subjectId: this.principal.subjectId }, data: { calls: this.calls } }]).catch(() => undefined);
+    await this.deps.persistence.release(this.claim).catch(() => undefined);
+    this.deps.onEnd?.(this);
+  }
+
   readonly registry = {
     list: (): ToolDescription[] => this.deps.registry.list().map((d) => this.deps.registry.describe(d.ref)),
     describe: (ref: string): ToolDescription => this.deps.registry.describe(ref),
@@ -122,7 +164,8 @@ export class ExternalExecutionScope implements ExecutionScope {
       } else if (existing.result && existing.state !== "waiting_approval") {
         return existing.result; // confirmed result is reused, never re-executed (§16.4)
       }
-      const prepared = await this.deps.pipeline.prepare({ def, inputs, principal: this.principal, runId: this.id, callId, preset: this.preset });
+      // Pinned to the scope's configuration digest, so a resumed call re-prepares to the same digest its approval names.
+      const prepared = await this.deps.pipeline.prepare({ def, inputs, principal: this.principal, runId: this.id, callId, preset: this.preset, configDigest: this.run.configDigest });
       await p.updateCall(this.id, this.claim.epoch, callId, { state: "prepared", invocation: prepared.invocation });
       let approvalId: string | undefined;
       if (prepared.approval.required) {
@@ -183,6 +226,7 @@ export class ExternalExecutionScope implements ExecutionScope {
     this.deps.bus.publish(evs);
     await this.deps.persistence.release(this.claim);
     this.deps.bus.end(this.id);
+    this.deps.onEnd?.(this);
     return toResult(updated);
   }
 }

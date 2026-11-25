@@ -557,9 +557,11 @@ export interface IntegrationTaskRuntime {
   registeredIntegrationTools(): ReadonlySet<string>;
   dispatcherRef(effect: "read" | "write" | "destructive"): string;
   executeIntegrationTask(principalId: string, sfieldToolRef: string, toolInputs: JsonObject, gated: boolean): Promise<ExecOutcome>;
-  hasPendingIntegrationCall(sfieldApprovalId: string): boolean;
-  resumeIntegrationTask(sfieldApprovalId: string, approver: string, decision: "approve" | "deny"):
-    Promise<{ kind: "result"; result: ToolResult; sfieldRunId: string } | { kind: "denied" }>;
+  registerPublishedTask(contract: TaskContract): Promise<{ route: "dedicated" | "dispatcher"; reason?: string }>;
+  resumeIntegrationTask(
+    call: { sfieldApprovalId: string; sfieldRunId: string; callId: string; sfieldToolRef: string; toolInputs: JsonObject },
+    approver: string, decision: "approve" | "deny", principalId: string,
+  ): Promise<{ kind: "result"; result: ToolResult; sfieldRunId: string; resumed: boolean } | { kind: "denied"; resumed: boolean }>;
 }
 
 type ApprovalPayload = {
@@ -678,11 +680,19 @@ export class IntegrationTaskService {
     return { run };
   }
 
+  /** Publishes a draft and, when possible, registers it as a dedicated sfield tool right away (no restart). */
+  async publish(ref: string) {
+    const published = this.store.publish(ref);
+    const runtime = this.runtime();
+    const registration = runtime ? await runtime.registerPublishedTask(published.contract) : { route: "unavailable" as const, reason: "sfield runtime not configured" };
+    return { ...published, sfieldRegistered: registration.route === "dedicated", sfieldRoute: registration.route, ...(registration.reason ? { registrationNote: registration.reason } : {}) };
+  }
+
   /**
-   * Called after our approval store approved (and enforced dual control). Claims the record (execute-once), then:
-   * - native: the original sfield call is still open → sfield re-checks its digest-bound approval and dispatches;
-   * - restart-safe fallback: the call was lost (restart) → re-run the exact recorded tool inputs in a fresh scope.
-   *   The tool handler only dispatches if this approval record is claimed and matches version, binding and input.
+   * Called after our approval store approved (and enforced dual control). Claims the record (execute-once), then
+   * decides sfield's own digest-bound approval and continues the exact waiting call. After a restart, sfield resumes
+   * the original execution scope by id, so the approval the human decided is the one sfield checks at dispatch.
+   * The tool handler additionally requires this record to be claimed and to match version, binding and input.
    */
   async resume(record: ApprovalRecord, principalId = "cep-operator") {
     const run = this.store.runByApproval(record.id);
@@ -695,42 +705,50 @@ export class IntegrationTaskService {
       this.store.saveRun({ ...run, state: "failed", error: { kind: "policy_denied", retryable: false, message: "The task definition changed after approval was requested. Request it again." } });
       throw new IntegrationTaskError("definition_changed", `${run.toolRef} changed after approval was requested.`);
     }
+    const call = this.pendingCall(run, payload);
+    if (!call) throw new IntegrationTaskError("approval_payload_incomplete", `Approval ${record.id} predates resumable approvals; request the task again.`);
     const claim = this.approvals.claimForExecution(record.id);
     if (!claim.ok) throw new IntegrationTaskError(claim.code, claim.message);
     const approver = record.decidedBy ?? record.requester;
+    let out: Awaited<ReturnType<IntegrationTaskRuntime["resumeIntegrationTask"]>>;
     try {
-      let out: { kind: "result"; result: ToolResult; sfieldRunId: string } | { kind: "denied" };
-      let route: "native" | "restart_fallback" = "native";
-      if (run.sfieldApprovalId && runtime.hasPendingIntegrationCall(run.sfieldApprovalId)) {
-        out = await runtime.resumeIntegrationTask(run.sfieldApprovalId, approver, "approve");
-      } else {
-        route = "restart_fallback";
-        if (!payload.sfieldToolRef || !payload.toolInputs) throw new IntegrationTaskError("approval_payload_incomplete", `Approval ${record.id} predates restart-safe approvals; request the task again.`);
-        // Fresh scope. sfield gates it again (bound to the new prepared digest); the human decision already recorded
-        // in our store (with dual control) is applied to it, attributed to the same approver.
-        const exec = await runtime.executeIntegrationTask(principalId, payload.sfieldToolRef, payload.toolInputs, true);
-        out = exec.kind === "pending" ? await runtime.resumeIntegrationTask(exec.sfieldApprovalId, approver, "approve") : exec;
-      }
-      if (out.kind === "denied") throw new IntegrationTaskError("approval_denied", "sfield denied the approval.");
-      const finished = this.store.saveRun(this.applyResult({ ...run, state: "executing" }, out.result, out.sfieldRunId));
-      const summary = `${finished.toolRef} → ${finished.state}${finished.outcome ? ` (${finished.outcome.code})` : ""}${finished.error ? `: ${finished.error.message}` : ""}${route === "restart_fallback" ? " [restart-safe resume]" : ""}`.slice(0, 320);
-      const approval = this.approvals.markExecuted(record.id, { summary, sfieldRunId: out.sfieldRunId }) ?? record;
-      return { approval, run: finished, execution: { summary, sfieldRunId: out.sfieldRunId, route } };
+      out = await runtime.resumeIntegrationTask(call, approver, "approve", principalId);
     } catch (err) {
-      // Nothing was dispatched (rejected before the handler ran or by the handler's policy check): allow a retry.
+      // Rejected before dispatch: release the claim so the approval can be retried.
       this.approvals.releaseClaim(record.id);
+      const code = (err as { code?: string }).code ?? "";
+      if (code === "OWNERSHIP_UNAVAILABLE") {
+        throw new IntegrationTaskError("retry_shortly", "The previous server instance still holds this call's lease (it did not shut down cleanly). Approve again in about 30 seconds.");
+      }
+      if (code === "NOT_FOUND" || code === "STATE_UNAVAILABLE" || code === "APPROVAL_EXPIRED" || code === "APPROVAL_DENIED") {
+        this.store.saveRun({ ...run, state: "expired", error: { kind: "policy_denied", retryable: true, message: `The waiting sfield call can no longer run (${code}). Request the task again.` } });
+        throw new IntegrationTaskError("approval_context_expired", `The waiting sfield call can no longer run (${code}). Request the task again.`);
+      }
       throw err;
     }
+    if (out.kind === "denied") {
+      this.approvals.releaseClaim(record.id);
+      throw new IntegrationTaskError("approval_denied", "sfield denied the approval.");
+    }
+    const finished = this.store.saveRun(this.applyResult({ ...run, state: "executing" }, out.result, out.sfieldRunId));
+    const summary = `${finished.toolRef} → ${finished.state}${finished.outcome ? ` (${finished.outcome.code})` : ""}${finished.error ? `: ${finished.error.message}` : ""}${out.resumed ? " [resumed after restart]" : ""}`.slice(0, 320);
+    const approval = this.approvals.markExecuted(record.id, { summary, sfieldRunId: out.sfieldRunId }) ?? record;
+    return { approval, run: finished, execution: { summary, sfieldRunId: out.sfieldRunId, resumed: out.resumed } };
   }
 
-  async deny(record: ApprovalRecord) {
+  async deny(record: ApprovalRecord, principalId = "cep-operator") {
     const run = this.store.runByApproval(record.id);
     if (!run) return;
-    const runtime = this.runtime();
-    if (run.sfieldApprovalId && runtime?.hasPendingIntegrationCall(run.sfieldApprovalId)) {
-      await runtime.resumeIntegrationTask(run.sfieldApprovalId, record.decidedBy ?? "approver", "deny").catch(() => undefined);
+    const call = this.pendingCall(run, record.payload as ApprovalPayload);
+    if (call) {
+      await this.runtime()?.resumeIntegrationTask(call, record.decidedBy ?? "approver", "deny", principalId).catch(() => undefined);
     }
     this.store.saveRun({ ...run, state: "denied", error: { kind: "policy_denied", retryable: false, message: `Denied by ${record.decidedBy ?? "approver"}${record.comment ? `: ${record.comment}` : ""}` } });
+  }
+
+  private pendingCall(run: TaskRun, payload: ApprovalPayload) {
+    if (!run.sfieldApprovalId || !run.sfieldRunId || !run.sfieldCallId || !payload.sfieldToolRef || !payload.toolInputs) return null;
+    return { sfieldApprovalId: run.sfieldApprovalId, sfieldRunId: run.sfieldRunId, callId: run.sfieldCallId, sfieldToolRef: payload.sfieldToolRef, toolInputs: payload.toolInputs };
   }
 
   /** Resolves an `outcome_unknown` write by calling the contract's read-only reconcile task with the same idempotency key. */

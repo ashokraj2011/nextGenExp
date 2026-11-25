@@ -831,19 +831,34 @@ export class Runtime implements IntegrationTaskRuntime {
   private integrationTools() {
     const store = this.integrationTasks;
     if (!store) return [];
-    const policyFor = (action: string, effect: "read" | "write" | "destructive", timeoutMs: number) => ({
+
+    // 1. Dedicated tools for versions published before startup: per-task schema, policy, and lock digest.
+    const dedicated = store.published().flatMap((contract) => {
+      const tool = this.dedicatedTool(contract);
+      if (!tool) return [];
+      this.registeredIntegrationRefs.add(contract.ref);
+      return [tool];
+    });
+    return [...dedicated, ...this.dispatcherTools()];
+  }
+
+  private integrationPolicy(action: string, effect: "read" | "write" | "destructive", timeoutMs: number) {
+    return {
       action, effect,
       // Approval is decided per call (scope preset) and also enforced in the handler; see runTaskCall.
       requiresApproval: false, maxAttempts: 1, retrySafety: "never" as const, timeoutMs,
       classification: "public" as const, maxOutputBytes: 48_000,
-    });
+    };
+  }
 
-    // 1. Dedicated tools for versions published before startup: per-task schema, policy, and lock digest.
-    const dedicated = store.published().flatMap((contract) => {
-      const integration = store.integration(contract.integrationId);
-      if (!integration) return [];
-      const id = taskToolId(contract.integrationId, contract.taskId);
-      const tool = defineTool({
+  /** One sfield tool per published task version: its own input schema, policy, and lock-manifest digest. */
+  private dedicatedTool(contract: TaskContract) {
+    const store = this.integrationTasks!;
+    const integration = store.integration(contract.integrationId);
+    if (!integration) return null;
+    const policyFor = this.integrationPolicy.bind(this);
+    const id = taskToolId(contract.integrationId, contract.taskId);
+    return defineTool({
         id,
         version: contract.version,
         description: contract.description,
@@ -867,10 +882,32 @@ export class Runtime implements IntegrationTaskRuntime {
           return this.runTaskCall(current, input, approvalId, ctx.signal);
         },
       });
-      this.registeredIntegrationRefs.add(contract.ref);
-      return [tool];
-    });
+  }
 
+  /**
+   * Registers a version published after startup as its own dedicated sfield tool, through sfield.reload: the
+   * candidate lock manifest (with the new tool) must pass lock governance before the tool exists. If it cannot be
+   * registered, the version still runs through the effect's dispatcher tool.
+   */
+  async registerPublishedTask(contract: TaskContract): Promise<{ route: "dedicated" | "dispatcher"; reason?: string }> {
+    if (this.registeredIntegrationRefs.has(contract.ref)) return { route: "dedicated" };
+    const tool = this.dedicatedTool(contract);
+    if (!tool) return { route: "dispatcher", reason: "integration not found" };
+    try {
+      const out = await this.sf.reload({ tools: [tool as unknown as DefineToolInput] });
+      if (out.added.includes(contract.ref) || this.sf.registry.list().some((d) => d.ref === contract.ref)) {
+        this.registeredIntegrationRefs.add(contract.ref);
+        return { route: "dedicated" };
+      }
+      return { route: "dispatcher", reason: "sfield did not add the tool" };
+    } catch (err) {
+      return { route: "dispatcher", reason: `${(err as { code?: string }).code ?? "RELOAD_FAILED"}: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300) };
+    }
+  }
+
+  private dispatcherTools() {
+    const store = this.integrationTasks!;
+    const policyFor = this.integrationPolicy.bind(this);
     // 2. Dispatchers (one per effect) for versions published after startup. Both digests are inputs, so the
     //    prepared-invocation digest (and therefore any sfield approval) is bound to the exact contract and binding.
     const dispatchers = (["read", "write", "destructive"] as const).map((effect) => defineTool({
@@ -911,8 +948,7 @@ export class Runtime implements IntegrationTaskRuntime {
         return this.runTaskCall(contract, input, approvalId, ctx.signal);
       },
     }));
-
-    return [...dedicated, ...dispatchers];
+    return dispatchers;
   }
 
   /**
@@ -950,35 +986,45 @@ export class Runtime implements IntegrationTaskRuntime {
     }
   }
 
+  /** sfield's own approval records for one run (audit / tests). */
+  sfieldApprovals(runId: string) {
+    return this.sf.approvals.list({ runId });
+  }
+
   hasPendingIntegrationCall(sfieldApprovalId: string): boolean {
     return this.pendingIntegrationCalls.has(sfieldApprovalId);
   }
 
-  async resumeIntegrationTask(sfieldApprovalId: string, approver: string, decision: "approve" | "deny") {
-    const pending = this.pendingIntegrationCalls.get(sfieldApprovalId);
-    if (!pending) throw new Error(`APPROVAL_CONTEXT_LOST: no pending sfield call for ${sfieldApprovalId}`);
-    this.pendingIntegrationCalls.delete(sfieldApprovalId);
-    clearTimeout(pending.timer);
+  /**
+   * Decides sfield's own digest-bound approval and continues the exact waiting call (same run, call id, prepared
+   * digest). If the server restarted, the original execution scope is resumed by id (sfield executions.resume), so
+   * the approval the human decided is the one sfield checks: nothing is re-requested or re-granted.
+   */
+  async resumeIntegrationTask(
+    call: { sfieldApprovalId: string; sfieldRunId: string; callId: string; sfieldToolRef: string; toolInputs: JsonObject },
+    approver: string, decision: "approve" | "deny", principalId: string,
+  ) {
+    const pending = this.pendingIntegrationCalls.get(call.sfieldApprovalId);
+    let scope: ExecutionScope;
+    let resumed = false;
+    if (pending) {
+      this.pendingIntegrationCalls.delete(call.sfieldApprovalId);
+      clearTimeout(pending.timer);
+      scope = pending.scope;
+    } else {
+      scope = await this.sf.executions.resume({ runId: call.sfieldRunId, principal: principalFor(principalId), preset: "supervised", budget: { maxToolCalls: 2 } });
+      resumed = true;
+    }
     try {
-      // sfield.approvals.decide() also wakes the scheduler, which re-claims this external scope's run and breaks the
-      // pending call ("epoch no longer owns run"). Record the decision through the same persistence call decide() uses,
-      // keeping its expiry rule; dispatch still validates the approval against the prepared invocation digest.
-      const persistence = this.sf.persistence;
-      const sfApproval = await persistence.getApproval(sfieldApprovalId);
-      if (!sfApproval) throw new Error(`APPROVAL_CONTEXT_LOST: sfield approval ${sfieldApprovalId} not found`);
-      const now = new Date().toISOString();
-      if (sfApproval.status === "pending" && sfApproval.expiresAt <= now) {
-        await persistence.decideApproval({ id: sfieldApprovalId, actor: { tenantId: "pzn-local", subjectId: "expiry" }, decision: "deny", comment: "expired", now });
-        throw new Error(`APPROVAL_CONTEXT_LOST: sfield approval ${sfieldApprovalId} expired`);
-      }
-      await persistence.decideApproval({ id: sfieldApprovalId, actor: { tenantId: "pzn-local", subjectId: approver.slice(0, 80) }, decision, now });
-      if (decision === "deny") return { kind: "denied" as const };
-      const result = await pending.scope.registry.execute(pending.sfieldToolRef, pending.toolInputs, {
-        callId: pending.callId, signal: AbortSignal.timeout(35_000),
+      await this.sf.approvals.decide({
+        approvalId: call.sfieldApprovalId, actor: { tenantId: "pzn-local", subjectId: approver.slice(0, 80) }, decision,
+        ...(decision === "deny" ? { comment: "denied in CEP" } : {}),
       });
-      return { kind: "result" as const, result, sfieldRunId: pending.scope.id };
+      if (decision === "deny") return { kind: "denied" as const, resumed };
+      const result = await scope.registry.execute(call.sfieldToolRef, call.toolInputs, { callId: call.callId, signal: AbortSignal.timeout(35_000) });
+      return { kind: "result" as const, result, sfieldRunId: scope.id, resumed };
     } finally {
-      await pending.scope.close().catch(() => undefined);
+      await scope.close().catch(() => undefined);
     }
   }
 
