@@ -1,11 +1,14 @@
 import profiles from "../../fixtures/host.json";
+import { findProfileById, listAllProfiles } from "../../packages/customer-profiles";
+import { resolveCustomerBindings } from "../../packages/customer-profiles/bindings";
 import { availableFundingOptions, fundingPreviewFrom } from "../../packages/capabilities";
 import { requiredContribution, savingsProjection } from "../../packages/capabilities/calculations";
-import { routingIntents } from "../../packages/contracts/routing-intents";
+import { allRoutingIntents } from "../../packages/contracts/routing-intents";
 import type { DisplayBlock } from "../../packages/contracts/surface";
 import { targetKey, type LayoutComponent, type UiDesign, type UiTargetOption } from "../../packages/contracts/ui-layout";
 import { conversationalTextAllowed } from "../../packages/experience/chat-policy";
 import { contentCatalog, readDemoBalance } from "../../packages/experience/content";
+import { findEffectiveContentById } from "../../packages/experience-registry/registry";
 import { compileUiLayoutPreview } from "../../packages/experience/ui-layout";
 import { fixtureGoalProgressProvider } from "../../packages/goal-progress";
 import { fixturePortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
@@ -15,7 +18,7 @@ import { ApiError } from "./store";
 export function uiTargetOptions(registry: CapabilityRegistry, principalId: string): UiTargetOption[] {
   const latest = new Map(registry.list(principalId).map((manifest) => [manifest.id, manifest]));
   return [
-    ...routingIntents.map(({ intentId, label, description }): UiTargetOption => ({ target: { kind: "intent", id: intentId }, label, description })),
+    ...allRoutingIntents().map(({ intentId, label, description }): UiTargetOption => ({ target: { kind: "intent", id: intentId }, label, description })),
     ...[...latest.values()].map(({ id, title, description }): UiTargetOption => ({ target: { kind: "capability", id }, label: title, description })),
   ];
 }
@@ -30,16 +33,25 @@ export function validateUiDesign(design: UiDesign, options: UiTargetOption[], pu
     throw new ApiError(400, "invalid_ui_copy", "Use headings and explanatory copy. Add verified components for account figures, recommendations, or results.");
   }
   if (!publishing) return;
-  if (!design.description || !design.targets.length || !design.slots.some(({ kind }) => kind === "block")) {
-    throw new ApiError(400, "ui_layout_incomplete", "Add a description, an attachment, and at least one component before publishing.");
+  if (!design.description || !design.targets.length || !design.slots.some(({ kind }) => kind === "block" || kind === "form" || kind === "widget")) {
+    throw new ApiError(400, "ui_layout_incomplete", "Add a description, an attachment, and at least one component, form, or widget before publishing.");
   }
   if (design.slots.some((slot) => slot.kind === "text" && !slot.heading && !slot.body)) {
     throw new ApiError(400, "ui_layout_incomplete", "Fill in or remove any empty text sections.");
   }
+  if (design.slots.some((slot) => slot.kind === "form" && (!slot.title.trim() || slot.fields.length === 0))) {
+    throw new ApiError(400, "ui_layout_incomplete", "Give each interactive form a title and at least one field before publishing.");
+  }
+  if (design.slots.some((slot) => slot.kind === "widget" && !slot.title.trim())) {
+    throw new ApiError(400, "ui_layout_incomplete", "Give each data-bound widget a title before publishing.");
+  }
 }
 
 function content(id: string) {
-  const published = contentCatalog.entries.find((entry) => entry.contentId === id && entry.publicationStatus === "published");
+  const live = findEffectiveContentById(id);
+  const published = (live && live.publicationStatus === "published")
+    ? live
+    : contentCatalog.entries.find((entry) => entry.contentId === id && entry.publicationStatus === "published");
   if (!published) throw new Error("UI preview content is missing.");
   return published;
 }
@@ -56,12 +68,20 @@ function sampleDetails(id: string) {
   return { shared, body, description, steps };
 }
 
-export async function previewUiLayout(design: UiDesign) {
-  const { personaId, syntheticMid } = profiles.personas[0];
-  const [goal, portfolio] = await Promise.all([
-    fixtureGoalProgressProvider.read(syntheticMid), fixturePortfolioSnapshotProvider.read(syntheticMid),
+export async function previewUiLayout(design: UiDesign, requestedPersonaId?: string) {
+  const activeProfile = (requestedPersonaId ? findProfileById(requestedPersonaId) : undefined)
+    ?? listAllProfiles()[0]
+    ?? profiles.personas[0];
+  const { personaId, syntheticMid } = activeProfile;
+  const fallbackMid = profiles.personas[0].syntheticMid;
+  const [goalRaw, portfolioRaw] = await Promise.all([
+    fixtureGoalProgressProvider.read(syntheticMid),
+    fixturePortfolioSnapshotProvider.read(syntheticMid),
   ]);
+  const goal = goalRaw ?? await fixtureGoalProgressProvider.read(fallbackMid);
+  const portfolio = portfolioRaw ?? await fixturePortfolioSnapshotProvider.read(fallbackMid);
   if (!goal || !portfolio) throw new Error("UI preview data is missing.");
+  const bindings = resolveCustomerBindings(personaId);
   const funding = availableFundingOptions(true, 50_000);
   const balance = readDemoBalance(personaId, syntheticMid, Date.parse(portfolio.asOf));
   const education = sampleDetails("balance_education");
@@ -95,5 +115,9 @@ export async function previewUiLayout(design: UiDesign) {
     } },
     PznRuleCreation: { component: "PznRuleCreation", props: { scenarioId: profiles.defaultScenarioId, personaId } },
   };
-  return compileUiLayoutPreview(design, design.slots.flatMap((slot) => slot.kind === "block" ? [samples[slot.component]] : []));
+  return compileUiLayoutPreview(
+    design,
+    design.slots.flatMap((slot) => slot.kind === "block" ? [samples[slot.component]] : []),
+    bindings,
+  );
 }

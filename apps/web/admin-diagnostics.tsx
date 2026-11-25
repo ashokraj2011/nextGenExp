@@ -1,13 +1,84 @@
 import { useEffect, useId, useState } from "react";
-import { RotateCw } from "lucide-react";
+import { RotateCw, ShieldCheck } from "lucide-react";
 import { adminPaths } from "../../packages/contracts/admin-paths";
-import type { Bootstrap, ConversationView } from "../../packages/contracts/api";
+import type { Bootstrap, ConversationView, DomainWriteAuditEntry } from "../../packages/contracts/api";
 import { pendingActionsContext } from "../../packages/contracts/workspace";
 import { api, toolSetupErrorMessage } from "./api";
 import { diagnosticHref } from "./admin-navigation";
 import { CallLogs, PendingActionLogs } from "./call-logs";
 import { Inspector } from "./inspector";
 import { readActiveConversation, rememberActiveConversation } from "./conversation-storage";
+
+function WriteAuditLogs() {
+  const [data, setData] = useState<{ toolRef: string; entries: DomainWriteAuditEntry[] }>();
+  const [error, setError] = useState("");
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    void api.writeAudit().then((res) => {
+      if (active) setData(res);
+    }, (err: unknown) => {
+      if (active) setError(toolSetupErrorMessage(err));
+    });
+    return () => { active = false; };
+  }, [tick]);
+
+  return (
+    <section className="admin-card" aria-labelledby="write-audit-title">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+        <div>
+          <h2 id="write-audit-title" style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+            <ShieldCheck size={18} aria-hidden="true" />
+            Governed sfield Write Audit Log
+          </h2>
+          <p>
+            Every operator-confirmed write-back (IT rollbacks, Sales discount approvals, Customer 360 form updates) executed through{" "}
+            <code>{data?.toolRef ?? "cep.domain.execute_write@1.0.0"}</code>.
+          </p>
+        </div>
+        <button className="secondary-button" type="button" onClick={() => setTick((t) => t + 1)}>
+          <RotateCw size={15} aria-hidden="true" />Refresh
+        </button>
+      </div>
+      {error && <p className="request-notice" role="alert" style={{ marginTop: "12px" }}>{error}</p>}
+      {!data && !error && <p className="workspace-loading" role="status">Loading audit log…</p>}
+      {data && data.entries.length === 0 && (
+        <p className="admin-muted" style={{ marginTop: "14px" }}>
+          No governed write actions recorded yet. Approve a rollback in IT Ops, approve a discount in RevOps, or submit a Customer 360 form to see immutable sfield audit entries here.
+        </p>
+      )}
+      {data && data.entries.length > 0 && (
+        <div className="dyn-table-wrap" style={{ marginTop: "14px" }}>
+          <table className="dyn-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Domain</th>
+                <th>Record</th>
+                <th>Action &amp; Summary</th>
+                <th>Actor</th>
+                <th>sfield Run ID</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.entries.map((entry) => (
+                <tr key={entry.auditId}>
+                  <td>{new Date(entry.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</td>
+                  <td><code>{entry.domain}</code></td>
+                  <td><strong>{entry.recordId}</strong></td>
+                  <td><code>{entry.action}</code> — {entry.summary}</td>
+                  <td>{entry.actor}</td>
+                  <td><code>{entry.sfieldRunId}</code></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
 
 export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspector"; selectThread: (id: string) => void }) {
   const selectId = useId();
@@ -20,6 +91,7 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
   const path = adminPaths[view];
   const title = view === "logs" ? "Call logs" : "Developer inspector";
   const pendingActionView = view === "logs" && query.get("source") === pendingActionsContext;
+  const writeAuditView = view === "logs" && query.get("source") === "write_audit";
 
   useEffect(() => {
     let active = true;
@@ -36,27 +108,35 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
   }, [query, selectThread]);
 
   useEffect(() => {
-    if (!selectedId || pendingActionView) return;
+    if (!selectedId || pendingActionView || writeAuditView) return;
     let active = true;
     void api.conversation(selectedId).then((row) => {
       if (active) setConversation(row);
     }, (error: unknown) => { if (active) setNotice(toolSetupErrorMessage(error)); });
     return () => { active = false; };
-  }, [selectedId, refresh, pendingActionView]);
+  }, [selectedId, refresh, pendingActionView, writeAuditView]);
 
   const loaded = conversation?.id === selectedId ? conversation : undefined;
   const requestedTurn = loaded?.id === query.get("thread") ? query.get("turn") ?? undefined : undefined;
   const pendingQuery = new URLSearchParams({ source: pendingActionsContext });
-  if (selectedId) pendingQuery.set("thread", selectedId);
+  const writeAuditQuery = new URLSearchParams({ source: "write_audit" });
+  if (selectedId) {
+    pendingQuery.set("thread", selectedId);
+    writeAuditQuery.set("thread", selectedId);
+  }
   return <main className="admin-main admin-diagnostics" aria-labelledby="diagnostics-title">
     <header className="admin-heading"><h1 id="diagnostics-title">{title}</h1></header>
     {view === "logs" && <nav className="log-sources" aria-label="Log sources">
-      <a className="rail-link" aria-current={pendingActionView ? undefined : "page"}
+      <a className="rail-link" aria-current={!pendingActionView && !writeAuditView ? "page" : undefined}
         href={diagnosticHref(adminPaths.logs, selectedId, requestedTurn)}>Chat calls</a>
       <a className="rail-link" aria-current={pendingActionView ? "page" : undefined}
         href={adminPaths.logs + "?" + pendingQuery}>Pending actions</a>
+      <a className="rail-link" aria-current={writeAuditView ? "page" : undefined}
+        href={adminPaths.logs + "?" + writeAuditQuery}>Write audit (sfield)</a>
     </nav>}
-    {pendingActionView ? <PendingActionLogs profiles={configuration?.personas ?? []} /> : <section className="admin-card diagnostics-picker">
+    {pendingActionView ? <PendingActionLogs profiles={configuration?.personas ?? []} />
+      : writeAuditView ? <WriteAuditLogs />
+      : <section className="admin-card diagnostics-picker">
       <label htmlFor={selectId}>Conversation</label>
       <div>
         <select id={selectId} value={selectedId} disabled={!configuration?.conversations.length} onChange={(event) => {
@@ -80,8 +160,8 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
       </div>
     </section>}
     {notice && <p className="request-notice" role="alert">{notice}</p>}
-    {!pendingActionView && selectedId && !loaded && !notice && <p className="workspace-loading" role="status">Loading conversation…</p>}
-    {view === "logs" && !pendingActionView && (!selectedId || loaded) && <CallLogs key={loaded?.id} turns={loaded?.turns ?? []} turnId={requestedTurn} />}
+    {!pendingActionView && !writeAuditView && selectedId && !loaded && !notice && <p className="workspace-loading" role="status">Loading conversation…</p>}
+    {view === "logs" && !pendingActionView && !writeAuditView && (!selectedId || loaded) && <CallLogs key={loaded?.id} turns={loaded?.turns ?? []} turnId={requestedTurn} />}
     {view === "inspector" && configuration && (!selectedId || loaded) && <Inspector key={loaded?.id} configuration={configuration}
       conversation={loaded} turnId={requestedTurn} create={async (personaId, scenarioId) => {
         setNotice("");

@@ -1,5 +1,6 @@
 import { defineTool, ToolError, type DefineToolInput, type JsonObject, type JsonValue, type Principal, type SField, type ToolHandlerContext, type ToolResult } from "@sfield/core";
 import host from "../../fixtures/host.json";
+import { findProfileById, type PersonaRecord } from "../../packages/customer-profiles";
 import { addressFields, capabilityRef, type ExecutionBudget, type CapabilityManifest, type EligibilityGrant, type Evidence, type ExecutionPlan, type InputValues, type Journey, type OutputKind, type PlanProposal, type StepResult } from "../../packages/contracts/agentic";
 import { DECISION_TTL } from "../../packages/contracts/domain";
 import { fundingStatusSchema } from "../../packages/contracts/funding-workflow";
@@ -29,7 +30,7 @@ function readResult(result: ToolResult): unknown {
 }
 const reasonCode = (error: unknown) => error instanceof Rejected ? error.code : error instanceof ToolError ? error.code : "TOOL_UNAVAILABLE";
 
-type Persona = typeof host.personas[number];
+type Persona = PersonaRecord;
 type BoundRead =
   | { kind: "decision"; contextId: string }
   | { kind: "capability"; journeyId: string; stepId: string; tool: CapabilityTool; manifest: CapabilityManifest; grant: EligibilityGrant;
@@ -91,7 +92,7 @@ export class AgenticExecution {
   }
 
   persona(turn: TurnRecord) {
-    const persona = host.personas.find(({ personaId }) => personaId === turn.scope.personaId);
+    const persona = findProfileById(turn.scope.personaId);
     requireCheck(persona, "PERSONA_MISMATCH");
     return persona;
   }

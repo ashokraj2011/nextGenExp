@@ -1,0 +1,625 @@
+import { mkdirSync } from "node:fs";
+import { resolve } from "node:path";
+import { dynamicCanvasSchema, type DynamicCanvasNode, type DynamicCanvasProps } from "../../packages/contracts/dynamic-canvas";
+import { widgetDraftSchema, type WidgetDraft } from "../../packages/contracts/widget";
+import { runCopilotPrompt } from "./copilot-acp-client";
+import type { GatewaySettings } from "./gateway";
+import type { OpsIncidentStore } from "./ops-store";
+import type { SalesDealStore } from "./sales-store";
+import { generateWidgetFromText } from "./widget-library";
+
+const dynamicUiTrigger = /\b(widget|table|bar chart|chart|graph|dashboard|visuali[sz]e|visuali[sz]ation|calculator|simulator|matrix|breakdown|dynamic ui|custom ui|interactive|approval\s+(?:card|flow|form|workflow|request)|timeline|roadmap|triage|incident\s+(?:triage|dashboard|timeline|queue|status|report|response)|rollback|deal\s+desk|sales\s+pipeline|discount\s+approval|close[- ]plan|intake\s+form|build\s+(?:me\s+)?a\b|design\s+(?:me\s+)?a\b|generate\s+(?:me\s+)?a\b|create\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist|workflow)|make\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist))\b/i;
+const nonDynamicGuard = /\b(weather|stock price|tomorrow|create a? ?rule)\b/i;
+const opsIncidentTrigger = /\b(incident|triage|rollback|sre|sev\s*[0-3]|p[1-3]\b|latency|5xx|error rate|it ops|operations dashboard|post-incident|production alert|inc-\d+)\b/i;
+const salesDealTrigger = /\b(deal\s*desk|deal-\d+|sales\s*pipeline|pipeline\s*(?:breakdown|chart|table|forecast)|revops|discount\s*approval|pricing\s*exception|mutual\s*action\s*plan|close[- ]plan|acme\s*cloud|enterprise\s*renewal)\b/i;
+
+export function isDynamicUiRequest(message: string): boolean {
+  const clean = message.trim();
+  if (clean.length < 8 || nonDynamicGuard.test(clean)) return false;
+  return dynamicUiTrigger.test(clean);
+}
+
+export function isOpsIncidentPrompt(message: string): boolean {
+  return opsIncidentTrigger.test(message);
+}
+
+export function isSalesDealPrompt(message: string): boolean {
+  return salesDealTrigger.test(message);
+}
+
+function stripJsonFences(raw: string): string {
+  const trimmed = raw.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*\r?\n([\s\S]*?)\r?\n```/i);
+  if (fenced) return fenced[1].trim();
+  const first = trimmed.indexOf("{");
+  const last = trimmed.lastIndexOf("}");
+  if (first >= 0 && last > first) return trimmed.slice(first, last + 1);
+  return trimmed;
+}
+
+async function callConfiguredLlmJson(
+  gateway: GatewaySettings,
+  dataDir: string,
+  systemPrompt: string,
+  userPrompt: string,
+  signal: AbortSignal,
+): Promise<unknown | null> {
+  if (gateway.profile === "copilot_acp") {
+    const cliHome = resolve(dataDir, "copilot-cli");
+    mkdirSync(cliHome, { recursive: true, mode: 0o700 });
+    const fullText = `${systemPrompt}\n\nUSER REQUEST:\n${userPrompt}\n\nReturn ONLY one valid JSON object matching the schema. No markdown fences, no commentary.`;
+    const reply = await runCopilotPrompt(gateway, cliHome, [{ type: "text", text: fullText }], signal, () => undefined);
+    return JSON.parse(stripJsonFences(reply.text));
+  }
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(gateway.apiKey ? { Authorization: `Bearer ${gateway.apiKey}` } : {}),
+    ...(gateway.headers ?? {}),
+  };
+  const response = await fetch(`${gateway.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+    method: "POST",
+    headers,
+    signal,
+    body: JSON.stringify({
+      ...(gateway.bodyFields ?? {}),
+      model: gateway.model,
+      max_tokens: Math.min(gateway.maxOutputTokens, 1400),
+      temperature: 0.3,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    }),
+  });
+  if (!response.ok) return null;
+  const payload = await response.json() as { choices?: { message?: { content?: string } }[] };
+  const text = payload.choices?.[0]?.message?.content;
+  if (!text) return null;
+  return JSON.parse(stripJsonFences(text));
+}
+
+const canvasSystemPrompt = [
+  "You are CEP (Customer Engagement Platform) Multi-Domain Dynamic UI Composer.",
+  "Compose a rich, original, schema-valid interactive UI component tree tailored to ANY domain the user requests (Wealth, IT Operations / Incident Triage, Sales / RevOps, HR / Onboarding, Release Readiness, Supply Chain, Support Desk, Healthcare, etc.).",
+  "Only use customer financial context if the request is about finance or wealth. For non-financial domains (IT Ops, HR, Sales, Product, Ops), tailor 100% of labels, badges, data, disclaimer, and follow-ups to the requested domain.",
+  "IMPORTANT: When LIVE DOMAIN DATA is included in the user request, you MUST ground all KPI metrics, table rows, timeline events, and approval details strictly in those exact live values — do NOT fabricate conflicting numbers. Mention the live data source in the disclaimer.",
+  "When no live domain data is provided, use realistic illustrative data and clearly note that in disclaimer.",
+  "Return ONE JSON object with this exact shape:",
+  JSON.stringify({
+    intro: "1-2 sentence concise introduction explaining what this custom UI shows.",
+    canvas: {
+      title: "Short clear card headline (max 90 chars)",
+      badge: "Short category badge like 'IT Operations', 'Deal Review', 'Approval Flow', or 'Interactive Form' (max 36 chars)",
+      subtitle: "Optional concise subtitle",
+      generatedBy: "llm",
+      nodes: [
+        "1 to 5 composable nodes from these exact 11 types:",
+        "{ type: 'metrics', items: [{ label, value, delta? }] }",
+        "{ type: 'table', caption?, columns: [2..5 strings], rows: [[2..5 strings]] }",
+        "{ type: 'barchart', title?, unit?: 'usd'|'percent'|'number', bars: [{ label, value: number, displayValue, highlight?: boolean }] }",
+        "{ type: 'progress', label, current: number, target: number, currentDisplay, targetDisplay }",
+        "{ type: 'sliders', title?, formula: 'compound_monthly'|'annual_yield'|'simple_total', resultLabel, inputs: [{ id: 'amount'|'monthly'|'rate'|'years', label, min, max, step, value, unit: 'usd'|'percent'|'years' }] }",
+        "{ type: 'comparison', columns: [{ title, points: [strings] }, { title, points: [strings] }] }",
+        "{ type: 'checklist', title?, items: [strings] }",
+        "{ type: 'callout', tone: 'info'|'highlight'|'caution', title?, body }",
+        "{ type: 'form', title?, submitLabel, fields: [{ id, label, type: 'text'|'number'|'currency'|'select'|'date'|'checkbox', placeholder?, required?, options?: [strings], defaultValue? }] }",
+        "{ type: 'approval', title, summary, requester?, riskLevel?: 'low'|'medium'|'high', details: [{ label, value }], approveLabel, rejectLabel }",
+        "{ type: 'timeline', title?, events: [{ time, title, detail?, owner?, status: 'done'|'active'|'pending'|'blocked' }] }",
+      ],
+      disclaimer: "Illustrative interactive workspace generated dynamically for review.",
+      suggestedFollowUp: "Optional short follow-up prompt matching the requested domain",
+    },
+  }),
+].join("\n");
+
+export function synthesizeDynamicCanvas(
+  prompt: string,
+  profileSummary?: string,
+  opsStore?: OpsIncidentStore,
+  salesStore?: SalesDealStore,
+): { intro: string; canvas: DynamicCanvasProps } {
+  const widget = generateWidgetFromText(prompt);
+  const lower = prompt.toLowerCase();
+  const nodes: DynamicCanvasNode[] = [];
+  let customBadge: string | undefined;
+  let customFollowUp = "Show my portfolio summary";
+  let dataSource: string | undefined;
+  let recordId: string | undefined;
+  let customTitle: string | undefined;
+  let customSubtitle: string | undefined;
+  let customDisclaimer: string | undefined;
+
+  if (opsStore && isOpsIncidentPrompt(prompt)) {
+    const view = opsStore.view();
+    const primary = opsStore.primaryIncident();
+    const statusLabel = primary.status.replace("_", " ").toUpperCase();
+    dataSource = view.summary.sourceLabel;
+    recordId = primary.id;
+    customBadge = `IT Operations · ${primary.id}`;
+    customTitle = `${primary.id}: ${primary.title}`.slice(0, 96);
+    customSubtitle = `${primary.service} · ${primary.environment} · Status: ${statusLabel}`;
+    customDisclaimer = `Live operational telemetry grounded in ${view.summary.sourceLabel}. Actions persist directly to the incident store.`;
+    customFollowUp = primary.rollbackStatus === "pending"
+      ? "Show the incident timeline and active incident queue"
+      : "Refresh the IT incident triage dashboard with live status";
+
+    const isTimelineFocus = /\b(timeline|post-incident|root-cause|history)\b/.test(lower);
+    nodes.push({
+      type: "metrics",
+      items: [
+        { label: "Severity & Status", value: `${primary.severity} · ${statusLabel}`, delta: `SLA ${primary.slaMinutes}m` },
+        { label: "Error Rate", value: `${primary.errorRatePct}%`, delta: `Baseline ${primary.baselineErrorRatePct}%` },
+        { label: "p95 Latency", value: `${primary.p95LatencyMs}ms`, delta: `${primary.affectedUsers.toLocaleString("en-US")} affected` },
+        { label: "Open Queue", value: `${view.summary.totalOpen} active`, delta: `${view.summary.activeP1Count} P1 open` },
+      ],
+    });
+    if (isTimelineFocus) {
+      nodes.push({
+        type: "timeline",
+        title: `${primary.id} Live Incident Timeline`,
+        events: primary.timeline.slice(0, 8),
+      });
+    } else {
+      nodes.push({
+        type: "approval",
+        title: `Production Rollback · ${primary.id} (${primary.currentRelease} → ${primary.previousRelease})`,
+        summary: primary.summary,
+        requester: primary.owner,
+        riskLevel: primary.severity === "P1" ? "high" : "medium",
+        details: [
+          { label: "Incident ID", value: primary.id },
+          { label: "Target Environment", value: primary.environment },
+          { label: "Release Action", value: `Revert ${primary.currentRelease} → ${primary.previousRelease}` },
+          { label: "Current Error Rate", value: `${primary.errorRatePct}% (p95 ${primary.p95LatencyMs}ms)` },
+        ],
+        approveLabel: "Approve rollback",
+        rejectLabel: "Hold & investigate",
+        recordId: primary.id,
+        domain: "ops_incident",
+        initialDecision: primary.rollbackStatus === "approved" ? "approved" : primary.rollbackStatus === "rejected" ? "rejected" : "pending",
+        ...(primary.rollbackNote ? { decisionNote: primary.rollbackNote } : {}),
+      });
+    }
+    nodes.push({
+      type: "table",
+      caption: "Live Incident Queue",
+      columns: ["Incident", "Sev", "Service", "Error Rate", "Status"],
+      rows: view.incidents.slice(0, 6).map((inc) => [
+        inc.id,
+        inc.severity,
+        inc.service,
+        `${inc.errorRatePct}%`,
+        inc.status.replace("_", " "),
+      ]),
+    });
+    if (!isTimelineFocus) {
+      nodes.push({
+        type: "timeline",
+        title: `${primary.id} Live Timeline`,
+        events: primary.timeline.slice(-4),
+      });
+    }
+  } else if (salesStore && isSalesDealPrompt(prompt)) {
+    const view = salesStore.view();
+    const primary = salesStore.primaryDeal();
+    const usdFmt = (n: number) => `$${n.toLocaleString("en-US")}`;
+    dataSource = view.summary.sourceLabel;
+    recordId = primary.id;
+    customBadge = `RevOps · ${primary.id}`;
+    customTitle = `${primary.accountName} · ${primary.id}`.slice(0, 96);
+    customSubtitle = `${primary.title} · Stage: ${primary.stage} · Close ${primary.closeDate}`;
+    customDisclaimer = `Live CRM deal data grounded in ${view.summary.sourceLabel}. Deal Desk approvals persist immediately.`;
+    customFollowUp = primary.discountStatus === "pending"
+      ? "Show a live sales pipeline breakdown and deal table"
+      : "Build a close-plan timeline for DEAL-904 enterprise renewal";
+
+    const isTimelineFocus = /\b(timeline|close[- ]plan|mutual\s*action)\b/.test(lower);
+    const isPipelineFocus = /\b(pipeline|bar chart|chart)\b/.test(lower);
+    nodes.push({
+      type: "metrics",
+      items: [
+        { label: "Total Q4 Pipeline", value: usdFmt(view.summary.totalPipelineUsd), delta: `${view.summary.activeDeals} active deals` },
+        { label: "Weighted Forecast", value: usdFmt(view.summary.weightedForecastUsd), delta: `${view.summary.pendingApprovals} approval pending` },
+        { label: `${primary.id} ARR`, value: usdFmt(primary.arrUsd), delta: `${primary.winProbabilityPct}% · ${primary.stage}` },
+      ],
+    });
+    if (isTimelineFocus) {
+      nodes.push({
+        type: "timeline",
+        title: `${primary.accountName} Mutual Action Plan`,
+        events: primary.timeline.slice(0, 8),
+      });
+    } else if (isPipelineFocus) {
+      nodes.push({
+        type: "barchart",
+        title: "Live Pipeline by Account (ARR)",
+        unit: "usd",
+        bars: view.deals.map((d) => ({
+          label: `${d.accountName} (${d.stage})`,
+          value: d.arrUsd,
+          displayValue: usdFmt(d.arrUsd),
+          highlight: d.id === primary.id,
+        })),
+      });
+    } else {
+      nodes.push({
+        type: "approval",
+        title: `Discount Approval · ${primary.accountName} (${primary.discountPct}% off)`,
+        summary: primary.summary,
+        requester: primary.owner,
+        riskLevel: primary.discountPct > 15 ? "medium" : "low",
+        details: [
+          { label: "Deal ID", value: primary.id },
+          { label: "Annual Value (ARR)", value: usdFmt(primary.arrUsd) },
+          { label: "Current Stage", value: `${primary.stage} (${primary.winProbabilityPct}% prob.)` },
+          { label: "Discount Requested", value: `${primary.discountPct}% (Standard cap: 15%)` },
+        ],
+        approveLabel: "Approve discount",
+        rejectLabel: "Hold & counter-offer",
+        recordId: primary.id,
+        domain: "sales_deal",
+        initialDecision: primary.discountStatus === "approved" ? "approved" : primary.discountStatus === "rejected" ? "rejected" : "pending",
+        ...(primary.discountNote ? { decisionNote: primary.discountNote } : {}),
+      });
+    }
+    nodes.push({
+      type: "table",
+      caption: "Live Q4 Deal Pipeline",
+      columns: ["Deal", "Account", "Stage", "ARR", "Discount"],
+      rows: view.deals.map((d) => [
+        d.id,
+        d.accountName,
+        d.stage,
+        usdFmt(d.arrUsd),
+        `${d.discountPct}% (${d.discountStatus})`,
+      ]),
+    });
+  } else if (/\b(approval|approve|rollback|incident|triage|escalation)\b/.test(lower)) {
+    customBadge = "Operations & Approval";
+    customFollowUp = "Build a post-incident timeline and root-cause checklist";
+    nodes.push({
+      type: "metrics",
+      items: [
+        { label: "Severity", value: "P1 · High", delta: "SLA 30m" },
+        { label: "Affected Services", value: "2 APIs", delta: "Checkout + Auth" },
+        { label: "Error Rate", value: "4.8%", delta: "+4.5% vs baseline" },
+      ],
+    });
+    nodes.push({
+      type: "approval",
+      title: "Production Rollback Approval",
+      summary: "Revert release v2.14.3 to last known healthy build v2.14.2 to clear elevated 5xx latency spikes.",
+      requester: "On-Call SRE · Release Bot",
+      riskLevel: "medium",
+      details: [
+        { label: "Target Environment", value: "Production · US-East" },
+        { label: "Estimated Recovery", value: "< 3 minutes" },
+        { label: "Data Impact", value: "Zero schema migration rollback" },
+      ],
+      approveLabel: "Approve rollback",
+      rejectLabel: "Hold & investigate",
+    });
+    nodes.push({
+      type: "checklist",
+      title: "Verification runbook",
+      items: [
+        "Confirm error rate returns below 0.2% across edge gateways",
+        "Verify p95 latency stabilizes under 180ms",
+        "Post status update to incident channel and notify stakeholders",
+      ],
+    });
+  } else if (/\b(timeline|roadmap|release readiness|onboarding|milestone|sprint)\b/.test(lower)) {
+    customBadge = "Timeline & Readiness";
+    customFollowUp = "Create an interactive intake form for launch sign-off";
+    nodes.push({
+      type: "timeline",
+      title: widget.title,
+      events: [
+        { time: "Phase 1 · Done", title: "Requirements & design review", detail: "Architecture signed off across engineering and product.", owner: "Product Lead", status: "done" },
+        { time: "Phase 2 · Active", title: "Integration testing & QA gate", detail: "Automated E2E suite passing; final performance check underway.", owner: "QA & SRE", status: "active" },
+        { time: "Phase 3 · Pending", title: "Staged production rollout (10% → 100%)", detail: "Feature flag ramp with automated rollback guardrails.", owner: "Release Manager", status: "pending" },
+        { time: "Phase 4 · Pending", title: "Post-launch telemetry review", detail: "24-hour KPI health check and customer feedback triage.", owner: "Ops Team", status: "pending" },
+      ],
+    });
+    nodes.push({
+      type: "checklist",
+      title: "Sign-off checklist",
+      items: [
+        "All P0/P1 defects resolved and verified",
+        "Runbook and rollback trigger verified",
+        "Stakeholder release notes approved",
+      ],
+    });
+  } else if (/\b(form|intake|request|application|survey|onboarding form|pto|expense)\b/.test(lower)) {
+    customBadge = "Interactive Form";
+    customFollowUp = "Create an approval card to review submitted requests";
+    nodes.push({
+      type: "form",
+      title: widget.title,
+      submitLabel: "Submit request",
+      fields: [
+        { id: "title", label: "Request title", type: "text", placeholder: "Short summary...", required: true },
+        { id: "category", label: "Category", type: "select", required: true, options: ["Operations", "Engineering", "Finance & Ops", "HR / People"] },
+        { id: "priority", label: "Priority", type: "select", required: true, options: ["Standard", "High", "Urgent"] },
+        { id: "target_date", label: "Target date", type: "date", required: false },
+        { id: "confirm", label: "Confirm manager / policy review completed", type: "checkbox", required: true },
+      ],
+    });
+    nodes.push({
+      type: "callout",
+      tone: "info",
+      title: "Governed submission",
+      body: "Submitted details are validated and logged into the conversation audit trail automatically.",
+    });
+  } else if (/\b(table|matrix|schedule|year-by-year|5-year|10-year)\b/.test(lower)) {
+    nodes.push({
+      type: "table",
+      caption: widget.title,
+      columns: ["Horizon", "Conservative (4.5%)", "Balanced (6.5%)", "Growth (8.5%)"],
+      rows: [
+        ["Year 1", "$10,450", "$10,650", "$10,850"],
+        ["Year 3", "$11,412", "$12,079", "$12,773"],
+        ["Year 5", "$12,462", "$13,701", "$15,037"],
+        ["Year 10", "$15,530", "$18,771", "$22,610"],
+      ],
+    });
+    nodes.push({
+      type: "callout",
+      tone: "highlight",
+      title: "Key takeaway",
+      body: "Compounding differences widen substantially after Year 5. Pair return expectations with your liquidity timeline.",
+    });
+  } else if (/\b(bar chart|chart|graph|visuali[sz]e|bucket|breakdown)\b/.test(lower)) {
+    nodes.push({
+      type: "barchart",
+      title: widget.title,
+      unit: "percent",
+      bars: [
+        { label: "Core Equities", value: 55, displayValue: "55%", highlight: true },
+        { label: "Investment-Grade Fixed Income", value: 25, displayValue: "25%" },
+        { label: "High-Yield Cash Reserve", value: 15, displayValue: "15%" },
+        { label: "Short-Term Liquidity Buffer", value: 5, displayValue: "5%" },
+      ],
+    });
+    nodes.push({
+      type: "metrics",
+      items: [
+        { label: "Illustrative Blend", value: "5.2%", delta: "Est. yield/return" },
+        { label: "Liquid Share", value: "20%", delta: "T+1 accessible" },
+        { label: "Rebalance Cadence", value: "Quarterly", delta: "Automated drift check" },
+      ],
+    });
+  } else if (widget.kind === "calculator" && widget.sliders?.length) {
+    nodes.push({
+      type: "sliders",
+      title: "Adjust assumptions live",
+      formula: /yield|income|dividend/i.test(lower) ? "annual_yield" : "compound_monthly",
+      resultLabel: /yield|income|dividend/i.test(lower) ? "Estimated annual income" : "Projected future value",
+      inputs: widget.sliders.map((s) => ({
+        id: s.id === "monthly" ? "monthly" : s.id === "rate" ? "rate" : s.id === "years" ? "years" : "amount",
+        label: s.label,
+        min: s.min,
+        max: s.max,
+        step: s.step,
+        value: s.value,
+        unit: s.unit === "months" ? "years" : s.unit,
+      })),
+    });
+  } else if (widget.kind === "comparison" && widget.columns?.length === 2) {
+    nodes.push({ type: "comparison", columns: widget.columns });
+  } else if (widget.kind === "goal" && widget.goal) {
+    const fmt = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+    nodes.push({
+      type: "progress",
+      label: widget.title,
+      current: widget.goal.saved,
+      target: widget.goal.target,
+      currentDisplay: fmt(widget.goal.saved),
+      targetDisplay: fmt(widget.goal.target),
+    });
+  } else if (widget.kind === "checklist" && widget.steps?.length) {
+    nodes.push({ type: "checklist", title: "Action checklist", items: widget.steps });
+  } else if (widget.metrics?.length) {
+    nodes.push({ type: "metrics", items: widget.metrics });
+  } else {
+    nodes.push({
+      type: "callout",
+      tone: "highlight",
+      title: widget.title,
+      body: profileSummary ? `${widget.body} (${profileSummary})` : widget.body,
+    });
+  }
+
+  return {
+    intro: dataSource
+      ? `Loaded live operational telemetry from ${dataSource} for "${customTitle ?? widget.title}". Approving or holding the rollback updates the backing incident store immediately.`
+      : `I composed a custom interactive view for "${widget.title}". You can interact with it below or save it directly to your Widget Library.`,
+    canvas: {
+      title: customTitle ?? widget.title,
+      badge: customBadge ?? widget.badge,
+      subtitle: customSubtitle ?? widget.body,
+      generatedBy: "synthesizer",
+      ...(dataSource ? { dataSource } : {}),
+      ...(recordId ? { recordId } : {}),
+      prompt,
+      nodes,
+      disclaimer: customDisclaimer ?? "Illustrative dynamic UI generated for exploration and operational review.",
+      suggestedFollowUp: customFollowUp,
+    },
+  };
+}
+
+export async function generateDynamicUi(input: {
+  prompt: string;
+  profileSummary?: string;
+  gateway?: GatewaySettings | null;
+  dataDir: string;
+  opsStore?: OpsIncidentStore;
+  salesStore?: SalesDealStore;
+  signal?: AbortSignal;
+}): Promise<{ intro: string; canvas: DynamicCanvasProps }> {
+  const { prompt, profileSummary, gateway, dataDir, opsStore, salesStore } = input;
+  const opsLive = opsStore && isOpsIncidentPrompt(prompt) ? {
+    view: opsStore.view(),
+    primary: opsStore.primaryIncident(),
+  } : null;
+  const salesLive = !opsLive && salesStore && isSalesDealPrompt(prompt) ? {
+    view: salesStore.view(),
+    primary: salesStore.primaryDeal(),
+  } : null;
+
+  if (!gateway) return synthesizeDynamicCanvas(prompt, profileSummary, opsStore, salesStore);
+
+  const timeoutController = new AbortController();
+  const timer = setTimeout(() => timeoutController.abort(), 18_000);
+  timer.unref();
+  const onParentAbort = () => timeoutController.abort();
+  input.signal?.addEventListener("abort", onParentAbort, { once: true });
+
+  try {
+    const parts: string[] = [];
+    if (opsLive) {
+      parts.push(`LIVE DOMAIN DATA (${opsLive.view.summary.sourceLabel}):\n${JSON.stringify({
+        summary: opsLive.view.summary,
+        primaryIncident: opsLive.primary,
+        allIncidents: opsLive.view.incidents.map((i) => ({
+          id: i.id,
+          title: i.title,
+          severity: i.severity,
+          status: i.status,
+          service: i.service,
+          environment: i.environment,
+          errorRatePct: i.errorRatePct,
+          p95LatencyMs: i.p95LatencyMs,
+          affectedUsers: i.affectedUsers,
+          currentRelease: i.currentRelease,
+          previousRelease: i.previousRelease,
+          rollbackStatus: i.rollbackStatus,
+          rollbackNote: i.rollbackNote,
+        })),
+      })}`);
+    } else if (salesLive) {
+      parts.push(`LIVE DOMAIN DATA (${salesLive.view.summary.sourceLabel}):\n${JSON.stringify({
+        summary: salesLive.view.summary,
+        primaryDeal: salesLive.primary,
+        allDeals: salesLive.view.deals.map((d) => ({
+          id: d.id,
+          accountName: d.accountName,
+          title: d.title,
+          stage: d.stage,
+          arrUsd: d.arrUsd,
+          discountPct: d.discountPct,
+          discountStatus: d.discountStatus,
+          discountNote: d.discountNote,
+          winProbabilityPct: d.winProbabilityPct,
+          closeDate: d.closeDate,
+          owner: d.owner,
+        })),
+      })}`);
+    } else if (profileSummary) {
+      parts.push(`Customer context: ${profileSummary}`);
+    }
+    parts.push(`Request: ${prompt}`);
+    const userPrompt = parts.join("\n\n");
+
+    const raw = await callConfiguredLlmJson(gateway, dataDir, canvasSystemPrompt, userPrompt, timeoutController.signal);
+    if (raw && typeof raw === "object") {
+      const obj = raw as { intro?: unknown; canvas?: unknown };
+      const candidateCanvas = (obj.canvas && typeof obj.canvas === "object" ? obj.canvas : raw) as Record<string, unknown>;
+      const rawNodes = Array.isArray(candidateCanvas.nodes) ? candidateCanvas.nodes : [];
+      const hydratedNodes = opsLive
+        ? rawNodes.map((n) => {
+            if (n && typeof n === "object" && (n as { type?: string }).type === "approval") {
+              const p = opsLive.primary;
+              return {
+                ...(n as Record<string, unknown>),
+                recordId: p.id,
+                domain: "ops_incident",
+                initialDecision: p.rollbackStatus === "approved" ? "approved" : p.rollbackStatus === "rejected" ? "rejected" : "pending",
+                ...(p.rollbackNote ? { decisionNote: p.rollbackNote } : {}),
+              };
+            }
+            return n;
+          })
+        : salesLive
+          ? rawNodes.map((n) => {
+              if (n && typeof n === "object" && (n as { type?: string }).type === "approval") {
+                const d = salesLive.primary;
+                return {
+                  ...(n as Record<string, unknown>),
+                  recordId: d.id,
+                  domain: "sales_deal",
+                  initialDecision: d.discountStatus === "approved" ? "approved" : d.discountStatus === "rejected" ? "rejected" : "pending",
+                  ...(d.discountNote ? { decisionNote: d.discountNote } : {}),
+                };
+              }
+              return n;
+            })
+          : rawNodes;
+
+      const parsed = dynamicCanvasSchema.safeParse({
+        ...candidateCanvas,
+        nodes: hydratedNodes,
+        generatedBy: "llm",
+        ...(opsLive ? { dataSource: opsLive.view.summary.sourceLabel, recordId: opsLive.primary.id } : {}),
+        ...(salesLive ? { dataSource: salesLive.view.summary.sourceLabel, recordId: salesLive.primary.id } : {}),
+        prompt,
+      });
+      if (parsed.success) {
+        const intro = typeof obj.intro === "string" && obj.intro.trim()
+          ? obj.intro.trim().slice(0, 600)
+          : `Here is a dynamically generated interactive view for "${parsed.data.title}".`;
+        return { intro, canvas: parsed.data };
+      }
+    }
+  } catch {
+    // Gracefully fall back to deterministic composable synthesizer if the live model times out or returns malformed JSON.
+  } finally {
+    clearTimeout(timer);
+    input.signal?.removeEventListener("abort", onParentAbort);
+  }
+  return synthesizeDynamicCanvas(prompt, profileSummary, opsStore, salesStore);
+}
+
+const widgetStudioSystemPrompt = [
+  "You are CEP Widget Studio Generator. Given a natural-language widget request, output ONE JSON object matching this schema:",
+  JSON.stringify({
+    name: "Short library name (max 72 chars)",
+    kind: "kpi | calculator | goal | comparison | checklist | advisory",
+    prompt: "Original user prompt",
+    badge: "Short badge label (max 40 chars)",
+    title: "Card headline (max 90 chars)",
+    body: "1-2 sentence description (max 320 chars)",
+    ctaLabel: "Action button text (max 48 chars)",
+    accentTop: true,
+    recommendedComponent: "PznPortfolioSnapshot | PznCapabilityForm | PznGoalProgress | PznComparison | PznStepList | PznContentCard",
+    metrics: "Optional (when kind=kpi): 2-4 items [{ label, value, delta? }]",
+    sliders: "Optional (when kind=calculator): 2-3 items [{ id: 'monthly'|'years'|'rate', label, min, max, step, value, unit: 'usd'|'percent'|'years'|'months' }]",
+    goal: "Optional (when kind=goal): { saved: number, target: number, unitLabel?: string }",
+    columns: "Optional (when kind=comparison): exactly 2 items [{ title, points: [2-4 strings] }]",
+    steps: "Optional (when kind=checklist): 3-5 step strings",
+  }),
+  "Do not include any external company names. Return ONLY valid JSON.",
+].join("\n");
+
+export async function generateWidgetDraftWithLlm(
+  prompt: string,
+  gateway: GatewaySettings | null | undefined,
+  dataDir: string,
+): Promise<WidgetDraft> {
+  if (!gateway) return generateWidgetFromText(prompt);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 14_000);
+  timer.unref();
+  try {
+    const raw = await callConfiguredLlmJson(gateway, dataDir, widgetStudioSystemPrompt, prompt, controller.signal);
+    const parsed = widgetDraftSchema.safeParse(raw && typeof raw === "object" ? { ...(raw as Record<string, unknown>), prompt } : null);
+    if (parsed.success) return parsed.data;
+  } catch {
+    // Fall back to deterministic generator
+  } finally {
+    clearTimeout(timer);
+  }
+  return generateWidgetFromText(prompt);
+}

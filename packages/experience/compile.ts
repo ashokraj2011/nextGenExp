@@ -7,8 +7,8 @@ import type { GoalProgress } from "../contracts/goal-progress";
 import { formatPortfolioAmount, type PortfolioSnapshot } from "../contracts/portfolio";
 import type { RuleGlossary } from "../contracts/rule-glossary";
 import {
-  MAX_SURFACE_BYTES, PZN_CATALOG_ID, fundingOptions, fundingPreview, portfolioSnapshot, ruleCreation, validatePznSurface,
-  type DisplayBlock, type DisplayExperience, type RuleCreationProps,
+  MAX_SURFACE_BYTES, PZN_CATALOG_ID, dynamicCanvas, fundingOptions, fundingPreview, portfolioSnapshot, ruleCreation, validatePznSurface,
+  type DisplayBlock, type DisplayExperience, type DynamicCanvasProps, type RuleCreationProps,
 } from "../contracts/surface";
 import type { VerifiedExperience } from "./verify";
 
@@ -118,6 +118,17 @@ export function compileChatReply(text: string, outcome: "reply" | "no_match" | "
     status: outcome === "reply" ? "ready" : "no_match",
     outcome, intro: text, question: null, partial: false, expiresAt,
   }, [], []);
+}
+
+export function compileDynamicCanvas(intro: string, canvas: DynamicCanvasProps, expiresAt: number): CompiledExperience {
+  return buildSurface({
+    status: "ready",
+    outcome: "ready",
+    intro,
+    question: null,
+    partial: false,
+    expiresAt,
+  }, [{ component: dynamicCanvas.name, props: canvas }], []);
 }
 
 export function buildSurface(

@@ -1,22 +1,27 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import host from "../../fixtures/host.json";
+import { findProfileById, listAllProfiles } from "../../packages/customer-profiles";
 import { fundingWorkflowIssue } from "../../packages/contracts/funding-workflow";
 import { glossaryAllowsCondition } from "../../packages/contracts/rule-glossary";
 import {
   MAX_CCRE_RULES, type MockCcreRule, type MockOutput, type ToolSetup, type ToolSetupView, type TreatmentPreview, type TreatmentPreviewInput,
 } from "../../packages/contracts/tool-setup";
 import { contentCatalog } from "../../packages/experience/content";
+import { builtInContentById, getEffectiveContentEntries } from "../../packages/experience-registry/registry";
 import type { PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import { mockRuleGlossary } from "../../packages/rule-glossary";
 import { fixtureEligibleSets, FixtureTsAdapter, scenariosById, treatmentContexts, TreatmentSelectorTimeout, tsFixtures } from "../../packages/ts-adapter";
 import { ApiError } from "./store";
 
 const fixtureIds = new Set(fixtureEligibleSets.flat());
-const content = contentCatalog.entries
-  .filter(({ contentId, publicationStatus }) => publicationStatus === "published" && fixtureIds.has(contentId))
-  .map(({ contentId, title }) => ({ contentId, title }));
-const contentIds = new Set(content.map(({ contentId }) => contentId));
+function availableToolContent() {
+  return getEffectiveContentEntries()
+    .filter(({ contentId, publicationStatus }) => (
+      publicationStatus === "published" && (fixtureIds.has(contentId) || !builtInContentById.has(contentId))
+    ))
+    .map(({ contentId, title }) => ({ contentId, title }));
+}
 const contexts = treatmentContexts.map(({ contextId, displayName }) => ({ contextId, displayName }));
 
 export function toolSetupTag(setup: ToolSetup) {
@@ -25,10 +30,10 @@ export function toolSetupTag(setup: ToolSetup) {
 
 export function toolSetupView(setup: ToolSetup): ToolSetupView {
   return {
-    setup, content, contexts, glossary: mockRuleGlossary,
+    setup, content: availableToolContent(), contexts, glossary: mockRuleGlossary,
     defaultPersonaId: host.defaultPersonaId,
     defaultScenarioId: host.defaultScenarioId,
-    personas: host.personas.map(({ personaId, displayName, allowedScenarios }) => ({ personaId, displayName, allowedScenarios })),
+    personas: listAllProfiles().map(({ personaId, displayName, allowedScenarios }) => ({ personaId, displayName, allowedScenarios })),
     scenarios: tsFixtures.scenarios.map(({ scenarioId, label }) => ({ scenarioId, label })),
   };
 }
@@ -41,6 +46,7 @@ function validateScope(scenarioId: string, contextId: string) {
 
 function validateMock(scenarioId: string, contextId: string, output: MockOutput | null) {
   validateScope(scenarioId, contextId);
+  const contentIds = new Set(availableToolContent().map(({ contentId }) => contentId));
   if (output?.mode === "ranked" && output.contentIds.some((id) => !contentIds.has(id))) {
     throw new ApiError(400, "invalid_mock_content", "Choose content from the eligible demo catalog.");
   }
@@ -48,6 +54,7 @@ function validateMock(scenarioId: string, contextId: string, output: MockOutput 
 
 function validateCcreRule(rule: MockCcreRule) {
   validateScope(rule.scenarioId, rule.contextId);
+  const contentIds = new Set(availableToolContent().map(({ contentId }) => contentId));
   if (!contentIds.has(rule.contentId)) {
     throw new ApiError(400, "invalid_ccre_treatment", "Choose a rule target from the eligible demo catalog.");
   }
@@ -55,7 +62,7 @@ function validateCcreRule(rule: MockCcreRule) {
   if (condition.kind === "attribute" && !glossaryAllowsCondition(mockRuleGlossary, condition)) {
     throw new ApiError(400, "invalid_ccre_attribute", "Choose an attribute, operator and value from the current rule glossary.");
   }
-  if (condition.kind === "persona_is" && !host.personas.some((persona) => (
+  if (condition.kind === "persona_is" && !listAllProfiles().some((persona) => (
     persona.personaId === condition.personaId && persona.allowedScenarios.includes(rule.scenarioId)
   ))) {
     throw new ApiError(400, "invalid_ccre_persona", "Choose a rule persona allowed for its scenario.");
@@ -94,8 +101,8 @@ export async function previewTreatmentSelector(input: TreatmentPreviewInput, por
     }
     validateCcreRule(rule);
   }
-  const persona = host.personas.find((entry) => entry.personaId === personaId && entry.allowedScenarios.includes(scenarioId));
-  if (!persona) throw new ApiError(400, "invalid_mock_persona", "Choose a demo persona allowed for this scenario.");
+  const persona = findProfileById(personaId);
+  if (!persona || !persona.allowedScenarios.includes(scenarioId)) throw new ApiError(400, "invalid_mock_persona", "Choose a demo persona allowed for this scenario.");
   if (!enabled) return { status: "disabled" };
   const source = output ? "override" : "fixture";
   const adapter = new FixtureTsAdapter({ scenarioId, ordinal }, output ? [{ scenarioId, contextId, output }] : [], ccreRules, portfolios);

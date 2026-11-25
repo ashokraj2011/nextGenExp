@@ -5,6 +5,7 @@ import { portfolioSnapshotSchema } from "../contracts/portfolio";
 import { mockCcreRuleSchema, normalizedIdsSchema, treatmentOverride, type MockCcreRule, type TreatmentOverride } from "../contracts/tool-setup";
 import { pendingActionsContext } from "../contracts/workspace";
 import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../portfolio-snapshot";
+import { findProfileByMid } from "../customer-profiles";
 import rawCatalog from "../../fixtures/contexts.json";
 import rawScenarios from "../../fixtures/treatment-scenarios.json";
 import host from "../../fixtures/host.json";
@@ -84,6 +85,10 @@ export class FixtureTsAdapter implements TsAdapter {
   ) {}
 
   private personaFor(mid: string) {
+    const profile = findProfileByMid(mid);
+    if (profile && profile.allowedScenarios.includes(this.state.scenarioId)) {
+      return profile;
+    }
     const persona = host.personas.find((entry) => (
       entry.syntheticMid === mid && entry.allowedScenarios.includes(this.state.scenarioId)
     ));

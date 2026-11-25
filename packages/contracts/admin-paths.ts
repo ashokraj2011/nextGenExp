@@ -1,5 +1,7 @@
 export const adminPaths = {
   tools: "/admin",
+  customers: "/admin/customers",
+  intents: "/admin/intents",
   builder: "/admin/ui",
   logs: "/admin/logs",
   inspector: "/admin/inspector",

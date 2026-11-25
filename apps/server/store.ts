@@ -1,5 +1,6 @@
 import { maxLayouts, targetKey, type AppliedUiLayout, type UiLayoutChange, type UiLayoutRecord, type UiPublication, type UiTarget } from "../../packages/contracts/ui-layout";
 import { applyPublishedUi } from "../../packages/experience/ui-layout";
+import { resolveCustomerBindings } from "../../packages/customer-profiles/bindings";
 import type { AgentLaunch } from "../../packages/contracts/agentic";
 import { cancelsJourney, explicitInputs } from "./agentic-inputs";
 import { AgenticStore } from "./agentic-store";
@@ -469,7 +470,8 @@ export class Store {
       }
     }
     try {
-      const applied = applyPublishedUi(result, turn.uiLayouts, targets);
+      const bindings = resolveCustomerBindings(turn.scope.personaId, this.axe.fundingStatus(turn.scope));
+      const applied = applyPublishedUi(result, turn.uiLayouts, targets, bindings);
       if (applied) {
         turn.trace.uiLayout = applied.attachment;
         turn.trace.components = applied.result.display.blocks.map(({ component }) => component);

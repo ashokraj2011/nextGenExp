@@ -166,34 +166,74 @@ const addressBlocks = [
   { component: "PznStepList", props: { title: "Update your mailing address" } },
   { component: "PznContentCard", props: { title: "Fund your account", recommendation: true } },
 ];
+const marcusCustomerContext = {
+  segment: "New Onboarding · Unfunded",
+  fundingStatus: "unfunded" as const,
+  beneficiaryStatus: "on_file" as const,
+  hasElevatedCash: false,
+  hasActiveHomeGoal: true,
+  notes: "Recently opened account awaiting initial funding deposit.",
+};
+const marcusRouterInput = {
+  ...JSON.parse(marcusCalls.router.request.message.text),
+  customerContext: marcusCustomerContext,
+};
+const marcusRouterExchange = {
+  ...marcusCalls.router,
+  request: {
+    ...marcusCalls.router.request,
+    message: { ...marcusCalls.router.request.message, text: JSON.stringify(marcusRouterInput) },
+  },
+};
 const addressSteps = {
   chat: chat(addressPrompt),
-  discovery: discoveryFor("demo-new-account"),
+  discovery: {
+    id: "discovery",
+    title: "Customer 360 & Intents",
+    role: "Profile & catalog lookup",
+    description: "Before calling the LLM router, the app reads Marcus’s live Customer 360 profile (/admin/customers) and active High-Level Intents (/admin/intents). Only privacy-safe qualitative signals enter the router — never raw MIDs or cent values.",
+    input: {
+      label: "Customer 360 & Experience Registry lookup",
+      value: { personaId: newAccount.personaId, sources: ["customer-profiles.json", "experience-registry.json"] },
+    },
+    output: {
+      label: "Customer 360 signals & active intents",
+      value: {
+        customerContext: marcusCustomerContext,
+        activeIntentCount: marcusRouterInput.intentCatalog.length,
+        sampleIntents: ["show_balance", "show_portfolio", "show_home_goal", "update_address", "suggest_next_step"],
+      },
+    },
+    contracts: ["discovery", "domain"],
+  },
   router: {
     id: "router", title: "Context Router", role: "First model call",
-    description: "The model gets all active topics, Marcus’s scores, and the allowed intents. It returns update_address, which the app checks before asking Treatment Selector for content.",
-    input: { label: "What the model receives", value: JSON.parse(marcusCalls.router.request.message.text) },
+    description: "Copilot ACP receives Marcus’s message, recent chat, privacy-safe Customer 360 signals, and live High-Level Intents. It returns update_address, which the app verifies before calling Treatment Selector.",
+    input: { label: "What the model receives", value: marcusRouterInput },
     output: { label: "ContextSelectionProposal", value: marcusCalls.router.response.output },
     contracts: ["router", "gateway"],
   },
   treatment: treatment(
     addressContext, addressTreatments,
-    "Treatment Selector gets Marcus’s demo member ID and the topic. The unfunded-account rule makes the funding card eligible, which also qualifies Marcus for the funding preview workflow.",
+    "Treatment Selector receives Marcus’s member ID and TS rule group (address-update). CCRE evaluates account.funding_status == 'unfunded', making the Fund your account card and funding preview workflow eligible.",
     newAccount.syntheticMid,
   ),
   composer: {
     id: "composer", title: "Experience Composer", role: "Second model call",
-    description: "The model chooses the address guide. The app checks the choice and adds the funding card that Treatment Selector returned.",
+    description: "The model selects the address guide strictly from eligible candidates. The app verifies disclosures, merges any published UI Builder layout, and attaches the eligible funding card.",
     input: { label: "What the model receives", value: JSON.parse(marcusCalls.composer.request.message.text) },
     output: { label: "ExperienceProposal", value: marcusCalls.composer.response.output },
     contracts: ["composer", "domain"],
   },
   render: render(
-    "Chat shows the address guide, the funding card, and the Preview funding button.",
+    "Chat renders Advisory Reasoning (Stage 0 Verified Experience badge + Customer 360 trace), the address guide, the funding card, and the Preview funding button.",
     { label: "Verified inputs · excerpt", value: {
-      selectedCandidateId: addressCandidateId, eligibleFundingCard: "fund_account", workflow: fundingPreviewWorkflow.recommendation,
+      actionMode: "verified_experience",
+      selectedCandidateId: addressCandidateId,
+      eligibleFundingCard: "fund_account",
+      workflow: fundingPreviewWorkflow.recommendation,
     } },
-    { label: "DisplayExperience · excerpt", value: { status: "ready", blocks: addressBlocks, actions: addressActions } },
+    { label: "DisplayExperience · excerpt", value: { status: "ready", actionMode: "verified_experience", blocks: addressBlocks, actions: addressActions } },
   ),
 } satisfies Record<string, FlowStep>;
 
@@ -202,39 +242,24 @@ export const addressUpdateExample = {
   prompt: addressPrompt,
   treatmentResponse: addressTreatments,
   handoffs: {
-    discovery: {
-      description: "Before the first model call, the app uses sfield to ask Treatment Selector for the supported topics and then for Marcus’s scores. It saves both for his turn.",
-      calls: [
-        {
-          title: "Supported topics",
-          description: "The tool calls the mock Treatment Selector, which loads the active topics from fixtures/contexts.json. The app saves that list under catalog_demo for this turn.",
-          exchange: marcusCalls.catalog,
-        },
-        {
-          title: "Topic relevance scores",
-          description: "The scores tool sends Marcus’s demo member ID and the saved topic IDs to the mock Treatment Selector. The mock reads fixtures/propensity.json and returns 0.78 for Address update.",
-          exchange: marcusCalls.scores,
-        },
-      ],
-    },
     router: {
       calls: [{
         title: "Context Router",
-        description: "The app sends its routing input as JSON text. sfield runs the Context Router and returns a completed run with the model’s proposed intent.",
-        exchange: marcusCalls.router,
+        description: "The app sends Marcus’s prompt, privacy-safe Customer 360 signals, and live High-Level Intents as JSON text. sfield runs Copilot ACP and returns the proposed intent.",
+        exchange: marcusRouterExchange,
       }],
     },
     treatment: {
       calls: [{
         title: "Treatment Selector",
-        description: "The app sends the turn ID and checked route ID. The tool looks up Marcus’s demo member ID and the Address update topic, then returns the content and workflow recommendations from Treatment Selector.",
+        description: "The app sends the turn ID and verified route ID. sfield calls Treatment Selector with Marcus’s member ID and the address-update rule group, running CCRE rules to return eligible content and workflow recommendations.",
         exchange: marcusCalls.treatment,
       }],
     },
     composer: {
       calls: [{
         title: "Experience Composer",
-        description: "The app sends the checked intent and address guide as JSON text. sfield runs the Experience Composer and returns the model’s proposed layout.",
+        description: "The app sends the verified intent and eligible address guide as JSON text. sfield runs the Experience Composer and returns the proposed A2UI layout.",
         exchange: marcusCalls.composer,
       }],
     },
@@ -245,7 +270,7 @@ export const addressUpdateExample = {
     router: addressSteps.router,
     treatment: addressSteps.treatment,
     content: {
-      description: "The app uses the returned IDs to look up the address guide and funding card. It gives each item an ID for this message.",
+      description: "The app resolves the surviving Treatment Selector content IDs against the live Content Catalog (/admin/intents) to load approved copy, disclosures, and allowed components.",
       input: { label: "Content IDs to look up", value: addressContentIds },
       output: { label: "Matching items", value: {
         candidates: [
@@ -257,11 +282,13 @@ export const addressUpdateExample = {
     },
     composer: addressSteps.composer,
     surface: {
-      description: "The app tells chat the answer is ready. It sends the address steps, the funding card, and the available follow-up buttons.",
+      description: "The app applies any published UI Builder layout, runs Customer 360 NBA arbitration (filtering dismissed Not now cards), and streams the verified A2UI surface + Stage 0 Advisory Reasoning badge to chat.",
       input: { label: "Listen for chat updates", value: { method: "GET", path: "/api/turns/" + turnRef + "/events", headers: { Accept: "text/event-stream" } } },
       output: { label: "experience.ready · event excerpt", value: {
         type: "experience.ready",
         turnId: turnRef,
+        actionMode: "verified_experience",
+        customerLookup: { personaName: newAccount.displayName, fundingStatus: "unfunded", highlights: ["New Onboarding · Unfunded", "Awaiting first deposit", "Beneficiaries on file"] },
         payload: {
           experienceId: addressExperienceId, messageId: "msg_demo", a2uiVersion: "1.0",
           messages: [{

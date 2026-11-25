@@ -4,6 +4,7 @@ import { fieldValueValid } from "./agentic-inputs";
 import { digestJson, type ChatHarness, type RunResult } from "@sfield/core";
 import demo from "../../fixtures/host.json";
 import { type Conversation, type FailureCode, type TurnAccepted } from "../../packages/contracts/api";
+import { findProfileById } from "../../packages/customer-profiles";
 import { DECISION_TTL, TURN_DEADLINE, contextCatalogSchema, propensitySchema, type SelectionMode, type PropensityResult } from "../../packages/contracts/domain";
 import {
   fundingOptionsSchema, fundingPreviewSchema, fundingPreviewWorkflow, fundingStatusSchema, fundingToolKey,
@@ -14,16 +15,26 @@ import type { ContextRoutingInput, ExperienceCompositionInput } from "../../pack
 import { isPortfolioSummary, portfolioSnapshotSchema } from "../../packages/contracts/portfolio";
 import { ruleGlossarySchema } from "../../packages/contracts/rule-glossary";
 import {
-  availableRoutingIntents, demoExperiencesQuestion, explicitBalanceComparison, resolveSummaryFollowUp, routingQuestions,
+  availableRoutingIntents, demoExperiencesQuestion, explicitBalanceComparison, resolveInvestMoreFallback, resolveSummaryFollowUp, routingQuestions,
 } from "../../packages/contracts/routing-intents";
 import { FOLLOW_UP_EVENT, type DisplayExperience } from "../../packages/contracts/surface";
 import { normalizedIdsSchema, treatmentOverride } from "../../packages/contracts/tool-setup";
 import { overviewFundingOrigin, pendingActionsContext, pendingActionsFundingOrigin, workspaceFundingContext } from "../../packages/contracts/workspace";
 import { activeContextCatalog, fixtureRejections, tsFixtures } from "../../packages/ts-adapter";
 import { contentCatalog, lookupContent, modelBundle, resolveCandidates } from "../../packages/experience/content";
-import { compileChatReply, compileExperience, compileFundingOptions, compileFundingPreview, compileRuleCreation, makeId } from "../../packages/experience/compile";
+import { compileChatReply, compileDynamicCanvas, compileExperience, compileFundingOptions, compileFundingPreview, compileRuleCreation, makeId } from "../../packages/experience/compile";
 import { verifyContextProposal, verifyRoute, requireCheck, Rejected } from "../../packages/experience/verify";
 import { ApiError, presentConversation, Store, type ConversationRecord, type Stage, type TurnRecord } from "./store";
+import { generateDynamicUi, isDynamicUiRequest, isOpsIncidentPrompt, isSalesDealPrompt } from "./dynamic-ui-generator";
+import { recommendationArbitrateToolRef } from "../../packages/contracts/recommendation-provider";
+import type { ProviderArbitrationTrace } from "../../packages/contracts/api";
+import { createOpsRunbookProvider, createSalesDealDeskProvider, RecommendationArbitrator } from "../../packages/recommendations";
+import type { OpsIncidentStore } from "./ops-store";
+import type { SalesDealStore } from "./sales-store";
+import type { Customer360Service } from "./customer-360";
+import type { GatewaySettings } from "./gateway";
+import type { GoalProgressProvider } from "../../packages/goal-progress";
+import type { PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import { fundingOfferExpiry, fundingRecommendation, nextStepRecommendation } from "./funding-offer";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import { principalFor, type Runtime } from "./runtime";
@@ -54,6 +65,15 @@ export class ExperienceService {
   constructor(
     readonly store: Store, private readonly runtime: Runtime | null, readonly selectionMode: SelectionMode, private readonly now: () => number,
     private readonly canCreateRule: boolean, private readonly offlineHistory?: { chat: ChatHarness; close(): Promise<void> },
+    private readonly dynamicUi?: {
+      gateway?: GatewaySettings | null;
+      dataDir: string;
+      customer360?: Customer360Service;
+      portfolioSnapshots?: PortfolioSnapshotProvider;
+      goalProgressProvider?: GoalProgressProvider;
+      opsStore?: OpsIncidentStore;
+      salesStore?: SalesDealStore;
+    },
   ) {
     const chat = runtime?.chat ?? offlineHistory?.chat;
     if (!chat) throw new Error("sfield chat persistence is required.");
@@ -61,7 +81,7 @@ export class ExperienceService {
   }
 
   createConversation(principalId: string, personaId: string, scenarioId: string, audience?: Conversation["audience"]) {
-    const persona = demo.personas.find((entry) => entry.personaId === personaId);
+    const persona = findProfileById(personaId);
     if (!persona?.allowedScenarios.includes(scenarioId)) throw new ApiError(400, "demo_scope_invalid", "Select an available profile and scenario.");
     return this.store.createConversation(principalId, personaId, scenarioId, this.now(), audience);
   }
@@ -226,6 +246,7 @@ export class ExperienceService {
         status, outcome, introKey: status === "clarify" ? "clarification" : "no_match", question,
         partial: false, expiresAt: this.now(),
       });
+      this.store.update(id, (row) => { row.public.actionMode = status === "clarify" ? "clarify" : "plain_chat"; });
       this.store.finish(id, { type: "completed", result }, this.now());
     };
     try {
@@ -250,11 +271,121 @@ export class ExperienceService {
         const recent = await this.history.recent(conversation, initial.ordinal);
         const result = await runtime.experiences.respond(current(), principalFor(initial.scope.principalId), recent, signal);
         if (result) {
-          this.store.update(id, (row) => { row.trace.components = result.display.blocks.map(({ component }) => component); });
+          this.store.update(id, (row) => {
+            row.public.actionMode = "verified_experience";
+            row.trace.components = result.display.blocks.map(({ component }) => component);
+          });
           this.store.finish(id, { type: "completed", result }, this.now());
           return;
         }
         stage = "catalog";
+      }
+      if (!initial.workflow && !initial.route && this.dynamicUi && isDynamicUiRequest(initial.public.message)) {
+        stage = "compose";
+        this.store.progress(id, "composition", this.now());
+        const conversation = this.store.conversation(initial.scope.conversationId, initial.scope.principalId);
+        const persona = findProfileById(conversation.personaId);
+        const lookupInfo = this.dynamicUi.customer360 && persona
+          ? this.dynamicUi.customer360.evaluate({
+              principalId: initial.scope.principalId,
+              personaId: conversation.personaId,
+              fundingStatus: (this.store.axe.fundingStatus(initial.scope) ?? persona.accountFundingStatus) === "funded" ? "funded" : "unfunded",
+              excludePromotions: runtime.experiences.execution.world.exclusions(initial),
+            })
+          : undefined;
+        const profileSummary = lookupInfo
+          ? `${lookupInfo.lookup.personaName} (${lookupInfo.lookup.highlights.join(", ")})`
+          : undefined;
+        const generated = await generateDynamicUi({
+          prompt: initial.public.message,
+          profileSummary,
+          gateway: this.dynamicUi.gateway,
+          dataDir: this.dynamicUi.dataDir,
+          opsStore: this.dynamicUi.opsStore,
+          salesStore: this.dynamicUi.salesStore,
+          signal,
+        });
+        current();
+        const now = this.now();
+        const dynamicResult = compileDynamicCanvas(generated.intro, generated.canvas, now + DECISION_TTL);
+        const arbDomain: ProviderArbitrationTrace["domain"] = isOpsIncidentPrompt(initial.public.message)
+          ? "operations"
+          : isSalesDealPrompt(initial.public.message)
+            ? "sales"
+            : "wealth";
+        let providerArbitration: ProviderArbitrationTrace | undefined;
+        try {
+          if (arbDomain === "operations" && this.dynamicUi.opsStore) {
+            const opsArb = await new RecommendationArbitrator([
+              createOpsRunbookProvider(() => this.dynamicUi!.opsStore!.list()),
+            ]).arbitrate({
+              principalId: initial.scope.principalId,
+              personaId: conversation.personaId,
+              syntheticMid: persona?.syntheticMid ?? "ops",
+              contextId: "it_ops",
+              domain: "operations",
+              fundingStatus: "funded",
+              excludePromotions: false,
+            }, signal);
+            providerArbitration = {
+              toolRef: recommendationArbitrateToolRef,
+              domain: "operations",
+              decisionId: opsArb.decisionId,
+              winnerTitle: opsArb.topNba?.title,
+              providers: [
+                ...opsArb.providers,
+                { providerId: "treatment_selector", providerLabel: "Treatment Selector (TS + CCRE)", status: "skipped", candidateCount: 0, elapsedMs: 0, note: 'Domain "operations" outside wealth scope' },
+                { providerId: "customer360_nba", providerLabel: "Customer 360 NBA Engine", status: "skipped", candidateCount: 0, elapsedMs: 0, note: 'Domain "operations" outside customer scope' },
+                { providerId: "sales_deal_desk", providerLabel: "Sales Deal Desk Recommender", status: "skipped", candidateCount: 0, elapsedMs: 0, note: 'Domain "operations" outside sales scope' },
+              ],
+            };
+          } else if (arbDomain === "sales" && this.dynamicUi.salesStore) {
+            const salesArb = await new RecommendationArbitrator([
+              createSalesDealDeskProvider(() => this.dynamicUi!.salesStore!.list()),
+            ]).arbitrate({
+              principalId: initial.scope.principalId,
+              personaId: conversation.personaId,
+              syntheticMid: persona?.syntheticMid ?? "sales",
+              contextId: "sales_revops",
+              domain: "sales",
+              fundingStatus: "funded",
+              excludePromotions: false,
+            }, signal);
+            providerArbitration = {
+              toolRef: recommendationArbitrateToolRef,
+              domain: "sales",
+              decisionId: salesArb.decisionId,
+              winnerTitle: salesArb.topNba?.title,
+              providers: [
+                ...salesArb.providers,
+                { providerId: "treatment_selector", providerLabel: "Treatment Selector (TS + CCRE)", status: "skipped", candidateCount: 0, elapsedMs: 0, note: 'Domain "sales" outside wealth scope' },
+                { providerId: "customer360_nba", providerLabel: "Customer 360 NBA Engine", status: "skipped", candidateCount: 0, elapsedMs: 0, note: 'Domain "sales" outside customer scope' },
+                { providerId: "ops_runbook", providerLabel: "IT Ops Runbook Recommender", status: "skipped", candidateCount: 0, elapsedMs: 0, note: 'Domain "sales" outside operations scope' },
+              ],
+            };
+          } else {
+            providerArbitration = {
+              toolRef: recommendationArbitrateToolRef,
+              domain: "wealth",
+              decisionId: makeId("rec_arb"),
+              winnerTitle: lookupInfo?.nba?.title,
+              providers: [
+                { providerId: "customer360_nba", providerLabel: "Customer 360 NBA Engine", status: "ok", candidateCount: lookupInfo?.nba ? 1 : 0, elapsedMs: 1 },
+                { providerId: "treatment_selector", providerLabel: "Treatment Selector (TS + CCRE)", status: "skipped", candidateCount: 0, elapsedMs: 0, note: "Bypassed for Stage 0 Dynamic UI Canvas" },
+                { providerId: "ops_runbook", providerLabel: "IT Ops Runbook Recommender", status: "skipped", candidateCount: 0, elapsedMs: 0, note: 'Domain "wealth" outside operations scope' },
+                { providerId: "sales_deal_desk", providerLabel: "Sales Deal Desk Recommender", status: "skipped", candidateCount: 0, elapsedMs: 0, note: 'Domain "wealth" outside sales scope' },
+              ],
+            };
+          }
+        } catch { /* Telemetry trace must never fail turn completion. */ }
+        this.store.update(id, (row) => {
+          row.public.actionMode = "dynamic_ui";
+          if (lookupInfo) row.public.customerLookup = lookupInfo.lookup;
+          if (providerArbitration) row.public.providerArbitration = providerArbitration;
+          row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
+        });
+        this.store.finish(id, { type: "completed", result: dynamicResult }, now);
+        return;
       }
       if (initial.workflow) {
         stage = "workflow";
@@ -276,11 +407,32 @@ export class ExperienceService {
         const intentCatalog = availableRoutingIntents(catalog.catalog, canCreateRule);
         const summaryFollowUp = resolveSummaryFollowUp(turn.public.message, recent, intentCatalog);
         const uiDescriptions = uiIntentHints(turn.uiLayouts, intentCatalog.map(({ intentId }) => intentId));
+        const personaForRoute = findProfileById(conversation.personaId);
+        const effectiveFundingForRoute: "funded" | "unfunded" = personaForRoute
+          ? ((this.store.axe.fundingStatus(turn.scope) ?? personaForRoute.accountFundingStatus) === "funded" ? "funded" : "unfunded")
+          : "funded";
+        const customerContext = personaForRoute ? {
+          ...(personaForRoute.segment ? { segment: personaForRoute.segment } : {}),
+          fundingStatus: effectiveFundingForRoute,
+          beneficiaryStatus: personaForRoute.beneficiaryStatus,
+          hasElevatedCash: personaForRoute.cashCents > 10_000_00,
+          hasActiveHomeGoal: personaForRoute.homeGoalTargetCents > 0,
+          ...(personaForRoute.notes ? { notes: personaForRoute.notes } : {}),
+        } : undefined;
+        const routeLookup = personaForRoute && this.dynamicUi?.customer360
+          ? this.dynamicUi.customer360.evaluate({
+              principalId: turn.scope.principalId,
+              personaId: conversation.personaId,
+              fundingStatus: effectiveFundingForRoute,
+              excludePromotions: runtime.experiences.execution.world.exclusions(turn),
+            }).lookup
+          : undefined;
         const result = await runtime.model("route", turn, conversation, catalog.snapshotId, {
           inputType: "PznContextRoutingInput",
           catalogSnapshotId: catalog.snapshotId,
           catalog: catalog.catalog,
           intentCatalog,
+          ...(customerContext && { customerContext }),
           ...(uiDescriptions.length && { uiDescriptions }),
           propensity: turn.propensity,
           allowedQuestions: routingQuestions,
@@ -290,18 +442,27 @@ export class ExperienceService {
           request: turn.public.message,
         } satisfies ContextRoutingInput, signal, recovering);
         current();
-        this.store.update(id, (row) => { row.trace.routeRun = traceFor(result); });
+        this.store.update(id, (row) => {
+          row.trace.routeRun = traceFor(result);
+          if (routeLookup) row.public.customerLookup = routeLookup;
+        });
         completed(result, "route");
         const modelProposal = verifyContextProposal(result.output, catalog, turn.scope, this.now(), canCreateRule);
         const literalComparison = explicitBalanceComparison(turn.public.message, intentCatalog);
-        const established = summaryFollowUp ?? literalComparison;
-        const applyEstablished = established && modelProposal.intentId !== established.intentId;
+        const isUnfundedAccount = effectiveFundingForRoute !== "funded";
+        const investMoreFallback = (modelProposal.status === "no_match" || modelProposal.status === "clarify")
+          ? resolveInvestMoreFallback(turn.public.message, intentCatalog, isUnfundedAccount)
+          : undefined;
+        const established = summaryFollowUp ?? literalComparison ?? investMoreFallback;
+        const applyEstablished = established && established.contextId !== null && modelProposal.intentId !== established.intentId;
         const proposal = applyEstablished ? {
           status: "selected" as const,
           intentId: established.intentId,
           contextId: established.contextId,
           intent: { topic: established.label, task: established.task,
-            summary: summaryFollowUp ? "Show the summary of the established conversation topic." : "Compare the requested balance definitions." },
+            summary: summaryFollowUp ? "Show the summary of the established conversation topic."
+              : literalComparison ? "Compare the requested balance definitions."
+              : "Show governed investing and funding options for the customer's account." },
         } : modelProposal;
         this.store.update(id, (row) => {
           row.trace.routeOutcome = proposal.status;
@@ -326,6 +487,7 @@ export class ExperienceService {
           const now = this.now();
           const editor = compileRuleCreation({ personaId, scenarioId, glossary }, now + DECISION_TTL);
           this.store.update(id, (row) => {
+            row.public.actionMode = "verified_experience";
             row.trace.glossaryVersion = glossary.version;
             row.trace.markers.glossaryResolved = now;
             row.trace.components = editor.display.blocks.map((block) => block.component);
@@ -334,9 +496,38 @@ export class ExperienceService {
           return;
         }
         if (proposal.status === "reply" || proposal.status === "no_match") {
+          const activeTurn = current();
+          if (this.dynamicUi && isDynamicUiRequest(activeTurn.public.message)) {
+            this.store.progress(id, "composition", this.now());
+            const persona = findProfileById(conversation.personaId);
+            const profileSummary = persona
+              ? `${persona.displayName} (${persona.accountFundingStatus === "funded" ? "funded account" : "unfunded account"}, beneficiaries ${persona.beneficiaryStatus === "on_file" ? "on file" : "missing"})`
+              : undefined;
+            const generated = await generateDynamicUi({
+              prompt: activeTurn.public.message,
+              profileSummary,
+              gateway: this.dynamicUi.gateway,
+              dataDir: this.dynamicUi.dataDir,
+              opsStore: this.dynamicUi.opsStore,
+              salesStore: this.dynamicUi.salesStore,
+              signal,
+            });
+            current();
+            const now = this.now();
+            const dynamicResult = compileDynamicCanvas(generated.intro, generated.canvas, now + DECISION_TTL);
+            this.store.update(id, (row) => {
+              row.public.actionMode = "dynamic_ui";
+              row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
+            });
+            this.store.finish(id, { type: "completed", result: dynamicResult }, now);
+            return;
+          }
           const now = this.now();
           const text = proposal.status === "reply" ? proposal.replyText : demoExperiencesQuestion;
           const result = compileChatReply(text, proposal.status, now);
+          this.store.update(id, (row) => {
+            row.public.actionMode = proposal.status === "reply" ? "plain_chat" : "clarify";
+          });
           this.store.finish(id, { type: "completed", result }, now);
           return;
         }
@@ -490,7 +681,75 @@ export class ExperienceService {
         expiresAt, approved: verified, proof, portfolio, goalProgress,
         workflow: fundingRecommendation(latest, verified.contentOrder),
       });
+      let lookupSummary: typeof latest.public.customerLookup;
+      let companionNba: typeof latest.public.nextBestAction;
+      if (this.dynamicUi?.customer360) {
+        const persona = findProfileById(conversation.personaId);
+        if (persona) {
+          const existingBlockTitles = resultForDisplay.display.blocks.flatMap((block) => (
+            "title" in block.props && typeof block.props.title === "string" ? [block.props.title] : []
+          ));
+          const evaluated = this.dynamicUi.customer360.evaluate({
+            principalId: latest.scope.principalId,
+            personaId: conversation.personaId,
+            fundingStatus: (this.store.axe.fundingStatus(latest.scope) ?? persona.accountFundingStatus) === "funded" ? "funded" : "unfunded",
+            excludePromotions: runtime.experiences.execution.world.exclusions(latest),
+            existingBlockTitles,
+          });
+          lookupSummary = evaluated.lookup;
+          if ((showBalance || showPortfolio) && resultForDisplay.display.status === "ready") {
+            companionNba = evaluated.nba;
+          }
+        }
+      }
       this.store.update(id, (row) => {
+        row.public.actionMode = resultForDisplay.display.status === "clarify"
+          ? "clarify"
+          : resultForDisplay.display.blocks.length > 0
+            ? "verified_experience"
+            : "plain_chat";
+        if (lookupSummary) row.public.customerLookup = lookupSummary;
+        if (companionNba) row.public.nextBestAction = companionNba;
+        const tsElapsed = Math.max(1, (row.trace.markers.tsResolved ?? this.now()) - (row.trace.markers.routeCommitted ?? row.trace.markers.tsResolved ?? this.now()));
+        row.public.providerArbitration = {
+          toolRef: recommendationArbitrateToolRef,
+          domain: "wealth",
+          decisionId: decision.decisionId,
+          winnerTitle: companionNba?.title ?? verified.blocks[0]?.proposal.candidateIds[0],
+          providers: [
+            {
+              providerId: "treatment_selector",
+              providerLabel: "Treatment Selector (TS + CCRE)",
+              status: "ok",
+              candidateCount: decision.candidates.length,
+              elapsedMs: tsElapsed,
+            },
+            {
+              providerId: "customer360_nba",
+              providerLabel: "Customer 360 NBA Engine",
+              status: "ok",
+              candidateCount: companionNba ? 1 : 0,
+              elapsedMs: 1,
+              ...(companionNba ? { note: `Winner: ${companionNba.title}` } : { note: "No higher-priority NBA required" }),
+            },
+            {
+              providerId: "ops_runbook",
+              providerLabel: "IT Ops Runbook Recommender",
+              status: "skipped",
+              candidateCount: 0,
+              elapsedMs: 0,
+              note: 'Domain "wealth" outside operations scope',
+            },
+            {
+              providerId: "sales_deal_desk",
+              providerLabel: "Sales Deal Desk Recommender",
+              status: "skipped",
+              candidateCount: 0,
+              elapsedMs: 0,
+              note: 'Domain "wealth" outside sales scope',
+            },
+          ],
+        };
         row.trace.markers.proposalValidated = this.now();
         row.trace.finalOrder = verified.contentOrder;
         row.trace.components = resultForDisplay.display.blocks.map((block) => block.component);

@@ -1,6 +1,7 @@
 import { ArrowRight, MessageCircle } from "lucide-react";
 import coastalPhoto from "./assets/coastal-planning.jpg";
 import { planningTopics } from "./planning-topics";
+import { ThemeToggle } from "./theme";
 import "./landing.css";
 
 export function Landing() {
@@ -11,9 +12,12 @@ export function Landing() {
         <nav className="planning-nav" aria-label="Planning topics">
           {planningTopics.map(({ id, name }) => <a key={id} href={"/chat?topic=" + id}>{name}</a>)}
         </nav>
-        <a className="planning-header-action" href="/chat">
-          <MessageCircle size={17} aria-hidden="true" /> Ask the assistant
-        </a>
+        <div className="planning-header-actions">
+          <ThemeToggle compact />
+          <a className="planning-header-action" href="/chat">
+            <MessageCircle size={17} aria-hidden="true" /> Ask the assistant
+          </a>
+        </div>
       </div>
     </header>
     <main className="planning-width planning-main">

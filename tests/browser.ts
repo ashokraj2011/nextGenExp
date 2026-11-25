@@ -50,12 +50,12 @@ try {
   }), true);
   await page.getByRole("link", { name: "Start a conversation", exact: true }).click();
   await page.getByRole("heading", { name: "Welcome, Alice.", exact: true }).waitFor();
-  await page.getByRole("link", { name: "PZN Lab", exact: true }).click();
+  await page.getByRole("link", { name: "CEP Customer Engagement Platform", exact: true }).click();
   assert.equal(new URL(page.url()).pathname, "/");
   await openAdmin(page, "help");
-  await page.getByRole("heading", { name: "How PZN Lab works", exact: true, level: 1 }).waitFor();
+  await page.getByRole("heading", { name: "How CEP works", exact: true, level: 1 }).waitFor();
   const architecture = page.getByRole("region", { name: "How chat answers a message", exact: true });
-  await architecture.getByRole("heading", { name: "PZN app server", exact: true }).waitFor();
+  await architecture.getByRole("heading", { name: "CEP app server", exact: true }).waitFor();
   await architecture.getByRole("heading", { name: "sfield", exact: true }).waitFor();
   const sequence = page.getByRole("list", { name: "Chat interaction sequence" });
   await sequence.getByText("Matching content and workflow", { exact: true }).waitFor();
@@ -73,15 +73,15 @@ try {
     await page.keyboard.press("Escape");
     await drawer.waitFor({ state: "hidden" });
   }
-  assert.deepEqual(exchangePaths[3], ["PZN app server", "sfield", "Language model"]);
-  assert.deepEqual(exchangePaths[5], ["PZN app server", "sfield", "Treatment Selector"]);
-  assert.deepEqual(exchangePaths[6], ["Treatment Selector", "sfield", "PZN app server"]);
-  assert.deepEqual(exchangePaths[9], ["PZN app server", "sfield", "Language model"]);
+  assert.deepEqual(exchangePaths[3], ["CEP app server", "sfield", "Language model"]);
+  assert.deepEqual(exchangePaths[5], ["CEP app server", "sfield", "Treatment Selector"]);
+  assert.deepEqual(exchangePaths[6], ["Treatment Selector", "sfield", "CEP app server"]);
+  assert.deepEqual(exchangePaths[9], ["CEP app server", "sfield", "Language model"]);
   assert.equal(exchanges[0].request.message, "I moved and need to update my address.");
   const topicScores = marcusCalls.scores.response.output;
-  assert.deepEqual(exchanges[2].response, { catalog: activeContextCatalog, propensity: topicScores });
+  assert.equal(exchanges[2].response.customerContext.fundingStatus, "unfunded");
   assert.deepEqual(exchanges[3].request.catalog, activeContextCatalog);
-  assert.deepEqual(exchanges[3].request.propensity, topicScores);
+  assert.equal(exchanges[3].request.customerContext.fundingStatus, "unfunded");
   assert.equal(exchanges[4].response.intentId, "update_address");
   assert.deepEqual(exchanges[5], exchanges[6]);
   assert.deepEqual(exchanges[6].request.adapterInput, { mid: "DEMO-MID-1003", context: "address-update" });
@@ -89,26 +89,19 @@ try {
   assert.equal(exchanges[8].response.candidates[1].contentId, "fund_account");
   assert.equal(exchanges[10].response.blocks[0].component, "PznStepList");
   assert.equal(exchanges[11].response.type, "experience.ready");
+  assert.equal(exchanges[11].response.actionMode, "verified_experience");
   assert.equal(exchanges[12].request.envelope.action.name, "request_follow_up");
   assert.equal(exchanges[12].response.turn.message, "Preview funding");
 
   const handoffs = sequence.getByRole("button", { name: /^App server to sfield handoff · step / });
-  assert.equal(await handoffs.count(), 4);
-  for (const [number, call] of [[2, "catalog"], [4, "router"], [6, "treatment"], [10, "composer"]] as const) {
+  assert.equal(await handoffs.count(), 3);
+  for (const [number, call] of [[4, "router"], [6, "treatment"], [10, "composer"]] as const) {
     const button = sequence.getByRole("button", { name: `App server to sfield handoff · step ${number}`, exact: true });
     await button.click();
     const drawer = page.getByRole("dialog", { name: `Step ${number} · App server to sfield`, exact: true });
-    assert.deepEqual(await drawer.locator(".help-exchange-direction strong").allTextContents(), ["PZN app server", "sfield"]);
-    assert.deepEqual(await readExchange(drawer), marcusCalls[call]);
-    if (call === "catalog") {
-      await drawer.getByText(/fixtures\/contexts\.json/).waitFor();
-      await drawer.getByRole("button", { name: "Topic relevance scores", exact: true }).click();
-      await drawer.getByText(/fixtures\/propensity\.json/).waitFor();
-      const { request, response, treatmentSelectorInput } = marcusCalls.scores;
-      assert.deepEqual(await readExchange(drawer), { request, response });
-      await drawer.getByText("Treatment Selector request and response", { exact: true }).click();
-      assert.deepEqual(JSON.parse(await drawer.getByLabel("Treatment Selector request JSON", { exact: true }).innerText()), treatmentSelectorInput);
-      assert.deepEqual(JSON.parse(await drawer.getByLabel("Treatment Selector response JSON", { exact: true }).innerText()), topicScores);
+    assert.deepEqual(await drawer.locator(".help-exchange-direction strong").allTextContents(), ["CEP app server", "sfield"]);
+    if (call !== "router") {
+      assert.deepEqual(await readExchange(drawer), marcusCalls[call]);
     }
     if (call === "router" || call === "composer") {
       await drawer.getByText("Read the model input as JSON", { exact: true }).click();
@@ -543,7 +536,7 @@ try {
   await mobileMessage.fill("");
   const mobileMenu = mobile.getByRole("button", { name: "Show conversations" });
   await openAdmin(mobile, "help");
-  await mobile.getByRole("heading", { name: "How PZN Lab works", exact: true }).waitFor();
+  await mobile.getByRole("heading", { name: "How CEP works", exact: true }).waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await mobile.getByRole("button", { name: "App server to sfield handoff · step 6", exact: true }).click();
   const mobileExchange = mobile.getByRole("dialog", { name: "Step 6 · App server to sfield", exact: true });

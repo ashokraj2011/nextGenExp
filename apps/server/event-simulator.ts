@@ -1,11 +1,11 @@
-import host from "../../fixtures/host.json";
+import { findProfileById } from "../../packages/customer-profiles";
 import type { z } from "zod";
 import type { customerEventSchema } from "../../packages/contracts/agentic";
 import { ApiError, type Store } from "./store";
 
 export function simulateCustomerEvent(store: Store, principalId: string, input: z.infer<typeof customerEventSchema>, now: number) {
   const { personaId, eventId, type } = input;
-  const persona = host.personas.find((value) => value.personaId === personaId);
+  const persona = findProfileById(personaId);
   if (persona?.accountFundingStatus !== "unfunded") {
     throw new ApiError(400, "event_profile_unavailable", "Choose a profile awaiting its first deposit.");
   }

@@ -1,7 +1,8 @@
 import "./published-ui.css";
 import type { z } from "zod";
-import { CapabilityForm, FactSummary, SavingsChart, SavingsMetric, formEnvelope } from "./agentic-experience";
+import { CapabilityForm, FactSummary, LiveSimulationProvider, SavingsChart, SavingsMetric, formEnvelope } from "./agentic-experience";
 import "./agentic.css";
+import { RichText, renderInlineMarkdown } from "./markdown";
 import { Component, createContext, lazy, Suspense, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { A2uiSurface, createComponentImplementation, MarkdownComponentContext, type ReactCatalogComponent } from "@a2ui/react";
 import {
@@ -13,9 +14,10 @@ import { makeAssistantDataUI } from "@assistant-ui/react";
 import type { FundingOptions, FundingPreview } from "../../packages/contracts/funding-workflow";
 import { formatPortfolioAmount } from "../../packages/contracts/portfolio";
 import {
-  PZN_CATALOG_ID, FOLLOW_UP_EVENT, contentCard, comparison, stepList, metricSummary, experienceRoot, followUpButton, ruleCreation, portfolioSnapshot,
-  capabilityForm, factSummary, layoutText, savingsChart, savingsMetric, fundingOptions, fundingPreview, goalProgressCard, validatePznSurface, type DisplayBlock, type DisplayExperience,
+  PZN_CATALOG_ID, FOLLOW_UP_EVENT, boundWidget, contentCard, comparison, stepList, metricSummary, experienceRoot, followUpButton, ruleCreation, portfolioSnapshot,
+  capabilityForm, customForm, factSummary, layoutText, dynamicCanvas, savingsChart, savingsMetric, fundingOptions, fundingPreview, goalProgressCard, validatePznSurface, type DisplayBlock, type DisplayExperience,
 } from "../../packages/contracts/surface";
+import { DynamicCanvasBlock } from "./dynamic-canvas";
 import { PortfolioSnapshotBlock } from "./portfolio-snapshot";
 import { GoalProgressDetails } from "./goal-progress";
 
@@ -41,6 +43,227 @@ function LayoutText({ heading, body, tone }: z.infer<typeof layoutText.schema>) 
     {heading && <h3>{heading}</h3>}
     {body && <p>{body}</p>}
   </section>;
+}
+
+function initialFormValues(fields: z.infer<typeof customForm.schema>["fields"]) {
+  const initial: Record<string, string | boolean> = {};
+  for (const f of fields) {
+    if (f.type === "checkbox") initial[f.id] = f.initialValue === "true" || f.initialValue === "on_file" || f.initialValue === "funded";
+    else if (f.type === "select") initial[f.id] = f.initialValue && f.options.includes(f.initialValue) ? f.initialValue : (f.options[0] ?? "");
+    else initial[f.id] = f.initialValue ?? "";
+  }
+  return initial;
+}
+
+function CustomFormBlock({ title, description, submitLabel, writeBack = true, fields }: z.infer<typeof customForm.schema>) {
+  const { enabled, preview } = useContext(SurfaceActions);
+  const controls = useContext(ExperienceControls);
+  const [values, setValues] = useState<Record<string, string | boolean>>(() => initialFormValues(fields));
+  const [submitted, setSubmitted] = useState<{ summary: string; savedFields: string[] } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [missingError, setMissingError] = useState("");
+  const fieldsSignature = fields.map((f) => `${f.id}:${f.type}:${f.initialValue ?? ""}`).join("|");
+  useEffect(() => {
+    setValues(initialFormValues(fields));
+  }, [fieldsSignature]);
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    if (submitting) return;
+    const missing = fields.filter((f) => {
+      if (!f.required) return false;
+      const val = values[f.id];
+      return f.type === "checkbox" ? val !== true : !String(val ?? "").trim();
+    });
+    if (missing.length > 0) {
+      setMissingError(`Please complete: ${missing.map((f) => f.label).join(", ")}`);
+      return;
+    }
+    setMissingError("");
+    const parts = fields.map((f) => {
+      const val = values[f.id];
+      const formatted = f.type === "checkbox" ? (val ? "Yes" : "No")
+        : f.type === "currency" && String(val ?? "").trim() ? `$${String(val).replace(/^\$/, "")}`
+        : String(val ?? "—");
+      return `${f.label}: ${formatted}`;
+    });
+    const summary = parts.join(" · ");
+    const updates: Record<string, string> = {};
+    if (writeBack !== false) {
+      for (const f of fields) {
+        if (!f.defaultBinding) continue;
+        const val = values[f.id];
+        const raw = f.type === "checkbox" ? String(Boolean(val)) : String(val ?? "").trim();
+        if (raw) updates[f.defaultBinding] = raw;
+      }
+    }
+    const updateKeys = Object.keys(updates);
+    if (preview) {
+      setSubmitted({ summary, savedFields: updateKeys });
+      return;
+    }
+    setSubmitting(true);
+    let savedFields: string[] = [];
+    try {
+      if (updateKeys.length > 0 && controls.onWriteBack) {
+        savedFields = await controls.onWriteBack(updates);
+      }
+    } catch {
+      savedFields = [];
+    } finally {
+      setSubmitting(false);
+    }
+    setSubmitted({ summary, savedFields });
+    if (enabled && controls.askPrompt) {
+      const note = savedFields.length > 0 ? " (Updated Customer 360 profile)" : "";
+      controls.askPrompt(`Submitted "${title || "Form"}" — ${summary}${note}`);
+    }
+  }
+
+  return (
+    <section className="content-card pzn-custom-form" aria-label={title || "Interactive form"}>
+      <div className="content-kind"><ListChecks size={16} aria-hidden="true" />Interactive form</div>
+      {title && <h3>{title}</h3>}
+      {description && <p className="pzn-custom-form-desc">{description}</p>}
+      {submitted ? (
+        <div className="pzn-custom-form-done" role="status">
+          <strong>
+            {preview
+              ? (submitted.savedFields.length > 0 ? `Preview submitted · Will update Customer 360 (${submitted.savedFields.join(", ")})` : "Preview form submitted")
+              : (submitted.savedFields.length > 0 ? `Saved to Customer 360 (${submitted.savedFields.join(", ")})` : "Submitted")}
+          </strong>
+          <p>{submitted.summary}</p>
+          {preview && (
+            <button type="button" className="secondary-button" onClick={() => setSubmitted(null)}>Reset preview form</button>
+          )}
+        </div>
+      ) : (
+        <form className="pzn-custom-form-grid" onSubmit={(e) => void handleSubmit(e)}>
+          {fields.length === 0 ? (
+            <p className="pzn-custom-form-empty">Add fields in the form editor to preview them here.</p>
+          ) : fields.map((field) => {
+            const val = values[field.id];
+            if (field.type === "checkbox") {
+              return (
+                <label key={field.id} className="pzn-cf-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(val)}
+                    disabled={!preview && !enabled}
+                    onChange={(e) => setValues((prev) => ({ ...prev, [field.id]: e.target.checked }))}
+                  />
+                  <span>{field.label}{field.required ? " *" : ""}</span>
+                </label>
+              );
+            }
+            return (
+              <label key={field.id} className="pzn-cf-field">
+                <span>{field.label}{field.required ? " *" : ""}</span>
+                {field.type === "select" ? (
+                  <select
+                    value={String(val ?? "")}
+                    disabled={!preview && !enabled}
+                    onChange={(e) => setValues((prev) => ({ ...prev, [field.id]: e.target.value }))}
+                  >
+                    {field.options.length === 0 && <option value="">Select an option</option>}
+                    {field.options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                  </select>
+                ) : field.type === "currency" ? (
+                  <div className="pzn-cf-currency">
+                    <span aria-hidden="true">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={String(val ?? "")}
+                      placeholder={field.placeholder || "0.00"}
+                      disabled={!preview && !enabled}
+                      onChange={(e) => setValues((prev) => ({ ...prev, [field.id]: e.target.value }))}
+                    />
+                  </div>
+                ) : (
+                  <input
+                    type={field.type === "date" ? "date" : field.type === "number" ? "number" : "text"}
+                    value={String(val ?? "")}
+                    placeholder={field.placeholder}
+                    disabled={!preview && !enabled}
+                    onChange={(e) => setValues((prev) => ({ ...prev, [field.id]: e.target.value }))}
+                  />
+                )}
+              </label>
+            );
+          })}
+          {missingError && <p className="pzn-cf-error" role="alert">{missingError}</p>}
+          {fields.length > 0 && (
+            <div className="pzn-cf-actions">
+              <button type="submit" className="axe-primary-button" disabled={!preview && !enabled}>
+                {submitLabel || "Submit"}
+              </button>
+            </div>
+          )}
+        </form>
+      )}
+    </section>
+  );
+}
+
+function BoundWidgetBlock({
+  badge, title, body, accentTop, hydratedFor, metrics, progressLabel, progressPercent, progressDisplay, ctaLabel, ctaPrompt,
+}: z.infer<typeof boundWidget.schema>) {
+  const { enabled, preview } = useContext(SurfaceActions);
+  const controls = useContext(ExperienceControls);
+  const hasBindings = metrics.some((m) => Boolean(m.boundKey)) || progressPercent !== undefined;
+
+  return (
+    <section className={"content-card pzn-bound-widget" + (accentTop ? " has-accent-top" : "")} aria-label={title}>
+      <div className="pzn-bw-top">
+        {badge && <span className="pzn-bw-badge">{badge}</span>}
+        {hasBindings && hydratedFor && (
+          <span className="pzn-bw-live-pill">Live data · {hydratedFor}</span>
+        )}
+      </div>
+      <h3>{title}</h3>
+      {body && <p className="pzn-bw-body">{body}</p>}
+      {metrics.length > 0 && (
+        <dl className="pzn-bw-metrics">
+          {metrics.map((metric) => (
+            <div key={metric.id} className={"pzn-bw-metric tone-" + metric.tone}>
+              <dt>{metric.label}</dt>
+              <dd>
+                <strong>{metric.value}</strong>
+                {metric.subtext && <span>{metric.subtext}</span>}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {progressPercent !== undefined && (
+        <div className="pzn-bw-progress">
+          <div className="pzn-bw-progress-head">
+            <span>{progressLabel || "Progress"}</span>
+            <strong>{progressDisplay ?? `${progressPercent}%`}</strong>
+          </div>
+          <div className="pzn-bw-progress-track" role="progressbar" aria-valuenow={progressPercent} aria-valuemin={0} aria-valuemax={100}>
+            <span style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }} />
+          </div>
+        </div>
+      )}
+      {ctaLabel && (
+        <div className="pzn-bw-actions">
+          <button
+            type="button"
+            className="axe-primary-button"
+            disabled={!preview && !enabled}
+            onClick={() => {
+              if (!preview && enabled && ctaPrompt && controls.askPrompt) controls.askPrompt(ctaPrompt);
+            }}
+          >
+            {ctaLabel} <ArrowUpRight size={14} aria-hidden="true" />
+          </button>
+        </div>
+      )}
+    </section>
+  );
 }
 
 function RuleBlock(props: Extract<DisplayBlock, { component: "PznRuleCreation" }>["props"]) {
@@ -99,8 +322,11 @@ function ContentBlock({ block, form }: { block: DisplayBlock; form?: { experienc
   if (block.component === capabilityForm.name) return form && <CapabilityForm props={block.props} enabled={form.enabled}
     dispatch={(id, values) => controls.followUp(form.experienceId, formEnvelope(form.experienceId, form.componentId, id, values))} />;
   if (block.component === layoutText.name) return <LayoutText {...block.props} />;
+  if (block.component === customForm.name) return <CustomFormBlock {...block.props} />;
+  if (block.component === boundWidget.name) return <BoundWidgetBlock {...block.props} />;
+  if (block.component === dynamicCanvas.name) return <DynamicCanvasBlock {...block.props} onFollowUp={controls.askPrompt} />;
   if (block.component === ruleCreation.name) return <RuleBlock {...block.props} />;
-  if (block.component === portfolioSnapshot.name) return <PortfolioSnapshotBlock {...block.props} />;
+  if (block.component === portfolioSnapshot.name) return <PortfolioSnapshotBlock {...block.props} onExploreAllocation={controls.askPrompt} />;
   if (block.component === fundingPreview.name) return <FundingPreviewBlock {...block.props} />;
   if (block.component === fundingOptions.name) return <FundingOptionsBlock {...block.props} />;
   const { component, props } = block;
@@ -170,7 +396,7 @@ function ContentBlock({ block, form }: { block: DisplayBlock; form?: { experienc
 
 function Introduction({ intro, question, partial }: { intro: string; question: string | null; partial: boolean }) {
   return <>
-    {question ? <p className="clarification">{question}</p> : <p className="experience-intro">{intro}</p>}
+    {question ? <p className="clarification">{question}</p> : <RichText text={intro} className="experience-intro" />}
     {partial && <p className="partial-result">Some matching content is unavailable.</p>}
   </>;
 }
@@ -198,11 +424,20 @@ const pznCatalog = new Catalog<ReactCatalogComponent>(PZN_CATALOG_ID, "1.0", [
   createComponentImplementation(stepList, ({ props }) => <ContentBlock block={{ component: stepList.name, props }} />),
   createComponentImplementation(metricSummary, ({ props }) => <ContentBlock block={{ component: metricSummary.name, props }} />),
   createComponentImplementation(goalProgressCard, ({ props }) => <ContentBlock block={{ component: goalProgressCard.name, props }} />),
-  createComponentImplementation(portfolioSnapshot, ({ props }) => <PortfolioSnapshotBlock {...props} />),
+  createComponentImplementation(portfolioSnapshot, ({ props }) => {
+    const controls = useContext(ExperienceControls);
+    return <PortfolioSnapshotBlock {...props} onExploreAllocation={controls.askPrompt} />;
+  }),
   createComponentImplementation(fundingPreview, ({ props }) => <FundingPreviewBlock {...props} />),
   createComponentImplementation(fundingOptions, ({ props }) => <FundingOptionsBlock {...props} />),
   createComponentImplementation(ruleCreation, ({ props }) => <RuleBlock {...props} />),
   createComponentImplementation(layoutText, ({ props }) => <LayoutText {...props} />),
+  createComponentImplementation(customForm, ({ props }) => <CustomFormBlock {...props} />),
+  createComponentImplementation(boundWidget, ({ props }) => <BoundWidgetBlock {...props} />),
+  createComponentImplementation(dynamicCanvas, ({ props }) => {
+    const controls = useContext(ExperienceControls);
+    return <DynamicCanvasBlock {...props} onFollowUp={controls.askPrompt} />;
+  }),
   createComponentImplementation(savingsChart, ({ props }) => <SavingsChart {...props} />),
   createComponentImplementation(savingsMetric, ({ props }) => <SavingsMetric {...props} />),
   createComponentImplementation(factSummary, ({ props }) => <FactSummary {...props} />),
@@ -223,7 +458,7 @@ export function installA2uiStyles() {
   injectBasicCatalogStyles();
 }
 function PlainText({ markdown }: { markdown: string }) {
-  return <span>{markdown}</span>;
+  return <span>{renderInlineMarkdown(markdown)}</span>;
 }
 
 function MountedSurface({ input, id, onAction, smoke, onRendered }: {
@@ -275,6 +510,8 @@ class SurfaceBoundary extends Component<{ children: ReactNode; fallback: ReactNo
 type SurfaceControls = {
   activeExperienceId?: string;
   allowRuleCreation?: boolean;
+  askPrompt?: (prompt: string) => void;
+  onWriteBack?: (updates: Record<string, string>) => Promise<string[]>;
   followUp: (id: string, envelope: ActionMessage) => void;
   rendered: (id: string, fallback?: boolean) => void;
 };
@@ -319,11 +556,13 @@ function ExperiencePart({ data, preview = false }: { data: DisplayExperience; pr
   }, [expiresAt]);
   const enabled = !preview && controls.activeExperienceId === experienceId && !expired;
   return <SurfaceActions.Provider value={{ enabled, preview }}>
-    <SurfaceBoundary key={experienceId} fallback={<CanonicalFallback experience={data} enabled={enabled} />}>
-      <MountedSurface id={experienceId} input={messages[0]}
-        onAction={(envelope) => controls.followUp(experienceId, envelope)}
-        onRendered={() => controls.rendered(experienceId)} />
-    </SurfaceBoundary>
+    <LiveSimulationProvider>
+      <SurfaceBoundary key={experienceId} fallback={<CanonicalFallback experience={data} enabled={enabled} />}>
+        <MountedSurface id={experienceId} input={messages[0]}
+          onAction={(envelope) => controls.followUp(experienceId, envelope)}
+          onRendered={() => controls.rendered(experienceId)} />
+      </SurfaceBoundary>
+    </LiveSimulationProvider>
   </SurfaceActions.Provider>;
 }
 export function ExperienceLayoutPreview({ data }: { data: DisplayExperience }) {

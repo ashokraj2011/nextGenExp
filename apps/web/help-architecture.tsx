@@ -9,44 +9,44 @@ import { addressUpdateExample } from "./help-flow";
 const participants = [
   {
     name: "Chat and A2UI", shortName: "Chat", Icon: MessageSquare,
-    description: "Chat sends messages. A2UI displays cards, forms, and buttons.",
+    description: "Profile-scoped chat workbench. Renders Advisory Reasoning (with Stage 0 badge), verified A2UI cards, Dynamic LLM Canvas, and #1 NBA.",
   },
   {
-    name: "PZN app server", shortName: "App server", Icon: Network,
-    description: "Matches the chat to a demo customer, chooses the next step, and checks the results before building the reply.",
+    name: "CEP app server", shortName: "App server", Icon: Network,
+    description: "Runs Customer 360 lookup, Stage 0 Action Gate, schema verification, UI Builder layouts, and NBA arbitration with persistent dismissals.",
   },
   {
     name: "sfield", shortName: "sfield", Icon: ShieldCheck,
-    description: "Runs inside the app server. Calls the language model and runs the tools that call Treatment Selector.",
+    description: "Runs inside the app server. Executes Copilot ACP calls and scoped tools for Treatment Selector, balances, portfolio, goals, and workflows.",
   },
   {
     name: "Language model", shortName: "Language model", Icon: Sparkles,
-    description: "The first call identifies what the customer wants. The second picks content and a layout for the reply.",
+    description: "Copilot ACP extracts high-level intents using Customer 360 signals, composes verified layouts, or builds safe Dynamic UI canvases.",
   },
   {
     name: "Treatment Selector", shortName: "Treatment Selector", Icon: ListFilter,
-    description: "Provides topics and relevance scores. Uses CCRE rules to decide what content fits the customer and topic.",
+    description: "Evaluates CCRE eligibility rules and ranking overrides per customer MID to decide eligible treatments, workflows, and capabilities.",
   },
   {
     name: "Content and data", shortName: "Content and data", Icon: Database,
-    description: "Provides approved content and sample balances, portfolio values, and savings progress.",
+    description: "Live Customer 360 profiles (/admin/customers), governed Content Catalog & Intents (/admin/intents), and Widget Library (/admin/ui).",
   },
 ];
 
 const [chat, host, sfield, model, selector, data] = participants;
 const { exchanges: cases, handoffs } = addressUpdateExample;
 const exchanges = [
-  { path: [chat, host], label: "Message + conversation ID", example: cases.chat },
-  { path: [host, sfield, selector], label: "Get supported topics and scores", example: cases.contexts, handoff: handoffs.discovery },
-  { path: [selector, sfield, host], label: "Supported topics and relevance scores", reply: true, example: cases.contexts },
-  { path: [host, sfield, model], label: "Message, recent chat, and request options", example: cases.router, handoff: handoffs.router },
-  { path: [model, sfield, host], label: "Likely request or follow-up question", reply: true, example: cases.router },
-  { path: [host, sfield, selector], label: "Topic and member ID", example: cases.treatment, handoff: handoffs.treatment },
+  { path: [chat, host], label: "Message + Stage 0 Action Gate", example: cases.chat },
+  { path: [host, data], label: "Customer 360 lookup & active intents", example: cases.contexts },
+  { path: [data, host], label: "Customer 360 signals & live intent catalog", reply: true, example: cases.contexts },
+  { path: [host, sfield, model], label: "Prompt, Customer 360 signals & high-level intents", example: cases.router, handoff: handoffs.router },
+  { path: [model, sfield, host], label: "Extracted intent or action mode (update_address)", reply: true, example: cases.router },
+  { path: [host, sfield, selector], label: "TS rule group + member ID (CCRE rules)", example: cases.treatment, handoff: handoffs.treatment },
   { path: [selector, sfield, host], label: "Matching content and workflow", reply: true, example: cases.treatment },
-  { path: [host, data], label: "Look up content by ID", example: cases.content },
-  { path: [data, host], label: "Matching content for this request", reply: true, example: cases.content },
-  { path: [host, sfield, model], label: "Customer’s request and matching content", example: cases.composer, handoff: handoffs.composer },
-  { path: [model, sfield, host], label: "Suggested layout for the reply", reply: true, example: cases.composer },
+  { path: [host, data], label: "Resolve approved content from catalog", example: cases.content },
+  { path: [data, host], label: "Approved copy, disclosures & allowed components", reply: true, example: cases.content },
+  { path: [host, sfield, model], label: "Customer’s request and eligible candidates", example: cases.composer, handoff: handoffs.composer },
+  { path: [model, sfield, host], label: "Verified layout proposal (PznStepList)", reply: true, example: cases.composer },
   { path: [host, chat], label: "A2UI instructions for cards and buttons", reply: true, example: cases.surface },
   { path: [chat, host], label: "Button starts the next chat step", example: cases.followUp },
 ];
@@ -114,7 +114,7 @@ export function InteractionDiagram({ onSelect }: { onSelect: (exchange: DiagramE
         })}
       </ol>
     </div>
-    <figcaption>The model can use relevance scores as hints when it picks a topic. If the request is unclear, chat asks a follow-up question. When the reply needs account details, the app can read them through sfield tools.</figcaption>
+    <figcaption>Customer 360 signals and high-level intents guide routing before Treatment Selector evaluates CCRE rules. Explicit custom visualization requests take the Stage 0 Dynamic UI Canvas fast-path, and balance/portfolio replies attach the #1 arbitrated Next Best Action.</figcaption>
   </figure>;
 }
 
@@ -144,7 +144,7 @@ export function TreatmentProposalDiagram() {
       </li>
       <li className="help-proposal-entity">
         <span className="help-entity-icon"><Network size={18} aria-hidden="true" /></span>
-        <h3>PZN app server + sfield</h3>
+        <h3>CEP app server + sfield</h3>
         <p>The app looks up the recommended ID and version in Tool setup. sfield runs the funding agent when Marcus opens the preview.</p>
         <ArrowRight className="help-proposal-arrow" size={22} aria-hidden="true" />
       </li>

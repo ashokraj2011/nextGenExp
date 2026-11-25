@@ -9,6 +9,7 @@ import { ASK_USER, defineTool, estimateJsonTokens, estimateTokens, SField, ToolE
 import type { ConfigDocument, DefineToolInput, JsonObject, JsonValue, Principal, RunRecord, RunResult, ToolHandlerContext, Verifier } from "@sfield/core";
 import { SqlitePersistence } from "@sfield/store-sqlite";
 import host from "../../fixtures/host.json";
+import { findProfileById, type PersonaRecord } from "../../packages/customer-profiles";
 import { MAX_MESSAGE_LENGTH, metricReadingSchema, TURN_DEADLINE, type BalanceProof, type Scope } from "../../packages/contracts/domain";
 import {
   fundingAgentId, fundingAgentToolLimit, fundingOptionsSchema, fundingToolRef, fundingToolVersion,
@@ -29,6 +30,61 @@ import {
   ROUTING_HISTORY_TURNS, ROUTING_HISTORY_REQUEST_LENGTH, ROUTING_HISTORY_REPLY_LENGTH,
 } from "../../packages/contracts/routing-intents";
 import { sfieldTools, toolKeys, toolVersion, type MockCcreEvaluation, type ToolKey, type ToolSetup } from "../../packages/contracts/tool-setup";
+import {
+  recommendationArbitrateInputJsonSchema,
+  recommendationArbitrateInputSchema,
+  recommendationArbitrateResultJsonSchema,
+  recommendationArbitrateResultSchema,
+  recommendationArbitrateToolId,
+  recommendationArbitrateToolRef,
+  recommendationArbitrateToolVersion,
+  type RecommendationArbitrateResult,
+  type RecommendationDomain,
+  type RecommendationProvider,
+  type RecommendationProviderDescriptor,
+} from "../../packages/contracts/recommendation-provider";
+import {
+  createCustomer360NbaProvider,
+  createOpsRunbookProvider,
+  createSalesDealDeskProvider,
+  createTreatmentSelectorProvider,
+  RecommendationArbitrator,
+} from "../../packages/recommendations";
+import type { Customer360Service } from "./customer-360";
+import type { OpsIncidentStore } from "./ops-store";
+import type { SalesDealStore } from "./sales-store";
+import type { WriteAuditStore } from "./write-audit";
+import type { CustomerProfileStore } from "../../packages/customer-profiles";
+import type { DomainWriteAuditEntry } from "../../packages/contracts/api";
+
+export const domainWriteToolId = "cep.domain.execute_write";
+export const domainWriteToolVersion = "1.0.0";
+export const domainWriteToolRef = `${domainWriteToolId}@${domainWriteToolVersion}`;
+
+const domainWriteInputJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["domain", "recordId", "action", "actor"],
+  properties: {
+    domain: { type: "string", enum: ["ops_incident", "sales_deal", "customer360"] },
+    recordId: { type: "string", minLength: 1, maxLength: 64 },
+    action: { type: "string", minLength: 1, maxLength: 64 },
+    actor: { type: "string", minLength: 1, maxLength: 80 },
+    note: { type: "string", maxLength: 240 },
+    updatesJson: { type: "string", maxLength: 4000 },
+  },
+} as const;
+
+const domainWriteResultJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["ok", "recordId", "summary"],
+  properties: {
+    ok: { type: "boolean" },
+    recordId: { type: "string", minLength: 1, maxLength: 64 },
+    summary: { type: "string", minLength: 1, maxLength: 320 },
+  },
+} as const;
 import { activeContextCatalog, fixtureEligibleSets, FixtureTsAdapter, type ContextScoresRequest, type FixtureState } from "../../packages/ts-adapter";
 import { nextStepContext, workspaceFundingContext, type WorkspaceNextStep } from "../../packages/contracts/workspace";
 import { nextStepRecommendation } from "./funding-offer";
@@ -57,6 +113,7 @@ const toolRefs = {
   fundingOptions: fundingToolRef("fundingOptions"),
   fundingStatus: fundingToolRef("fundingStatus"),
   fundingPreview: fundingToolRef("fundingPreview"),
+  arbitrateRecommendations: recommendationArbitrateToolRef,
 } as const;
 const registryPurposes = {
   catalogScopeId: "pzn-context-discovery",
@@ -73,7 +130,7 @@ const registryBoundaries = {
 export function principalFor(id: string): Principal {
   return { tenantId: "pzn-local", subjectId: id, roles: ["pzn-demo", "pzn-developer"], attributes: {} };
 }
-const actions = new Set<string>(toolKeys.map((key) => sfieldTools[key].id));
+const actions = new Set<string>([...toolKeys.map((key) => sfieldTools[key].id), recommendationArbitrateToolId]);
 export const sfieldNamespace = "pzn-experience-runtime";
 
 function requireToolEnabled(turn: TurnRecord, key: ToolKey) {
@@ -83,8 +140,9 @@ function requireToolEnabled(turn: TurnRecord, key: ToolKey) {
 const routeInstructions = [
   "You are the PZN chat assistant and Context Router. Return only the ContextSelectionProposal JSON.",
   "Read the latest request together with recent messages, assistant replies, displayed card titles, and clarification questions. Infer the user's goal from their meaning, including paraphrases and obvious typos.",
-  "Give a clear current request priority over past topics. Use history to resolve related fragments, references, and yes or no replies to clarification. Treat propensity as advisory when the request points to a supported intent.",
-  "Use no_match for requests requiring live external data, such as tomorrow's weather or current stock prices, for unsupported actions, and for personalized advice about changing a financial outcome. The app lists the available experiences for these requests. Return no_match with null intentId, clarificationQuestion, and replyText.",
+  "Give a clear current request priority over past topics. Use history to resolve related fragments, references, and yes or no replies to clarification. Use customerContext (live Customer 360 profile signals such as funding status, elevated cash, active goals, segment, and notes) together with intentCatalog to match the customer's high-level intent accurately; treat legacy propensity scores as optional tie-breakers only.",
+  "Use no_match for requests requiring live external data, such as tomorrow's weather or current stock prices, for unsupported actions, and for specific stock picks or market predictions. The app lists the available experiences for these requests. Return no_match with null intentId, clarificationQuestion, and replyText.",
+  "For general questions about how to invest more, put idle cash to work, or see investing options (such as 'how can I invest more' or 'options for my cash'), select show_portfolio when available so the customer receives their verified portfolio summary, eligible cash-investing card, and cash deployment simulator.",
   "For greetings, thanks, reactions such as 'thats nice', and simple conversational questions that can be answered from general knowledge or the current chat, return reply with null intentId and clarificationQuestion. Write a concise plain-text replyText. Acknowledge the conversation without repeating its cards or forcing a suggestion. Use everyday language and leave environment details out of customer replies. Avoid inventing account values, eligibility decisions, or completed actions.",
   "The recent entries are chronological. When asked what you just said, quote or paraphrase only the assistantReply or clarificationQuestion from the last entry of recent. Return reply. If that last entry has displayedContent, you may include those titles.",
   "Getting older, a statement about turning 62, and an upcoming last day at work are clues to possible retirement planning. If the person has already asked to learn about retirement or confirms that goal, classify related follow-ups as retirement_learning. If those clues leave the goal uncertain, ask the most relevant approved retirement question. Treat an explicit job search or layoff assistance request as unsupported.",
@@ -195,6 +253,11 @@ export class Runtime {
     private readonly portfolioSnapshots: PortfolioSnapshotProvider,
     private readonly goalProgressProvider: GoalProgressProvider,
     readonly goalBudget: ExecutionBudget,
+    private readonly customer360?: Customer360Service,
+    private readonly opsStore?: OpsIncidentStore,
+    private readonly salesStore?: SalesDealStore,
+    private readonly profileStore?: CustomerProfileStore,
+    private readonly writeAudit?: WriteAuditStore,
   ) {
     this.funding = new FundingAgent(store, () => this.sf, now);
     const execution = new AgenticExecution(store, () => this.sf, now, (turnId) => this.current(turnId), portfolioSnapshots, goalProgressProvider, goalBudget);
@@ -204,12 +267,23 @@ export class Runtime {
   static async open(
     store: Store, path: string, settings: GatewaySettings, now: () => number,
     inspectorEnabled = false, portfolioSnapshots = fixturePortfolioSnapshotProvider, goalProgressProvider = fixtureGoalProgressProvider, goalBudget: ExecutionBudget = axeBudget,
+    extraProviders?: {
+      customer360?: Customer360Service;
+      opsStore?: OpsIncidentStore;
+      salesStore?: SalesDealStore;
+      profileStore?: CustomerProfileStore;
+      writeAudit?: WriteAuditStore;
+    },
   ) {
     const record = inspectorEnabled ? (id: string, exchange: GatewayExchange) => store.saveGatewayExchange(id, exchange) : undefined;
     const gateway = settings.profile === "copilot_acp"
       ? await configureCopilotAcp(settings, resolve(dirname(path), "copilot-cli"), record)
       : configureGateway(settings, record);
-    const runtime = new Runtime(store, now, gateway.inspection, portfolioSnapshots, goalProgressProvider, goalBudget);
+    const runtime = new Runtime(
+      store, now, gateway.inspection, portfolioSnapshots, goalProgressProvider, goalBudget,
+      extraProviders?.customer360, extraProviders?.opsStore, extraProviders?.salesStore,
+      extraProviders?.profileStore, extraProviders?.writeAudit,
+    );
     const agentTools = [...runtime.experiences.tools(), ...runtime.experiences.execution.tools()];
     const agentActions = new Set(agentTools.map(({ ref }) => axeToolAction(ref)));
     runtime.sf = await SField.create({
@@ -219,11 +293,14 @@ export class Runtime {
       ...gateway.options,
       authorizer: {
         async authorize({ principal, action, effect, agentId }) {
-          const allowed = actions.has(action) || agentActions.has(action)
-            || ((agentId === fundingAgentId || agentId === experienceAgentId) && action === ASK_USER.policy.action);
-          return principal.tenantId === "pzn-local" && principal.roles.includes("pzn-demo") && allowed && effect === "read"
+          const readAllowed = effect === "read" && (
+            actions.has(action) || agentActions.has(action)
+            || ((agentId === fundingAgentId || agentId === experienceAgentId) && action === ASK_USER.policy.action)
+          );
+          const writeAllowed = effect === "write" && action === domainWriteToolId && !agentId;
+          return principal.tenantId === "pzn-local" && principal.roles.includes("pzn-demo") && (readAllowed || writeAllowed)
             ? { decision: "allow", evidenceId: makeId("auth"), expiresAt: new Date(now() + axeBudget.activeSeconds * 1000).toISOString() }
-            : { decision: "deny", code: "TOOL_DENIED", reason: "The demo permits scoped fixture reads." };
+            : { decision: "deny", code: "TOOL_DENIED", reason: "The demo permits scoped reads and host-governed domain writes." };
         },
       },
       input: { async request() { /* The chat turn renders the persisted input request. */ } },
@@ -259,7 +336,11 @@ export class Runtime {
           },
         },
       },
-      limits: { requestMaxBytes: 64 * 1024, inputExpirySeconds: 300, grants: { effects: ["read"], interactionTools: ["ask_user"] } },
+      limits: {
+        requestMaxBytes: 64 * 1024,
+        inputExpirySeconds: 300,
+        grants: { effects: ["read", "write"], autonomousWrites: true, interactionTools: ["ask_user"] },
+      },
     });
     return runtime;
   }
@@ -331,7 +412,7 @@ export class Runtime {
       && turn.scope.principalId === ctx.principal.subjectId && !ctx.agentId, "REGISTRY_SCOPE_MISMATCH");
     const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
     requireCheck(conversation.personaId === turn.scope.personaId, "PERSONA_MISMATCH");
-    const persona = host.personas.find((entry) => entry.personaId === conversation.personaId);
+    const persona = findProfileById(conversation.personaId);
     requireCheck(persona && persona.allowedScenarios.includes(conversation.scenarioId), "PERSONA_MISMATCH");
     if (boundary === "workflowScopeId") {
       const definition = turn.workflow && resolveFundingWorkflow(turn.workflow.recommendation, turn.toolSetup?.fundingWorkflow);
@@ -345,7 +426,7 @@ export class Runtime {
     const turn = await this.funding.scopedTurn(ref, ctx);
     if (!turn) return { ...this.scopedRegistryTurn(ref, ctx, key), agentGuided: false };
     requireToolEnabled(turn, key);
-    const persona = host.personas.find((entry) => entry.personaId === turn.scope.personaId);
+    const persona = findProfileById(turn.scope.personaId);
     requireCheck(persona, "PERSONA_MISMATCH");
     return { persona, agentGuided: true };
   }
@@ -361,7 +442,7 @@ export class Runtime {
   }
 
   async workspaceNextStep(principalId: string, personaId: string): Promise<WorkspaceNextStep | null> {
-    const persona = host.personas.find((entry) => entry.personaId === personaId);
+    const persona = findProfileById(personaId);
     if (!persona) return null;
     const setup = this.store.toolSetup(principalId);
     if (!setup.enabled.selection) return null;
@@ -403,8 +484,110 @@ export class Runtime {
     }
   }
 
-  private effectiveFundingStatus(persona: typeof host.personas[number], principalId: string) {
+  private effectiveFundingStatus(persona: Pick<PersonaRecord, "personaId" | "accountFundingStatus">, principalId: string) {
     return this.store.axe.fundingStatus({ principalId, personaId: persona.personaId }) ?? persona.accountFundingStatus;
+  }
+
+  private buildArbitrator(turn?: TurnRecord, conversation?: ConversationRecord): RecommendationArbitrator {
+    const providers: RecommendationProvider[] = [
+      createTreatmentSelectorProvider((mid, contextId, signal) => {
+        const adapter = turn && conversation
+          ? this.turnTreatmentAdapter(turn, conversation)
+          : this.treatmentAdapter({ scenarioId: host.defaultScenarioId, ordinal: 1 }, undefined, { principalId: "preview", personaId: "demo-learner" });
+        return adapter.selectEligibleContent({ mid, context: contextId }, signal);
+      }),
+    ];
+    if (this.customer360) {
+      providers.push(createCustomer360NbaProvider((input) => this.customer360!.evaluate(input)));
+    }
+    if (this.opsStore) {
+      providers.push(createOpsRunbookProvider(() => this.opsStore!.list()));
+    }
+    if (this.salesStore) {
+      providers.push(createSalesDealDeskProvider(() => this.salesStore!.list()));
+    }
+    return new RecommendationArbitrator(providers);
+  }
+
+  recommendationProviderDescriptors(): RecommendationProviderDescriptor[] {
+    return this.buildArbitrator().descriptors();
+  }
+
+  async arbitrateRecommendations(
+    turn: TurnRecord,
+    input: { contextId: string; domain?: RecommendationDomain; existingBlockTitles?: string[] },
+    signal: AbortSignal,
+  ): Promise<RecommendationArbitrateResult> {
+    const result = await this.registry(turn, "tsScopeId", 1, signal, (execute) => execute("arbitrateRecommendations", {
+      turnRef: turn.public.id,
+      contextId: input.contextId,
+      domain: input.domain ?? "wealth",
+      ...(input.existingBlockTitles ? { existingBlockTitles: input.existingBlockTitles } : {}),
+    }));
+    return recommendationArbitrateResultSchema.parse(result.output);
+  }
+
+  async executeGovernedWrite(
+    principalId: string,
+    input: {
+      domain: "ops_incident" | "sales_deal" | "customer360";
+      recordId: string;
+      action: string;
+      actor: string;
+      note?: string;
+      updates?: Record<string, string>;
+    },
+    signal: AbortSignal,
+  ): Promise<{ summary: string; sfieldRunId: string; audit?: DomainWriteAuditEntry }> {
+    const scope = await this.sf.executions.open({
+      principal: principalFor(principalId),
+      purpose: "cep-governed-write",
+      preset: "bounded_auto",
+      budget: { maxToolCalls: 1 },
+    });
+    try {
+      const exec = await scope.registry.execute(
+        domainWriteToolRef,
+        {
+          domain: input.domain,
+          recordId: input.recordId,
+          action: input.action,
+          actor: input.actor,
+          ...(input.note ? { note: input.note } : {}),
+          ...(input.updates ? { updatesJson: JSON.stringify(input.updates) } : {}),
+        },
+        { signal },
+      );
+      if (exec.status !== "succeeded" || !exec.output || typeof exec.output !== "object") {
+        const reason = exec.error?.message ?? "Governed write denied by sfield policy.";
+        this.writeAudit?.record({
+          sfieldRunId: scope.id,
+          sfieldToolRef: domainWriteToolRef,
+          domain: input.domain,
+          recordId: input.recordId,
+          action: input.action,
+          actor: input.actor,
+          summary: reason,
+          status: "denied",
+        });
+        throw new Error(reason);
+      }
+      const out = exec.output as { summary?: string };
+      const summary = out.summary ?? `${input.action} applied to ${input.recordId}`;
+      const audit = this.writeAudit?.record({
+        sfieldRunId: scope.id,
+        sfieldToolRef: domainWriteToolRef,
+        domain: input.domain,
+        recordId: input.recordId,
+        action: input.action,
+        actor: input.actor,
+        summary,
+        status: "succeeded",
+      });
+      return { summary, sfieldRunId: scope.id, audit };
+    } finally {
+      await scope.close();
+    }
   }
 
   private tools() {
@@ -533,10 +716,98 @@ export class Runtime {
           checkFresh(turn.decision, turn.scope, this.now());
           requireCheck(turn.trace.intentId === "show_balance" && turn.decision.routeDecisionId === turn.route.routeDecisionId && turn.decision.contextId === "balance"
             && turn.decision.candidates.some((candidate) => lookupContent(candidate)?.metricSpec?.toolId === sfieldTools.balances.id), "METRIC_NOT_ELIGIBLE");
-          const persona = host.personas.find((entry) => entry.personaId === turn.scope.personaId);
+          const persona = findProfileById(turn.scope.personaId);
           if (!persona) throw new ToolError("DEMO_BALANCE_UNAVAILABLE");
           ctx.signal.throwIfAborted();
           return readDemoBalance(persona.personaId, persona.syntheticMid, this.now());
+        },
+      }),
+      defineTool({
+        id: recommendationArbitrateToolId,
+        version: recommendationArbitrateToolVersion,
+        description: "Host-governed recommendation arbitrator that fans out across pluggable RecommendationProvider adapters (Treatment Selector + CCRE, Customer 360 NBA, IT Ops Runbooks) behind one normalized sfield boundary.",
+        inputs: recommendationArbitrateInputJsonSchema,
+        outputs: recommendationArbitrateResultJsonSchema,
+        policy: {
+          action: recommendationArbitrateToolId,
+          effect: "read",
+          requiresApproval: false,
+          maxAttempts: 1,
+          timeoutMs: 5_000,
+          classification: "public",
+          maxOutputBytes: 48_000,
+        },
+        handler: async (raw, ctx) => {
+          const parsed = recommendationArbitrateInputSchema.parse(raw);
+          const { turn, conversation, persona } = this.scopedRegistryTurn(parsed.turnRef, ctx, "selection");
+          const funding = this.effectiveFundingStatus(persona, turn.scope.principalId) === "funded" ? "funded" : "unfunded";
+          return this.buildArbitrator(turn, conversation).arbitrate({
+            principalId: turn.scope.principalId,
+            personaId: turn.scope.personaId,
+            syntheticMid: persona.syntheticMid,
+            contextId: parsed.contextId,
+            domain: parsed.domain,
+            fundingStatus: funding,
+            excludePromotions: false,
+            existingBlockTitles: parsed.existingBlockTitles,
+          }, ctx.signal);
+        },
+      }),
+      defineTool({
+        id: domainWriteToolId,
+        version: domainWriteToolVersion,
+        description: "Host-governed domain write-back tool for operator-confirmed mutations across IT Incidents, Sales Deals, and Customer 360 bindings.",
+        resource: { type: "domain_record", id: { ref: "inputs.recordId" } },
+        inputs: domainWriteInputJsonSchema,
+        outputs: domainWriteResultJsonSchema,
+        policy: {
+          action: domainWriteToolId,
+          effect: "write",
+          requiresApproval: false,
+          maxAttempts: 1,
+          timeoutMs: 5_000,
+          classification: "public",
+          maxOutputBytes: 16_000,
+        },
+        handler: async (raw) => {
+          const inp = raw as {
+            domain: "ops_incident" | "sales_deal" | "customer360";
+            recordId: string;
+            action: string;
+            actor: string;
+            note?: string;
+            updatesJson?: string;
+          };
+          if (inp.domain === "ops_incident") {
+            if (!this.opsStore) throw new ToolError("OPS_STORE_UNAVAILABLE");
+            const decision = inp.action as "approve_rollback" | "reject_rollback" | "resolve" | "escalate";
+            const updated = this.opsStore.decide(inp.recordId, { decision, actor: inp.actor, ...(inp.note ? { note: inp.note } : {}) });
+            if (!updated) throw new ToolError("INCIDENT_NOT_FOUND");
+            return {
+              ok: true,
+              recordId: updated.id,
+              summary: `${updated.id} → ${updated.status} (error rate ${updated.errorRatePct}%, p95 ${updated.p95LatencyMs}ms)`,
+            };
+          }
+          if (inp.domain === "sales_deal") {
+            if (!this.salesStore) throw new ToolError("SALES_STORE_UNAVAILABLE");
+            const decision = inp.action as "approve_discount" | "reject_discount" | "advance_stage";
+            const updated = this.salesStore.decide(inp.recordId, { decision, actor: inp.actor, ...(inp.note ? { note: inp.note } : {}) });
+            if (!updated) throw new ToolError("DEAL_NOT_FOUND");
+            return {
+              ok: true,
+              recordId: updated.id,
+              summary: `${updated.id} (${updated.accountName}) → ${updated.stage} (${updated.discountStatus}, ${updated.winProbabilityPct}% prob.)`,
+            };
+          }
+          if (!this.profileStore) throw new ToolError("CUSTOMER_STORE_UNAVAILABLE");
+          const updates = inp.updatesJson ? JSON.parse(inp.updatesJson) as Record<string, string> : {};
+          const applied = this.profileStore.applyBindings(inp.recordId, updates, this.now());
+          return {
+            ok: true,
+            recordId: inp.recordId,
+            summary: `Updated Customer 360 bindings: ${applied.updatedFields.join(", ") || "none"}`,
+          };
         },
       }),
     ];

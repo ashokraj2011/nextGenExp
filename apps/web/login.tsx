@@ -6,6 +6,7 @@ import coastalPhoto from "./assets/coastal-planning.jpg";
 import { readProfileSession, saveProfileSession } from "./conversation-storage";
 import { ProfileAvatar } from "./demo-profiles";
 import { LabMark } from "./lab-mark";
+import { ThemeToggle } from "./theme";
 import "./login.css";
 
 export function Login() {
@@ -36,7 +37,14 @@ export function Login() {
 
   return <div className="login-page">
     <header className="login-header">
-      <div className="login-brand"><LabMark small /> PZN Lab</div>
+      <div className="login-brand">
+        <LabMark small />
+        <span className="rail-brand-text">
+          <strong>CEP</strong>
+          <small>Customer Engagement Platform</small>
+        </span>
+      </div>
+      <ThemeToggle />
       {readProfileSession() !== "" && <a className="login-back" href={chatPath}><ArrowLeft size={16} aria-hidden="true" />Back to chat</a>}
     </header>
     <main className="login-layout">

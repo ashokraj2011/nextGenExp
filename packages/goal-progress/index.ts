@@ -1,6 +1,7 @@
 import fixtures from "../../fixtures/demo-goal-progress.json";
 import host from "../../fixtures/host.json";
 import { goalProgressSchema, type GoalProgress } from "../contracts/goal-progress";
+import { getActiveCustomerProfileStore } from "../customer-profiles";
 
 export interface GoalProgressProvider {
   read(mid: string, signal?: AbortSignal): Promise<GoalProgress | null>;
@@ -17,6 +18,12 @@ if (byMid.size !== goals.length || goals.some(({ mid }) => !host.personas.some((
 export const fixtureGoalProgressProvider: GoalProgressProvider = {
   async read(mid, signal) {
     signal?.throwIfAborted();
+    const live = getActiveCustomerProfileStore();
+    if (live) {
+      const progress = live.goalProgress(mid);
+      if (progress) return progress;
+      if (live.findByMid(mid)) return null;
+    }
     return byMid.get(mid) ?? null;
   },
 };

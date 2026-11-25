@@ -1,7 +1,8 @@
 import { CapabilityStudio } from "./capability-studio";
 import "./agentic.css";
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, FlaskConical, MessageSquare, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, FlaskConical, Layers, MessageSquare, Trash2 } from "lucide-react";
+import type { RecommendationProviderDescriptor } from "../../packages/contracts/recommendation-provider";
 import {
   defaultAgentFundingWorkflow, defaultFundingWorkflow, fundingAgentToolLimit, fundingToolKey, fundingToolKeys,
   fundingToolRef, fundingTools, fundingWorkflowIssue,
@@ -331,6 +332,43 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
   </form>;
 }
 
+function RecommendationProvidersCard() {
+  const [info, setInfo] = useState<{ toolRef: string; providers: RecommendationProviderDescriptor[] } | null>(null);
+  useEffect(() => {
+    let mounted = true;
+    void api.recommendationProviders()
+      .then((res) => { if (mounted) setInfo(res); })
+      .catch(() => undefined);
+    return () => { mounted = false; };
+  }, []);
+  if (!info || info.providers.length === 0) return null;
+  return (
+    <section className="admin-card" aria-labelledby="rec-providers-title" style={{ marginTop: "18px" }}>
+      <h2 id="rec-providers-title" style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+        <Layers size={18} aria-hidden="true" />
+        Recommendation Providers (sfield)
+      </h2>
+      <p>
+        Pluggable domain engines registered behind the host-governed arbitrator tool <code>{info.toolRef}</code>.
+        Add new domain or vendor adapters via <code>RecommendationProvider</code> without modifying LLM prompts.
+      </p>
+      <ul className="admin-tools" style={{ marginTop: "12px" }}>
+        {info.providers.map((provider) => (
+          <li key={provider.id}>
+            <div className="admin-tool" style={{ cursor: "default" }}>
+              <span>
+                <strong>{provider.label}</strong>
+                <code>{provider.id} · domains: {provider.domains.join(", ")}</code>
+                <small>{provider.description}</small>
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export function AdminPage() {
   const [loaded, setLoaded] = useState<Awaited<ReturnType<typeof api.toolSetup>>>();
   const [error, setError] = useState("");
@@ -347,6 +385,7 @@ export function AdminPage() {
         <h1>Tool setup</h1>
         {error ? <p role="alert">{error}</p> : <p role="status">Loading tool settings…</p>}
       </div>}
+      {loaded && <RecommendationProvidersCard />}
       {loaded && <CapabilityStudio />}
     </main>
   </div>;

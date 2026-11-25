@@ -2,6 +2,7 @@ import { experienceAgentId } from "../../packages/contracts/agentic";
 import { ASK_USER } from "@sfield/core";
 import type { CallRecord, JsonValue, ModelAttemptRecord, RunRecord, SField } from "@sfield/core";
 import host from "../../fixtures/host.json";
+import { findProfileById } from "../../packages/customer-profiles";
 import type { AgenticPayloads, WorkflowPayloads, ModelStagePayloads, RegistryToolPayloads, TreatmentPayloads, TurnPayloads } from "../../packages/contracts/inspector";
 import { fundingAgentId, fundingToolKey, resolveFundingWorkflow, treatmentRecommendationsVersion } from "../../packages/contracts/funding-workflow";
 import { sfieldTools, toolVersion } from "../../packages/contracts/tool-setup";
@@ -127,7 +128,7 @@ async function treatmentPayloads(sf: SField, inspection: Inspection, turn: TurnR
   if (!call) return null;
   let mockInput = turn.treatmentMockInput;
   if (!mockInput && (call.result?.status === "succeeded" || call.result?.error?.code === "TS_TIMEOUT")) {
-    const persona = host.personas.find((entry) => entry.personaId === conversation.personaId);
+    const persona = findProfileById(conversation.personaId);
     if (persona) mockInput = { mid: persona.syntheticMid, context };
   }
   return {

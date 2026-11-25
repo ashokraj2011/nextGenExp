@@ -11,6 +11,8 @@ import portfolioSource from "../../packages/contracts/portfolio.ts?raw";
 import goalSource from "../../packages/contracts/goal-progress.ts?raw";
 import surfaceSource from "../../packages/contracts/surface.ts?raw";
 import inspectorSource from "../../packages/contracts/inspector.ts?raw";
+import recommendationProviderContractSource from "../../packages/contracts/recommendation-provider.ts?raw";
+import recommendationArbitratorSource from "../../packages/recommendations/index.ts?raw";
 import treatmentAdapterSource from "../../packages/ts-adapter/index.ts?raw";
 import contentBundleSource from "../../packages/experience/content.ts?raw";
 import portfolioProviderSource from "../../packages/portfolio-snapshot/index.ts?raw";
@@ -109,6 +111,18 @@ export const helpContracts = [
   {
     title: "Personalization and tools",
     contracts: [
+      {
+        id: "providers",
+        title: "Recommendation providers (sfield)",
+        description: "One host-governed sfield tool (cep.recommendations.arbitrate@1.0.0) fans out across pluggable RecommendationProvider adapters (Treatment Selector + CCRE, Customer 360 NBA, IT Ops Runbooks, or external decisioning engines) and returns one normalized, priority-arbitrated bundle.",
+        endpoints: [
+          ["GET /api/admin/recommendation-providers", "List active RecommendationProvider adapters registered behind cep.recommendations.arbitrate@1.0.0."],
+        ],
+        files: [
+          { name: "recommendation-provider.ts", source: recommendationProviderContractSource },
+          { name: "recommendations-arbitrator.ts", source: recommendationArbitratorSource },
+        ],
+      },
       {
         id: "treatment",
         title: "Treatment Selector",

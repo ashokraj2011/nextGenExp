@@ -80,7 +80,7 @@ function drawSavings(canvas: HTMLCanvasElement, { history, targetCents }: Pick<G
   context.stroke();
   context.setLineDash([]);
 
-  context.strokeStyle = "#226149";
+  context.strokeStyle = "#368727";
   context.lineWidth = 2.5;
   context.lineJoin = "round";
   context.beginPath();
@@ -94,7 +94,7 @@ function drawSavings(canvas: HTMLCanvasElement, { history, targetCents }: Pick<G
     const last = index === points.length - 1;
     context.beginPath();
     context.arc(point.x, point.y, last ? 4.5 : 3.4, 0, Math.PI * 2);
-    context.fillStyle = "#226149";
+    context.fillStyle = "#368727";
     context.fill();
     if (last || (point.x - lastLabelX >= labelSpacing && right - point.x >= labelSpacing)) {
       context.fillStyle = "#4d6558";

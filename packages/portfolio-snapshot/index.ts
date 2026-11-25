@@ -3,6 +3,7 @@ import host from "../../fixtures/host.json";
 import raw from "../../fixtures/demo-portfolio-snapshots.json";
 import historyFixture from "../../fixtures/demo-portfolio-history.json";
 import { portfolioHistoryPointSchema, portfolioSnapshotSchema, type PortfolioSnapshot } from "../contracts/portfolio";
+import { getActiveCustomerProfileStore } from "../customer-profiles";
 
 export interface PortfolioSnapshotProvider {
   read(mid: string, signal?: AbortSignal): Promise<PortfolioSnapshot | null>;
@@ -27,6 +28,11 @@ if (Object.entries(historyByMid).some(([mid, points]) => !byMid.has(mid)
 }
 
 export function fixturePortfolioHistory(mid: string) {
+  const live = getActiveCustomerProfileStore();
+  if (live) {
+    const customHistory = live.portfolioHistory(mid);
+    if (customHistory.length > 0) return customHistory;
+  }
   const history = historyByMid[mid];
   const snapshot = byMid.get(mid);
   if (!history || !snapshot) return [];
@@ -36,6 +42,11 @@ export function fixturePortfolioHistory(mid: string) {
 export const fixturePortfolioSnapshotProvider: PortfolioSnapshotProvider = {
   async read(mid, signal) {
     signal?.throwIfAborted();
+    const live = getActiveCustomerProfileStore();
+    if (live) {
+      const snapshot = live.portfolioSnapshot(mid);
+      if (snapshot) return snapshot;
+    }
     const balances = byMid.get(mid);
     return balances ? { fixtureVersion, asOf, currency, ...balances } : null;
   },

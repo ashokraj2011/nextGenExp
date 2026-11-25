@@ -1,4 +1,7 @@
-import { ArrowRight, ArrowUpRight, Database, Network, ShieldCheck, Sparkles } from "lucide-react";
+import {
+  ArrowRight, ArrowUpRight, CheckCircle2, Cpu, Database, HardDrive, KeyRound, Layers, Lock, Network, ShieldCheck, Sliders, Sparkles,
+} from "lucide-react";
+import { recommendationArbitrateToolRef } from "../../packages/contracts/recommendation-provider";
 import { sfieldTools, toolKeys, toolVersion, type ToolKey } from "../../packages/contracts/tool-setup";
 
 const usage = {
@@ -14,6 +17,84 @@ const usage = {
   fundingPreview: { caller: "Funding preview workflow", contract: "funding", description: "Builds a sample preview using the method read for this turn." },
 } satisfies Record<ToolKey, { caller: string; contract: string; description: string }>;
 
+const sfieldPillars = [
+  {
+    Icon: KeyRound,
+    title: "1. Zero-Trust Identity & Authorizer",
+    detail: "Every execution carries a host-authenticated Principal (tenantId, subjectId, roles). Before any tool runs, sfield invokes the Authorizer hook to verify tenant, role, action, read/write effect, and caller origin (agent vs host).",
+  },
+  {
+    Icon: Lock,
+    title: "2. Policy Presets & Effect Isolation",
+    detail: "LLM agents (Context Router, Composer, Funding, Experience) always run under preset: read_only — they can never invoke write tools. Operator-confirmed mutations run only in host-owned bounded_auto scopes with explicit resource bindings.",
+  },
+  {
+    Icon: CheckCircle2,
+    title: "3. Closed Schemas & Output Verifiers",
+    detail: "Every tool input and output is validated by Ajv against a strict closed JSON Schema subset. Structured LLM outputs pass through host Verifier gates (contextSelection, experience, fundingPreview) before anything can publish.",
+  },
+  {
+    Icon: Sliders,
+    title: "4. Lifecycle Hooks (Narrow & Prepare)",
+    detail: "beforeModelDispatch narrows the exact tool surface visible to an agent on each turn, while prepareTool injects verified host scope and turn references — preventing prompt-injected parameter tampering.",
+  },
+  {
+    Icon: HardDrive,
+    title: "5. Durable Checkpoints & Crash Recovery",
+    detail: "Sessions, runs, checkpoints, model attempts, and tool calls persist with idempotency keys via ExecutionPersistence. Interrupted multi-step workflows (such as Funding Preview) resume cleanly after server restarts.",
+  },
+  {
+    Icon: Cpu,
+    title: "6. Budgets, Deadlines & Audit Proof",
+    detail: "Enforces strict ceilings on token output, model calls, tool attempts, timeouts, and payload byte sizes (maxOutputBytes). Every run and governed write produces a traceable sfieldRunId inspectable in Logs and Inspector.",
+  },
+];
+
+const executionLanes = [
+  {
+    lane: "LLM Agent Sessions",
+    preset: "read_only",
+    caller: "route · compose · funding · experience",
+    allowed: "Scoped read tools & ask_user only",
+    guarantee: "Cannot invoke write tools; outputs must pass Verifier gates",
+  },
+  {
+    lane: "Host Read Scopes",
+    preset: "read_only",
+    caller: "CEP App Server (registry.execute)",
+    allowed: "Treatment Selector, Portfolio, Goal, cep.recommendations.arbitrate@1.0.0",
+    guarantee: "Deterministic arbitration & PII-safe data reads with full audit logs",
+  },
+  {
+    lane: "Host Governed Writes",
+    preset: "bounded_auto",
+    caller: "CEP App Server (operator UI confirmation)",
+    allowed: "cep.domain.execute_write@1.0.0 only (no agentId)",
+    guarantee: "Explicit business resource binding (domain_record) + immutable Write Audit entry",
+  },
+];
+
+const deploymentModes = [
+  {
+    mode: "ephemeral",
+    label: "Ephemeral (In-Memory)",
+    use: "Unit tests and stateless CI verification via @sfield/testing.",
+    active: false,
+  },
+  {
+    mode: "durable_single",
+    label: "Durable Single-Node (SQLite)",
+    use: "Active in CEP today via @sfield/store-sqlite — full crash recovery, checkpoints, and local audit trails.",
+    active: true,
+  },
+  {
+    mode: "service",
+    label: "Distributed Service (Postgres / HA)",
+    use: "Production scale-out path: swap ExecutionPersistence + ArtifactStore to Postgres without changing agents or tools.",
+    active: false,
+  },
+];
+
 export function SfieldHelp({ selectContract }: { selectContract: (id: string) => void }) {
   const portfolioTool = sfieldTools.portfolio.id + "@" + toolVersion;
   return <section id="sfield" className="help-section" aria-labelledby="sfield-title">
@@ -24,34 +105,101 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
       </a>
     </div>
     <div className="help-sfield">
-      <p className="help-sfield-lead"><strong>sfield runs the model calls and tools needed to answer a chat message.</strong></p>
+      <p className="help-sfield-lead">
+        <strong>sfield is CEP’s embedded zero-trust agent &amp; tool execution kernel</strong> (<code>@sfield/core</code>,{" "}
+        <code>@sfield/store-sqlite</code>, <code>@sfield/testing</code>). It sits between the CEP server, language models, and business systems — enforcing identity, closed schemas, policy presets, budgets, durability, and verification on every call.
+      </p>
+
       <ol className="help-sfield-flow" aria-label="How sfield handles a chat message" role="list">
         <li className="help-sfield-node">
           <span className="help-entity-icon"><Network size={18} aria-hidden="true" /></span>
-          <h3>PZN app server</h3>
-          <p>Matches the chat to a demo customer, chooses the next step, and checks the results before building the reply.</p>
+          <h3>CEP app server</h3>
+          <p>Authenticates the session, selects the active Domain Pack &amp; principal, opens scoped sfield executions, and compiles verified A2UI surfaces.</p>
           <ArrowRight className="help-proposal-arrow" size={22} aria-hidden="true" />
         </li>
         <li className="help-sfield-node">
           <span className="help-entity-icon"><ShieldCheck size={18} aria-hidden="true" /></span>
-          <h3>sfield</h3>
-          <p>Checks who can use a tool and whether the data is in the right format. It limits how long calls can run and records what happened.</p>
+          <h3>sfield runtime</h3>
+          <p>Runs Authorizer checks, policy presets (<code>read_only</code> vs host <code>bounded_auto</code>), Ajv schema validation, lifecycle hooks, Verifiers, and durable SQLite checkpoints.</p>
           <ArrowRight className="help-proposal-arrow" size={22} aria-hidden="true" />
         </li>
         <li className="help-sfield-targets">
           <div className="help-proposal-choice">
             <span className="help-entity-icon"><Sparkles size={16} aria-hidden="true" /></span>
-            <div><h3>Language model</h3><p>Identifies the request or suggests how to show the answer.</p></div>
+            <div><h3>Language model gateway</h3><p>Copilot ACP or OpenAI-compatible gateway — always sandboxed in <code>read_only</code> sessions with strict token &amp; attempt budgets.</p></div>
           </div>
           <div className="help-proposal-choice">
             <span className="help-entity-icon"><Database size={16} aria-hidden="true" /></span>
-            <div><h3>Tools</h3><p>Ask Treatment Selector which content fits or look up the account details needed for the reply.</p></div>
+            <div><h3>Scoped read &amp; write tools</h3><p>Reads live domain data, arbitrates recommendations (<code>cep.recommendations.arbitrate</code>), and executes operator-confirmed writes (<code>cep.domain.execute_write</code>).</p></div>
           </div>
         </li>
       </ol>
+
+      <div className="help-sfield-subsection">
+        <h3>Core sfield architecture pillars</h3>
+        <p>Unlike unguarded LLM tool loops, sfield separates <em>model reasoning</em> from <em>authorization, data access, and state mutation</em> across six enforcement layers:</p>
+        <div className="help-sfield-pillars">
+          {sfieldPillars.map(({ Icon, title, detail }) => (
+            <article key={title} className="help-sfield-pillar">
+              <span className="help-entity-icon"><Icon size={16} aria-hidden="true" /></span>
+              <div>
+                <h4>{title}</h4>
+                <p>{detail}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+
+      <div className="help-sfield-subsection">
+        <h3>Execution lanes &amp; security boundaries</h3>
+        <p>sfield enforces strict separation between what an LLM can trigger autonomously and what requires host orchestration or explicit operator confirmation:</p>
+        <div className="help-sfield-table-wrap">
+          <table className="help-sfield-table">
+            <thead>
+              <tr>
+                <th>Execution Lane</th>
+                <th>Policy Preset</th>
+                <th>Caller</th>
+                <th>Permitted Surface</th>
+                <th>Security Guarantee</th>
+              </tr>
+            </thead>
+            <tbody>
+              {executionLanes.map((row) => (
+                <tr key={row.lane}>
+                  <td><strong>{row.lane}</strong></td>
+                  <td><code>{row.preset}</code></td>
+                  <td>{row.caller}</td>
+                  <td>{row.allowed}</td>
+                  <td>{row.guarantee}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="help-sfield-subsection">
+        <h3>Deployment modes &amp; enterprise scaling path</h3>
+        <p>sfield decouples orchestration from storage through its <code>ExecutionPersistence</code> and <code>ArtifactStore</code> interfaces, supporting a smooth progression from local tests to HA production:</p>
+        <div className="help-sfield-modes">
+          {deploymentModes.map((item) => (
+            <div key={item.mode} className={"help-sfield-mode" + (item.active ? " is-active" : "")}>
+              <div className="help-sfield-mode-head">
+                <code>{item.mode}</code>
+                {item.active && <span className="help-mode-pill mode-verified">Active in CEP</span>}
+              </div>
+              <h4>{item.label}</h4>
+              <p>{item.use}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="help-sfield-subsection">
         <h3>What makes a tool plug-and-play</h3>
-        <p>Each tool has an ID and version, a format for what it receives and sends back, code that does the work, and rules for who can use it. The code can get its data from the demo or a connected service.</p>
+        <p>Each tool declares an ID and version, closed JSON Schemas for inputs and outputs, a business resource binding (mandatory for write tools), policy limits, and a pluggable adapter handler:</p>
         <div className="help-provider-path" aria-label="Portfolio Snapshot provider example">
           <div>
             <h4>Portfolio Snapshot tool</h4>
@@ -65,10 +213,37 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
             <p>The demo uses sample data. Set the server’s <code>portfolioSnapshots</code> option to connect a service that provides cash and investment balances.</p>
           </div>
         </div>
+        <div className="help-provider-path" aria-label="Unified Recommendation Provider example" style={{ marginTop: "12px" }}>
+          <div>
+            <h4><Layers size={15} aria-hidden="true" style={{ verticalAlign: "-2px", marginRight: "6px" }} />Unified Recommendation Arbitrator</h4>
+            <code>{recommendationArbitrateToolRef}</code>
+            <p>Host-governed <code>sfield</code> read tool — never exposed directly to the LLM so vendor selection stays deterministic and compliant.</p>
+          </div>
+          <ArrowRight className="help-provider-arrow" size={20} aria-hidden="true" />
+          <div>
+            <h4>Pluggable RecommendationProvider adapters</h4>
+            <code>RecommendationProvider.evaluate(ctx, signal)</code>
+            <p>Fans out in parallel to <strong>Treatment Selector (TS + CCRE)</strong>, <strong>Customer 360 NBA</strong>, <strong>IT Ops Runbooks</strong>, <strong>Sales Deal Desk</strong>, or external engines (Pega CDH, ML Ranker).</p>
+          </div>
+        </div>
+        <div className="help-provider-path" aria-label="Governed Write Tool example" style={{ marginTop: "12px" }}>
+          <div>
+            <h4><Lock size={15} aria-hidden="true" style={{ verticalAlign: "-2px", marginRight: "6px" }} />Governed Domain Write Tool</h4>
+            <code>cep.domain.execute_write@1.0.0</code>
+            <p>Declares <code>effect: "write"</code> and <code>resource: domain_record</code> bound to <code>inputs.recordId</code>. Blocked for all LLM agents; executable only by confirmed host actions.</p>
+          </div>
+          <ArrowRight className="help-provider-arrow" size={20} aria-hidden="true" />
+          <div>
+            <h4>Live Stores &amp; Immutable Write Audit</h4>
+            <code>incidents.json · deals.json · customer-profiles.json → write-audit.json</code>
+            <p>Executes rollbacks, discount approvals, and Customer 360 form updates inside a signed <code>sfield</code> run and logs every <code>sfieldRunId</code> to <strong>Logs → Write audit</strong>.</p>
+          </div>
+        </div>
       </div>
+
       <div className="help-sfield-subsection">
         <h3>Registered tools</h3>
-        <p>These tools only read data. Use Tool setup to turn them on or off and choose how Treatment Selector responds in the demo. Select a tool to see what it sends and receives.</p>
+        <p>Read tools can be toggled in Tool setup, while platform arbitration and governed write tools run at the host boundary. Select a tool to inspect its contract.</p>
         <ul className="help-tool-registry" aria-label="sfield tool registry" role="list">
           {toolKeys.map((key) => {
             const tool = sfieldTools[key];
@@ -83,6 +258,33 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
               <span className="help-tool-caller">{usage[key].caller}</span>
             </li>;
           })}
+        </ul>
+      </div>
+
+      <div className="help-sfield-subsection">
+        <h3>Host platform tools (Arbitration &amp; Governed Writes)</h3>
+        <p>These two platform-level tools run exclusively inside host-owned sfield scopes and are never exposed to LLM agents directly.</p>
+        <ul className="help-tool-registry" aria-label="sfield platform tools" role="list">
+          <li>
+            <div className="help-tool-name">
+              <a className="help-section-link" href="#contracts" onClick={() => selectContract("providers")}>
+                Recommendation Arbitrator <ArrowUpRight size={13} aria-hidden="true" />
+              </a>
+              <code>{recommendationArbitrateToolRef}</code>
+            </div>
+            <p>Fans out across registered RecommendationProvider adapters and returns one normalized, priority-arbitrated bundle.</p>
+            <span className="help-tool-caller">Host · Read scope</span>
+          </li>
+          <li>
+            <div className="help-tool-name">
+              <a className="help-section-link" href="/admin/logs?source=write_audit">
+                Governed Domain Write <ArrowUpRight size={13} aria-hidden="true" />
+              </a>
+              <code>cep.domain.execute_write@1.0.0</code>
+            </div>
+            <p>Executes operator-confirmed writes across IT Ops rollbacks, RevOps discount approvals, and Customer 360 form bindings with immutable audit proof.</p>
+            <span className="help-tool-caller">Host · bounded_auto write scope</span>
+          </li>
         </ul>
       </div>
     </div>

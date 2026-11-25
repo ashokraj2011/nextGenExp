@@ -2,17 +2,34 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useAui, useAuiState, useExternalStoreRuntime, type ThreadMessageLike } from "@assistant-ui/react";
 import { CreateSurfaceMessageSchema, type ActionMessage } from "@a2ui/web_core/v1_0";
-import { ArrowLeft, ArrowUp, BookOpenText, ChevronDown, ChevronRight, Columns2, GraduationCap, House, LayoutDashboard, ListChecks, LogIn, LogOut, MapPin, MessageSquare, PanelLeft, Plus, RotateCcw, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
-import { failureCopy, progressLabels, type Bootstrap, type Conversation, type ConversationChange, type ConversationView, type DemoPersona, type TurnView, type TurnAccepted, type Progress } from "../../packages/contracts/api";
+import {
+  ArrowLeft, ArrowUp, ArrowUpRight, BookOpenText, ChevronDown, ChevronRight, Columns2, GraduationCap, House, LayoutDashboard,
+  ListChecks, LogIn, LogOut, MapPin, MessageSquare, Mic, MicOff, PanelLeft, PanelLeftClose, Paperclip, Plus, RotateCcw, Sparkles,
+  Square, ThumbsDown, ThumbsUp, Wallet, X,
+} from "lucide-react";
+import {
+  failureCopy, progressLabels, type Bootstrap, type Conversation, type ConversationChange, type ConversationView,
+  type DemoPersona, type NextBestActionCard, type Progress, type TurnAccepted, type TurnView,
+} from "../../packages/contracts/api";
 import { MAX_MESSAGE_LENGTH } from "../../packages/contracts/domain";
+import { formatPortfolioAmount } from "../../packages/contracts/portfolio";
 import { defaultWorkspacePins, pendingActionsContext, type WorkspacePin } from "../../packages/contracts/workspace";
 import { adminPaths } from "../../packages/contracts/admin-paths";
 import { api } from "./api";
 import { AdminNavigation } from "./admin-navigation";
 import { readActiveConversation, readProfileSession, rememberActiveConversation, saveProfileSession } from "./conversation-storage";
+import {
+  AttachmentChipList, composeMessageWithAttachments, computeNextSuggestions, NextSuggestionChips,
+  readAttachmentFile, SpeakButton, useVoiceInput, type ComposerAttachment, type NextSuggestion,
+} from "./composer-extras";
 import { DemoProfiles, ProfileAvatar } from "./demo-profiles";
+import { DomainLiveHud, DomainPackSwitcher, DomainWelcomeHome, useDomainPack } from "./domain-pack-ui";
+import type { DomainPack } from "../../packages/contracts/domain-packs";
 import { LabMark } from "./lab-mark";
+import { LiveMetricsHud } from "./live-metrics-rail";
 import { planningTopics } from "./planning-topics";
+import { ReasoningPanel } from "./reasoning-panel";
+import { ThemeToggle } from "./theme";
 import { BasicSmoke, ExperienceControls, ExperienceDataUI, installA2uiStyles } from "./surface";
 import { usePendingActions, WorkspaceHome, WorkspaceOverview, type PendingActions } from "./workspace-overview";
 import { WorkspaceCustomization, WorkspaceMenu, type WorkspaceSection } from "./workspace-menu";
@@ -23,6 +40,8 @@ const homeGoalPrompt = "Show my home-buying goal and savings progress.";
 const portfolioPrompt = planningTopics.find(({ id }) => id === "portfolio")!.prompt;
 const adminChat = location.pathname === adminPaths.chat;
 const createConversation = adminChat ? api.newAdminConversation : api.newConversation;
+const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+
 const starters = [
   ...(adminChat ? [{ Icon: BookOpenText, label: "Create a rule", message: "Create a rule" }] : []),
   { Icon: BookOpenText, label: "Explain a concept", message: "Explain the balance labels." },
@@ -32,92 +51,381 @@ const starters = [
   { Icon: House, label: "Home-buying goal", message: homeGoalPrompt },
   { Icon: MapPin, label: "Update mailing address", message: "I need to update my mailing address." },
 ];
+
 type ConversationOperations = {
   latest?: TurnView;
   pending: boolean;
+  activeProfile?: DemoPersona;
+  progressHistory: Record<string, Progress[]>;
   retry: (id: string) => void;
   anchorTurn: (id: string, message: HTMLElement) => void;
   feedback: (turnId: string, experienceId: string, value: "helpful" | "unhelpful") => void;
+  runPrompt: (prompt: string) => void;
+  previewFunding: () => void;
 };
-const ConversationControls = createContext<ConversationOperations>({ pending: false, retry: () => undefined, feedback: () => undefined, anchorTurn: () => undefined });
-function StarterPrompts({ disabled }: { disabled: boolean }) {
+
+const ConversationControls = createContext<ConversationOperations>({
+  pending: false,
+  progressHistory: {},
+  retry: () => undefined,
+  feedback: () => undefined,
+  anchorTurn: () => undefined,
+  runPrompt: () => undefined,
+  previewFunding: () => undefined,
+});
+
+function StarterPrompts({ disabled, activeProfile }: { disabled: boolean; activeProfile?: DemoPersona }) {
   const aui = useAui();
+  const dynamicStarters = useMemo(() => {
+    if (adminChat || !activeProfile) return [];
+    const items: { Icon: typeof Sparkles; label: string; message: string; personalized: true }[] = [];
+    const cashCents = activeProfile.overview?.portfolio?.cashCents ?? 0;
+    if (activeProfile.profile.accountFundingStatus === "unfunded") {
+      items.push({
+        Icon: Wallet,
+        label: "Deposit $500 to start",
+        message: "I want to deposit $500 into my investment account.",
+        personalized: true,
+      });
+    } else if (cashCents > 10_000_00) {
+      items.push({
+        Icon: Sparkles,
+        label: `Review ${formatPortfolioAmount(cashCents)} cash`,
+        message: "Let me know my portfolio summary.",
+        personalized: true,
+      });
+    }
+    if (activeProfile.overview?.homeGoal) {
+      items.push({
+        Icon: Sparkles,
+        label: "Simulate 2-year home plan",
+        message: "I want to buy a house in two years. Show me how close I am and help me explore a savings plan.",
+        personalized: true,
+      });
+    }
+    return items;
+  }, [activeProfile]);
+
   return <div className="composer-starters" role="group" aria-label="Suggested questions">
+    {dynamicStarters.map(({ Icon, label, message }) => (
+      <button key={label} type="button" className="starter starter-personalized" disabled={disabled} onClick={() => aui.thread().append(message)}>
+        <Icon size={14} aria-hidden="true" />{label}
+      </button>
+    ))}
     {starters.map(({ Icon, label, message }) => (
       <button key={label} type="button" className="starter" disabled={disabled} onClick={() => aui.thread().append(message)}>
-        <Icon size={15} aria-hidden="true" />{label}
+        <Icon size={14} aria-hidden="true" />{label}
       </button>
     ))}
   </div>;
 }
 
 function UserMessage() {
-  return <MessagePrimitive.Root className="user-message"><div className="user-bubble"><MessagePrimitive.Parts /></div></MessagePrimitive.Root>;
+  const createdAt = useAuiState((state) => state.message.createdAt);
+  const { activeProfile } = useContext(ConversationControls);
+  const displayName = activeProfile?.displayName ?? "You";
+  return (
+    <MessagePrimitive.Root className="user-message">
+      <div className="stream-user-row">
+        <ProfileAvatar name={displayName} />
+        <div className="stream-user-body">
+          <div className="stream-meta-line">
+            <strong>{displayName}</strong>
+            <span className="turn-meta">{createdAt ? timeFormat.format(createdAt) : "Just now"}</span>
+          </div>
+          <div className="user-bubble"><MessagePrimitive.Parts /></div>
+        </div>
+      </div>
+    </MessagePrimitive.Root>
+  );
 }
+
+function NbaCompanionCard({ nba, personaId, disabled, onRunPrompt, onPreviewFunding }: {
+  nba: NextBestActionCard;
+  personaId?: string;
+  disabled: boolean;
+  onRunPrompt: (prompt: string) => void;
+  onPreviewFunding: () => void;
+}) {
+  const [dismissed, setDismissed] = useState(false);
+  const [dismissing, setDismissing] = useState(false);
+
+  if (dismissed) {
+    return (
+      <p className="nba-dismissed-note" role="status">
+        Dismissed — we&rsquo;ll prioritize other recommendations next time.
+      </p>
+    );
+  }
+
+  async function dismiss() {
+    if (!personaId || dismissing) return;
+    setDismissing(true);
+    try {
+      await api.dismissNba(personaId, nba.id);
+      setDismissed(true);
+    } catch {
+      setDismissed(true);
+    } finally {
+      setDismissing(false);
+    }
+  }
+
+  return (
+    <section className="content-card nba-companion-card" aria-label="Next best action">
+      <div className="nba-companion-top">
+        <span className="nba-companion-kicker"><Sparkles size={13} aria-hidden="true" />{nba.kicker}</span>
+      </div>
+      <h3>{nba.title}</h3>
+      <p className="content-body">{nba.body}</p>
+      <p className="nba-companion-reason">Why you&rsquo;re seeing this: {nba.reason}</p>
+      <div className="nba-companion-actions">
+        <button
+          type="button"
+          className="axe-primary-button"
+          disabled={disabled}
+          onClick={() => {
+            if (nba.actionKind === "preview_funding") onPreviewFunding();
+            else if (nba.prompt) onRunPrompt(nba.prompt);
+          }}
+        >
+          {nba.ctaLabel} <ArrowUpRight size={14} aria-hidden="true" />
+        </button>
+        <button type="button" className="secondary-button" disabled={dismissing} onClick={() => void dismiss()}>
+          Not now
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function AssistantMessage() {
   const turn = useAuiState((state) => state.message.metadata.custom?.turn as TurnView | undefined);
-  const { latest, pending, retry, feedback, anchorTurn } = useContext(ConversationControls);
+  const { latest, pending, activeProfile, progressHistory, retry, feedback, anchorTurn, runPrompt, previewFunding } = useContext(ConversationControls);
   const element = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (element.current && turn && latest?.id === turn.id) anchorTurn(turn.id, element.current);
   }, [anchorTurn, latest?.id, turn?.id]);
   if (!turn) return null;
   const experience = turn.experience;
-  return <MessagePrimitive.Root ref={element} className="assistant-message">
-    <LabMark small />
-    <div className="assistant-content">
-      {turn.status === "working"
-        ? <div role="status" aria-live="polite" className="working-status"><span className="working-indicator" />{progressLabels[turn.progress]}…</div>
-        : <MessagePrimitive.Parts />}
-      {turn.status === "completed" && latest?.id === turn.id && <span className="sr-only" role="status">Response ready.</span>}
-      {(turn.status === "failed" || turn.status === "cancelled") && latest?.id === turn.id && (
-        <button type="button" disabled={pending} className="secondary-button retry" onClick={() => retry(turn.id)}><RotateCcw size={15} />Retry</button>
-      )}
-      {experience?.status === "ready" && experience.outcome !== "create_rule" && <div className="feedback-controls" aria-label="Response feedback">
-        <span>Was this helpful?</span>
-        <button className="icon-button" type="button" aria-label="Helpful" aria-pressed={turn.feedback === "helpful"}
-          onClick={() => feedback(turn.id, experience.experienceId, "helpful")}><ThumbsUp size={16} /></button>
-        <button className="icon-button" type="button" aria-label="Unhelpful" aria-pressed={turn.feedback === "unhelpful"}
-          onClick={() => feedback(turn.id, experience.experienceId, "unhelpful")}><ThumbsDown size={16} /></button>
-      </div>}
-    </div>
-  </MessagePrimitive.Root>;
+  const steps = progressHistory[turn.id] ?? [turn.progress];
+
+  return (
+    <MessagePrimitive.Root ref={element} className="assistant-message">
+      <div className="stream-assistant-row">
+        <LabMark small />
+        <div className="assistant-content">
+          <header className="stream-meta-line">
+            <strong>CEP Assistant</strong>
+            <span className="turn-meta">{timeFormat.format(new Date(turn.createdAt))}</span>
+          </header>
+
+          {turn.status === "working" ? (
+            <>
+              <div role="status" aria-live="polite" className="sr-only">{progressLabels[turn.progress]}…</div>
+              <ReasoningPanel status={turn.status} progress={turn.progress} history={steps} />
+            </>
+          ) : (
+            <>
+              {steps.length > 0 && turn.status === "completed" && (
+                <ReasoningPanel
+                  status={turn.status}
+                  progress={turn.progress}
+                  history={steps}
+                  experience={experience}
+                  actionMode={turn.actionMode}
+                  customerLookup={turn.customerLookup}
+                  providerArbitration={turn.providerArbitration}
+                />
+              )}
+              <MessagePrimitive.Parts />
+              {!adminChat && turn.nextBestAction && (
+                <NbaCompanionCard
+                  nba={turn.nextBestAction}
+                  personaId={activeProfile?.personaId}
+                  disabled={pending}
+                  onRunPrompt={runPrompt}
+                  onPreviewFunding={previewFunding}
+                />
+              )}
+            </>
+          )}
+
+          {turn.status === "completed" && latest?.id === turn.id && <span className="sr-only" role="status">Response ready.</span>}
+          {(turn.status === "failed" || turn.status === "cancelled") && latest?.id === turn.id && (
+            <button type="button" disabled={pending} className="secondary-button retry" onClick={() => retry(turn.id)}>
+              <RotateCcw size={15} />Retry
+            </button>
+          )}
+          {experience?.status === "ready" && experience.outcome !== "create_rule" && (
+            <footer className="feedback-controls" aria-label="Response feedback">
+              <SpeakButton text={experience.question ?? experience.intro} />
+              <span>Was this helpful?</span>
+              <button className="icon-button" type="button" aria-label="Helpful" aria-pressed={turn.feedback === "helpful"}
+                onClick={() => feedback(turn.id, experience.experienceId, "helpful")}><ThumbsUp size={15} /></button>
+              <button className="icon-button" type="button" aria-label="Unhelpful" aria-pressed={turn.feedback === "unhelpful"}
+                onClick={() => feedback(turn.id, experience.experienceId, "unhelpful")}><ThumbsDown size={15} /></button>
+            </footer>
+          )}
+        </div>
+      </div>
+    </MessagePrimitive.Root>
+  );
 }
 
-function Composer({ draft, onDraft, running, pending, disabled, notice, input, showStarters }: {
+function Composer({ draft, onDraft, running, pending, disabled, notice, input, showStarters, hero, activeProfile, nextSuggestions, domainPack }: {
   draft: string; onDraft: (value: string) => void; running: boolean; pending: boolean; disabled: boolean; notice: string;
   input: React.RefObject<HTMLTextAreaElement | null>;
   showStarters: boolean;
+  hero?: boolean;
+  activeProfile?: DemoPersona;
+  nextSuggestions: NextSuggestion[];
+  domainPack?: DomainPack;
 }) {
   const aui = useAui();
-  const send = () => {
-    if (!running && !pending && !disabled && draft.trim()) aui.thread().append(draft.trim());
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const [localNotice, setLocalNotice] = useState("");
+  const [dragOver, setDragOver] = useState(false);
+
+  const voice = useVoiceInput({
+    onTranscript: (text) => {
+      setLocalNotice("");
+      onDraft(text);
+    },
+    onError: (msg) => setLocalNotice(msg),
+  });
+
+  useEffect(() => () => {
+    for (const item of attachments) {
+      if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+    }
+  }, [attachments]);
+
+  const addFiles = async (fileList: FileList | null) => {
+    if (!fileList?.length) return;
+    setLocalNotice("");
+    const incoming = Array.from(fileList).slice(0, Math.max(0, 4 - attachments.length));
+    if (!incoming.length) {
+      setLocalNotice("You can attach up to 4 files per message.");
+      return;
+    }
+    const parsed = await Promise.all(incoming.map((file) => readAttachmentFile(file)));
+    setAttachments((prev) => [...prev, ...parsed]);
   };
+
+  const removeAttachment = (id: string) => {
+    setAttachments((prev) => {
+      const target = prev.find((item) => item.id === id);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((item) => item.id !== id);
+    });
+  };
+
+  const canSubmit = !running && !pending && !disabled && (Boolean(draft.trim()) || attachments.length > 0);
+  const send = () => {
+    if (!canSubmit) return;
+    if (voice.listening) voice.stop();
+    const payload = composeMessageWithAttachments(draft, attachments);
+    setAttachments([]);
+    setLocalNotice("");
+    aui.thread().append(payload);
+  };
+
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       send();
     }
   }
-  return <div className="composer-area">
+  const nearLimit = draft.length > MAX_MESSAGE_LENGTH * 0.8;
+  const activeNotice = notice || localNotice;
+
+  return <div className={hero ? "composer-area composer-hero" : "composer-area composer-dock"}>
     <div className="composer-inner">
-      {showStarters && <StarterPrompts disabled={disabled || pending} />}
-      {notice && <div className="request-notice" role="status">{notice}</div>}
-      {pending && !running && !notice && <div className="submit-status" role="status">Sending your request…</div>}
-      <form className="composer" onSubmit={(event) => { event.preventDefault(); send(); }}>
-        <MessageSquare size={19} className="composer-icon" aria-hidden="true" />
-        <div className="composer-field">
-          <label className="sr-only" htmlFor="composer-input">Your question</label>
-          <textarea id="composer-input" ref={input} rows={1} value={draft} maxLength={MAX_MESSAGE_LENGTH}
-            placeholder="Ask a question…" onChange={(event) => onDraft(event.target.value)} onKeyDown={onKeyDown} />
+      {!hero && showStarters && <StarterPrompts disabled={disabled || pending} activeProfile={activeProfile} />}
+      {!hero && !showStarters && !running && (
+        <NextSuggestionChips
+          suggestions={nextSuggestions}
+          disabled={disabled || pending}
+          onPick={(prompt) => aui.thread().append(prompt)}
+        />
+      )}
+      {activeNotice && <div className="request-notice" role="status">{activeNotice}</div>}
+      {pending && !running && !activeNotice && <div className="submit-status" role="status">Sending your request…</div>}
+      <form
+        className={"composer" + (dragOver ? " is-drag-over" : "") + (attachments.length ? " has-attachments" : "")}
+        onSubmit={(event) => { event.preventDefault(); send(); }}
+        onDragOver={(event) => { event.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          setDragOver(false);
+          void addFiles(event.dataTransfer.files);
+        }}
+      >
+        <AttachmentChipList attachments={attachments} onRemove={removeAttachment} />
+        <div className="composer-input-row">
+          <MessageSquare size={18} className="composer-icon" aria-hidden="true" />
+          <div className="composer-field">
+            <label className="sr-only" htmlFor="composer-input">Your question</label>
+            <textarea id="composer-input" ref={input} rows={hero ? 2 : 1} value={draft} maxLength={MAX_MESSAGE_LENGTH}
+              placeholder={voice.listening ? "Listening… speak your question" : (domainPack?.composerPlaceholder ?? "Ask a question…")}
+              onChange={(event) => onDraft(event.target.value)} onKeyDown={onKeyDown} />
+          </div>
+          <div className="composer-tools">
+            <input
+              ref={fileInput}
+              type="file"
+              multiple
+              className="sr-only"
+              accept=".pdf,.csv,.txt,.json,.md,.png,.jpg,.jpeg,.webp"
+              onChange={(event) => {
+                void addFiles(event.target.files);
+                event.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              className="composer-tool-btn"
+              aria-label="Attach file"
+              title="Attach statement, CSV, PDF, or image"
+              disabled={disabled || pending || running}
+              onClick={() => fileInput.current?.click()}
+            >
+              <Paperclip size={16} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className={"composer-tool-btn" + (voice.listening ? " is-listening" : "")}
+              aria-label={voice.listening ? "Stop voice input" : "Voice input"}
+              aria-pressed={voice.listening}
+              title={voice.listening ? "Stop voice dictation" : "Dictate with microphone"}
+              disabled={disabled || pending || running}
+              onClick={() => voice.toggle(draft)}
+            >
+              {voice.listening ? <MicOff size={16} aria-hidden="true" /> : <Mic size={16} aria-hidden="true" />}
+            </button>
+            {running ? <button className="send-button stop-button" type="button" disabled={pending} onClick={() => aui.thread().cancelRun()}>
+              <Square size={13} aria-hidden="true" />Stop
+            </button> : <button className="send-button" type="submit" disabled={!canSubmit}>
+              Send <ArrowUp size={15} aria-hidden="true" />
+            </button>}
+          </div>
         </div>
-        {running ? <button className="send-button stop-button" type="button" disabled={pending} onClick={() => aui.thread().cancelRun()}>
-          <Square size={13} aria-hidden="true" />Stop
-        </button> : <button className="send-button" type="submit" disabled={disabled || pending || !draft.trim()}>
-          Send <ArrowUp size={15} aria-hidden="true" />
-        </button>}
       </form>
-      <p className="composer-hint">Enter to send <span aria-hidden="true">·</span> Shift+Enter for a new line</p>
+      <div className="composer-footer-row">
+        <span className="composer-guardrail">
+          {voice.listening
+            ? <span className="voice-live-badge"><span aria-hidden="true" />Listening via microphone…</span>
+            : (adminChat ? "Admin test environment" : (domainPack?.guardrailLabel ?? "CEP Advisory Guardrails Active"))}
+        </span>
+        <div className="composer-footer-right">
+          {nearLimit && <span className="composer-count">{draft.length}/{MAX_MESSAGE_LENGTH}</span>}
+          <p className="composer-hint">Enter to send <span aria-hidden="true">·</span> Shift+Enter for a new line</p>
+        </div>
+      </div>
+      {hero && showStarters && <StarterPrompts disabled={disabled || pending} activeProfile={activeProfile} />}
     </div>
   </div>;
 }
@@ -143,17 +451,22 @@ function visibleMessages(turns: TurnView[]): ThreadMessageLike[] {
 type ChatProps = {
   conversation?: ConversationView; configuration?: Bootstrap; pending: boolean; notice: string;
   activeProfile?: DemoPersona; pendingActions: PendingActions; section: WorkspaceSection; pins: WorkspacePin[];
-  onSelect: (section: WorkspaceSection) => void; onCustomize: () => void; customizeTrigger: React.RefObject<HTMLButtonElement | null>;
+  progressHistory: Record<string, Progress[]>;
+  domainPack: DomainPack;
+  onSelect: (section: WorkspaceSection) => void;
   onPreviewFunding: (source?: typeof pendingActionsContext) => void; onRestore: () => void;
+  onWriteBack?: (updates: Record<string, string>) => Promise<string[]>;
   draft: string; onDraft: (value: string) => void; onSend: (text: string) => Promise<void>; onStop: () => Promise<void>;
   onRetry: (id: string) => void;
   onFollowUp: (id: string, envelope: ActionMessage) => void;
   onFeedback: ConversationOperations["feedback"];
 };
+
 const noTurns: TurnView[] = [];
+
 function Chat({
   conversation, configuration, activeProfile, pendingActions, pending, draft, onDraft, onSend, onStop, onRetry, onFollowUp, onFeedback, notice,
-  section, pins, onSelect, onCustomize, customizeTrigger, onPreviewFunding, onRestore,
+  section, pins, progressHistory, domainPack, onSelect, onPreviewFunding, onRestore, onWriteBack,
 }: ChatProps) {
   const turns = conversation?.turns ?? noTurns;
   const latest = turns.at(-1);
@@ -176,7 +489,7 @@ function Chat({
     lastAnchor.current = id;
     const user = message.previousElementSibling ?? message;
     const top = user.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop;
-    scroll.scrollTop = Math.max(0, top - 18);
+    scroll.scrollTop = Math.max(0, top - 24);
   }, []);
   const rendered = useCallback((experienceId: string, fallback?: boolean) => {
     void api.event(experienceId, fallback ? "render_fallback" : "rendered").catch(() => undefined);
@@ -186,6 +499,8 @@ function Chat({
   const canWrite = Boolean(configuration) && !pending && !running && !archived;
   const showWelcomeCards = !adminChat && !turns.length && section === "summary";
   const showOverview = adminChat || section !== "summary";
+  const useHeroComposer = !archived && !turns.length && section === "summary" && !adminChat;
+
   const overviewProps = {
     activeProfile, pins, onSelect, disabled: !canWrite,
     modelUnavailable: Boolean(configuration && !configuration.gatewayConfigured),
@@ -193,32 +508,77 @@ function Chat({
     onReviewPortfolio: () => void onSend(portfolioPrompt),
     onPreviewFunding: () => onPreviewFunding(),
   };
-  const composer = archived ? <div className="composer-area archived-conversation"><p>This conversation is archived.</p>
+
+  const nextSuggestions = useMemo(() => {
+    if (adminChat) return [];
+    if (domainPack.id !== "wealth") return domainPack.quickPrompts;
+    return computeNextSuggestions(latest, activeProfile, configuration?.intentPrompts);
+  }, [latest, activeProfile, configuration?.intentPrompts, domainPack]);
+
+  const composerEl = archived ? <div className="composer-area archived-conversation"><p>This conversation is archived.</p>
     <button className="secondary-button" type="button" disabled={pending} onClick={onRestore}>Restore conversation</button>
   </div> : <Composer draft={draft} onDraft={onDraft} running={running} pending={pending} disabled={!configuration} input={input}
-    notice={notice} showStarters={turns.length === 0} />;
+    notice={notice} showStarters={turns.length === 0 && domainPack.id === "wealth"} hero={useHeroComposer} activeProfile={activeProfile}
+    nextSuggestions={nextSuggestions} domainPack={domainPack} />;
 
   return <AssistantRuntimeProvider runtime={runtime}>
-    <ExperienceControls.Provider value={{ activeExperienceId, allowRuleCreation: adminChat, followUp: onFollowUp, rendered }}>
-      <ConversationControls.Provider value={{ latest, pending, retry: onRetry, feedback: onFeedback, anchorTurn }}>
+    <ExperienceControls.Provider value={{
+      activeExperienceId,
+      allowRuleCreation: adminChat,
+      askPrompt: canWrite ? (prompt) => void onSend(prompt) : undefined,
+      onWriteBack,
+      followUp: onFollowUp,
+      rendered,
+    }}>
+      <ConversationControls.Provider value={{
+        latest, pending, activeProfile, progressHistory, retry: onRetry, feedback: onFeedback, anchorTurn,
+        runPrompt: (prompt) => void onSend(prompt),
+        previewFunding: () => onPreviewFunding(pendingActionsContext),
+      }}>
         <ExperienceDataUI />
-        <ThreadPrimitive.Root className={adminChat ? "thread" : "thread customer-workbench"}>
-          <WorkspaceMenu pins={pins} section={section} onCustomize={onCustomize} trigger={customizeTrigger} disabled={!configuration}
-            onSelect={(next) => {
-              onSelect(next);
-              viewport.current?.scrollTo(0, 0);
-            }} />
+        <ThreadPrimitive.Root className={adminChat ? "thread" : "thread customer-workbench editorial-thread"}>
           <ThreadPrimitive.Viewport className="thread-scroll" ref={viewport}
             autoScroll={false} scrollToBottomOnInitialize={false} scrollToBottomOnRunStart={false} scrollToBottomOnThreadSwitch={false}
             aria-label="Conversation">
-            {showWelcomeCards && <WorkspaceHome {...overviewProps} pendingActions={pendingActions}
-              onReviewGuide={(message) => void onSend(message)} onPreviewFunding={() => onPreviewFunding(pendingActionsContext)} />}
+            {!adminChat && section === "summary" && domainPack.id !== "wealth" && (
+              <DomainLiveHud
+                domainId={domainPack.id}
+                disabled={!canWrite}
+                onPrompt={(prompt) => void onSend(prompt)}
+              />
+            )}
+            {!adminChat && turns.length > 0 && section === "summary" && domainPack.id === "wealth" && (
+              <LiveMetricsHud
+                activeProfile={activeProfile}
+                pendingActions={pendingActions}
+                disabled={!canWrite}
+                onReviewPortfolio={() => void onSend(portfolioPrompt)}
+                onReviewGoal={() => void onSend(homeGoalPrompt)}
+                onPreviewFunding={() => onPreviewFunding(pendingActionsContext)}
+                onReviewGuide={(message) => void onSend(message)}
+              />
+            )}
+            {useHeroComposer && (
+              <div className="editorial-hero-stage">
+                {domainPack.id === "wealth"
+                  ? <WorkspaceHome {...overviewProps} pendingActions={pendingActions}
+                      onReviewGuide={(message) => void onSend(message)} onPreviewFunding={() => onPreviewFunding(pendingActionsContext)} />
+                  : <DomainWelcomeHome domainId={domainPack.id} disabled={!canWrite} onPrompt={(prompt) => void onSend(prompt)} />}
+                {composerEl}
+              </div>
+            )}
+            {!useHeroComposer && showWelcomeCards && (
+              domainPack.id === "wealth"
+                ? <WorkspaceHome {...overviewProps} pendingActions={pendingActions}
+                    onReviewGuide={(message) => void onSend(message)} onPreviewFunding={() => onPreviewFunding(pendingActionsContext)} />
+                : <DomainWelcomeHome domainId={domainPack.id} disabled={!canWrite} onPrompt={(prompt) => void onSend(prompt)} />
+            )}
             {showOverview && <WorkspaceOverview {...overviewProps} section={section} showNextStep={!turns.length} />}
             {turns.length > 0 && <div className="messages">
               <ThreadPrimitive.Messages>{({ message }) => message.role === "user" ? <UserMessage /> : <AssistantMessage />}</ThreadPrimitive.Messages>
             </div>}
           </ThreadPrimitive.Viewport>
-          {composer}
+          {!useHeroComposer && composerEl}
         </ThreadPrimitive.Root>
       </ConversationControls.Provider>
     </ExperienceControls.Provider>
@@ -243,15 +603,18 @@ function App() {
     };
   });
   const [signedInProfileId, setSignedInProfileId] = useState(entry.profileId);
+  const [domainPack, setDomainPack] = useDomainPack();
   const [configuration, setConfiguration] = useState<Bootstrap>();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversation, setConversation] = useState<ConversationView>();
   const [overviewOpen, setOverviewOpen] = useState(entry.showOverview);
   const [section, setSection] = useState<WorkspaceSection>("summary");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [progressHistory, setProgressHistory] = useState<Record<string, Progress[]>>({});
   const [notice, setNotice] = useState("");
   const [pending, setPending] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
+  const [railCollapsed, setRailCollapsed] = useState(false);
   const [panel, setPanel] = useState<Panel | undefined>(entry.showProfiles ? { kind: "profiles" } : undefined);
   const inFlight = useRef(false);
   const previousAttempt = useRef<{ fingerprint: string; id: string } | null>(null);
@@ -267,11 +630,23 @@ function App() {
   const pins = activeProfile?.pins ?? defaultWorkspacePins;
   const activeSection = section === "summary" || pins.includes(section) ? section : "summary";
   const chat = overviewOpen ? undefined : conversation;
-  const pendingActions = usePendingActions(!adminChat && !chat?.turns.length ? activeProfile?.personaId : undefined);
+  const pendingActions = usePendingActions(!adminChat ? activeProfile?.personaId : undefined);
   const draftKey = chat?.id ?? "new:" + (conversation?.personaId ?? signedInProfileId ?? "");
   const latest = chat?.turns.at(-1);
   const activeTurnId = latest?.status === "working" ? latest.id : undefined;
-  const visibleConversations = signedInProfileId ? conversations.filter((row) => row.personaId === signedInProfileId) : conversations;
+  const scopedPersonaId = adminChat ? null : (signedInProfileId ?? activeProfile?.personaId ?? null);
+  const visibleConversations = scopedPersonaId
+    ? conversations.filter((row) => row.personaId === scopedPersonaId)
+    : conversations;
+
+  const recordProgress = useCallback((turnId: string, progress: Progress) => {
+    setProgressHistory((prev) => {
+      const current = prev[turnId] ?? [];
+      if (current.includes(progress)) return prev;
+      return { ...prev, [turnId]: [...current, progress] };
+    });
+  }, []);
+
   const remember = (row: Conversation) => setConversations((list) => (
     [row, ...list.filter((item) => item.id !== row.id)].sort((a, b) => b.updatedAt - a.updatedAt)
   ));
@@ -349,6 +724,7 @@ function App() {
   }, [panel]);
 
   const upsert = useCallback((turn: TurnView) => {
+    recordProgress(turn.id, turn.progress);
     setConversation((previous) => {
       if (!previous || previous.id !== turn.conversationId) return previous;
       const existing = previous.turns.find((item) => item.id === turn.id);
@@ -358,7 +734,7 @@ function App() {
       }
       return { ...previous, turns: [...previous.turns, turn] };
     });
-  }, []);
+  }, [recordProgress]);
 
   useEffect(() => {
     if (!activeTurnId) return;
@@ -377,6 +753,7 @@ function App() {
       seen = sequence;
       const { progress } = JSON.parse(event.data).payload as { progress: Progress };
       if (!Object.hasOwn(progressLabels, progress)) return;
+      recordProgress(id, progress);
       setConversation((previous) => previous ? {
         ...previous, turns: previous.turns.map((turn) => turn.id === id && turn.status === "working" ? { ...turn, progress } : turn),
       } : previous);
@@ -384,7 +761,7 @@ function App() {
     for (const type of ["experience.ready", "turn.failed", "turn.cancelled", "gap", "error"]) stream.addEventListener(type, refresh);
     const recoveryPoll = setInterval(refresh, 4000);
     return () => { alive = false; stream.close(); clearInterval(recoveryPoll); };
-  }, [activeTurnId, upsert]);
+  }, [activeTurnId, upsert, recordProgress]);
 
   const exclusive = async (task: () => Promise<void>) => {
     if (inFlight.current) return false;
@@ -418,6 +795,7 @@ function App() {
     await exclusive(async () => {
       const target = chat ?? await createConversation(activeProfile?.personaId ?? configuration.defaultPersonaId, configuration.defaultScenarioId);
       if (!chat) choose(target);
+      setSection("summary");
       try {
         accept(await api.send(target.id, message, requestId(target.id + ":" + message)));
         setDrafts((all) => ({ ...all, [draftKey]: all[draftKey]?.trim() === message ? "" : all[draftKey] }));
@@ -433,6 +811,7 @@ function App() {
       const target = chat && !chat.turns.length && chat.scenarioId === configuration.defaultScenarioId
         ? chat : await createConversation(activeProfile.personaId, configuration.defaultScenarioId);
       choose(target);
+      setSection("summary");
       accept(await api.previewFunding(target.id, requestId(target.id + ":preview-funding:" + (source ?? "overview")), source));
     });
   };
@@ -479,33 +858,75 @@ function App() {
     setPanel(next);
   };
   const closePanel = () => setPanel(undefined);
-  const modelStatus = configuration?.mode === "test" ? "Test mode" : configuration?.gatewayConfigured ? "Model connected" : "Model offline";
-  const managedThread = panel?.kind === "thread" ? visibleConversations.find(({ id }) => id === panel.id) : undefined;
+  const startFreshChat = () => {
+    if (configuration) void startConversation(conversation?.personaId ?? signedInProfileId ?? configuration.defaultPersonaId, conversation?.scenarioId ?? configuration.defaultScenarioId);
+  };
 
-  return <div className="app-layout">
+  const modelStatus = adminChat
+    ? (configuration?.mode === "test" ? "Test mode" : configuration?.gatewayConfigured ? "Model connected" : "Model offline")
+    : (configuration?.copilotModel ? `Live · ${configuration.copilotModel}` : "Live Advisory");
+  const managedThread = panel?.kind === "thread" ? visibleConversations.find(({ id }) => id === panel.id) : undefined;
+  const canRunRailActions = Boolean(configuration) && !pending && latest?.status !== "working";
+
+  return <div className={"app-layout" + (railCollapsed ? " rail-collapsed" : "")}>
     {railOpen && <button className="rail-scrim" aria-label="Close conversations" onClick={() => setRailOpen(false)} />}
     <aside className={"rail" + (railOpen ? " rail-open" : "")} id="conversation-rail" aria-label="Workspace navigation">
       <div className="rail-header">
-        <a className="rail-home" href={adminChat ? adminPaths.tools : "/"}><LabMark />{adminChat ? "Administration" : "PZN Lab"}</a>
+        <a className="rail-home" href={adminChat ? adminPaths.tools : "/"}>
+          <LabMark />
+          <span className="rail-brand-text">
+            <strong>{adminChat ? "Administration" : "CEP"}</strong>
+            {!adminChat && <small>Customer Engagement Platform</small>}
+          </span>
+        </a>
+        <button className="icon-button rail-collapse-desktop" type="button" aria-label="Collapse sidebar" title="Collapse sidebar"
+          onClick={() => setRailCollapsed(true)}><PanelLeftClose size={17} aria-hidden="true" /></button>
         <button className="icon-button rail-close" ref={railClose} aria-label="Close conversation navigation" onClick={() => setRailOpen(false)}><X size={20} /></button>
       </div>
-      <button ref={newThreadTrigger} type="button" className="new-conversation" disabled={pending || !configuration} onClick={() => {
-        if (configuration) void startConversation(conversation?.personaId ?? signedInProfileId ?? configuration.defaultPersonaId, conversation?.scenarioId ?? configuration.defaultScenarioId);
-      }}><Plus size={18} aria-hidden="true" />New conversation</button>
-      <button type="button" className="rail-link rail-overview" aria-current={!chat ? "page" : undefined} disabled={pending}
-        onClick={() => {
-          setOverviewOpen(true);
-          setSection("summary");
-          setRailOpen(false);
-          setNotice("");
-          if (!adminChat) pendingActions.refresh();
-        }}>
-        <LayoutDashboard size={17} aria-hidden="true" />Overview
+      <button ref={newThreadTrigger} type="button" className="new-conversation" disabled={pending || !configuration} onClick={startFreshChat}>
+        <Plus size={17} aria-hidden="true" />New conversation
       </button>
+      {!adminChat && <DomainPackSwitcher activeId={domainPack.id} onSelect={setDomainPack} />}
+      <div className="rail-section rail-workbench-nav">
+        <button type="button" className="rail-link rail-overview" aria-current={!chat ? "page" : undefined} disabled={pending}
+          onClick={() => {
+            setOverviewOpen(true);
+            setSection("summary");
+            setRailOpen(false);
+            setNotice("");
+            if (!adminChat) pendingActions.refresh();
+          }}>
+          <LayoutDashboard size={16} aria-hidden="true" />Overview
+        </button>
+      </div>
       <ThreadList threads={visibleConversations} profiles={profilesById} activeId={chat?.id}
-        showNames={!signedInProfileId} pending={pending || !configuration}
+        showNames={adminChat} pending={pending || !configuration}
         open={(id) => void exclusive(async () => revealChat(await api.conversation(id)))}
         manage={(id, trigger) => { threadTrigger.current = trigger; openPanel({ kind: "thread", id }); }} />
+      {!adminChat && (
+        <section className="rail-section rail-topics" aria-label="Quick planning topics">
+          <h2>{domainPack.id === "wealth" ? "Topics" : `${domainPack.shortLabel} Actions`}</h2>
+          <nav>
+            {domainPack.id === "wealth"
+              ? planningTopics.map(({ id, name, prompt, Icon }) => (
+                  <button key={id} type="button" className="rail-link" disabled={!canRunRailActions} onClick={() => {
+                    setRailOpen(false);
+                    void send(prompt);
+                  }}>
+                    <Icon size={15} aria-hidden="true" />{name}
+                  </button>
+                ))
+              : domainPack.topics.map(({ id, name, prompt }) => (
+                  <button key={id} type="button" className="rail-link" disabled={!canRunRailActions} onClick={() => {
+                    setRailOpen(false);
+                    void send(prompt);
+                  }}>
+                    <Sparkles size={14} aria-hidden="true" />{name}
+                  </button>
+                ))}
+          </nav>
+        </section>
+      )}
       {adminChat && <section className="rail-section rail-tools"><AdminNavigation thread={chat?.id} /></section>}
       <div className="rail-footer">
         {activeProfile && <button ref={profilesTrigger} className="rail-profile" type="button" aria-haspopup="dialog"
@@ -521,21 +942,47 @@ function App() {
       </div>
     </aside>
     <main className="workspace" inert={railOpen}>
-      <header className="topbar">
+      <header className="topbar unified-topbar">
         <div className="topbar-left">
           <button className="icon-button rail-menu" ref={railTrigger} type="button" aria-label="Show conversations" aria-expanded={railOpen}
-            aria-controls="conversation-rail" onClick={() => setRailOpen((open) => !open)}><PanelLeft size={20} aria-hidden="true" /></button>
-          <span className="workspace-crumb">{adminChat ? "Test chat" : "Workspace"} <ChevronRight size={14} aria-hidden="true" /></span>
+            aria-controls="conversation-rail" onClick={() => setRailOpen((open) => !open)}><PanelLeft size={19} aria-hidden="true" /></button>
+          {railCollapsed && (
+            <button className="icon-button rail-expand-desktop" type="button" aria-label="Expand sidebar" title="Expand sidebar"
+              onClick={() => setRailCollapsed(false)}><PanelLeft size={18} aria-hidden="true" /></button>
+          )}
+          <span className="workspace-crumb">
+            {adminChat ? "Test chat" : (activeProfile?.displayName ?? "Workspace")}
+            <ChevronRight size={13} aria-hidden="true" />
+          </span>
           <h1>{chat?.title ?? "Overview"}</h1>
         </div>
-        {adminChat && configuration && <span className="model-status" data-connected={configuration.gatewayConfigured}>
-          <span aria-hidden="true" />{modelStatus}
-        </span>}
+        <div className="topbar-center">
+          <WorkspaceMenu pins={pins} section={activeSection} onSelect={setSection} onCustomize={() => openPanel({ kind: "pins" })}
+            trigger={customizeTrigger} disabled={!configuration} />
+        </div>
+        <div className="topbar-actions">
+          <ThemeToggle compact />
+          {configuration && (
+            <span className="model-status" data-connected={configuration.gatewayConfigured}>
+              <span aria-hidden="true" />{modelStatus}
+            </span>
+          )}
+        </div>
       </header>
       <Chat key={draftKey} conversation={chat} configuration={configuration} activeProfile={activeProfile}
-        pendingActions={pendingActions} pending={pending} section={activeSection} pins={pins}
-        onSelect={setSection} customizeTrigger={customizeTrigger} onCustomize={() => openPanel({ kind: "pins" })}
-        onPreviewFunding={previewFunding} onRestore={() => { if (chat) void changeConversation(chat.id, { operation: "restore" }); }}
+        pendingActions={pendingActions} pending={pending} section={activeSection} pins={pins} progressHistory={progressHistory}
+        domainPack={domainPack}
+        onSelect={setSection} onPreviewFunding={previewFunding}
+        onRestore={() => { if (chat) void changeConversation(chat.id, { operation: "restore" }); }}
+        onWriteBack={activeProfile ? async (updates) => {
+          const { updatedFields } = await api.applyCustomerBindings(activeProfile.personaId, updates);
+          if (updatedFields.length > 0) {
+            void (adminChat ? api.adminBootstrap() : api.bootstrap()).then((fresh) => {
+              setConfiguration(fresh);
+            }).catch(() => undefined);
+          }
+          return updatedFields;
+        } : undefined}
         draft={drafts[draftKey] ?? ""} onDraft={(value) => setDrafts((all) => ({ ...all, [draftKey]: value }))} notice={notice}
         onSend={send} onStop={async () => {
           if (activeTurnId) await exclusive(async () => upsert(await api.cancel(activeTurnId)));
@@ -568,6 +1015,6 @@ if (location.pathname === "/__test/a2ui") {
     root.render(<BasicSmoke input={CreateSurfaceMessageSchema.parse(message)} />);
   });
 } else {
-  document.title = (adminChat ? "Test chat" : "Assistant") + " · PZN Lab";
+  document.title = (adminChat ? "Test chat" : "Assistant") + " · CEP";
   root.render(<App />);
 }

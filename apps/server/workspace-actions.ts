@@ -1,4 +1,5 @@
 import host from "../../fixtures/host.json";
+import type { PersonaRecord } from "../../packages/customer-profiles";
 import { fundingPreviewWorkflow } from "../../packages/contracts/funding-workflow";
 import { pendingActionsContext, type WorkspaceActionLog, type WorkspacePendingAction } from "../../packages/contracts/workspace";
 import { makeId } from "../../packages/experience/compile";
@@ -9,7 +10,7 @@ import { nextStepRecommendation } from "./funding-offer";
 import { ApiError, type Store } from "./store";
 
 export async function readWorkspacePendingActions(
-  store: Store, principalId: string, persona: typeof host.personas[number],
+  store: Store, principalId: string, persona: Pick<PersonaRecord, "personaId" | "syntheticMid">,
   portfolios: PortfolioSnapshotProvider, inspection: boolean, now: number,
 ): Promise<WorkspacePendingAction[]> {
   const { personaId, syntheticMid } = persona;

@@ -3,6 +3,8 @@ import { z } from "zod";
 import rawContent from "../../fixtures/content-catalog.json";
 import rawReads from "../../fixtures/demo-balance-reads.json";
 import { contentEntrySchema, metricValueSchema, type Candidate, type ContentEntry, type ContentDecision, type RouteDecision } from "../contracts/domain";
+import { getActiveCustomerProfileStore } from "../customer-profiles";
+import { findEffectiveContentById } from "../experience-registry/registry";
 
 export const contentCatalog = z.object({
   schemaVersion: z.literal("1.0"),
@@ -29,7 +31,7 @@ export function resolveCandidates(ids: string[]) {
   const candidates: Candidate[] = [];
   const rejections: { contentId: string; stage: "catalog_resolution"; reasonCode: string }[] = [];
   ids.forEach((contentId, index) => {
-    const content = contentById.get(contentId);
+    const content = findEffectiveContentById(contentId) ?? contentById.get(contentId);
     if (!content || content.publicationStatus !== "published") {
       rejections.push({ contentId, stage: "catalog_resolution", reasonCode: content ? "CONTENT_WITHDRAWN" : "CONTENT_NOT_FOUND" });
       return;
@@ -43,7 +45,7 @@ export function resolveCandidates(ids: string[]) {
 }
 
 export function lookupContent(candidate: Candidate): ContentEntry | undefined {
-  const content = contentById.get(candidate.contentId);
+  const content = findEffectiveContentById(candidate.contentId) ?? contentById.get(candidate.contentId);
   return content?.publicationStatus === "published" && content.version === candidate.contentVersion ? content : undefined;
 }
 
@@ -89,6 +91,8 @@ export function modelBundle(decision: ContentDecision, route?: RouteDecision) {
 }
 
 export function readDemoBalance(personaId: string, syntheticMid: string, now: number) {
+  const live = getActiveCustomerProfileStore()?.balanceReading(personaId, syntheticMid, now);
+  if (live) return live;
   const row = readings.reads.find((read) => read.personaId === personaId && read.syntheticMid === syntheticMid);
   if (!row) throw new Error("DEMO_BALANCE_UNAVAILABLE");
   return { fixtureVersion: readings.fixtureVersion, observedAt: new Date(now).toISOString(), values: row.values };

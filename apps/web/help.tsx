@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { ArrowUpRight, BookOpenText, Braces, Database, Download, GitBranch, House, LayoutGrid, ListFilter, MessageSquare, Sparkles } from "lucide-react";
+import { ArrowUpRight, BookOpenText, Braces, Database, Download, GitBranch, House, Layers, LayoutGrid, ListFilter, MessageSquare, Network, PanelsTopLeft, Settings2, ShieldCheck, Sparkles, UsersRound } from "lucide-react";
+import { recommendationArbitrateToolRef } from "../../packages/contracts/recommendation-provider";
+import { adminPaths } from "../../packages/contracts/admin-paths";
 import { DeveloperDrawer } from "./developer-drawer";
 import { ExchangePath, InteractionDiagram, treatmentExample, TreatmentProposalDiagram, type DiagramExchange } from "./help-architecture";
 import { contractList, helpContracts, type ContractFile } from "./help-contracts";
@@ -142,6 +144,8 @@ export function Help() {
     <header className="help-topbar">
       <div className="help-width help-topbar-inner">
         <nav aria-label="Help sections">
+          <a href="#cep-blueprint">CEP Blueprint</a>
+          <a href="#providers">Providers</a>
           <a href="#architecture">Architecture</a>
           <a href="#goal-planning">Multi-step requests</a>
           <a href="#sfield">sfield</a>
@@ -153,9 +157,119 @@ export function Help() {
     </header>
     <main className="help-width help-main">
       <div className="help-intro">
-        <h1>How PZN Lab works</h1>
-        <p>See how the app understands a request, picks content for the customer, and displays the reply.</p>
+        <h1>How CEP works</h1>
+        <p>See how CEP combines Customer 360 lookup, Stage 0 Action Gating, High-Level Intent Routing, Treatment Selector (TS + CCRE rules), Dynamic LLM UI, and #1 Arbitrated Next Best Actions.</p>
       </div>
+      <section id="cep-blueprint" className="help-section" aria-labelledby="cep-blueprint-title">
+        <div className="help-section-heading">
+          <div>
+            <h2 id="cep-blueprint-title">Straightened CEP end-to-end architecture</h2>
+            <p className="help-exchange-description">Every customer message flows through 4 governed stages backed by live Admin Master Data — no static guesswork, no unverified figures.</p>
+          </div>
+          <a className="help-section-link" href="/chat">Try in customer chat <ArrowUpRight size={14} aria-hidden="true" /></a>
+        </div>
+        <ol className="help-cep-pipeline" aria-label="Straightened CEP pipeline">
+          <li>
+            <span className="help-stage-tag">Stage 1</span>
+            <h3>Customer 360 Lookup</h3>
+            <p>Reads the active profile from <strong>Customer 360</strong> (segment, funding status, beneficiary status, cash/equity/fixed income, goals, notes). Only privacy-safe signals enter the router LLM — never raw MIDs or cent values.</p>
+          </li>
+          <li>
+            <span className="help-stage-tag">Stage 2</span>
+            <h3>Stage 0 Action Gate &amp; Intent Routing</h3>
+            <p>Copilot ACP matches the prompt + Customer 360 signals against live <strong>High-Level Intents</strong> and classifies the turn into one visible mode:</p>
+            <div className="help-mode-pills">
+              <span className="help-mode-pill mode-chat">Plain Chat</span>
+              <span className="help-mode-pill mode-verified">Verified Experience</span>
+              <span className="help-mode-pill mode-dynamic">Dynamic UI Canvas</span>
+              <span className="help-mode-pill mode-clarify">Clarification</span>
+            </div>
+          </li>
+          <li>
+            <span className="help-stage-tag">Stage 3</span>
+            <h3>Unified Recommendation Layer (sfield) &amp; Data</h3>
+            <p>The host invokes <code>{recommendationArbitrateToolRef}</code> through <code>sfield</code>, fanning out to pluggable <strong>RecommendationProvider</strong> adapters (<strong>TS + CCRE</strong>, <strong>Customer 360 NBA</strong>, <strong>IT Ops Runbooks</strong>, or external engines) alongside scoped portfolio &amp; goal reads.</p>
+          </li>
+          <li>
+            <span className="help-stage-tag">Stage 4</span>
+            <h3>Experience Render &amp; Live Write-Back</h3>
+            <p>Applies any published <strong>UI Builder</strong> layout (or renders a safe multi-domain <strong>Dynamic UI Canvas</strong>), displays the #1 arbitrated NBA honoring persistent dismissals, and supports live write-back to Customer 360 &amp; Ops stores.</p>
+          </li>
+        </ol>
+        <div className="help-control-plane" aria-label="Admin master data control plane">
+          <a className="help-cp-card" href={adminPaths.customers}>
+            <span className="help-entity-icon"><UsersRound size={17} aria-hidden="true" /></span>
+            <div>
+              <strong>Customer 360 Profiles</strong>
+              <p>Create/edit customer profiles, balances, portfolios, goals &amp; NBA preview.</p>
+            </div>
+            <ArrowUpRight size={15} aria-hidden="true" />
+          </a>
+          <a className="help-cp-card" href={adminPaths.intents}>
+            <span className="help-entity-icon"><GitBranch size={17} aria-hidden="true" /></span>
+            <div>
+              <strong>Intents, Catalog &amp; NBA Rules</strong>
+              <p>Manage high-level intents, governed content treatments, and NBA priority order.</p>
+            </div>
+            <ArrowUpRight size={15} aria-hidden="true" />
+          </a>
+          <a className="help-cp-card" href={adminPaths.tools}>
+            <span className="help-entity-icon"><Settings2 size={17} aria-hidden="true" /></span>
+            <div>
+              <strong>Tool Setup (TS &amp; CCRE Rules)</strong>
+              <p>Configure Treatment Selector overrides, CCRE eligibility rules, workflows &amp; capabilities.</p>
+            </div>
+            <ArrowUpRight size={15} aria-hidden="true" />
+          </a>
+          <a className="help-cp-card" href={adminPaths.builder}>
+            <span className="help-entity-icon"><PanelsTopLeft size={17} aria-hidden="true" /></span>
+            <div>
+              <strong>UI Builder &amp; Widget Studio</strong>
+              <p>Bind custom layouts to intents and save Copilot-generated widgets to the library.</p>
+            </div>
+            <ArrowUpRight size={15} aria-hidden="true" />
+          </a>
+        </div>
+      </section>
+      <section id="providers" className="help-section" aria-labelledby="providers-title">
+        <div className="help-section-heading">
+          <div>
+            <h2 id="providers-title">Pluggable Recommendation Providers behind sfield</h2>
+            <p className="help-exchange-description">Recommendation engines are abstracted behind one host-governed <code>sfield</code> tool so the LLM never chooses between competing vendors and arbitration stays deterministic.</p>
+          </div>
+          <a className="help-section-link" href="#contracts" onClick={() => setContractId("providers")}>
+            Provider contract <ArrowUpRight size={14} aria-hidden="true" />
+          </a>
+        </div>
+        <div className="help-sfield">
+          <ol className="help-sfield-flow" aria-label="Recommendation provider abstraction flow" role="list">
+            <li className="help-sfield-node">
+              <span className="help-entity-icon"><Network size={18} aria-hidden="true" /></span>
+              <h3>CEP Host Orchestrator</h3>
+              <p>Calls one stable contract per turn (<code>domain</code>, <code>contextId</code>, scoped customer/session) without vendor-specific branching.</p>
+            </li>
+            <li className="help-sfield-node">
+              <span className="help-entity-icon"><ShieldCheck size={18} aria-hidden="true" /></span>
+              <h3>sfield · Arbitrator Tool</h3>
+              <p><code>{recommendationArbitrateToolRef}</code> enforces scope authorization, 5s timeout, parallel fan-out, deduplication, priority sorting, and audit traces.</p>
+            </li>
+            <li className="help-sfield-targets">
+              <div className="help-proposal-choice">
+                <span className="help-entity-icon"><ListFilter size={16} aria-hidden="true" /></span>
+                <div><h3>Treatment Selector (TS + CCRE)</h3><p>Wealth eligibility rules, ranking overrides, approved content &amp; workflows.</p></div>
+              </div>
+              <div className="help-proposal-choice">
+                <span className="help-entity-icon"><UsersRound size={16} aria-hidden="true" /></span>
+                <div><h3>Customer 360 NBA Engine</h3><p>Prioritized Next Best Action rules against Customer 360 signals &amp; persistent dismissals.</p></div>
+              </div>
+              <div className="help-proposal-choice">
+                <span className="help-entity-icon"><Layers size={16} aria-hidden="true" /></span>
+                <div><h3>IT Ops, Sales RevOps &amp; External Engines</h3><p>Live <code>incidents.json</code> SRE runbooks &amp; <code>deals.json</code> Deal Desk today; plug in Pega CDH, Adobe Offer Decisioning, or ML Rankers via <code>RecommendationProvider</code>.</p></div>
+              </div>
+            </li>
+          </ol>
+        </div>
+      </section>
       <section id="architecture" className="help-section" aria-labelledby="architecture-title">
         <div className="help-section-heading">
           <div>

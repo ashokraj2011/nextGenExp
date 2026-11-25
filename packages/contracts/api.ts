@@ -37,6 +37,50 @@ export const failureCopy = {
 } as const;
 export type FailureCode = keyof typeof failureCopy;
 export type TurnStatus = "working" | "completed" | "failed" | "cancelled";
+export type ActionMode = "plain_chat" | "verified_experience" | "dynamic_ui" | "clarify";
+export type CustomerLookupSummary = {
+  personaName: string;
+  fundingStatus: "funded" | "unfunded";
+  highlights: string[];
+  nbaSelected?: string;
+};
+export type NextBestActionCard = {
+  id: string;
+  priority: "urgent" | "opportunity" | "goal";
+  kicker: string;
+  title: string;
+  body: string;
+  reason: string;
+  ctaLabel: string;
+  actionKind: "prompt" | "preview_funding";
+  prompt?: string;
+};
+export type ProviderArbitrationTrace = {
+  toolRef: string;
+  domain: "wealth" | "operations" | "sales" | "general";
+  decisionId: string;
+  winnerTitle?: string;
+  providers: {
+    providerId: string;
+    providerLabel: string;
+    status: "ok" | "skipped" | "error";
+    candidateCount: number;
+    elapsedMs: number;
+    note?: string;
+  }[];
+};
+export type DomainWriteAuditEntry = {
+  auditId: string;
+  sfieldRunId: string;
+  sfieldToolRef: string;
+  domain: "ops_incident" | "sales_deal" | "customer360";
+  recordId: string;
+  action: string;
+  actor: string;
+  summary: string;
+  status: "succeeded" | "denied";
+  createdAt: string;
+};
 export type TurnView = {
   id: string;
   conversationId: string;
@@ -44,6 +88,10 @@ export type TurnView = {
   createdAt: number;
   status: TurnStatus;
   progress: Progress;
+  actionMode?: ActionMode;
+  customerLookup?: CustomerLookupSummary;
+  providerArbitration?: ProviderArbitrationTrace;
+  nextBestAction?: NextBestActionCard;
   experience?: DisplayExperience;
   failureCode?: FailureCode;
   retryOf?: string;
@@ -76,6 +124,7 @@ export type Bootstrap = {
   conversations: Conversation[];
   personas: DemoPersona[];
   scenarios: { scenarioId: string; label: string }[];
+  intentPrompts?: { intentId: string; label: string; prompt: string; isCustom: boolean }[];
   defaultPersonaId: string;
   defaultScenarioId: string;
   mode: "live" | "test";

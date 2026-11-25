@@ -59,7 +59,7 @@ function drawHistory(canvas: HTMLCanvasElement, points: PortfolioHistoryPoint[])
   }
   context.lineWidth = 2.5;
   context.lineJoin = "round";
-  context.strokeStyle = "#117052";
+  context.strokeStyle = "#368727";
   context.beginPath();
   context.moveTo(plot[0].x, plot[0].y);
   for (const point of plot.slice(1)) context.lineTo(point.x, point.y);
@@ -70,7 +70,7 @@ function drawHistory(canvas: HTMLCanvasElement, points: PortfolioHistoryPoint[])
     const last = index === plot.length - 1;
     context.beginPath();
     context.arc(point.x, point.y, last ? 4 : 3, 0, Math.PI * 2);
-    context.fillStyle = "#117052";
+    context.fillStyle = "#368727";
     context.fill();
     if (last || (point.x - lastLabel >= 51 && right - point.x >= 51)) {
       context.fillStyle = "#516376";

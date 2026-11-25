@@ -60,8 +60,18 @@ try {
   const inspector = page.getByRole("region", { name: "Turn inspection details" });
   await inspector.getByRole("heading", { name: "Published UI" }).waitFor();
   await inspector.getByText("Compare balances layout", { exact: true }).waitFor();
+  await openAdmin(page, "builder");
+  await page.getByRole("tab", { name: /^Widget Studio & Library/ }).click();
+  await page.getByLabel("Describe the widget you want to create").fill("Create a net worth KPI card showing $145,000 total assets, $22,000 cash reserve, and +6.4% YTD growth");
+  await page.getByRole("button", { name: "Generate widget", exact: true }).click();
+  await page.getByText("$145,000", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Add to library", exact: true }).click();
+  await page.getByRole("heading", { name: "Widget Library (4)", exact: true }).waitFor();
+  if (screenshots) await page.screenshot({ path: resolve(screenshots, "widget-studio-desktop.png"), fullPage: true });
+  await page.getByRole("button", { name: "Use in layout", exact: true }).first().click();
+  await page.getByRole("heading", { name: "Layout details", exact: true }).waitFor();
   assert.deepEqual(pageErrors, []);
-  console.log("UI builder preview, publishing, intent routing, Inspector and responsive layout passed.");
+  console.log("UI builder preview, publishing, intent routing, Inspector, Widget Studio and responsive layout passed.");
 } finally {
   await browser.close();
   await app.close();

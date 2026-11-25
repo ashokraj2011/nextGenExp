@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { capabilityIdSchema } from "./agentic";
-import { routingIntents, type RoutingIntentId } from "./routing-intents";
+import { dataBindingKeySchema } from "./data-bindings";
+import type { RoutingIntentId } from "./routing-intents";
 
 export const layoutComponents = [
   { id: "PznComparison", label: "Balance comparison", description: "Compare definitions in two columns." },
@@ -25,9 +26,9 @@ export const maxLayoutDescription = 200;
 export const maxUiIntentHints = 6;
 export const maxUiHintLength = 120;
 const ids = layoutComponents.map(({ id }) => id) as [LayoutComponent, ...LayoutComponent[]];
-const intents = routingIntents.map(({ intentId }) => intentId) as [RoutingIntentId, ...RoutingIntentId[]];
+const intentIdSchema = z.string().regex(/^[a-z][a-z0-9_]{1,63}$/);
 export const uiTargetSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("intent"), id: z.enum(intents) }).strict(),
+  z.object({ kind: z.literal("intent"), id: intentIdSchema }).strict(),
   z.object({ kind: z.literal("capability"), id: capabilityIdSchema }).strict(),
 ]);
 export type UiTarget = z.infer<typeof uiTargetSchema>;
@@ -39,9 +40,78 @@ export const layoutTextSchema = z.object({
   tone: z.enum(["plain", "accent"]),
 }).strict();
 const slotId = z.string().regex(/^[a-zA-Z0-9_-]{1,50}$/);
+export const customFormFieldTypeSchema = z.enum(["text", "number", "currency", "select", "date", "checkbox"]);
+export type CustomFormFieldType = z.infer<typeof customFormFieldTypeSchema>;
+export const customFormFieldSchema = z.object({
+  id: slotId,
+  label: z.string().trim().min(1).max(80),
+  type: customFormFieldTypeSchema,
+  placeholder: z.string().trim().max(100),
+  required: z.boolean(),
+  options: z.array(z.string().trim().min(1).max(60)).max(10),
+  defaultBinding: dataBindingKeySchema.optional(),
+  initialValue: z.string().max(120).optional(),
+}).strict();
+export type CustomFormField = z.infer<typeof customFormFieldSchema>;
+export const layoutFormSchema = z.object({
+  title: z.string().trim().max(90),
+  description: z.string().trim().max(240),
+  submitLabel: z.string().trim().max(48),
+  writeBack: z.boolean().optional(),
+  fields: z.array(customFormFieldSchema).max(10),
+}).strict();
+export type LayoutFormProps = z.infer<typeof layoutFormSchema>;
+
+export const boundWidgetMetricSchema = z.object({
+  id: slotId,
+  label: z.string().trim().min(1).max(60),
+  binding: dataBindingKeySchema.optional(),
+  staticValue: z.string().trim().max(60),
+  subtext: z.string().trim().max(80),
+  tone: z.enum(["default", "positive", "caution"]),
+}).strict();
+export type BoundWidgetMetric = z.infer<typeof boundWidgetMetricSchema>;
+
+export const layoutBoundWidgetSchema = z.object({
+  badge: z.string().trim().max(48),
+  title: z.string().trim().max(110),
+  body: z.string().trim().max(320),
+  accentTop: z.boolean(),
+  metrics: z.array(boundWidgetMetricSchema).max(6),
+  progressLabel: z.string().trim().max(60).optional(),
+  progressBinding: dataBindingKeySchema.optional(),
+  ctaLabel: z.string().trim().max(48).optional(),
+  ctaPrompt: z.string().trim().max(200).optional(),
+}).strict();
+export type LayoutBoundWidget = z.infer<typeof layoutBoundWidgetSchema>;
+
+export const resolvedBoundWidgetSchema = z.object({
+  badge: z.string().max(48),
+  title: z.string().max(160),
+  body: z.string().max(420),
+  accentTop: z.boolean(),
+  hydratedFor: z.string().max(80).optional(),
+  metrics: z.array(z.object({
+    id: slotId,
+    label: z.string().max(60),
+    value: z.string().max(80),
+    subtext: z.string().max(100),
+    tone: z.enum(["default", "positive", "caution"]),
+    boundKey: dataBindingKeySchema.optional(),
+  }).strict()).max(6),
+  progressLabel: z.string().max(80).optional(),
+  progressPercent: z.number().min(0).max(100).optional(),
+  progressDisplay: z.string().max(40).optional(),
+  ctaLabel: z.string().max(48).optional(),
+  ctaPrompt: z.string().max(200).optional(),
+}).strict();
+export type ResolvedBoundWidgetProps = z.infer<typeof resolvedBoundWidgetSchema>;
+
 export const layoutSlotSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("block"), id: slotId, component: z.enum(ids) }).strict(),
   layoutTextSchema.extend({ kind: z.literal("text"), id: slotId }),
+  layoutFormSchema.extend({ kind: z.literal("form"), id: slotId }),
+  layoutBoundWidgetSchema.extend({ kind: z.literal("widget"), id: slotId }),
 ]);
 export type LayoutSlot = z.infer<typeof layoutSlotSchema>;
 export const uiDesignSchema = z.object({

@@ -1,5 +1,31 @@
 import { uiDesignSchema, uiLayoutChangeSchema } from "../../packages/contracts/ui-layout";
+import { widgetGenerateRequestSchema, widgetLibraryChangeSchema } from "../../packages/contracts/widget";
 import { previewUiLayout, uiTargetOptions, validateUiDesign } from "./ui-layouts";
+import { Customer360Service } from "./customer-360";
+import { dataBindingKeySchema } from "../../packages/contracts/data-bindings";
+import { customer360ProfileInputSchema, type Customer360AdminRecord } from "../../packages/contracts/customer-360";
+import {
+  managedContentInputSchema,
+  managedIntentInputSchema,
+  managedNbaRuleInputSchema,
+  type ExperienceRegistryView,
+} from "../../packages/contracts/experience-registry";
+import { CustomerProfileStore, getActiveCustomerProfileStore, setActiveCustomerProfileStore } from "../../packages/customer-profiles";
+import {
+  ExperienceRegistryStore,
+  getActiveExperienceRegistryStore,
+  setActiveExperienceRegistryStore,
+} from "../../packages/experience-registry";
+import { activeContexts } from "../../packages/ts-adapter";
+import { generateWidgetDraftWithLlm } from "./dynamic-ui-generator";
+import { OpsIncidentStore } from "./ops-store";
+import { incidentDecisionInputSchema } from "../../packages/contracts/ops";
+import { SalesDealStore } from "./sales-store";
+import { dealDecisionInputSchema } from "../../packages/contracts/sales";
+import { WriteAuditStore } from "./write-audit";
+import { recommendationArbitrateToolRef } from "../../packages/contracts/recommendation-provider";
+import { domainWriteToolRef, Runtime, sfieldNamespace } from "./runtime";
+import { WidgetLibraryStore } from "./widget-library";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { capabilityIdSchema, capabilityRef, customerEventSchema, versionSchema, type ExecutionBudget } from "../../packages/contracts/agentic";
 import { capabilityTools } from "../../packages/capabilities";
@@ -24,7 +50,6 @@ import { tsFixtures } from "../../packages/ts-adapter";
 import { fixturePortfolioHistory, fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import { fixtureGoalProgressProvider, type GoalProgressProvider } from "../../packages/goal-progress";
 import type { GatewaySettings } from "./gateway";
-import { Runtime, sfieldNamespace } from "./runtime";
 import { ApiError, Store, presentConversation } from "./store";
 import { ExperienceService } from "./service";
 import { addCcreRule, previewTreatmentSelector, toolSetupTag, toolSetupView, validateToolSetup } from "./tool-setup";
@@ -101,6 +126,12 @@ async function serveAsset(pathname: string, root: string, res: ServerResponse) {
 
 export async function startApp(options: Options) {
   const now = Date.now;
+  const widgetLibrary = new WidgetLibraryStore(options.dataDir);
+  const profileStore = new CustomerProfileStore(options.dataDir);
+  setActiveCustomerProfileStore(profileStore);
+  const experienceRegistry = new ExperienceRegistryStore(options.dataDir);
+  setActiveExperienceRegistryStore(experienceRegistry);
+  const customer360 = new Customer360Service(options.dataDir);
   const selectionMode = options.selectionMode ?? "semantic_rerank";
   const inspectorEnabled = options.inspectorEnabled ?? true;
   const profile = options.gateway?.profile;
@@ -108,31 +139,94 @@ export async function startApp(options: Options) {
   const sessionPattern = new RegExp("(?:^|;\\s*)" + sessionCookie + "=(local_[a-f0-9]{32})(?:;|$)");
   const portfolioSnapshots = options.portfolioSnapshots ?? fixturePortfolioSnapshotProvider;
   const goalProgressProvider = options.goalProgressProvider ?? fixtureGoalProgressProvider;
-  const personas: Bootstrap["personas"] = await Promise.all(demo.personas.map(async ({
-    personaId, displayName, allowedScenarios, beneficiaryStatus, accountFundingStatus, syntheticMid,
-  }) => {
-    const [portfolio, homeGoal] = await Promise.all([
-      fixturePortfolioSnapshotProvider.read(syntheticMid),
-      fixtureGoalProgressProvider.read(syntheticMid),
-    ]);
+  async function loadBootstrapPersonas(principalId: string): Promise<Bootstrap["personas"]> {
+    return Promise.all(profileStore.list().map(async ({
+      personaId, displayName, allowedScenarios, beneficiaryStatus, accountFundingStatus, syntheticMid,
+    }) => {
+      const [portfolio, homeGoal] = await Promise.all([
+        fixturePortfolioSnapshotProvider.read(syntheticMid),
+        fixtureGoalProgressProvider.read(syntheticMid),
+      ]);
+      return {
+        personaId, displayName, allowedScenarios,
+        pins: store.workspacePins(principalId, personaId),
+        profile: {
+          beneficiaryStatus: beneficiaryStatusSchema.parse(beneficiaryStatus),
+          accountFundingStatus: accountFundingStatusSchema.parse(
+            store.axe.fundingStatus({ principalId, personaId }) ?? accountFundingStatus,
+          ),
+          cashCents: portfolio?.cashCents ?? null,
+        },
+        overview: { portfolio, homeGoal, portfolioHistory: fixturePortfolioHistory(syntheticMid) },
+      };
+    }));
+  }
+  function listAdminCustomers(principalId: string): Customer360AdminRecord[] {
+    return profileStore.list().map((entry) => {
+      const effectiveFunding = store.axe.fundingStatus({ principalId, personaId: entry.personaId }) ?? entry.accountFundingStatus;
+      const evaluated = customer360.evaluate({
+        principalId,
+        personaId: entry.personaId,
+        fundingStatus: effectiveFunding === "funded" ? "funded" : "unfunded",
+        excludePromotions: false,
+      });
+      return {
+        ...entry,
+        isBuiltIn: profileStore.isBuiltIn(entry.personaId),
+        isCustomized: profileStore.isCustomized(entry.personaId),
+        dismissedNbaIds: [...customer360.dismissedIds(principalId, entry.personaId)],
+        lookup: evaluated.lookup,
+        nba: evaluated.nba,
+      };
+    });
+  }
+  function buildExperienceRegistryView(principalId: string): ExperienceRegistryView {
+    const layouts = store.listUiLayouts(principalId);
+    const publishedIntentIds = new Set(
+      layouts.flatMap((l) => (l.published ? l.published.design.targets.filter((t) => t.kind === "intent").map((t) => t.id) : [])),
+    );
+    const contexts = activeContexts.map((ctx) => ({
+      contextId: ctx.contextId,
+      displayName: ctx.displayName,
+      description: ctx.description,
+      active: ctx.active,
+      baseContentIds: [...(tsFixtures.base[ctx.contextId] ?? [])],
+    }));
+    const intents = experienceRegistry.listIntents().map((item) => ({
+      ...item,
+      tsContentIds: [...(tsFixtures.base[item.contextId] ?? [])],
+      hasPublishedLayout: publishedIntentIds.has(item.intentId),
+    }));
+    const content = experienceRegistry.listContent().map(({ input, rawEntry, isBuiltIn, isCustomized }) => ({
+      ...input,
+      version: rawEntry.version,
+      isBuiltIn,
+      isCustomized,
+      linkedContexts: Object.entries(tsFixtures.base)
+        .filter(([, ids]) => ids.includes(rawEntry.contentId))
+        .map(([ctxId]) => ctxId),
+      rawEntry,
+    }));
     return {
-      personaId, displayName, allowedScenarios,
-      profile: {
-        beneficiaryStatus: beneficiaryStatusSchema.parse(beneficiaryStatus),
-        accountFundingStatus: accountFundingStatusSchema.parse(accountFundingStatus),
-        cashCents: portfolio?.cashCents ?? null,
-      },
-      overview: { portfolio, homeGoal, portfolioHistory: fixturePortfolioHistory(syntheticMid) },
+      contexts,
+      intents,
+      content,
+      nbaRules: experienceRegistry.listNbaRules(),
     };
-  }));
+  }
   const store = new Store(join(options.dataDir, "app.sqlite"));
+  const opsStore = new OpsIncidentStore(options.dataDir);
+  const salesStore = new SalesDealStore(options.dataDir);
+  const writeAudit = new WriteAuditStore(options.dataDir);
   const registry = new CapabilityRegistry(store);
   const sfieldPath = join(options.dataDir, "sfield.sqlite");
   const offline = options.gateway ? undefined : new SqlitePersistence({ path: sfieldPath });
   let runtime: Runtime | null;
   try {
     runtime = options.gateway
-      ? await Runtime.open(store, sfieldPath, options.gateway, now, inspectorEnabled, portfolioSnapshots, goalProgressProvider, options.goalBudget)
+      ? await Runtime.open(store, sfieldPath, options.gateway, now, inspectorEnabled, portfolioSnapshots, goalProgressProvider, options.goalBudget, {
+          customer360, opsStore, salesStore, profileStore, writeAudit,
+        })
       : null;
     await offline?.init({ namespace: sfieldNamespace, ownerId: newId("owner") });
   } catch (error) {
@@ -141,7 +235,7 @@ export async function startApp(options: Options) {
   }
   const experience = new ExperienceService(store, runtime, selectionMode, now, inspectorEnabled, offline && {
     chat: new ChatHarness(offline), close: () => offline.close(),
-  });
+  }, { gateway: options.gateway, dataDir: options.dataDir, customer360, portfolioSnapshots, goalProgressProvider, opsStore, salesStore });
   const mode = options.mode ?? "live";
   let vite: ViteDevServer | undefined;
   const streams = new Set<ServerResponse>();
@@ -196,13 +290,19 @@ export async function startApp(options: Options) {
     const method = req.method;
     const adminBootstrap = resource === "admin" && id === "bootstrap" && !operation && inspectorEnabled;
     if (method === "GET" && ((resource === "bootstrap" && !id) || adminBootstrap)) {
+      const intentPrompts = experienceRegistry.listIntents()
+        .filter((item) => item.enabled && item.samplePhrases.length > 0)
+        .map((item) => ({
+          intentId: item.intentId,
+          label: item.label,
+          prompt: item.samplePhrases[0],
+          isCustom: !item.isBuiltIn || item.isCustomized,
+        }));
       const state: Bootstrap = {
         conversations: store.conversations(principalId).filter((conversation) => adminBootstrap || conversation.audience !== "admin"),
-        personas: personas.map((entry) => ({
-          ...entry, pins: store.workspacePins(principalId, entry.personaId),
-          profile: { ...entry.profile, accountFundingStatus: store.axe.fundingStatus({ principalId, personaId: entry.personaId }) ?? entry.profile.accountFundingStatus },
-        })),
+        personas: await loadBootstrapPersonas(principalId),
         scenarios: tsFixtures.scenarios.map(({ scenarioId, label }) => ({ scenarioId, label })),
+        intentPrompts,
         defaultPersonaId: demo.defaultPersonaId, defaultScenarioId: demo.defaultScenarioId,
         gatewayConfigured: Boolean(runtime), mode, selectionMode, inspectorEnabled,
         ...(options.gateway?.profile === "openai" && { openAiModel: options.gateway.model }),
@@ -210,7 +310,7 @@ export async function startApp(options: Options) {
       };
       return json(res, state);
     }
-    const workspacePersona = resource === "workspace" && id ? demo.personas.find(({ personaId }) => personaId === id) : undefined;
+    const workspacePersona = resource === "workspace" && id ? profileStore.findByPersonaId(id) : undefined;
     if (workspacePersona) {
       const { personaId } = workspacePersona;
       if (operation === "next-step" && method === "GET") {
@@ -222,6 +322,41 @@ export async function startApp(options: Options) {
       if (operation === "preferences" && method === "POST") {
         const { pins } = await body(req, z.object({ pins: workspacePinsSchema }).strict());
         return json(res, store.saveWorkspacePins(principalId, personaId, pins));
+      }
+      if (operation === "dismiss-nba" && method === "POST") {
+        const { nbaId } = await body(req, z.object({ nbaId: z.string().regex(/^nba_[a-z0-9_]{3,40}$/) }).strict());
+        return json(res, { dismissed: customer360.dismiss(principalId, personaId, nbaId) });
+      }
+      if (operation === "apply-bindings" && method === "POST") {
+        const { updates } = await body(req, z.object({
+          updates: z.record(dataBindingKeySchema, z.string().max(160)),
+        }).strict());
+        if (runtime) {
+          const governed = await runtime.executeGovernedWrite(principalId, {
+            domain: "customer360",
+            recordId: personaId,
+            action: "apply_bindings",
+            actor: workspacePersona.displayName,
+            updates,
+          }, AbortSignal.timeout(5000));
+          return json(res, {
+            updatedFields: Object.keys(updates),
+            sfieldRunId: governed.sfieldRunId,
+            auditId: governed.audit?.auditId,
+          });
+        }
+        const applied = profileStore.applyBindings(personaId, updates, now());
+        const audit = writeAudit.record({
+          sfieldRunId: "offline",
+          sfieldToolRef: domainWriteToolRef,
+          domain: "customer360",
+          recordId: personaId,
+          action: "apply_bindings",
+          actor: workspacePersona.displayName,
+          summary: `Updated Customer 360 bindings: ${applied.updatedFields.join(", ") || "none"}`,
+          status: "succeeded",
+        });
+        return json(res, { updatedFields: applied.updatedFields, auditId: audit.auditId });
       }
     }
     if (resource === "admin" && inspectorEnabled && !operation) {
@@ -241,9 +376,86 @@ export async function startApp(options: Options) {
         return json(res, store.changeUiLayout(principalId, change, now()));
       }
       if (id === "ui-layout-preview" && method === "POST") {
-        const design = await body(req, uiDesignSchema, 32 * 1024);
+        const previewBody = await body(req, z.union([
+          z.object({ design: uiDesignSchema, personaId: z.string().regex(idPattern).optional() }).strict(),
+          uiDesignSchema,
+        ]), 32 * 1024);
+        const design = "design" in previewBody ? previewBody.design : previewBody;
+        const personaId = "design" in previewBody ? previewBody.personaId : undefined;
         validateUiDesign(design, uiTargetOptions(registry, principalId), false);
-        return json(res, await previewUiLayout(design));
+        return json(res, await previewUiLayout(design, personaId));
+      }
+      if (id === "widgets" && method === "GET") {
+        return json(res, { widgets: widgetLibrary.list(principalId, now()) });
+      }
+      if (id === "widget-generate" && method === "POST") {
+        const { prompt } = await body(req, widgetGenerateRequestSchema, 8 * 1024);
+        const widget = await generateWidgetDraftWithLlm(prompt, options.gateway, options.dataDir);
+        return json(res, { widget });
+      }
+      if (id === "widgets" && method === "POST") {
+        const change = await body(req, widgetLibraryChangeSchema, 32 * 1024);
+        return json(res, widgetLibrary.change(principalId, change, now()));
+      }
+      if (id === "customers" && method === "GET") {
+        return json(res, { customers: listAdminCustomers(principalId) });
+      }
+      if (id === "customers" && method === "POST") {
+        const input = await body(req, customer360ProfileInputSchema, 16 * 1024);
+        const saved = profileStore.upsert(input, now());
+        const customers = listAdminCustomers(principalId);
+        return json(res, { customer: customers.find((c) => c.personaId === saved.personaId), customers });
+      }
+      if (id === "customer-delete" && method === "POST") {
+        const { personaId } = await body(req, z.object({ personaId: z.string().regex(idPattern) }).strict());
+        const result = profileStore.removeOrReset(personaId);
+        return json(res, { ...result, customers: listAdminCustomers(principalId) });
+      }
+      if (id === "customer-reset-nba" && method === "POST") {
+        const { personaId } = await body(req, z.object({ personaId: z.string().regex(idPattern) }).strict());
+        customer360.resetDismissals(principalId, personaId);
+        return json(res, { customers: listAdminCustomers(principalId) });
+      }
+      if (id === "experience-registry" && method === "GET") {
+        return json(res, buildExperienceRegistryView(principalId));
+      }
+      if (id === "registry-intent" && method === "POST") {
+        const input = await body(req, managedIntentInputSchema, 16 * 1024);
+        if (!activeContexts.some((c) => c.contextId === input.contextId)) {
+          throw new ApiError(400, "invalid_context", "Choose an active Treatment Selector context.");
+        }
+        experienceRegistry.upsertIntent(input);
+        return json(res, buildExperienceRegistryView(principalId));
+      }
+      if (id === "registry-intent-delete" && method === "POST") {
+        const { intentId } = await body(req, z.object({ intentId: z.string().regex(/^[a-z][a-z0-9_]{1,63}$/) }).strict());
+        experienceRegistry.deleteOrResetIntent(intentId);
+        return json(res, buildExperienceRegistryView(principalId));
+      }
+      if (id === "registry-content" && method === "POST") {
+        const input = await body(req, managedContentInputSchema, 32 * 1024);
+        experienceRegistry.upsertContent(input);
+        return json(res, buildExperienceRegistryView(principalId));
+      }
+      if (id === "registry-content-delete" && method === "POST") {
+        const { contentId } = await body(req, z.object({ contentId: z.string().regex(/^[a-z][a-z0-9_]{1,63}$/) }).strict());
+        experienceRegistry.deleteOrResetContent(contentId);
+        return json(res, buildExperienceRegistryView(principalId));
+      }
+      if (id === "registry-nba" && method === "POST") {
+        const input = await body(req, managedNbaRuleInputSchema, 16 * 1024);
+        experienceRegistry.upsertNbaRule(input);
+        return json(res, buildExperienceRegistryView(principalId));
+      }
+      if (id === "registry-nba-reorder" && method === "POST") {
+        const { orderedIds } = await body(req, z.object({ orderedIds: z.array(z.string().min(1)).min(1).max(30) }).strict());
+        experienceRegistry.reorderNbaRules(orderedIds);
+        return json(res, buildExperienceRegistryView(principalId));
+      }
+      if (id === "registry-nba-delete" && method === "POST") {
+        const { id: ruleId } = await body(req, z.object({ id: z.string().regex(/^nba_[a-z0-9_]{3,40}$/) }).strict());
+        experienceRegistry.deleteOrResetNbaRule(ruleId);
+        return json(res, buildExperienceRegistryView(principalId));
       }
       if (id === "evaluation" && method === "GET") {
         return json(res, { mode, rows: await runtime?.evaluation(principalId) ?? [] });
@@ -374,6 +586,87 @@ export async function startApp(options: Options) {
       const { envelope, clientRequestId } = await body(req, actionBody);
       return json(res, experience.followUp(principalId, id, envelope, clientRequestId), 202);
     }
+    if (resource === "admin" && id === "recommendation-providers" && !operation && method === "GET" && inspectorEnabled) {
+      return json(res, {
+        toolRef: recommendationArbitrateToolRef,
+        writeToolRef: domainWriteToolRef,
+        providers: runtime?.recommendationProviderDescriptors() ?? [],
+      });
+    }
+    if (resource === "admin" && id === "write-audit" && !operation && method === "GET" && inspectorEnabled) {
+      return json(res, {
+        toolRef: domainWriteToolRef,
+        entries: writeAudit.list(),
+      });
+    }
+    if (resource === "ops" && id === "incidents" && !operation && method === "GET") {
+      return json(res, opsStore.view());
+    }
+    if (resource === "ops" && id === "incidents" && operation === "reset" && method === "POST") {
+      return json(res, opsStore.reset());
+    }
+    if (resource === "ops-incidents" && id && operation === "decision" && method === "POST") {
+      const data = await body(req, incidentDecisionInputSchema);
+      if (runtime) {
+        const governed = await runtime.executeGovernedWrite(principalId, {
+          domain: "ops_incident",
+          recordId: id,
+          action: data.decision,
+          actor: data.actor?.trim() || "On-Call SRE Commander",
+          ...(data.note ? { note: data.note } : {}),
+        }, AbortSignal.timeout(5000));
+        const updated = opsStore.findById(id);
+        if (!updated) throw new ApiError(404, "not_found", "Incident not found.");
+        return json(res, { incident: updated, view: opsStore.view(), sfieldRunId: governed.sfieldRunId, auditId: governed.audit?.auditId });
+      }
+      const updated = opsStore.decide(id, data);
+      if (!updated) throw new ApiError(404, "not_found", "Incident not found.");
+      const audit = writeAudit.record({
+        sfieldRunId: "offline",
+        sfieldToolRef: domainWriteToolRef,
+        domain: "ops_incident",
+        recordId: updated.id,
+        action: data.decision,
+        actor: data.actor?.trim() || "On-Call SRE Commander",
+        summary: `${updated.id} → ${updated.status} (error rate ${updated.errorRatePct}%, p95 ${updated.p95LatencyMs}ms)`,
+        status: "succeeded",
+      });
+      return json(res, { incident: updated, view: opsStore.view(), auditId: audit.auditId });
+    }
+    if (resource === "sales" && id === "deals" && !operation && method === "GET") {
+      return json(res, salesStore.view());
+    }
+    if (resource === "sales" && id === "deals" && operation === "reset" && method === "POST") {
+      return json(res, salesStore.reset());
+    }
+    if (resource === "sales-deals" && id && operation === "decision" && method === "POST") {
+      const data = await body(req, dealDecisionInputSchema);
+      if (runtime) {
+        const governed = await runtime.executeGovernedWrite(principalId, {
+          domain: "sales_deal",
+          recordId: id,
+          action: data.decision,
+          actor: data.actor?.trim() || "VP Revenue Operations",
+          ...(data.note ? { note: data.note } : {}),
+        }, AbortSignal.timeout(5000));
+        const updated = salesStore.list().find((d) => d.id.toLowerCase() === id.toLowerCase());
+        if (!updated) throw new ApiError(404, "not_found", "Deal not found.");
+        return json(res, { deal: updated, view: salesStore.view(), sfieldRunId: governed.sfieldRunId, auditId: governed.audit?.auditId });
+      }
+      const updated = salesStore.decide(id, data);
+      if (!updated) throw new ApiError(404, "not_found", "Deal not found.");
+      const audit = writeAudit.record({
+        sfieldRunId: "offline",
+        sfieldToolRef: domainWriteToolRef,
+        domain: "sales_deal",
+        recordId: updated.id,
+        action: data.decision,
+        actor: data.actor?.trim() || "VP Revenue Operations",
+        summary: `${updated.id} (${updated.accountName}) → ${updated.stage} (${updated.discountStatus}, ${updated.winProbabilityPct}% prob.)`,
+        status: "succeeded",
+      });
+      return json(res, { deal: updated, view: salesStore.view(), auditId: audit.auditId });
+    }
     if (resource === "events" && !id && method === "POST") {
       const data = await body(req, eventBody);
       store.analytics(principalId, data.experienceId, data.eventId, data.type, now());
@@ -435,6 +728,8 @@ export async function startApp(options: Options) {
       await vite?.close();
       await new Promise<void>((accept, reject) => server.close((error) => error ? reject(error) : accept()));
       await experience.close();
+      if (getActiveCustomerProfileStore() === profileStore) setActiveCustomerProfileStore(null);
+      if (getActiveExperienceRegistryStore() === experienceRegistry) setActiveExperienceRegistryStore(null);
     },
   };
 }

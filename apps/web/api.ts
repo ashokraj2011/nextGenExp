@@ -1,10 +1,21 @@
 import type { AppliedUiLayout, UiDesign, UiLayoutCatalog, UiLayoutChange, UiLayoutRecord } from "../../packages/contracts/ui-layout";
+import type { SavedWidget, WidgetDraft, WidgetLibraryChange } from "../../packages/contracts/widget";
+import type { IncidentDecisionInput, IncidentRecord, OpsIncidentsView } from "../../packages/contracts/ops";
+import type { DealDecisionInput, DealRecord, SalesDealsView } from "../../packages/contracts/sales";
+import type { RecommendationProviderDescriptor } from "../../packages/contracts/recommendation-provider";
+import type { Customer360AdminRecord, Customer360ProfileInput } from "../../packages/contracts/customer-360";
+import type {
+  ExperienceRegistryView,
+  ManagedContentInput,
+  ManagedIntentInput,
+  ManagedNbaRuleInput,
+} from "../../packages/contracts/experience-registry";
 import type { DisplayExperience } from "../../packages/contracts/surface";
 import type { CapabilityManifest, CapabilityRef, OutputKind } from "../../packages/contracts/agentic";
 import type { AgenticTrace } from "./decision-trace";
 import type { EvaluationRow } from "../../packages/contracts/evaluation";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
-import type { Bootstrap, Conversation, ConversationChange, ConversationView, TurnAccepted, TurnView } from "../../packages/contracts/api";
+import type { Bootstrap, Conversation, ConversationChange, ConversationView, DomainWriteAuditEntry, TurnAccepted, TurnView } from "../../packages/contracts/api";
 import { pendingActionsContext, type WorkspaceActionLog, type WorkspaceNextStep, type WorkspacePendingAction, type WorkspacePin } from "../../packages/contracts/workspace";
 import type { TurnPayloads } from "../../packages/contracts/inspector";
 import type { ContextCatalog, PropensityResult, SelectionMode } from "../../packages/contracts/domain";
@@ -83,7 +94,25 @@ export const api = {
   ),
   uiLayouts: () => request<UiLayoutCatalog>("/api/admin/ui-layouts"),
   saveUiLayout: (change: UiLayoutChange) => request<UiLayoutRecord>("/api/admin/ui-layouts", change),
-  previewUiLayout: (design: UiDesign) => request<DisplayExperience>("/api/admin/ui-layout-preview", design),
+  previewUiLayout: (design: UiDesign, personaId?: string) => request<DisplayExperience>(
+    "/api/admin/ui-layout-preview",
+    personaId ? { design, personaId } : design,
+  ),
+  widgets: () => request<{ widgets: SavedWidget[] }>("/api/admin/widgets"),
+  generateWidget: (prompt: string) => request<{ widget: WidgetDraft }>("/api/admin/widget-generate", { prompt }),
+  saveWidgetLibrary: (change: WidgetLibraryChange) => request<{ widget?: SavedWidget; widgets: SavedWidget[] }>("/api/admin/widgets", change),
+  customers: () => request<{ customers: Customer360AdminRecord[] }>("/api/admin/customers"),
+  saveCustomer: (input: Customer360ProfileInput) => request<{ customer?: Customer360AdminRecord; customers: Customer360AdminRecord[] }>("/api/admin/customers", input),
+  deleteOrResetCustomer: (personaId: string) => request<{ deleted: boolean; reset: boolean; customers: Customer360AdminRecord[] }>("/api/admin/customer-delete", { personaId }),
+  resetCustomerNba: (personaId: string) => request<{ customers: Customer360AdminRecord[] }>("/api/admin/customer-reset-nba", { personaId }),
+  experienceRegistry: () => request<ExperienceRegistryView>("/api/admin/experience-registry"),
+  saveRegistryIntent: (input: ManagedIntentInput) => request<ExperienceRegistryView>("/api/admin/registry-intent", input),
+  deleteOrResetRegistryIntent: (intentId: string) => request<ExperienceRegistryView>("/api/admin/registry-intent-delete", { intentId }),
+  saveRegistryContent: (input: ManagedContentInput) => request<ExperienceRegistryView>("/api/admin/registry-content", input),
+  deleteOrResetRegistryContent: (contentId: string) => request<ExperienceRegistryView>("/api/admin/registry-content-delete", { contentId }),
+  saveRegistryNba: (input: ManagedNbaRuleInput) => request<ExperienceRegistryView>("/api/admin/registry-nba", input),
+  reorderRegistryNba: (orderedIds: string[]) => request<ExperienceRegistryView>("/api/admin/registry-nba-reorder", { orderedIds }),
+  deleteOrResetRegistryNba: (id: string) => request<ExperienceRegistryView>("/api/admin/registry-nba-delete", { id }),
   toolSetup: () => requestJson<ToolSetupView>("/api/admin/tools"),
   saveToolSetup: (setup: ToolSetup, revision?: string) => requestJson<ToolSetup>("/api/admin/tools", setup, revision),
   createCcreRule: (rule: MockCcreRule) => request<MockCcreRule>("/api/admin/ccre-rules", rule),
@@ -93,6 +122,22 @@ export const api = {
   nextStep: (personaId: string) => request<WorkspaceNextStep | null>("/api/workspace/" + personaId + "/next-step"),
   pendingActions: (personaId: string) => request<WorkspacePendingAction[]>("/api/workspace/" + personaId + "/" + pendingActionsContext),
   savePins: (personaId: string, pins: WorkspacePin[]) => request<WorkspacePin[]>("/api/workspace/" + personaId + "/preferences", { pins }),
+  dismissNba: (personaId: string, nbaId: string) => request<{ dismissed: string[] }>("/api/workspace/" + personaId + "/dismiss-nba", { nbaId }),
+  applyCustomerBindings: (personaId: string, updates: Record<string, string>) => request<{ updatedFields: string[] }>(
+    "/api/workspace/" + personaId + "/apply-bindings", { updates },
+  ),
+  opsIncidents: () => request<OpsIncidentsView>("/api/ops/incidents"),
+  resetOpsIncidents: () => request<OpsIncidentsView>("/api/ops/incidents/reset", {}),
+  decideIncident: (incidentId: string, input: IncidentDecisionInput) => request<{ incident: IncidentRecord; view: OpsIncidentsView }>(
+    "/api/ops-incidents/" + incidentId + "/decision", input,
+  ),
+  salesDeals: () => request<SalesDealsView>("/api/sales/deals"),
+  resetSalesDeals: () => request<SalesDealsView>("/api/sales/deals/reset", {}),
+  decideDeal: (dealId: string, input: DealDecisionInput) => request<{ deal: DealRecord; view: SalesDealsView }>(
+    "/api/sales-deals/" + dealId + "/decision", input,
+  ),
+  recommendationProviders: () => request<{ toolRef: string; writeToolRef?: string; providers: RecommendationProviderDescriptor[] }>("/api/admin/recommendation-providers"),
+  writeAudit: () => request<{ toolRef: string; entries: DomainWriteAuditEntry[] }>("/api/admin/write-audit"),
   previewFunding: (conversationId: string, clientRequestId: string, source?: typeof pendingActionsContext) => request<TurnAccepted>(
     "/api/conversations/" + conversationId + "/preview-funding", { clientRequestId, source },
   ),
