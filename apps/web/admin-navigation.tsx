@@ -1,4 +1,4 @@
-import { Blocks, BookOpenText, Code2, FileText, GitBranch, MessageSquare, PanelsTopLeft, Settings2, UsersRound } from "lucide-react";
+import { Activity, Blocks, BookOpenText, Briefcase, Code2, FileText, GitBranch, Landmark, MessageSquare, PanelsTopLeft, Settings2, UsersRound } from "lucide-react";
 import { adminPaths } from "../../packages/contracts/admin-paths";
 
 export function diagnosticHref(path: typeof adminPaths.logs | typeof adminPaths.inspector, thread?: string, turn?: string) {
@@ -20,12 +20,24 @@ const destinations = [
   { label: "Test chat", path: adminPaths.chat, Icon: MessageSquare },
 ] as const;
 
+const workspaceDestinations = [
+  { label: "Wealth (/wealth)", path: "/wealth", Icon: Landmark },
+  { label: "IT Ops (/it-ops)", path: "/it-ops", Icon: Activity },
+  { label: "RevOps (/revops)", path: "/revops", Icon: Briefcase },
+] as const;
+
 export function AdminNavigation({ thread }: { thread?: string }) {
   return <nav className="admin-navigation" aria-label="Administration">
     {destinations.map(({ label, path, Icon }) => <a key={path} className="rail-link"
       href={path === adminPaths.logs || path === adminPaths.inspector ? diagnosticHref(path, thread) : path}
       aria-current={location.pathname === path ? "page" : undefined}>
       <Icon size={17} aria-hidden="true" />{label}
+    </a>)}
+    <div style={{ margin: "12px 10px 4px", fontSize: "0.68rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)" }}>
+      Workspaces
+    </div>
+    {workspaceDestinations.map(({ label, path, Icon }) => <a key={path} className="rail-link" href={path}>
+      <Icon size={16} aria-hidden="true" />{label}
     </a>)}
   </nav>;
 }

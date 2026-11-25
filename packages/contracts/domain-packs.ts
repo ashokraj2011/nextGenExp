@@ -8,6 +8,7 @@ export interface DomainTopic {
 
 export interface DomainPack {
   id: DomainPackId;
+  path: string;
   shortLabel: string;
   label: string;
   subtitle: string;
@@ -22,6 +23,7 @@ export interface DomainPack {
 export const DOMAIN_PACKS: readonly DomainPack[] = [
   {
     id: "wealth",
+    path: "/wealth",
     shortLabel: "Wealth",
     label: "Wealth Advisory",
     subtitle: "Customer 360 · TS + CCRE · NBA",
@@ -42,6 +44,7 @@ export const DOMAIN_PACKS: readonly DomainPack[] = [
   },
   {
     id: "it_ops",
+    path: "/it-ops",
     shortLabel: "IT Ops",
     label: "IT Operations & SRE",
     subtitle: "Live Incident Store · Rollback Approvals",
@@ -63,6 +66,7 @@ export const DOMAIN_PACKS: readonly DomainPack[] = [
   },
   {
     id: "sales_revops",
+    path: "/revops",
     shortLabel: "RevOps",
     label: "Sales & Revenue Ops",
     subtitle: "Live CRM Deal Desk · Discount Approvals",
@@ -86,4 +90,16 @@ export const DOMAIN_PACKS: readonly DomainPack[] = [
 
 export function getDomainPack(id: string | null | undefined): DomainPack {
   return DOMAIN_PACKS.find((p) => p.id === id) ?? DOMAIN_PACKS[0];
+}
+
+export function domainPackPath(id: DomainPackId): string {
+  return getDomainPack(id).path;
+}
+
+export function domainPackFromPath(pathname: string): DomainPackId | null {
+  const clean = pathname.replace(/\/+$/, "") || "/";
+  if (clean === "/it-ops") return "it_ops";
+  if (clean === "/revops") return "sales_revops";
+  if (clean === "/wealth" || clean === "/chat" || clean === "/") return "wealth";
+  return null;
 }

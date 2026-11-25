@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import "@fontsource-variable/inter/wght.css";
 import { adminPaths, isAdminPath } from "../../packages/contracts/admin-paths";
+import { domainPackFromPath, getDomainPack } from "../../packages/contracts/domain-packs";
 import { readProfileSession, saveProfileSession } from "./conversation-storage";
 import { setStoredDomainPack } from "./domain-pack-ui";
 import { applyTheme, initTheme } from "./theme";
@@ -17,11 +18,11 @@ if (location.pathname === "/embed") {
   if (domainParam === "wealth" || domainParam === "it_ops" || domainParam === "sales_revops") {
     setStoredDomainPack(domainParam);
   }
-  const personaParam = params.get("personaId") || readProfileSession() || "persona_new_investor";
+  const personaParam = params.get("personaId") || readProfileSession() || "demo-learner";
   saveProfileSession(personaParam);
   document.documentElement.dataset.embed = "true";
   void import("./main");
-} else if (["/", "/chat"].includes(location.pathname) && readProfileSession() === "") {
+} else if (["/", "/chat", "/wealth"].includes(location.pathname) && readProfileSession() === "") {
   location.replace("/login" + location.search);
 } else if (isAdminPath(location.pathname) && location.pathname !== adminPaths.chat) {
   document.title = "Administration · CEP";
@@ -33,5 +34,12 @@ if (location.pathname === "/embed") {
   document.title = "Financial planning · CEP";
   void import("./landing").then(({ Landing }) => createRoot(document.getElementById("root")!).render(<Landing />));
 } else {
+  const pathDomain = domainPackFromPath(location.pathname);
+  if (pathDomain && pathDomain !== "wealth") {
+    if (readProfileSession() === "") saveProfileSession("demo-learner");
+    document.title = `${getDomainPack(pathDomain).label} · CEP`;
+  } else if (pathDomain === "wealth") {
+    document.title = "Wealth Advisory · CEP";
+  }
   void import("./main");
 }

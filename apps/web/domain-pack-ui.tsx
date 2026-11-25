@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, Briefcase, Database, Landmark, RotateCcw, ShieldAlert, TrendingUp } from "lucide-react";
-import { DOMAIN_PACKS, getDomainPack, type DomainPack, type DomainPackId } from "../../packages/contracts/domain-packs";
+import { Activity, Database, RotateCcw, ShieldAlert, TrendingUp } from "lucide-react";
+import {
+  domainPackFromPath,
+  domainPackPath,
+  getDomainPack,
+  type DomainPack,
+  type DomainPackId,
+} from "../../packages/contracts/domain-packs";
 import type { OpsIncidentsView } from "../../packages/contracts/ops";
 import type { SalesDealsView } from "../../packages/contracts/sales";
 import { api } from "./api";
@@ -10,6 +16,8 @@ const CHANGE_EVENT = "cep-domain-change";
 const DATA_EVENT = "cep-domain-data-updated";
 
 export function readStoredDomainPack(): DomainPackId {
+  const fromPath = typeof window !== "undefined" ? domainPackFromPath(window.location.pathname) : null;
+  if (fromPath) return fromPath;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw === "it_ops" || raw === "sales_revops" || raw === "wealth") return raw;
@@ -29,59 +37,32 @@ export function notifyDomainDataUpdated() {
 }
 
 export function useDomainPack(): [DomainPack, (id: DomainPackId) => void] {
+  const isEmbed = typeof window !== "undefined" && window.location.pathname === "/embed";
   const [packId, setPackId] = useState<DomainPackId>(() => readStoredDomainPack());
 
   useEffect(() => {
+    if (!isEmbed) return;
     const onChange = (event: Event) => {
       const next = (event as CustomEvent<DomainPackId>).detail;
       if (next === "wealth" || next === "it_ops" || next === "sales_revops") setPackId(next);
     };
     window.addEventListener(CHANGE_EVENT, onChange);
     return () => window.removeEventListener(CHANGE_EVENT, onChange);
-  }, []);
+  }, [isEmbed]);
 
   const select = useCallback((id: DomainPackId) => {
-    setStoredDomainPack(id);
-    setPackId(id);
-  }, []);
+    if (isEmbed) {
+      setStoredDomainPack(id);
+      setPackId(id);
+      return;
+    }
+    const targetPath = domainPackPath(id);
+    if (window.location.pathname !== targetPath) {
+      window.location.assign(targetPath);
+    }
+  }, [isEmbed]);
 
   return [getDomainPack(packId), select];
-}
-
-const packIcons: Record<DomainPackId, typeof Landmark> = {
-  wealth: Landmark,
-  it_ops: Activity,
-  sales_revops: Briefcase,
-};
-
-export function DomainPackSwitcher({
-  activeId,
-  onSelect,
-}: {
-  activeId: DomainPackId;
-  onSelect: (id: DomainPackId) => void;
-}) {
-  return (
-    <div className="domain-pack-switcher" role="group" aria-label="Workspace domain pack">
-      {DOMAIN_PACKS.map((pack) => {
-        const Icon = packIcons[pack.id];
-        const active = pack.id === activeId;
-        return (
-          <button
-            key={pack.id}
-            type="button"
-            className={"domain-pack-pill" + (active ? " is-active" : "")}
-            aria-pressed={active}
-            title={`${pack.label} — ${pack.subtitle}`}
-            onClick={() => onSelect(pack.id)}
-          >
-            <Icon size={13} aria-hidden="true" />
-            <span>{pack.shortLabel}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
 }
 
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });

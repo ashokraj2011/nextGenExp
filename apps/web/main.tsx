@@ -24,7 +24,7 @@ import {
   type ComposerAttachment, type NextSuggestion,
 } from "./composer-extras";
 import { DemoProfiles, ProfileAvatar } from "./demo-profiles";
-import { DomainLiveHud, DomainPackSwitcher, DomainWelcomeHome, useDomainPack } from "./domain-pack-ui";
+import { DomainLiveHud, DomainWelcomeHome, useDomainPack } from "./domain-pack-ui";
 import type { DomainPack } from "../../packages/contracts/domain-packs";
 import { LabMark } from "./lab-mark";
 import { LiveMetricsHud } from "./live-metrics-rail";
@@ -1061,11 +1061,11 @@ function App() {
     {!embedMode && railOpen && <button className="rail-scrim" aria-label="Close conversations" onClick={() => setRailOpen(false)} />}
     {!embedMode && <aside className={"rail" + (railOpen ? " rail-open" : "")} id="conversation-rail" aria-label="Workspace navigation">
       <div className="rail-header">
-        <a className="rail-home" href={adminChat ? adminPaths.tools : "/"}>
+        <a className="rail-home" href={adminChat ? adminPaths.tools : domainPack.path}>
           <LabMark />
           <span className="rail-brand-text">
             <strong>{adminChat ? "Administration" : "CEP"}</strong>
-            {!adminChat && <small>Customer Engagement Platform</small>}
+            {!adminChat && <small>{domainPack.label}</small>}
           </span>
         </a>
         <button className="icon-button rail-collapse-desktop" type="button" aria-label="Collapse sidebar" title="Collapse sidebar"
@@ -1075,7 +1075,6 @@ function App() {
       <button ref={newThreadTrigger} type="button" className="new-conversation" disabled={pending || !configuration} onClick={startFreshChat}>
         <Plus size={17} aria-hidden="true" />New conversation
       </button>
-      {!adminChat && <DomainPackSwitcher activeId={domainPack.id} onSelect={setDomainPack} />}
       <div className="rail-section rail-workbench-nav">
         <button type="button" className="rail-link rail-overview" aria-current={!chat ? "page" : undefined} disabled={pending}
           onClick={() => {
@@ -1157,15 +1156,17 @@ function App() {
                 onClick={() => setRailCollapsed(false)}><PanelLeft size={18} aria-hidden="true" /></button>
             )}
             <span className="workspace-crumb">
-              {adminChat ? "Test chat" : (activeProfile?.displayName ?? "Workspace")}
+              {adminChat ? "Test chat" : (domainPack.id === "wealth" ? (activeProfile?.displayName ?? "Workspace") : domainPack.label)}
               <ChevronRight size={13} aria-hidden="true" />
             </span>
             <h1>{chat?.title ?? "Overview"}</h1>
           </div>
-          <div className="topbar-center">
-            <WorkspaceMenu pins={pins} section={activeSection} onSelect={setSection} onCustomize={() => openPanel({ kind: "pins" })}
-              trigger={customizeTrigger} disabled={!configuration} />
-          </div>
+          {domainPack.id === "wealth" && (
+            <div className="topbar-center">
+              <WorkspaceMenu pins={pins} section={activeSection} onSelect={setSection} onCustomize={() => openPanel({ kind: "pins" })}
+                trigger={customizeTrigger} disabled={!configuration} />
+            </div>
+          )}
           <div className="topbar-actions">
             <ThemeToggle compact />
             {configuration && (

@@ -3,7 +3,6 @@ import { Activity, ArrowUpRight, Briefcase, Plus, RotateCcw, Save, Trash2 } from
 import type { IncidentRecord, IncidentUpsertInput, OpsIncidentsView } from "../../packages/contracts/ops";
 import type { DealRecord, DealUpsertInput, SalesDealsView } from "../../packages/contracts/sales";
 import { api } from "./api";
-import { setStoredDomainPack } from "./domain-pack-ui";
 
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
@@ -187,9 +186,9 @@ export function OpsIncidentsEditor() {
               <button
                 type="button"
                 className="secondary-button c360-launch-btn"
-                onClick={() => { setStoredDomainPack("it_ops"); location.assign("/chat"); }}
+                onClick={() => { location.assign("/it-ops"); }}
               >
-                Open IT Ops chat <ArrowUpRight size={14} aria-hidden="true" />
+                Open IT Ops workspace <ArrowUpRight size={14} aria-hidden="true" />
               </button>
             </div>
 
@@ -450,9 +449,9 @@ export function SalesDealsEditor() {
               <button
                 type="button"
                 className="secondary-button c360-launch-btn"
-                onClick={() => { setStoredDomainPack("sales_revops"); location.assign("/chat"); }}
+                onClick={() => { location.assign("/revops"); }}
               >
-                Open RevOps chat <ArrowUpRight size={14} aria-hidden="true" />
+                Open RevOps workspace <ArrowUpRight size={14} aria-hidden="true" />
               </button>
             </div>
 
