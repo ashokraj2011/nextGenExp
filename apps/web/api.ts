@@ -24,6 +24,7 @@ import type {
   TradeJobCreateInput,
 } from "../../packages/contracts/trading";
 import type { ActionFlow, ActionFlowUpsertInput } from "../../packages/contracts/action-flow";
+import type { WorkflowDefinition, WorkflowDefinitionUpsertInput, WorkflowRun, WorkflowsAdminView } from "../../packages/contracts/workflow-definition";
 import type { OmnichannelConfig, OmnichannelDelivery, OmnichannelView } from "../../packages/contracts/omnichannel";
 import type { Customer360AdminRecord, Customer360ProfileInput } from "../../packages/contracts/customer-360";
 import type {
@@ -208,6 +209,17 @@ export const api = {
   omnichannel: () => request<OmnichannelView>("/api/admin/omnichannel"),
   saveOmnichannel: (config: Partial<OmnichannelConfig>) => request<OmnichannelView>("/api/admin/omnichannel", config),
   testOmnichannel: () => request<{ delivery: OmnichannelDelivery; view: OmnichannelView }>("/api/admin/omnichannel-test", {}),
+  workflows: () => request<WorkflowsAdminView>("/api/workflows"),
+  saveWorkflow: (input: WorkflowDefinitionUpsertInput) => request<WorkflowsAdminView>("/api/workflows", input),
+  deleteWorkflow: (id: string) => request<WorkflowsAdminView>("/api/workflows/" + id + "/delete", {}),
+  startWorkflow: (id: string, input: { personaId?: string; actorName?: string; initialInputs?: Record<string, string | number | boolean> } = {}) => (
+    request<{ run: WorkflowRun; definition: WorkflowDefinition }>("/api/workflows/" + id + "/start", input)
+  ),
+  workflowRun: (runId: string) => request<{ run: WorkflowRun; definition?: WorkflowDefinition }>("/api/workflow-runs/" + runId),
+  submitWorkflowInput: (runId: string, inputs: Record<string, string | number | boolean>) => (
+    request<{ run: WorkflowRun; definition?: WorkflowDefinition }>("/api/workflow-runs/" + runId + "/input", { inputs })
+  ),
+  cancelWorkflowRun: (runId: string) => request<{ run: WorkflowRun; definition?: WorkflowDefinition }>("/api/workflow-runs/" + runId + "/cancel", {}),
   previewFunding: (conversationId: string, clientRequestId: string, source?: typeof pendingActionsContext) => request<TurnAccepted>(
     "/api/conversations/" + conversationId + "/preview-funding", { clientRequestId, source },
   ),

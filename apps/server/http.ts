@@ -36,6 +36,8 @@ import { TradeStore, type SettlementCallback } from "./trade-store";
 import { taxHarvestPreviewInputSchema, tradeJobCreateInputSchema, type TradeLegInput } from "../../packages/contracts/trading";
 import { ActionFlowStore } from "./action-flow-store";
 import { actionFlowUpsertSchema } from "../../packages/contracts/action-flow";
+import { WorkflowEngine } from "./workflow-engine";
+import { workflowDefinitionUpsertSchema } from "../../packages/contracts/workflow-definition";
 import { OmnichannelStore } from "./omnichannel-store";
 import { omnichannelConfigSchema } from "../../packages/contracts/omnichannel";
 import { renderCepEmbedSdkScript, renderHostPortalDemoHtml } from "./embed-sdk";
@@ -245,6 +247,7 @@ export async function startApp(options: Options) {
     omnichannelStore.notifyApprovalSync(record, `http://127.0.0.1:${port}`);
   });
   const actionFlowStore = new ActionFlowStore(options.dataDir);
+  const workflowEngine = new WorkflowEngine(options.dataDir, { approvalStore, connectorStore });
   const tradeStore = new TradeStore(options.dataDir, profileStore);
   setActiveEquityLedger(tradeStore);
   const writeAudit = new WriteAuditStore(options.dataDir);
@@ -308,11 +311,34 @@ export async function startApp(options: Options) {
     chat: new ChatHarness(offline), close: () => offline.close(),
   }, {
     mode, gateway: options.gateway, dataDir: options.dataDir, customer360, portfolioSnapshots, goalProgressProvider,
-    opsStore, salesStore, connectorStore, approvalStore, tradeStore, actionFlowStore,
+    opsStore, salesStore, connectorStore, approvalStore, tradeStore, actionFlowStore, workflowEngine,
     onTradeSettle: makeTradeSettler,
   });
 
   async function executeApprovedRecord(principalId: string, record: ApprovalRecord) {
+    if (record.targetKind === "workflow_step") {
+      const runId = typeof record.payload.runId === "string" ? record.payload.runId : record.recordId;
+      const actor = record.decidedBy ?? record.requester;
+      const resumed = await workflowEngine.resumeAfterApproval(runId, record.id, true, actor);
+      const summary = `Approved workflow step "${record.action}" → run ${runId} is now ${resumed?.status ?? "resumed"}`;
+      const audit = writeAudit.record({
+        sfieldRunId: runId,
+        sfieldToolRef: record.sfieldToolRef,
+        domain: "workflow",
+        recordId: runId,
+        action: record.action,
+        actor,
+        summary,
+        status: "succeeded",
+        approvalId: record.id,
+      });
+      const finalRecord = approvalStore.markExecuted(record.id, {
+        summary,
+        sfieldRunId: runId,
+        auditId: audit.auditId,
+      }) ?? record;
+      return { approval: finalRecord, workflowRun: resumed, execution: { summary, sfieldRunId: runId, auditId: audit.auditId } };
+    }
     if (record.targetKind === "stock_trade") {
       const legs = Array.isArray(record.payload.legs) ? (record.payload.legs as TradeLegInput[]) : [];
       const personaId = typeof record.payload.personaId === "string" ? record.payload.personaId : record.recordId;
@@ -911,6 +937,86 @@ export async function startApp(options: Options) {
       const { id: flowId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());
       return json(res, actionFlowStore.remove(flowId));
     }
+    if (resource === "workflows") {
+      if (!id && method === "GET") {
+        return json(res, workflowEngine.view());
+      }
+      if (!id && method === "POST" && inspectorEnabled) {
+        const input = await body(req, workflowDefinitionUpsertSchema, 48 * 1024);
+        return json(res, workflowEngine.upsertDefinition(input));
+      }
+      if (id && operation === "delete" && method === "POST" && inspectorEnabled) {
+        return json(res, workflowEngine.deleteOrResetDefinition(id));
+      }
+      if (id && operation === "start" && method === "POST") {
+        const input = await body(req, z.object({
+          personaId: z.string().regex(idPattern).optional(),
+          actorName: z.string().trim().min(1).max(80).optional(),
+          initialInputs: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+        }).strict());
+        const personaId = input.personaId ?? demo.defaultPersonaId;
+        const profile = profileStore.findByPersonaId(personaId);
+        try {
+          const started = await workflowEngine.startRun(id, {
+            personaId,
+            actorName: input.actorName ?? profile?.displayName ?? "Customer",
+            initialInputs: input.initialInputs,
+          });
+          return json(res, started, 201);
+        } catch (err) {
+          throw new ApiError(404, "workflow_not_found", err instanceof Error ? err.message : "Workflow not found.");
+        }
+      }
+    }
+    if (resource === "workflow-runs" && id) {
+      if (!operation && method === "GET") {
+        const run = workflowEngine.getRun(id);
+        if (!run) throw new ApiError(404, "workflow_run_not_found", "Workflow run not found.");
+        return json(res, { run, definition: workflowEngine.getDefinition(run.workflowId) });
+      }
+      if (operation === "input" && method === "POST") {
+        const { inputs } = await body(req, z.object({
+          inputs: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
+        }).strict());
+        try {
+          const run = await workflowEngine.submitInput(id, inputs);
+          return json(res, { run, definition: workflowEngine.getDefinition(run.workflowId) });
+        } catch (err) {
+          throw new ApiError(400, "workflow_input_failed", err instanceof Error ? err.message : "Could not submit workflow input.");
+        }
+      }
+      if (operation === "cancel" && method === "POST") {
+        try {
+          const run = workflowEngine.cancelRun(id);
+          return json(res, { run, definition: workflowEngine.getDefinition(run.workflowId) });
+        } catch (err) {
+          throw new ApiError(404, "workflow_run_not_found", err instanceof Error ? err.message : "Workflow run not found.");
+        }
+      }
+      if (operation === "events" && method === "GET") {
+        const initialRun = workflowEngine.getRun(id);
+        if (!initialRun) throw new ApiError(404, "workflow_run_not_found", "Workflow run not found.");
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          "Connection": "keep-alive",
+          "X-Accel-Buffering": "no",
+        });
+        streams.add(res);
+        const sendSnapshot = (snapshot: typeof initialRun) => {
+          if (res.writableEnded) return;
+          res.write(`event: workflow.update\ndata: ${JSON.stringify(snapshot)}\n\n`);
+          if (snapshot.status === "completed" || snapshot.status === "cancelled" || snapshot.status === "failed") {
+            res.end();
+          }
+        };
+        const unsubscribe = workflowEngine.subscribe(id, sendSnapshot);
+        const heartbeat = setInterval(() => { if (!res.writableEnded) res.write(": keepalive\n\n"); }, 15_000);
+        res.once("close", () => { unsubscribe(); clearInterval(heartbeat); streams.delete(res); });
+        sendSnapshot(initialRun);
+        return;
+      }
+    }
     if (resource === "trading") {
       if (id && operation === "portfolio" && method === "GET") {
         return json(res, tradeStore.snapshotFor(id));
@@ -1008,6 +1114,10 @@ export async function startApp(options: Options) {
         throw new ApiError(outcome.status, outcome.code, outcome.message);
       }
       if (outcome.record.status === "denied") {
+        if (outcome.record.targetKind === "workflow_step") {
+          const runId = typeof outcome.record.payload.runId === "string" ? outcome.record.payload.runId : outcome.record.recordId;
+          await workflowEngine.resumeAfterApproval(runId, outcome.record.id, false, decisionInput.actor, decisionInput.comment);
+        }
         writeAudit.record({
           sfieldRunId: "approval_denied",
           sfieldToolRef: outcome.record.sfieldToolRef,
@@ -1251,6 +1361,7 @@ export async function startApp(options: Options) {
       await new Promise<void>((accept, reject) => server.close((error) => error ? reject(error) : accept()));
       await experience.close();
       tradeStore.close();
+      workflowEngine.close();
       if (getActiveCustomerProfileStore() === profileStore) setActiveCustomerProfileStore(null);
       if (getActiveEquityLedger() === tradeStore) setActiveEquityLedger(null);
       if (getActiveExperienceRegistryStore() === experienceRegistry) setActiveExperienceRegistryStore(null);

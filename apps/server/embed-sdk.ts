@@ -670,6 +670,9 @@ export function renderHostPortalDemoHtml(baseOrigin: string, query: URLSearchPar
           <button type="button" class="action-trigger" data-prompt="I want to sell 40% of my Apple shares" data-domain="wealth">
             <span>Sell 40% AAPL + Tax-Loss Harvest</span><small>postMessage</small>
           </button>
+          <button type="button" class="action-trigger" data-prompt="I want to initiate a wire transfer" data-domain="wealth">
+            <span>Run Governed Wire Workflow (5-Step)</span><small>workflow DAG</small>
+          </button>
           <button type="button" class="action-trigger" data-prompt="whats in my equity book right now?" data-domain="wealth">
             <span>Inspect Live Stock Holdings</span><small>postMessage</small>
           </button>

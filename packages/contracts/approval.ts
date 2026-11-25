@@ -2,8 +2,8 @@ import { z } from "zod";
 
 export const approvalRiskLevelSchema = z.enum(["low", "medium", "high"]);
 export const approvalStatusSchema = z.enum(["pending", "approved", "denied", "executed", "expired"]);
-export const approvalTargetKindSchema = z.enum(["domain_write", "external_connector", "stock_trade"]);
-export const approvalDomainSchema = z.enum(["ops_incident", "sales_deal", "customer360", "external_connector", "stock_trade"]);
+export const approvalTargetKindSchema = z.enum(["domain_write", "external_connector", "stock_trade", "workflow_step"]);
+export const approvalDomainSchema = z.enum(["ops_incident", "sales_deal", "customer360", "external_connector", "stock_trade", "workflow"]);
 
 export const approvalDetailSchema = z.object({
   label: z.string().trim().min(1).max(64),

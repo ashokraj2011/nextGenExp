@@ -5,6 +5,7 @@ import type { WidgetDraft } from "../../packages/contracts/widget";
 import { api } from "./api";
 import { notifyDomainDataUpdated } from "./domain-pack-ui";
 import { TradeTicketNode } from "./trade-ticket";
+import { WorkflowRunnerNode } from "./workflow-runner";
 
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
@@ -662,6 +663,7 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
           if (node.type === "approval") return <ApprovalNode key={idx} node={node} onFollowUp={props.onFollowUp} />;
           if (node.type === "timeline") return <TimelineNode key={idx} node={node} />;
           if (node.type === "trade_ticket") return <TradeTicketNode key={idx} node={node} onFollowUp={props.onFollowUp} />;
+          if (node.type === "workflow_runner") return <WorkflowRunnerNode key={idx} node={node} />;
           return (
             <div key={idx} className={"dyn-callout dyn-callout-" + node.tone}>
               {node.title && <strong>{node.title}</strong>}

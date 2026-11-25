@@ -105,7 +105,7 @@ export const dynamicApprovalNodeSchema = z.object({
   approveLabel: z.string().trim().min(1).max(40),
   rejectLabel: z.string().trim().min(1).max(40),
   recordId: z.string().trim().max(64).optional(),
-  domain: z.enum(["ops_incident", "sales_deal", "external_connector", "stock_trade", "generic"]).optional(),
+  domain: z.enum(["ops_incident", "sales_deal", "external_connector", "stock_trade", "workflow", "generic"]).optional(),
   approvalId: z.string().trim().max(64).optional(),
   payloadDigest: z.string().trim().max(128).optional(),
   dualControl: z.boolean().optional(),
@@ -155,6 +155,13 @@ export const dynamicTradeTicketNodeSchema = z.object({
   }).strict()).min(1).max(12),
 }).strict();
 
+export const dynamicWorkflowRunnerNodeSchema = z.object({
+  type: z.literal("workflow_runner"),
+  runId: z.string().trim().min(1).max(80),
+  workflowId: z.string().trim().min(1).max(64),
+  workflowName: z.string().trim().min(1).max(80),
+}).strict();
+
 export const dynamicNodeSchema = z.discriminatedUnion("type", [
   dynamicMetricsNodeSchema,
   dynamicTableNodeSchema,
@@ -168,6 +175,7 @@ export const dynamicNodeSchema = z.discriminatedUnion("type", [
   dynamicApprovalNodeSchema,
   dynamicTimelineNodeSchema,
   dynamicTradeTicketNodeSchema,
+  dynamicWorkflowRunnerNodeSchema,
 ]);
 
 export type DynamicCanvasNode = z.infer<typeof dynamicNodeSchema>;

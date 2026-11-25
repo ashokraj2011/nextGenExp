@@ -73,7 +73,7 @@ export type DomainWriteAuditEntry = {
   auditId: string;
   sfieldRunId: string;
   sfieldToolRef: string;
-  domain: "ops_incident" | "sales_deal" | "customer360" | "external_connector" | "stock_trade";
+  domain: "ops_incident" | "sales_deal" | "customer360" | "external_connector" | "stock_trade" | "workflow";
   recordId: string;
   action: string;
   actor: string;

@@ -3,6 +3,7 @@ import {
   ArrowDown, ArrowRight, ArrowUp, BookOpen, GitBranch, Layers, Plus, RotateCcw, Save, Sparkles, Trash2, Zap,
 } from "lucide-react";
 import { ActionFlowsPanel } from "./action-flows-panel";
+import { WorkflowStudioPanel } from "./workflow-studio-panel";
 import { adminPaths } from "../../packages/contracts/admin-paths";
 import { componentNames, type ComponentName } from "../../packages/contracts/domain";
 import type {
@@ -18,7 +19,7 @@ import type {
 import { api } from "./api";
 import "./experience-registry-admin.css";
 
-type Tab = "intents" | "content" | "nba" | "flows";
+type Tab = "intents" | "content" | "nba" | "flows" | "workflows";
 
 const conditionLabels: Record<NbaConditionKind, string> = {
   unfunded_account: "Account is unfunded",
@@ -412,13 +413,18 @@ export function ExperienceRegistryAdmin() {
         <button type="button" role="tab" aria-selected={tab === "flows"} className={"reg-tab" + (tab === "flows" ? " is-active" : "")} onClick={() => { setTab("flows"); setNotice(null); }}>
           <Zap size={15} aria-hidden="true" />Action Flows (No-Code)
         </button>
+        <button type="button" role="tab" aria-selected={tab === "workflows"} className={"reg-tab" + (tab === "workflows" ? " is-active" : "")} onClick={() => { setTab("workflows"); setNotice(null); }}>
+          <Layers size={15} aria-hidden="true" />Workflows (Multi-Step)
+        </button>
       </div>
 
       {notice && (
         <p className={"reg-notice " + (notice.tone === "error" ? "is-error" : "is-ok")} role="status">{notice.text}</p>
       )}
 
-      {tab === "flows" ? (
+      {tab === "workflows" ? (
+        <WorkflowStudioPanel />
+      ) : tab === "flows" ? (
         <ActionFlowsPanel />
       ) : loading || !view ? (
         <p className="workspace-loading" role="status">Loading Experience Registry…</p>

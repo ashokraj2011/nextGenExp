@@ -33,6 +33,7 @@ import { createOpsRunbookProvider, createSalesDealDeskProvider, RecommendationAr
 import type { OpsIncidentStore } from "./ops-store";
 import type { SalesDealStore } from "./sales-store";
 import type { ConnectorStore } from "./connector-store";
+import type { WorkflowEngine } from "./workflow-engine";
 import type { ApprovalStore } from "./approval-store";
 import type { SettlementCallback, TradeStore } from "./trade-store";
 import type { ActionFlowStore } from "./action-flow-store";
@@ -83,6 +84,7 @@ export class ExperienceService {
       approvalStore?: ApprovalStore;
       tradeStore?: TradeStore;
       actionFlowStore?: ActionFlowStore;
+      workflowEngine?: WorkflowEngine;
       onTradeSettle?: (principalId: string) => SettlementCallback;
     },
   ) {
@@ -295,6 +297,7 @@ export class ExperienceService {
         const conversation = this.store.conversation(initial.scope.conversationId, initial.scope.principalId);
         const persona = findProfileById(conversation.personaId);
         const activeDraft = this.dynamicUi.tradeStore?.getDraft(conversation.id);
+        const matchedWorkflow = this.dynamicUi.workflowEngine?.matchPrompt(initial.public.message);
         const matchedActionFlow = this.dynamicUi.actionFlowStore?.matchPrompt(initial.public.message);
 
         // 1. Conversational continuation for an active stock trade draft in this thread
@@ -351,6 +354,52 @@ export class ExperienceService {
             this.store.finish(id, { type: "completed", result: dynamicResult }, now);
             return;
           }
+        }
+
+        // 1b. Declarative Multi-Step Workflow match
+        if (matchedWorkflow && this.dynamicUi.workflowEngine) {
+          stage = "compose";
+          this.store.progress(id, "composition", this.now());
+          const started = await this.dynamicUi.workflowEngine.startRun(matchedWorkflow.id, {
+            personaId: conversation.personaId,
+            actorName: persona?.displayName ?? "Customer",
+            conversationId: conversation.id,
+          });
+          current();
+          const now = this.now();
+          const canvas = {
+            title: matchedWorkflow.name,
+            badge: `Declarative Workflow · v${matchedWorkflow.version}`,
+            subtitle: matchedWorkflow.description,
+            generatedBy: "synthesizer" as const,
+            dataSource: `Workflow Engine (workflows.json · ${matchedWorkflow.steps.length} steps)`,
+            recordId: started.run.runId,
+            prompt: initial.public.message,
+            nodes: [
+              {
+                type: "workflow_runner" as const,
+                runId: started.run.runId,
+                workflowId: matchedWorkflow.id,
+                workflowName: matchedWorkflow.name,
+              },
+            ],
+            disclaimer: "Executed by CEP's declarative multi-step workflow engine with SHA-256 HITL gates and durable run state.",
+          };
+          const intro = `Started **${matchedWorkflow.name}** (\`${started.run.runId}\`). Complete the guided steps below — conditional branches, HITL compliance gates, and async timers execute automatically.`;
+          const dynamicResult = compileDynamicCanvas(intro, canvas, now + DECISION_TTL);
+          this.store.update(id, (row) => {
+            row.public.actionMode = "dynamic_ui";
+            row.public.semanticRoute = {
+              capabilityId: "external_connector",
+              capabilityLabel: `Declarative Workflow · ${matchedWorkflow.name}`,
+              method: "deterministic",
+              confidence: 0.98,
+              reasoning: `Matched declarative multi-step workflow "${matchedWorkflow.id}" (${matchedWorkflow.steps.length} steps).`,
+            };
+            row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
+          });
+          this.store.finish(id, { type: "completed", result: dynamicResult }, now);
+          return;
         }
 
         // 2. Admin-authored No-Code Action Flow match
