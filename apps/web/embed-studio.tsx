@@ -5,6 +5,7 @@ import type { CepEmbedDomain, CepEmbedMode, CepEmbedTheme } from "../../packages
 import { api } from "./api";
 import { ProactiveEventsCard } from "./proactive-events-card";
 import { ScheduledJobsCard } from "./scheduled-jobs-card";
+import { VerticalFactoryCard } from "./vertical-factory-card";
 
 type SnippetTab = "web-component" | "react" | "javascript" | "events";
 
@@ -207,6 +208,8 @@ export function EmbeddedAdvisor() {
           </a>
         </div>
       </header>
+
+      <VerticalFactoryCard />
 
       <div className="embed-studio-grid">
         <section className="embed-card">

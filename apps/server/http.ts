@@ -48,6 +48,7 @@ import { KnowledgeBaseStore } from "./knowledge-base";
 import { knowledgeDocumentUpsertSchema } from "../../packages/contracts/knowledge-base";
 import { ScheduledJobStore } from "./scheduled-jobs";
 import { scheduledJobUpsertSchema } from "../../packages/contracts/scheduled-jobs";
+import { VerticalPackStore } from "./vertical-factory";
 import { extractDocumentAction } from "./document-extractor";
 import { OmnichannelStore } from "./omnichannel-store";
 import { omnichannelConfigSchema } from "../../packages/contracts/omnichannel";
@@ -262,6 +263,7 @@ export async function startApp(options: Options) {
   const workflowEngine = new WorkflowEngine(options.dataDir, { approvalStore, connectorStore });
   const proactiveStore = new ProactiveEventStore(options.dataDir);
   const knowledgeBase = new KnowledgeBaseStore(options.dataDir);
+  const verticalFactory = new VerticalPackStore(options.dataDir);
   const evalRunner = new EvalRunnerStore(options.dataDir);
   const tradeStore = new TradeStore(options.dataDir, profileStore);
   const scheduledJobs = new ScheduledJobStore(options.dataDir, {
@@ -515,11 +517,13 @@ export async function startApp(options: Options) {
         return;
       }
       if (pathname === "/embed-demo" && req.method === "GET") {
+        const verticalId = url.searchParams.get("vertical");
+        const verticalPack = verticalId ? verticalFactory.getPack(verticalId) : undefined;
         res.writeHead(200, {
           "Content-Type": "text/html; charset=utf-8",
           "Cache-Control": "no-store",
         });
-        res.end(renderHostPortalDemoHtml(origin, url.searchParams));
+        res.end(renderHostPortalDemoHtml(origin, url.searchParams, verticalPack));
         return;
       }
       if (pathname === "/help" && req.method === "GET") {
@@ -878,6 +882,24 @@ export async function startApp(options: Options) {
         } catch (err) {
           throw new ApiError(404, "scheduled_job_not_found", err instanceof Error ? err.message : "Job not found.");
         }
+      }
+      if (id === "vertical-packs" && method === "GET") {
+        return json(res, verticalFactory.view());
+      }
+      if (id === "vertical-packs-generate" && method === "POST") {
+        const { prompt } = await body(req, z.object({ prompt: z.string().trim().min(5).max(600) }).strict(), 8 * 1024);
+        return json(res, await verticalFactory.generateAndInstall({
+          prompt,
+          gateway: options.gateway,
+          dataDir: options.dataDir,
+          knowledgeBase,
+          workflowEngine,
+          connectors: connectorStore.list(),
+        }), 201);
+      }
+      if (id === "vertical-packs-delete" && method === "POST") {
+        const { id: packId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());
+        return json(res, verticalFactory.deletePack(packId));
       }
     }
     if (resource === "conversations") {

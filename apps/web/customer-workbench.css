@@ -2782,3 +2782,103 @@
   font-weight: 700;
   color: var(--teal-dark);
 }
+
+/* DOM-Aware Ambient Co-Pilot Context Bar (/embed) */
+.embed-ambient-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--embed-accent-border, var(--teal-border));
+  background: var(--embed-accent-pale, var(--teal-pale));
+  color: var(--ink);
+}
+
+.embed-ambient-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.embed-ambient-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+}
+
+.embed-ambient-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--embed-accent, var(--teal));
+  color: #ffffff;
+  font-size: 0.69rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.embed-ambient-metrics {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.embed-ambient-metric {
+  padding: 2px 8px;
+  border-radius: 7px;
+  background: var(--white);
+  border: 1px solid var(--line);
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.embed-ambient-metric b {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.embed-ambient-summary {
+  margin: 0;
+  font-size: 0.77rem;
+  color: var(--soft-ink);
+  line-height: 1.4;
+}
+
+.embed-ambient-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.embed-ambient-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--embed-accent, var(--teal));
+  background: var(--white);
+  color: var(--embed-accent, var(--teal-dark));
+  font-size: 0.76rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.embed-ambient-action-btn:hover:not(:disabled) {
+  background: var(--embed-accent, var(--teal));
+  color: #ffffff;
+}
+
+.embed-ambient-action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

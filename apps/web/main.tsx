@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useAui, useAuiState, useExternalStoreRuntime, type ThreadMessageLike } from "@assistant-ui/react";
 import { CreateSurfaceMessageSchema, type ActionMessage } from "@a2ui/web_core/v1_0";
 import {
-  ArrowLeft, ArrowUp, ArrowUpRight, BookOpenText, ChevronDown, ChevronRight, Columns2, GraduationCap, House, LayoutDashboard,
+  ArrowLeft, ArrowUp, ArrowUpRight, BookOpenText, ChevronDown, ChevronRight, Columns2, Eye, GraduationCap, House, LayoutDashboard,
   ListChecks, LogIn, LogOut, MapPin, MessageSquare, Mic, MicOff, PanelLeft, PanelLeftClose, Paperclip, Plus, RotateCcw, Sparkles,
   Square, ThumbsDown, ThumbsUp, Wallet, X,
 } from "lucide-react";
@@ -32,7 +32,7 @@ import { planningTopics } from "./planning-topics";
 import { ReasoningPanel } from "./reasoning-panel";
 import { applyTheme, readStoredTheme, ThemeToggle } from "./theme";
 import { BasicSmoke, ExperienceControls, ExperienceDataUI, installA2uiStyles } from "./surface";
-import { CEP_EMBED_PROTOCOL } from "../../packages/embed-sdk";
+import { CEP_EMBED_PROTOCOL, type CepEmbedScreenContext } from "../../packages/embed-sdk";
 import type { ProactiveAlert } from "../../packages/contracts/proactive-events";
 import { usePendingActions, WorkspaceHome, WorkspaceOverview, type PendingActions } from "./workspace-overview";
 import { WorkspaceCustomization, WorkspaceMenu, type WorkspaceSection } from "./workspace-menu";
@@ -652,7 +652,7 @@ function App() {
       topic: planningTopics.find(({ id }) => id === query.get("topic")),
       showProfiles: query.get("view") === "profiles",
       showOverview: query.get("view") === "overview",
-      profileId: adminChat ? null : (embedMode ? (query.get("personaId") || readProfileSession() || "persona_new_investor") : readProfileSession()),
+      profileId: adminChat ? null : (embedMode ? (query.get("personaId") || readProfileSession() || "demo-learner") : readProfileSession()),
       embedBrand: query.get("brand")?.trim() || "CEP Assistant",
       embedAccent: query.get("accent")?.trim() || "",
       embedPrompt: query.get("prompt")?.trim() || "",
@@ -660,6 +660,7 @@ function App() {
   });
   const [embedBrand, setEmbedBrand] = useState(entry.embedBrand);
   const [embedAccent, setEmbedAccent] = useState(entry.embedAccent);
+  const [screenContext, setScreenContext] = useState<CepEmbedScreenContext | null>(null);
   const [proactiveAlert, setProactiveAlert] = useState<ProactiveAlert | null>(null);
   const [signedInProfileId, setSignedInProfileId] = useState(entry.profileId);
   const [domainPack, setDomainPack] = useDomainPack();
@@ -964,6 +965,17 @@ function App() {
         if (typeof payload.accent === "string" && payload.accent.trim()) setEmbedAccent(payload.accent.trim());
       } else if (data.type === "cep:set_persona" && typeof payload.personaId === "string" && configuration) {
         void startConversationRef.current(payload.personaId, configuration.defaultScenarioId);
+      } else if (data.type === "cep:screen_context" && typeof payload.label === "string" && payload.label.trim()) {
+        setScreenContext({
+          id: typeof payload.id === "string" ? payload.id : "screen",
+          label: payload.label.trim(),
+          viewType: typeof payload.viewType === "string" ? payload.viewType : "host_view",
+          summary: typeof payload.summary === "string" ? payload.summary : "",
+          metrics: Array.isArray(payload.metrics) ? (payload.metrics as { label: string; value: string }[]).slice(0, 4) : [],
+          suggestedActions: Array.isArray(payload.suggestedActions)
+            ? (payload.suggestedActions as { label: string; prompt: string }[]).slice(0, 4)
+            : [],
+        });
       }
     };
     window.addEventListener("message", onMessage);
@@ -1163,6 +1175,45 @@ function App() {
             )}
           </div>
         </header>
+      )}
+      {embedMode && screenContext && (
+        <section className="embed-ambient-bar" aria-label="Ambient host screen context">
+          <div className="embed-ambient-top">
+            <div className="embed-ambient-title">
+              <span className="embed-ambient-pill">
+                <Eye size={12} aria-hidden="true" />
+                Ambient DOM Context
+              </span>
+              <strong>Viewing: {screenContext.label}</strong>
+            </div>
+            {screenContext.metrics && screenContext.metrics.length > 0 && (
+              <div className="embed-ambient-metrics">
+                {screenContext.metrics.map((m) => (
+                  <span key={`${m.label}-${m.value}`} className="embed-ambient-metric">
+                    {m.label}: <b>{m.value}</b>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+          {screenContext.summary && <p className="embed-ambient-summary">{screenContext.summary}</p>}
+          {screenContext.suggestedActions && screenContext.suggestedActions.length > 0 && (
+            <div className="embed-ambient-actions">
+              {screenContext.suggestedActions.map((act) => (
+                <button
+                  key={act.label}
+                  type="button"
+                  className="embed-ambient-action-btn"
+                  disabled={pending || !configuration || latest?.status === "working"}
+                  onClick={() => void send(act.prompt)}
+                >
+                  <Sparkles size={12} aria-hidden="true" />
+                  {act.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
       )}
       {proactiveAlert && (
         <div className={`proactive-banner is-${proactiveAlert.severity}`} role="status">

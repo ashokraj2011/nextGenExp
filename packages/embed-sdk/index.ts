@@ -17,12 +17,23 @@ export interface CepEmbedMountOptions {
   onEvent?: (event: CepEmbedHostEvent) => void;
 }
 
+export interface CepEmbedScreenContext {
+  id: string;
+  label: string;
+  viewType: string;
+  summary: string;
+  metrics?: { label: string; value: string }[];
+  suggestedActions?: { label: string; prompt: string }[];
+  dataAttributes?: Record<string, string | number>;
+}
+
 export type CepEmbedFrameCommand =
   | { protocol: "cep:v1"; type: "cep:send_prompt"; payload: { prompt: string } }
   | { protocol: "cep:v1"; type: "cep:set_theme"; payload: { theme: CepEmbedTheme } }
   | { protocol: "cep:v1"; type: "cep:set_domain"; payload: { domain: CepEmbedDomain } }
   | { protocol: "cep:v1"; type: "cep:set_brand"; payload: { brand?: string; accent?: string } }
-  | { protocol: "cep:v1"; type: "cep:set_persona"; payload: { personaId: string } };
+  | { protocol: "cep:v1"; type: "cep:set_persona"; payload: { personaId: string } }
+  | { protocol: "cep:v1"; type: "cep:screen_context"; payload: CepEmbedScreenContext };
 
 export type CepEmbedHostEvent =
   | {
@@ -66,6 +77,7 @@ export interface CepEmbedController {
   setDomain(domain: CepEmbedDomain): void;
   setBrand(brand: string, accent?: string): void;
   setPersona(personaId: string): void;
+  setScreenContext(context: CepEmbedScreenContext): void;
   destroy(): void;
   element: HTMLElement;
 }

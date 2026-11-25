@@ -31,6 +31,7 @@ import type { McpDiscoveryResult } from "../../packages/contracts/mcp-discovery"
 import type { ProactiveAlert, ProactiveTriggerInput, ProactiveView } from "../../packages/contracts/proactive-events";
 import type { KnowledgeBaseView, KnowledgeDocumentUpsertInput, KnowledgeSearchResult } from "../../packages/contracts/knowledge-base";
 import type { ScheduledJobExecution, ScheduledJobsView, ScheduledJobUpsertInput } from "../../packages/contracts/scheduled-jobs";
+import type { VerticalPackRecord, VerticalPacksView } from "../../packages/contracts/vertical-pack";
 import type { Customer360AdminRecord, Customer360ProfileInput } from "../../packages/contracts/customer-360";
 import type {
   ExperienceRegistryView,
@@ -251,6 +252,9 @@ export const api = {
   scheduledJobs: () => request<ScheduledJobsView>("/api/admin/scheduled-jobs"),
   saveScheduledJob: (input: ScheduledJobUpsertInput) => request<ScheduledJobsView>("/api/admin/scheduled-jobs", input),
   runScheduledJob: (id: string) => request<{ execution: ScheduledJobExecution; view: ScheduledJobsView }>("/api/admin/scheduled-jobs-run", { id }),
+  verticalPacks: () => request<VerticalPacksView>("/api/admin/vertical-packs"),
+  generateVerticalPack: (prompt: string) => request<{ pack: VerticalPackRecord; embedDemoUrl: string; view: VerticalPacksView }>("/api/admin/vertical-packs-generate", { prompt }),
+  deleteVerticalPack: (id: string) => request<VerticalPacksView>("/api/admin/vertical-packs-delete", { id }),
   startWorkflow: (id: string, input: { personaId?: string; actorName?: string; initialInputs?: Record<string, string | number | boolean> } = {}) => (
     request<{ run: WorkflowRun; definition: WorkflowDefinition }>("/api/workflows/" + id + "/start", input)
   ),

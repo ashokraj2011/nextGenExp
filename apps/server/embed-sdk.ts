@@ -3,8 +3,73 @@
  *
  * Served directly by the CEP app server:
  *   - GET /sdk/cep-embed.js  -> Zero-dependency Web Component (<cep-assistant>) + window.CEPEmbed.mount(...)
- *   - GET /embed-demo        -> Standalone "Meridian Private Wealth" host portal demonstrating live white-label embedding
+ *                               with DOM-Aware Ambient Context (MutationObserver on [data-cep-context])
+ *   - GET /embed-demo        -> Standalone Host Portal (default: Meridian Private Wealth, or any ?vertical=<packId>)
  */
+import type { VerticalPackRecord, VerticalScreenContext } from "../../packages/contracts/vertical-pack";
+
+function escapeHtml(input: string): string {
+  return input
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function safeJsonForScript(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
+}
+
+const DEFAULT_MERIDIAN_SCREEN_VIEWS: VerticalScreenContext[] = [
+  {
+    id: "portfolio-overview",
+    label: "Portfolio Overview · $50,000",
+    viewType: "portfolio_dashboard",
+    summary: "Viewing client brokerage dashboard: $35,738 cash, $14,262 equities, AAPL concentration at 42%.",
+    metrics: [
+      { label: "Total Value", value: "$50,000" },
+      { label: "Cash", value: "$35,738" },
+      { label: "Top Holding", value: "AAPL (42%)" },
+    ],
+    suggestedActions: [
+      { label: "Sell 40% AAPL + Tax-Loss Harvest", prompt: "I want to sell 40% of my Apple shares" },
+      { label: "Review Allocation", prompt: "Let me know my portfolio summary." },
+    ],
+    dataAttributes: { view: "portfolio_dashboard", accountId: "acct-meridian-8821" },
+  },
+  {
+    id: "wire-invoice-441",
+    label: "Wire Invoice #INV-441 ($18,500)",
+    viewType: "pending_wire_invoice",
+    summary: "Viewing pending outbound wire invoice #INV-441 for $18,500 to Apex Title Co — exceeds $10,000 dual-control HITL threshold.",
+    metrics: [
+      { label: "Wire Amount", value: "$18,500" },
+      { label: "Beneficiary", value: "Apex Title Co" },
+      { label: "Policy Gate", value: ">$10k HITL" },
+    ],
+    suggestedActions: [
+      { label: "Launch Governed Wire Workflow", prompt: "I want to initiate a wire transfer" },
+      { label: "Check Wire Policy & Limits", prompt: "What are the wire transfer approval limits and security rules?" },
+    ],
+    dataAttributes: { view: "pending_wire_invoice", invoiceId: "INV-441", amountUsd: 18500 },
+  },
+  {
+    id: "tax-loss-lot",
+    label: "Tax Center · INTC Loss Lot (-$1,420)",
+    viewType: "tax_lot_detail",
+    summary: "Viewing short-term unrealized loss lot in INTC (-$1,420) eligible for tax-loss harvesting with wash-sale window clear.",
+    metrics: [
+      { label: "Unrealized P/L", value: "-$1,420" },
+      { label: "Position", value: "85 sh INTC" },
+      { label: "Wash-Sale", value: "Clear (30d)" },
+    ],
+    suggestedActions: [
+      { label: "Inspect Equity Holdings", prompt: "whats in my equity book right now?" },
+      { label: "Explain Wash-Sale Policy", prompt: "What is our policy on tax-loss harvesting and wash-sale rules?" },
+    ],
+    dataAttributes: { view: "tax_lot_detail", symbol: "INTC", lossUsd: 1420 },
+  },
+];
 
 export function renderCepEmbedSdkScript(defaultBaseUrl: string): string {
   const safeBase = JSON.stringify(defaultBaseUrl);
@@ -52,6 +117,9 @@ export function renderCepEmbedSdkScript(defaultBaseUrl: string): string {
       this._ready = false;
       this._queue = [];
       this._listeners = new Set();
+      this._domObserver = null;
+      this._lastContextSig = "";
+      this._latestContext = null;
       this._onWindowMessage = this._handleWindowMessage.bind(this);
     }
 
@@ -59,10 +127,15 @@ export function renderCepEmbedSdkScript(defaultBaseUrl: string): string {
       this._open = this.hasAttribute("open") && this.getAttribute("open") !== "false";
       window.addEventListener("message", this._onWindowMessage);
       this._render();
+      this._startDomContextObserver();
     }
 
     disconnectedCallback() {
       window.removeEventListener("message", this._onWindowMessage);
+      if (this._domObserver) {
+        this._domObserver.disconnect();
+        this._domObserver = null;
+      }
     }
 
     attributeChangedCallback(name, oldValue, newValue) {
@@ -91,7 +164,7 @@ export function renderCepEmbedSdkScript(defaultBaseUrl: string): string {
       return {
         baseUrl: this.getAttribute("base-url") || DEFAULT_BASE,
         mode: this.getAttribute("mode") || "launcher",
-        personaId: this.getAttribute("persona-id") || "persona_new_investor",
+        personaId: this.getAttribute("persona-id") || "demo-learner",
         domain: this.getAttribute("domain") || "wealth",
         theme: this.getAttribute("theme") || "light",
         brand: this.getAttribute("brand") || "CEP Assistant",
@@ -113,10 +186,57 @@ export function renderCepEmbedSdkScript(defaultBaseUrl: string): string {
 
     _flushQueue() {
       if (!this._iframe || !this._iframe.contentWindow || !this._ready) return;
+      var sentContext = false;
       while (this._queue.length > 0) {
         var next = this._queue.shift();
+        if (next && next.type === "cep:screen_context") sentContext = true;
         this._iframe.contentWindow.postMessage(next, "*");
       }
+      if (!sentContext && this._latestContext) {
+        this._iframe.contentWindow.postMessage({ protocol: PROTOCOL, type: "cep:screen_context", payload: this._latestContext }, "*");
+      }
+    }
+
+    _readDomContext() {
+      var target = document.querySelector('[data-cep-context][data-cep-active="true"]') || document.querySelector("[data-cep-context]");
+      if (!target) return null;
+      var raw = target.getAttribute("data-cep-context");
+      if (!raw) return null;
+      try {
+        var parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && typeof parsed.label === "string") return parsed;
+      } catch (_) {
+        return {
+          id: target.id || "dom-context",
+          label: raw.slice(0, 72),
+          viewType: target.getAttribute("data-cep-view") || "host_view",
+          summary: target.getAttribute("data-cep-summary") || ("Viewing " + raw.slice(0, 120)),
+        };
+      }
+      return null;
+    }
+
+    _scanDomContext() {
+      var ctx = this._readDomContext();
+      if (!ctx) return;
+      var sig = JSON.stringify(ctx);
+      if (sig === this._lastContextSig) return;
+      this._lastContextSig = sig;
+      this.setScreenContext(ctx);
+    }
+
+    _startDomContextObserver() {
+      if (this._domObserver || typeof MutationObserver === "undefined" || !document.body) return;
+      this._domObserver = new MutationObserver(() => {
+        this._scanDomContext();
+      });
+      this._domObserver.observe(document.body, {
+        attributes: true,
+        attributeFilter: ["data-cep-context", "data-cep-active"],
+        childList: true,
+        subtree: true,
+      });
+      this._scanDomContext();
     }
 
     _handleWindowMessage(event) {
@@ -189,6 +309,14 @@ export function renderCepEmbedSdkScript(defaultBaseUrl: string): string {
 
     setPersona(personaId) {
       this._post("cep:set_persona", { personaId: personaId });
+    }
+
+    setScreenContext(context) {
+      if (!context || typeof context !== "object") return;
+      this._latestContext = context;
+      this._lastContextSig = JSON.stringify(context);
+      this._post("cep:screen_context", context);
+      this.dispatchEvent(new CustomEvent("cep:screen_context_sent", { detail: context, bubbles: true, composed: true }));
     }
 
     onEvent(listener) {
@@ -370,6 +498,7 @@ export function renderCepEmbedSdkScript(defaultBaseUrl: string): string {
         setDomain: function (domain) { el.setDomain(domain); },
         setBrand: function (brand, accent) { el.setBrand(brand, accent); },
         setPersona: function (personaId) { el.setPersona(personaId); },
+        setScreenContext: function (context) { el.setScreenContext(context); },
         destroy: function () { el.remove(); },
       };
     },
@@ -378,21 +507,75 @@ export function renderCepEmbedSdkScript(defaultBaseUrl: string): string {
 `;
 }
 
-export function renderHostPortalDemoHtml(baseOrigin: string, query: URLSearchParams): string {
+export function renderHostPortalDemoHtml(
+  baseOrigin: string,
+  query: URLSearchParams,
+  verticalPack?: VerticalPackRecord,
+): string {
   const initialMode = query.get("mode") === "launcher" || query.get("mode") === "sidebar" ? query.get("mode")! : "inline";
-  const initialDomain = query.get("domain") === "it_ops" || query.get("domain") === "sales_revops" ? query.get("domain")! : "wealth";
+  const defaultDomain = verticalPack?.domain ?? "wealth";
+  const initialDomain = query.get("domain") === "it_ops" || query.get("domain") === "sales_revops" || query.get("domain") === "wealth"
+    ? query.get("domain")!
+    : defaultDomain;
   const initialTheme = query.get("theme") === "dark" ? "dark" : "light";
-  const initialBrand = (query.get("brand") || "Meridian AI Concierge").slice(0, 60).replace(/[<>"]/g, "");
-  const rawAccent = query.get("accent") || "#1d4ed8";
+  const initialBrand = (query.get("brand") || verticalPack?.brandTitle || "Meridian AI Concierge").slice(0, 60).replace(/[<>"]/g, "");
+  const rawAccent = query.get("accent") || verticalPack?.accentColor || "#1d4ed8";
   const initialAccent = /^#[0-9a-fA-F]{3,8}$/.test(rawAccent) ? rawAccent : "#1d4ed8";
-  const initialPersona = query.get("personaId") || "persona_new_investor";
+  const initialPersona = query.get("personaId") || "demo-learner";
+  const portalName = verticalPack?.portalName || "Meridian Private Wealth Portal";
+  const portalSubtitle = verticalPack?.portalSubtitle || "External Client Banking App · Real-time Host ↔ CEP Bridge";
+  const logoLetter = portalName.trim().charAt(0).toUpperCase() || "M";
+  const screenViews: VerticalScreenContext[] = verticalPack?.screenViews?.length
+    ? verticalPack.screenViews
+    : DEFAULT_MERIDIAN_SCREEN_VIEWS;
+  const initialScreen = screenViews[0]!;
+  const isCustomVertical = Boolean(verticalPack);
+
+  const actionButtonsHtml = isCustomVertical && verticalPack
+    ? [
+        ...verticalPack.quickPrompts.map((qp) =>
+          `<button type="button" class="action-trigger" data-prompt="${escapeHtml(qp.prompt)}" data-domain="${escapeHtml(verticalPack.domain)}">`
+          + `<span>${escapeHtml(qp.label)}</span><small>vertical action</small></button>`),
+        `<button type="button" class="action-trigger" data-prompt="${escapeHtml(verticalPack.workflowTriggerPhrase)}" data-domain="${escapeHtml(verticalPack.domain)}" style="border-color:${escapeHtml(initialAccent)};">`
+        + `<span>Run ${escapeHtml(verticalPack.workflowName)}</span><small>workflow DAG</small></button>`,
+      ].join("\n          ")
+    : `<button type="button" class="action-trigger" data-prompt="I want to sell 40% of my Apple shares" data-domain="wealth">
+            <span>Sell 40% AAPL + Tax-Loss Harvest</span><small>postMessage</small>
+          </button>
+          <button type="button" class="action-trigger" data-prompt="I want to initiate a wire transfer" data-domain="wealth">
+            <span>Run Governed Wire Workflow (5-Step)</span><small>workflow DAG</small>
+          </button>
+          <button type="button" class="action-trigger" data-prompt="whats in my equity book right now?" data-domain="wealth">
+            <span>Inspect Live Stock Holdings</span><small>postMessage</small>
+          </button>
+          <button type="button" class="action-trigger" data-prompt="Let me know my portfolio summary." data-domain="wealth">
+            <span>Review Portfolio Allocation</span><small>postMessage</small>
+          </button>
+          <button type="button" class="action-trigger" data-prompt="Build an IT incident triage dashboard for our active P1 alert" data-domain="it_ops">
+            <span>Switch Domain &rarr; IT Ops P1 Triage</span><small>setDomain + prompt</small>
+          </button>
+          <button type="button" class="action-trigger" data-prompt="Show the enterprise discount approval card for Acme Cloud Corp" data-domain="sales_revops">
+            <span>Switch Domain &rarr; Sales Deal Desk</span><small>setDomain + prompt</small>
+          </button>
+          <button type="button" class="action-trigger" id="fire-proactive-btn" style="border-color:#d97706;">
+            <span>Fire Live Proactive Event (AAPL +8.4%)</span><small>SSE push</small>
+          </button>`;
+
+  const screenTabsHtml = screenViews
+    .map((view, idx) =>
+      `<button type="button" class="screen-tab-btn${idx === 0 ? " is-active" : ""}" data-screen-idx="${idx}">${escapeHtml(view.label)}</button>`)
+    .join("\n          ");
+
+  const initialMetricsHtml = initialScreen.metrics
+    .map((m) => `<div class="bal-box"><span>${escapeHtml(m.label)}</span><strong>${escapeHtml(m.value)}</strong></div>`)
+    .join("");
 
   return `<!doctype html>
 <html lang="en" data-host-theme="${initialTheme}">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Meridian Private Wealth · CEP Embed SDK Host Portal Demo</title>
+  <title>${escapeHtml(portalName)} · CEP Embed SDK Host Portal</title>
   <style>
     :root {
       --bg: #f1f5f9;
@@ -437,6 +620,18 @@ export function renderHostPortalDemoHtml(baseOrigin: string, query: URLSearchPar
     .host-banner strong { color: #ffffff; }
     .host-banner a { color: #93c5fd; text-decoration: none; font-weight: 600; }
     .host-banner a:hover { text-decoration: underline; }
+    .vertical-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 9px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.12);
+      color: #e0f2fe;
+      font-size: 11px;
+      font-weight: 600;
+      margin-left: 8px;
+    }
     .portal-nav {
       background: var(--surface);
       border-bottom: 1px solid var(--line);
@@ -496,7 +691,7 @@ export function renderHostPortalDemoHtml(baseOrigin: string, query: URLSearchPar
       margin: 0 auto;
       padding: 20px 24px 36px;
       display: grid;
-      grid-template-columns: minmax(330px, 420px) minmax(0, 1fr);
+      grid-template-columns: minmax(340px, 430px) minmax(0, 1fr);
       gap: 20px;
       align-items: start;
     }
@@ -516,28 +711,80 @@ export function renderHostPortalDemoHtml(baseOrigin: string, query: URLSearchPar
       letter-spacing: -0.01em;
     }
     .card p.sub {
-      margin: 0 0 14px;
+      margin: 0 0 12px;
       font-size: 12px;
       color: var(--muted);
+    }
+    .screen-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .screen-tab-btn {
+      border: 1px solid var(--line);
+      background: var(--surface-alt);
+      color: var(--ink);
+      border-radius: 9px;
+      padding: 6px 10px;
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+    .screen-tab-btn:hover { border-color: var(--accent); }
+    .screen-tab-btn.is-active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #ffffff;
+    }
+    .active-screen-box {
+      padding: 12px;
+      border-radius: 12px;
+      background: var(--surface-alt);
+      border: 1px dashed var(--accent);
+    }
+    .active-screen-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .active-screen-head strong { font-size: 13px; }
+    .dom-tag-pill {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: var(--badge-bg);
+      color: var(--badge-ink);
+      font-weight: 700;
+    }
+    .active-screen-summary {
+      margin: 0 0 10px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.45;
     }
     .balance-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 10px;
+      gap: 8px;
     }
     .bal-box {
-      background: var(--surface-alt);
+      background: var(--surface);
       border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 10px 12px;
+      border-radius: 10px;
+      padding: 8px 10px;
       transition: transform 0.2s ease, border-color 0.2s ease;
     }
     .bal-box.pulse {
       border-color: #16a34a;
       transform: scale(1.03);
     }
-    .bal-box span { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
-    .bal-box strong { font-size: 15px; font-variant-numeric: tabular-nums; }
+    .bal-box span { display: block; font-size: 10.5px; color: var(--muted); margin-bottom: 3px; }
+    .bal-box strong { font-size: 13.5px; font-variant-numeric: tabular-nums; }
     .sync-pill {
       display: inline-flex;
       align-items: center;
@@ -572,7 +819,7 @@ export function renderHostPortalDemoHtml(baseOrigin: string, query: URLSearchPar
     .action-trigger:hover { border-color: var(--accent); }
     .action-trigger small { font-weight: 500; color: var(--muted); font-size: 11px; }
     .event-log {
-      max-height: 240px;
+      max-height: 220px;
       overflow-y: auto;
       display: grid;
       gap: 6px;
@@ -623,7 +870,11 @@ export function renderHostPortalDemoHtml(baseOrigin: string, query: URLSearchPar
 </head>
 <body>
   <div class="host-banner">
-    <div><strong>Simulated Third-Party Host Portal</strong> — Loading <code>&lt;script src="${baseOrigin}/sdk/cep-embed.js"&gt;</code> + <code>&lt;cep-assistant&gt;</code> Web Component via Shadow DOM &amp; <code>postMessage</code> (<code>cep:v1</code>)</div>
+    <div>
+      <strong>${isCustomVertical && verticalPack ? `Generated Vertical Pack · ${escapeHtml(verticalPack.industry)}` : "Simulated Third-Party Host Portal"}</strong>
+      — <code>&lt;cep-assistant&gt;</code> Shadow DOM + <code>MutationObserver([data-cep-context])</code>
+      ${verticalPack ? `<span class="vertical-pill">Policy RAG: ${escapeHtml(verticalPack.policyTitle)} · DAG: ${escapeHtml(verticalPack.workflowName)}</span>` : ""}
+    </div>
     <div style="display:flex;gap:14px;">
       <a href="/admin/embed">&larr; Back to Admin Embed Studio</a>
       <a href="/chat">Open Full CEP App</a>
@@ -632,10 +883,10 @@ export function renderHostPortalDemoHtml(baseOrigin: string, query: URLSearchPar
 
   <header class="portal-nav">
     <div class="portal-brand">
-      <div class="portal-logo" id="portal-logo">M</div>
+      <div class="portal-logo" id="portal-logo">${escapeHtml(logoLetter)}</div>
       <div>
-        <h1>Meridian Private Wealth Portal</h1>
-        <small>External Client Banking App · Real-time Host &harr; CEP Bridge</small>
+        <h1>${escapeHtml(portalName)}</h1>
+        <small>${escapeHtml(portalSubtitle)}</small>
       </div>
     </div>
     <div class="portal-controls">
@@ -653,6 +904,28 @@ export function renderHostPortalDemoHtml(baseOrigin: string, query: URLSearchPar
   <main class="portal-grid">
     <section>
       <div class="card">
+        <h2>Host Screen Views (DOM-Aware Ambient Co-Pilot)</h2>
+        <p class="sub">Switch tabs below — <code>@cep/embed</code> watches <code>[data-cep-context]</code> via <code>MutationObserver</code> and streams live screen context into the co-pilot automatically.</p>
+        <div class="screen-tabs" id="screen-tabs">
+          ${screenTabsHtml}
+        </div>
+        <div
+          id="host-active-screen"
+          class="active-screen-box"
+          data-cep-active="true"
+          data-cep-context="${escapeHtml(JSON.stringify(initialScreen))}"
+        >
+          <div class="active-screen-head">
+            <strong id="screen-title">${escapeHtml(initialScreen.label)}</strong>
+            <span class="dom-tag-pill">[data-cep-context] live</span>
+          </div>
+          <p class="active-screen-summary" id="screen-summary">${escapeHtml(initialScreen.summary)}</p>
+          <div class="balance-grid" id="screen-metrics">${initialMetricsHtml}</div>
+        </div>
+        <div class="sync-pill" id="sync-status">Waiting for CEP handshake (cep:ready)...</div>
+      </div>
+
+      ${!isCustomVertical ? `<div class="card">
         <h2>Host Portal Account Summary</h2>
         <p class="sub">Automatically synced in real time via <code>cep:balance_updated</code> postMessage events whenever CEP executes a trade.</p>
         <div class="balance-grid">
@@ -660,40 +933,19 @@ export function renderHostPortalDemoHtml(baseOrigin: string, query: URLSearchPar
           <div class="bal-box" id="box-equity"><span>Equities</span><strong id="val-equity">$14,261.80</strong></div>
           <div class="bal-box" id="box-cash"><span>Cash</span><strong id="val-cash">$35,738.20</strong></div>
         </div>
-        <div class="sync-pill" id="sync-status">Waiting for CEP handshake (cep:ready)...</div>
-      </div>
+      </div>` : ""}
 
       <div class="card">
         <h2>Host-Triggered SDK Actions</h2>
         <p class="sub">Clicking native host buttons drives the embedded CEP iframe via <code>assistant.sendPrompt(...)</code>.</p>
         <div class="action-stack">
-          <button type="button" class="action-trigger" data-prompt="I want to sell 40% of my Apple shares" data-domain="wealth">
-            <span>Sell 40% AAPL + Tax-Loss Harvest</span><small>postMessage</small>
-          </button>
-          <button type="button" class="action-trigger" data-prompt="I want to initiate a wire transfer" data-domain="wealth">
-            <span>Run Governed Wire Workflow (5-Step)</span><small>workflow DAG</small>
-          </button>
-          <button type="button" class="action-trigger" data-prompt="whats in my equity book right now?" data-domain="wealth">
-            <span>Inspect Live Stock Holdings</span><small>postMessage</small>
-          </button>
-          <button type="button" class="action-trigger" data-prompt="Let me know my portfolio summary." data-domain="wealth">
-            <span>Review Portfolio Allocation</span><small>postMessage</small>
-          </button>
-          <button type="button" class="action-trigger" data-prompt="Build an IT incident triage dashboard for our active P1 alert" data-domain="it_ops">
-            <span>Switch Domain &rarr; IT Ops P1 Triage</span><small>setDomain + prompt</small>
-          </button>
-          <button type="button" class="action-trigger" data-prompt="Show the enterprise discount approval card for Acme Cloud Corp" data-domain="sales_revops">
-            <span>Switch Domain &rarr; Sales Deal Desk</span><small>setDomain + prompt</small>
-          </button>
-          <button type="button" class="action-trigger" id="fire-proactive-btn" style="border-color:#d97706;">
-            <span>Fire Live Proactive Event (AAPL +8.4%)</span><small>SSE push</small>
-          </button>
+          ${actionButtonsHtml}
         </div>
       </div>
 
       <div class="card">
         <h2>SDK Event Bus Inspector (<code>cep:v1</code>)</h2>
-        <p class="sub">Live bi-directional <code>postMessage</code> frames between Meridian Portal and CEP.</p>
+        <p class="sub">Live bi-directional <code>postMessage</code> frames between ${escapeHtml(portalName)} and CEP.</p>
         <div class="event-log" id="event-log"></div>
       </div>
     </section>
@@ -704,7 +956,7 @@ export function renderHostPortalDemoHtml(baseOrigin: string, query: URLSearchPar
           <strong style="font-size:14px;">Embedded CEP Assistant</strong>
           <span style="font-size:12px;color:var(--muted);margin-left:8px;" id="stage-mode-label">Mode: ${initialMode}</span>
         </div>
-        <code id="tag-preview">&lt;cep-assistant mode="${initialMode}" domain="${initialDomain}" brand="${initialBrand}" accent="${initialAccent}" /&gt;</code>
+        <code id="tag-preview">&lt;cep-assistant mode="${initialMode}" domain="${initialDomain}" brand="${escapeHtml(initialBrand)}" accent="${initialAccent}" /&gt;</code>
       </div>
       <div id="embed-mount"></div>
     </section>
@@ -713,18 +965,23 @@ export function renderHostPortalDemoHtml(baseOrigin: string, query: URLSearchPar
   <script src="/sdk/cep-embed.js"></script>
   <script>
     (function () {
+      var SCREEN_VIEWS = ${safeJsonForScript(screenViews)};
       var state = {
-        mode: ${JSON.stringify(initialMode)},
-        domain: ${JSON.stringify(initialDomain)},
-        theme: ${JSON.stringify(initialTheme)},
-        brand: ${JSON.stringify(initialBrand)},
-        accent: ${JSON.stringify(initialAccent)},
-        personaId: ${JSON.stringify(initialPersona)},
+        mode: ${safeJsonForScript(initialMode)},
+        domain: ${safeJsonForScript(initialDomain)},
+        theme: ${safeJsonForScript(initialTheme)},
+        brand: ${safeJsonForScript(initialBrand)},
+        accent: ${safeJsonForScript(initialAccent)},
+        personaId: ${safeJsonForScript(initialPersona)},
       };
       var controller = null;
       var mountEl = document.getElementById("embed-mount");
       var logEl = document.getElementById("event-log");
       var syncEl = document.getElementById("sync-status");
+      var activeScreenEl = document.getElementById("host-active-screen");
+      var screenTitleEl = document.getElementById("screen-title");
+      var screenSummaryEl = document.getElementById("screen-summary");
+      var screenMetricsEl = document.getElementById("screen-metrics");
 
       function fmtMoney(cents) {
         return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format((cents || 0) / 100);
@@ -753,6 +1010,30 @@ export function renderHostPortalDemoHtml(baseOrigin: string, query: URLSearchPar
           '<cep-assistant mode="' + state.mode + '" domain="' + state.domain + '" theme="' + state.theme + '" brand="' + state.brand + '" accent="' + state.accent + '" />';
       }
 
+      function selectHostScreen(idx) {
+        var view = SCREEN_VIEWS[idx];
+        if (!view || !activeScreenEl) return;
+        document.querySelectorAll(".screen-tab-btn").forEach(function (b, i) {
+          b.classList.toggle("is-active", i === idx);
+        });
+        if (screenTitleEl) screenTitleEl.textContent = view.label;
+        if (screenSummaryEl) screenSummaryEl.textContent = view.summary;
+        if (screenMetricsEl) {
+          screenMetricsEl.innerHTML = (view.metrics || []).map(function (m) {
+            return '<div class="bal-box"><span>' + String(m.label).replace(/</g, "&lt;") + '</span><strong>' + String(m.value).replace(/</g, "&lt;") + '</strong></div>';
+          }).join("");
+        }
+        // Mutating data-cep-context triggers MutationObserver inside @cep/embed automatically!
+        activeScreenEl.setAttribute("data-cep-context", JSON.stringify(view));
+      }
+
+      document.querySelectorAll(".screen-tab-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var idx = Number(btn.getAttribute("data-screen-idx") || "0");
+          selectHostScreen(idx);
+        });
+      });
+
       function remount() {
         if (controller) controller.destroy();
         mountEl.innerHTML = "";
@@ -776,13 +1057,19 @@ export function renderHostPortalDemoHtml(baseOrigin: string, query: URLSearchPar
               syncEl.textContent = "Connected · " + (evt.payload.displayName || "Profile") + " (" + evt.payload.domain + ")";
             }
             if (evt.type === "cep:balance_updated" && evt.payload) {
-              document.getElementById("val-total").textContent = fmtMoney(evt.payload.totalCents);
-              document.getElementById("val-equity").textContent = fmtMoney(evt.payload.equityCents);
-              document.getElementById("val-cash").textContent = fmtMoney(evt.payload.cashCents);
+              var vt = document.getElementById("val-total");
+              var ve = document.getElementById("val-equity");
+              var vc = document.getElementById("val-cash");
+              if (vt) vt.textContent = fmtMoney(evt.payload.totalCents);
+              if (ve) ve.textContent = fmtMoney(evt.payload.equityCents);
+              if (vc) vc.textContent = fmtMoney(evt.payload.cashCents);
               syncEl.textContent = "Synced live · " + (evt.payload.displayName || "Profile") + " · " + new Date().toLocaleTimeString();
               pulseBox("box-total"); pulseBox("box-equity"); pulseBox("box-cash");
             }
           },
+        });
+        controller.element.addEventListener("cep:screen_context_sent", function (e) {
+          addLog("out", "cep:screen_context (DOM)", { id: e.detail && e.detail.id, label: e.detail && e.detail.label });
         });
         updateTagPreview();
       }
