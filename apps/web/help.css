@@ -198,6 +198,29 @@
   white-space: nowrap;
 }
 .help-message-handoff:is(:hover, :focus-visible) > span { border-color: #466f57; background: #e1eedf; }
+.help-message-edge[data-self="true"] {
+  margin-block: 5px;
+  margin-left: 25%;
+  margin-right: 2%;
+  padding: 8px 11px;
+  border: 1px dashed #6fa07b;
+  border-left: 3px solid #35624b;
+  border-radius: 4px 12px 12px 4px;
+  background: #edf6ee;
+  text-align: left;
+}
+.help-message-edge[data-self="true"] .help-message-heading {
+  background: transparent;
+  padding: 0;
+}
+.help-self-loop-bar {
+  display: block;
+  margin-top: 4px;
+  padding-left: 25px;
+  font-size: 0.72rem;
+  font-weight: 560;
+  color: #35624b;
+}
 .help-proposal-flow, .help-sfield-flow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1.32fr);
@@ -548,6 +571,7 @@
     border-radius: 9px;
   }
   .help-message-edge[data-reply="true"] { background: #f6f9f4; }
+  .help-message-edge[data-self="true"] { margin-inline: 0; border-radius: 9px; }
   .help-message-endpoints {
     display: flex;
     flex-wrap: wrap;

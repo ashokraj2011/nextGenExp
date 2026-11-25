@@ -281,9 +281,34 @@ export const addressUpdateExample = {
       } },
     },
     composer: addressSteps.composer,
+    compileUi: {
+      description: "The LLM only proposes component choices — never HTML. Here inside the CEP app server, compileExperience() + buildSurface() + applyPublishedUi() deterministically form the UI: merging approved catalog copy & disclosures, applying any published UI Builder layout, interpolating live customer.*/incident.*/deal.* bindings, signing action buttons, and emitting A2UI v1.0 protocol messages.",
+      input: {
+        label: "Host UI compiler inputs (compileExperience + applyPublishedUi)",
+        value: {
+          verifiedProposal: { blocks: [{ blockId: "b1", component: "PznStepList", candidateIds: [addressCandidateId] }] },
+          catalogCopyResolved: ["address_update_guide", "fund_account"],
+          uiBuilderLayout: "published_or_default",
+          liveBindings: { "customer.displayName": newAccount.displayName, "customer.fundingStatus": "unfunded" },
+          arbitratedNba: "fund_account",
+        },
+      },
+      output: {
+        label: "Formed A2UI v1.0 surface & signed actions",
+        value: {
+          a2uiProtocol: "v1.0",
+          a2uiMessages: [
+            { type: "createSurface", surfaceId: "exp_demo", theme: "evergreen" },
+            { type: "updateComponents", components: ["PznStepList", "PznContentCard"] },
+            { type: "updateDataModel", signedActions: addressActions },
+          ],
+          blocks: addressBlocks,
+        },
+      },
+    },
     surface: {
-      description: "The app applies any published UI Builder layout, runs Customer 360 NBA arbitration (filtering dismissed Not now cards), and streams the verified A2UI surface + Stage 0 Advisory Reasoning badge to chat.",
-      input: { label: "Listen for chat updates", value: { method: "GET", path: "/api/turns/" + turnRef + "/events", headers: { Accept: "text/event-stream" } } },
+      description: "store.finish() persists the formed DisplayExperience and streams an experience.ready Server-Sent Event (SSE) over GET /api/turns/:id/events. In the browser, surface.tsx receives the A2UI messages and renders the approved React components.",
+      input: { label: "Listen for chat updates (SSE stream)", value: { method: "GET", path: "/api/turns/" + turnRef + "/events", headers: { Accept: "text/event-stream" } } },
       output: { label: "experience.ready · event excerpt", value: {
         type: "experience.ready",
         turnId: turnRef,

@@ -59,9 +59,10 @@ try {
   await architecture.getByRole("heading", { name: "sfield", exact: true }).waitFor();
   const sequence = page.getByRole("list", { name: "Chat interaction sequence" });
   await sequence.getByText("Matching content and workflow", { exact: true }).waitFor();
-  await sequence.getByText("A2UI instructions for cards and buttons", { exact: true }).waitFor();
+  await sequence.getByText("Form UI: compile A2UI v1.0, UI Builder layouts & live bindings", { exact: true }).waitFor();
+  await sequence.getByText("Send A2UI instructions (experience.ready SSE) → React render", { exact: true }).waitFor();
   const numberedSteps = await sequence.getByRole("button", { name: /^Step \d+ ·/ }).all();
-  assert.equal(numberedSteps.length, 13);
+  assert.equal(numberedSteps.length, 14);
   const exchanges = [];
   const exchangePaths = [];
   for (const [index, button] of numberedSteps.entries()) {
@@ -77,6 +78,7 @@ try {
   assert.deepEqual(exchangePaths[5], ["CEP app server", "sfield", "Treatment Selector"]);
   assert.deepEqual(exchangePaths[6], ["Treatment Selector", "sfield", "CEP app server"]);
   assert.deepEqual(exchangePaths[9], ["CEP app server", "sfield", "Language model"]);
+  assert.deepEqual(exchangePaths[11], ["CEP app server", "CEP app server"]);
   assert.equal(exchanges[0].request.message, "I moved and need to update my address.");
   const topicScores = marcusCalls.scores.response.output;
   assert.equal(exchanges[2].response.customerContext.fundingStatus, "unfunded");
@@ -88,10 +90,11 @@ try {
   assert.deepEqual(exchanges[6].response, marcusCalls.treatment.response.output);
   assert.equal(exchanges[8].response.candidates[1].contentId, "fund_account");
   assert.equal(exchanges[10].response.blocks[0].component, "PznStepList");
-  assert.equal(exchanges[11].response.type, "experience.ready");
-  assert.equal(exchanges[11].response.actionMode, "verified_experience");
-  assert.equal(exchanges[12].request.envelope.action.name, "request_follow_up");
-  assert.equal(exchanges[12].response.turn.message, "Preview funding");
+  assert.equal(exchanges[11].response.a2uiProtocol, "v1.0");
+  assert.equal(exchanges[12].response.type, "experience.ready");
+  assert.equal(exchanges[12].response.actionMode, "verified_experience");
+  assert.equal(exchanges[13].request.envelope.action.name, "request_follow_up");
+  assert.equal(exchanges[13].response.turn.message, "Preview funding");
 
   const handoffs = sequence.getByRole("button", { name: /^App server to sfield handoff · step / });
   assert.equal(await handoffs.count(), 3);

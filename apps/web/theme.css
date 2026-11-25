@@ -774,10 +774,19 @@
 :root[data-theme="dark"] .help-message-handoff > span,
 :root[data-theme="dark"] .help-contract-group button[aria-pressed="true"],
 :root[data-theme="dark"] .help-sfield-mode.is-active,
+:root[data-theme="dark"] .help-message-edge[data-self="true"],
 :root[data-theme="dark"] .help-exchange-drawer .help-payload[data-emphasized="true"] {
   background: var(--teal-pale);
   border-color: var(--teal-border);
   color: var(--ink);
+}
+
+:root[data-theme="dark"] .help-message-edge[data-self="true"] {
+  border-left-color: #4aa83a;
+}
+
+:root[data-theme="dark"] .help-self-loop-bar {
+  color: var(--teal-dark);
 }
 
 :root[data-theme="dark"] .help-sfield-table th {
