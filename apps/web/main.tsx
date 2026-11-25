@@ -548,10 +548,10 @@ function Chat({
   };
 
   const nextSuggestions = useMemo(() => {
-    if (adminChat) return [];
+    if (adminChat || latest?.nextBestAction || latest?.experience?.actions.length) return [];
     if (domainPack.id !== "wealth") return domainPack.quickPrompts;
     return computeNextSuggestions(latest, activeProfile, configuration?.intentPrompts);
-  }, [latest, activeProfile, configuration?.intentPrompts, domainPack]);
+  }, [adminChat, latest, activeProfile, configuration?.intentPrompts, domainPack]);
 
   const composerEl = archived ? <div className="composer-area archived-conversation"><p>This conversation is archived.</p>
     <button className="secondary-button" type="button" disabled={pending} onClick={onRestore}>Restore conversation</button>

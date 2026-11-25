@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FileSpreadsheet, FileText, Image as ImageIcon, Sparkles, Volume2, VolumeX, X } from "lucide-react";
 import type { DemoPersona, TurnView } from "../../packages/contracts/api";
 import { MAX_MESSAGE_LENGTH } from "../../packages/contracts/domain";
-import { formatPortfolioAmount } from "../../packages/contracts/portfolio";
 
 export type ComposerAttachment = {
   id: string;
@@ -133,7 +132,6 @@ export function computeNextSuggestions(
 ): NextSuggestion[] {
   if (!latestTurn || latestTurn.status !== "completed") return [];
   const blocks = latestTurn.experience?.blocks.map((block) => block.component) ?? [];
-  const existingActionLabels = new Set((latestTurn.experience?.actions ?? []).map((a) => a.label.toLowerCase()));
   const lastUserMsg = latestTurn.message.toLowerCase();
   const candidates: NextSuggestion[] = [];
 
@@ -144,18 +142,9 @@ export function computeNextSuggestions(
     }
   }
 
-  const cashCents = activeProfile?.overview?.portfolio?.cashCents ?? 0;
-  const unfunded = activeProfile?.profile.accountFundingStatus === "unfunded";
-  const missingBeneficiary = activeProfile?.profile.beneficiaryStatus === "missing";
   const hasHomeGoal = Boolean(activeProfile?.overview?.homeGoal);
 
   if (blocks.includes("PznPortfolioSnapshot")) {
-    if (cashCents > 10_000_00) {
-      candidates.push({
-        label: `Options for my ${formatPortfolioAmount(cashCents)} cash`,
-        prompt: `How should I think about deploying my ${formatPortfolioAmount(cashCents)} cash reserve?`,
-      });
-    }
     if (hasHomeGoal) {
       candidates.push({
         label: "Model 2-year home plan",
@@ -163,7 +152,7 @@ export function computeNextSuggestions(
       });
     }
     candidates.push({ label: "Explore retirement basics", prompt: "I'd like to learn about retirement." });
-  } else if (blocks.includes("PznGoalProgress") || blocks.includes("PznSavingsChart") || blocks.includes("PznCapabilityForm")) {
+  } else if (blocks.includes("PznGoalProgress") || blocks.includes("PznSavingsChart")) {
     candidates.push({
       label: "Check required monthly savings",
       prompt: "How much do I need to save each month to reach my house deposit target?",
@@ -181,9 +170,7 @@ export function computeNextSuggestions(
       candidates.push({ label: "Check home-buying progress", prompt: "Show my home-buying goal and savings progress." });
     }
   } else {
-    if (unfunded) {
-      candidates.push({ label: "Deposit $500 to start", prompt: "I want to deposit $500 into my investment account." });
-    } else if (cashCents > 0) {
+    if (activeProfile?.overview?.portfolio) {
       candidates.push({ label: "Review portfolio mix", prompt: "Let me know my portfolio summary." });
     }
     if (hasHomeGoal) {
@@ -192,18 +179,14 @@ export function computeNextSuggestions(
         prompt: "I want to buy a house in two years. Show me how close I am and help me explore a savings plan.",
       });
     }
-    if (missingBeneficiary) {
-      candidates.push({ label: "Review beneficiary details", prompt: "I'd like to learn about retirement." });
-    } else {
-      candidates.push({ label: "Compare balance terms", prompt: "Compare available and current balance." });
-    }
+    candidates.push({ label: "Compare balance terms", prompt: "Compare available and current balance." });
   }
 
   const seenPrompts = new Set<string>();
   return candidates
     .filter((item) => {
       const promptKey = item.prompt.toLowerCase();
-      if (existingActionLabels.has(item.label.toLowerCase()) || promptKey === lastUserMsg || seenPrompts.has(promptKey)) {
+      if (promptKey === lastUserMsg || seenPrompts.has(promptKey)) {
         return false;
       }
       seenPrompts.add(promptKey);
@@ -219,14 +202,17 @@ export function NextSuggestionChips({ suggestions, disabled, onPick }: {
 }) {
   if (!suggestions.length) return null;
   return (
-    <div className="next-suggestions" role="group" aria-label="Suggested next questions">
-      {suggestions.map(({ label, prompt }) => (
-        <button key={label} type="button" className="next-suggestion-pill" disabled={disabled} onClick={() => onPick(prompt)}>
-          <Sparkles size={12} aria-hidden="true" />
-          <span>{label}</span>
-        </button>
-      ))}
-    </div>
+    <details className="starter-disclosure">
+      <summary>Explore suggested questions</summary>
+      <div className="next-suggestions" role="group" aria-label="Suggested next questions">
+        {suggestions.map(({ label, prompt }) => (
+          <button key={prompt} type="button" className="next-suggestion-pill" disabled={disabled} onClick={() => onPick(prompt)}>
+            <Sparkles size={12} aria-hidden="true" />
+            <span>{label}</span>
+          </button>
+        ))}
+      </div>
+    </details>
   );
 }
 

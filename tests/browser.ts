@@ -181,6 +181,8 @@ try {
   await page.getByRole("heading", { name: "Compare balance definitions" }).waitFor();
   await page.locator('[data-renderer="a2ui"]').waitFor();
   await page.getByText("For illustration.", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "Explain available balance", exact: true }).isVisible(), true);
+  assert.equal(await page.getByText("Explore suggested questions", { exact: true }).count(), 0);
   await page.screenshot({ path: resolve(screenshots, "comparison-desktop.png") });
 
   await page.getByText("View sources", { exact: true }).click();
