@@ -133,4 +133,25 @@ test("integration tasks run through sfield with native digest-bound approvals, r
   const published = await client.request<{ sfieldRegistered: boolean }>("/api/integrations/contracts/publish", { ref: "int.itsm_sandbox.create_ticket@1.1.0" });
   assert.equal(published.sfieldRegistered, false);
   await client.request("/api/integrations/tasks/run", { toolRef: "int.itsm_sandbox.create_ticket@1.1.0", input: { title: "x x x", priority: "P3", service: "db" } }, 409);
+
+  // 11. Chat: a write is drafted into a form (never run from text); every guessed field is marked model-proposed.
+  type ChatOut = { reply: string; cards: { kind: string; prefill?: Record<string, unknown>; provenance?: Record<string, string>; run?: TaskRun }[] };
+  const drafted = await client.request<ChatOut>("/api/integrations/copilot", { message: "Create a P1 ticket for checkout outage on payments" });
+  const form = drafted.cards.find((c) => c.kind === "task_form");
+  assert.ok(form, JSON.stringify(drafted));
+  assert.equal(form.prefill?.priority, "P1");
+  assert.equal(form.prefill?.service, "payments");
+  assert.equal(form.provenance?.priority, "model_proposed");
+  assert.equal(form.prefill?.idempotencyKey, undefined, "the model never supplies idempotency keys");
+
+  // 12. Chat: a complete read task runs immediately and returns its artifact.
+  const generated = await client.request<ChatOut>("/api/integrations/copilot", { message: "Generate a schema for Invoice from {\"id\": 7, \"total\": 12.5}" });
+  const runCard = generated.cards.find((c) => c.kind === "task_run");
+  assert.equal(runCard?.run?.state, "succeeded");
+  assert.equal(runCard?.run?.artifact?.validation.ok, true);
+
+  // 13. Chat: catalog, runs and approvals are all reachable by asking.
+  assert.ok((await client.request<ChatOut>("/api/integrations/copilot", { message: "Show integrations and tasks" })).cards.some((c) => c.kind === "catalog"));
+  assert.ok((await client.request<ChatOut>("/api/integrations/copilot", { message: "Show recent task runs" })).cards.some((c) => c.kind === "runs"));
+  assert.ok((await client.request<ChatOut>("/api/integrations/copilot", { message: "Show pending approvals" })).cards.some((c) => c.kind === "approvals"));
 });

@@ -63,7 +63,8 @@ import { connectorInvokeToolRef, domainWriteToolRef, Runtime, sfieldNamespace } 
 import { WidgetLibraryStore } from "./widget-library";
 import { SelfServicePznStore } from "./self-service-pzn-store";
 import { IntegrationTaskError, IntegrationTaskService, IntegrationTaskStore } from "./integration-tasks";
-import { runTaskRequestSchema } from "../../packages/contracts/integration-task";
+import { integrationCopilotRequestSchema, runTaskRequestSchema } from "../../packages/contracts/integration-task";
+import { runIntegrationCopilot } from "./integration-copilot";
 import { runSelfServicePznCopilot } from "./self-service-pzn-copilot";
 import { applyPznOperationDirect, PznApprovalError, pznGateFor, pznToolRefForOperation, requestPznApproval, verifyPznApproval } from "./pzn-approvals";
 import {
@@ -127,7 +128,7 @@ const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".woff2": "font/woff2", ".woff": "font/woff", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml",
 };
-const pagePaths = new Set(["/", "/chat", "/wealth", "/it-ops", "/revops", "/recommendations", "/embed", "/login", "/planning", "/__test/a2ui", ...Object.values(adminPaths)]);
+const pagePaths = new Set(["/", "/chat", "/wealth", "/it-ops", "/revops", "/recommendations", "/integrations", "/embed", "/login", "/planning", "/__test/a2ui", ...Object.values(adminPaths)]);
 
 function json(res: ServerResponse, body: unknown, status = 200) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
@@ -1636,6 +1637,10 @@ export async function startApp(options: Options) {
         const data = await body(req, runTaskRequestSchema, 32 * 1024);
         const out = await guard(() => integrationService.run(principalId, { ...data, requestedBy: data.requestedBy ?? "CEP Operator" }));
         return json(res, out, out.approval ? 202 : 200);
+      }
+      if (id === "copilot" && !operation && method === "POST") {
+        const data = await body(req, integrationCopilotRequestSchema, 48 * 1024);
+        return json(res, await runIntegrationCopilot(data, integrationService, principalId, { gateway: options.gateway, dataDir: options.dataDir }));
       }
       if (id === "runs" && operation === "reconcile" && method === "POST") {
         const { runId } = await body(req, z.object({ runId: z.string().min(3).max(64) }).strict());

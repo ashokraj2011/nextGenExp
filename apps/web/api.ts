@@ -50,6 +50,7 @@ import type { Bootstrap, Conversation, ConversationChange, ConversationView, Dom
 import { pendingActionsContext, type WorkspaceActionLog, type WorkspaceNextStep, type WorkspacePendingAction, type WorkspacePin } from "../../packages/contracts/workspace";
 import type { TurnPayloads } from "../../packages/contracts/inspector";
 import type { ContextCatalog, PropensityResult, SelectionMode } from "../../packages/contracts/domain";
+import type { IntegrationCopilotRequest, IntegrationCopilotResponse, IntegrationTasksView, TaskRun } from "../../packages/contracts/integration-task";
 import type { MockCcreRule, ToolSetup, ToolSetupView, TreatmentPreview, TreatmentPreviewInput, TreatmentSource } from "../../packages/contracts/tool-setup";
 import type {
   PznAttribute,
@@ -351,4 +352,9 @@ export const api = {
   pznDeleteContext: (contextId: string) => request<{ status?: "pending_approval"; approval?: ApprovalRecord; workspace: PznStudioWorkspaceState }>("/api/pzn/contexts/delete", { contextId }),
   pznEvaluateTs: (input: PznTsEvaluateRequest) => request<PznTsEvaluationResult>("/api/pzn/ts/evaluate", input),
   pznCopilot: (input: PznCopilotRequest) => request<PznCopilotResponse>("/api/pzn/copilot", input),
+  integrations: () => request<IntegrationTasksView>("/api/integrations"),
+  integrationCopilot: (input: IntegrationCopilotRequest) => request<IntegrationCopilotResponse>("/api/integrations/copilot", input),
+  runIntegrationTask: (input: { toolRef: string; input: Record<string, unknown>; requestedBy?: string; provenance?: Record<string, string> }) => (
+    request<{ run: TaskRun; approval?: ApprovalRecord }>("/api/integrations/tasks/run", input)
+  ),
 };

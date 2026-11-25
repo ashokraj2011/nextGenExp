@@ -1,4 +1,4 @@
-import { Activity, Blocks, BookOpenText, Briefcase, Code2, FileText, GitBranch, Landmark, Layers, MessageSquare, PanelsTopLeft, Settings2, UsersRound } from "lucide-react";
+import { Activity, Blocks, BookOpenText, Briefcase, Code2, FileText, GitBranch, Landmark, Layers, MessageSquare, Plug, PanelsTopLeft, Settings2, UsersRound } from "lucide-react";
 import { adminPaths } from "../../packages/contracts/admin-paths";
 
 export function diagnosticHref(path: typeof adminPaths.logs | typeof adminPaths.inspector, thread?: string, turn?: string) {
@@ -26,6 +26,7 @@ const workspaceDestinations = [
   { label: "IT Ops (/it-ops)", path: "/it-ops", Icon: Activity },
   { label: "RevOps (/revops)", path: "/revops", Icon: Briefcase },
   { label: "Recommendations (/recommendations)", path: "/recommendations", Icon: Layers },
+  { label: "Integrations (/integrations)", path: "/integrations", Icon: Plug },
 ] as const;
 
 export function AdminNavigation({ thread }: { thread?: string }) {

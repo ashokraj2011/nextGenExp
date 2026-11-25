@@ -198,3 +198,30 @@ export type IntegrationTasksView = {
   contracts: (TaskContract & { sfieldRegistered: boolean })[];
   runs: TaskRun[];
 };
+
+/* ============================================================================
+ * Integrations chat (copilot) contracts
+ * ========================================================================== */
+
+export const integrationCopilotRequestSchema = z.object({
+  message: z.string().trim().min(1).max(4000),
+  history: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().max(1500) }).strict()).max(12).optional(),
+}).strict();
+export type IntegrationCopilotRequest = z.infer<typeof integrationCopilotRequestSchema>;
+
+export type IntegrationCopilotCard =
+  | { kind: "catalog"; view: IntegrationTasksView }
+  | { kind: "contract"; contract: TaskContract & { sfieldRegistered: boolean } }
+  /** Writes are never run from chat text: the model prefills a form, a person confirms it. */
+  | { kind: "task_form"; contract: TaskContract & { sfieldRegistered: boolean }; prefill: Record<string, unknown>; provenance: Record<string, FieldProvenance> }
+  | { kind: "task_run"; run: TaskRun; approvalId?: string }
+  | { kind: "runs"; runs: TaskRun[]; filter?: string }
+  | { kind: "approvals" };
+
+export type IntegrationCopilotResponse = {
+  reply: string;
+  generatedBy: "copilot_llm" | "deterministic";
+  cards: IntegrationCopilotCard[];
+  suggestedPrompts: string[];
+  actions: { tool: string; summary: string; status: "ok" | "error" | "pending" }[];
+};
