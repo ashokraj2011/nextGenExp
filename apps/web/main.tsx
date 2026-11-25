@@ -646,6 +646,7 @@ function messageFor(error: unknown) {
 type Panel = { kind: "profiles" } | { kind: "pins" } | { kind: "thread"; id: string };
 const narrowNavigation = "(max-width: 850px)";
 
+/** What the customer sees above the chat: a plain-language snapshot of the screen they're on, plus a few next steps. */
 function buildWealthDomContext(section: WorkspaceSection, profile?: DemoPersona): CepEmbedScreenContext | null {
   if (!profile) return null;
   const p = profile.overview?.portfolio;
@@ -659,22 +660,24 @@ function buildWealthDomContext(section: WorkspaceSection, profile?: DemoPersona)
   const goalPct = goal && goal.targetCents > 0 ? Math.floor((savedCents * 100) / goal.targetCents) : 0;
   const benMissing = profile.profile.beneficiaryStatus === "missing";
   const unfunded = profile.profile.accountFundingStatus === "unfunded";
+  const firstName = profile.displayName.split(" ")[0] ?? profile.displayName;
+  const addBeneficiary = { label: "Add a beneficiary", prompt: "How do I update my beneficiary designation?" };
 
   if (section === "portfolio") {
     return {
       id: "wealth-portfolio",
-      label: `Portfolio & Equity Book · ${totalLabel}`,
+      label: `Your portfolio · ${totalLabel}`,
       viewType: "wealth_portfolio",
-      summary: `Observing ${profile.displayName}'s live portfolio allocation (${equityLabel} equities, ${cashLabel} cash, ${fixedLabel} fixed income).`,
+      summary: `You hold ${equityLabel} in stocks, ${fixedLabel} in bonds and ${cashLabel} in cash.`,
       metrics: [
-        { label: "Total", value: totalLabel },
-        { label: "Equities", value: equityLabel },
+        { label: "Stocks", value: equityLabel },
+        { label: "Bonds", value: fixedLabel },
         { label: "Cash", value: cashLabel },
       ],
       suggestedActions: [
-        { label: "Sell 40% AAPL + Tax Harvest", prompt: "I want to sell 40% of my Apple shares" },
-        { label: "Inspect Live Stock Holdings", prompt: "whats in my equity book right now?" },
-        { label: "Check Wash-Sale Policy", prompt: "What is our policy on tax-loss harvesting and wash-sale rules?" },
+        { label: "Sell some Apple shares, tax-smart", prompt: "I want to sell 40% of my Apple shares" },
+        { label: "What stocks do I own?", prompt: "whats in my equity book right now?" },
+        { label: "How do wash-sale rules work?", prompt: "What is our policy on tax-loss harvesting and wash-sale rules?" },
       ],
     };
   }
@@ -683,72 +686,78 @@ function buildWealthDomContext(section: WorkspaceSection, profile?: DemoPersona)
     const savedLabel = formatPortfolioAmount(savedCents);
     return {
       id: "wealth-savings",
-      label: `Home Down Payment Goal · ${goalPct}% Funded`,
+      label: `Home down payment · ${goalPct}% of your goal`,
       viewType: "wealth_savings_goal",
-      summary: `Observing ${profile.displayName}'s home down payment progress (${savedLabel} of ${targetLabel} target).`,
+      summary: `You've saved ${savedLabel} toward your ${targetLabel} down payment. Keep going, ${firstName}.`,
       metrics: [
         { label: "Saved", value: savedLabel },
-        { label: "Target", value: targetLabel },
+        { label: "Goal", value: targetLabel },
         { label: "Progress", value: `${goalPct}%` },
       ],
       suggestedActions: [
-        { label: "Simulate 2-Year Home Plan", prompt: "I want to buy a house in two years. Show me how close I am and help me explore a savings plan." },
-        { label: "Review Goal Progress", prompt: homeGoalPrompt },
-        { label: "Run Escrow Wire Workflow", prompt: "I want to initiate a wire transfer" },
+        { label: "Plan to buy a home in 2 years", prompt: "I want to buy a house in two years. Show me how close I am and help me explore a savings plan." },
+        { label: "How am I tracking?", prompt: homeGoalPrompt },
+        { label: "Send money to escrow", prompt: "I want to initiate a wire transfer" },
       ],
     };
   }
   if (section === "account") {
+    const todo = (benMissing ? 1 : 0) + (unfunded ? 1 : 0);
     return {
       id: "wealth-account",
-      label: `Account Status · ${benMissing ? "Beneficiary Action Needed" : "In Good Standing"}`,
+      label: todo ? `Your account · ${todo} thing${todo > 1 ? "s" : ""} to finish` : "Your account · all set",
       viewType: "wealth_account_status",
-      summary: `Observing account compliance for ${profile.displayName}: Funding is ${unfunded ? "Awaiting deposit" : "Funded"}, Beneficiaries are ${benMissing ? "Missing" : "On file"}.`,
+      summary: [
+        unfunded ? "Your account is open and waiting for its first deposit." : "Your account is funded.",
+        benMissing ? "You haven't named a beneficiary yet; it only takes a minute." : "Your beneficiaries are on file.",
+      ].join(" "),
       metrics: [
-        { label: "Funding", value: unfunded ? "Awaiting deposit" : "Funded" },
-        { label: "Beneficiaries", value: benMissing ? "Missing" : "On file" },
-        { label: "Available Cash", value: cashLabel },
+        { label: "Deposit", value: unfunded ? "Waiting" : "Received" },
+        { label: "Beneficiary", value: benMissing ? "Not added" : "On file" },
+        { label: "Cash", value: cashLabel },
       ],
       suggestedActions: [
-        ...(benMissing ? [{ label: "Update Beneficiaries", prompt: "How do I update my beneficiary designation?" }] : []),
-        { label: "Update Mailing Address", prompt: "I need to update my mailing address." },
-        { label: "Check Wire Approval Limits", prompt: "What are the wire transfer approval limits and security rules?" },
+        ...(benMissing ? [addBeneficiary] : []),
+        { label: "Update my mailing address", prompt: "I need to update my mailing address." },
+        { label: "Wire limits & security", prompt: "What are the wire transfer approval limits and security rules?" },
       ],
     };
   }
   if (section === "next-step") {
     return {
       id: "wealth-next-step",
-      label: `Personalized Next Step · ${profile.displayName}`,
+      label: `Your next step, ${firstName}`,
       viewType: "wealth_next_step",
-      summary: `Observing Customer 360 next-best-action eligibility for ${profile.displayName} (${cashLabel} idle cash).`,
+      summary: unfunded
+        ? "Make your first deposit to start investing. Here are a few things you can do now."
+        : `You have ${cashLabel} in cash that isn't invested yet. Here are a few ideas.`,
       metrics: [
-        { label: "Total Value", value: totalLabel },
-        { label: "Idle Cash", value: cashLabel },
-        { label: "Status", value: unfunded ? "Unfunded" : "Funded" },
+        { label: "Total", value: totalLabel },
+        { label: "Cash", value: cashLabel },
       ],
       suggestedActions: [
-        { label: "Review Portfolio Summary", prompt: portfolioPrompt },
-        { label: "Explain Balance Labels", prompt: "Explain the balance labels." },
-        { label: "Learn About Retirement", prompt: "I'd like to learn about retirement." },
+        { label: "Review my portfolio", prompt: portfolioPrompt },
+        { label: "What do my balances mean?", prompt: "Explain the balance labels." },
+        { label: "Learn about retirement", prompt: "I'd like to learn about retirement." },
       ],
     };
   }
   return {
     id: "wealth-summary",
-    label: `Wealth Summary · ${totalLabel}`,
+    label: `Your wealth · ${totalLabel}`,
     viewType: "wealth_summary",
-    summary: `Live DOM context for ${profile.displayName}: ${cashLabel} cash, ${equityLabel} equities${benMissing ? " · Beneficiary missing" : ""}. Switch topbar tabs to adapt actions automatically.`,
+    summary: `You have ${cashLabel} in cash and ${equityLabel} invested in stocks.${benMissing ? " One thing to finish: you haven't named a beneficiary yet." : ""}`,
     metrics: [
-      { label: "Total Value", value: totalLabel },
+      { label: "Total", value: totalLabel },
       { label: "Cash", value: cashLabel },
-      { label: "Equities", value: equityLabel },
+      { label: "Stocks", value: equityLabel },
     ],
     suggestedActions: [
-      { label: "Sell 40% AAPL + Tax Harvest", prompt: "I want to sell 40% of my Apple shares" },
-      { label: "Run Wire Workflow (5-Step)", prompt: "I want to initiate a wire transfer" },
-      { label: "Review Portfolio Summary", prompt: portfolioPrompt },
-    ],
+      { label: "Review my portfolio", prompt: portfolioPrompt },
+      ...(benMissing ? [addBeneficiary] : []),
+      { label: "Sell some Apple shares, tax-smart", prompt: "I want to sell 40% of my Apple shares" },
+      { label: "Send a wire transfer", prompt: "I want to initiate a wire transfer" },
+    ].slice(0, 4),
   };
 }
 
@@ -1320,14 +1329,14 @@ function App() {
         </header>
       )}
       {(embedMode || (!adminChat && domainPack.id === "wealth")) && screenContext && !ambientDismissed && (
-        <section className="embed-ambient-bar" aria-label="Ambient host screen context">
+        <section className="embed-ambient-bar" aria-label="Your snapshot and suggestions">
           <div className="embed-ambient-top">
             <div className="embed-ambient-title">
               <span className="embed-ambient-pill">
-                <Eye size={12} aria-hidden="true" />
-                Ambient DOM Context
+                <Sparkles size={12} aria-hidden="true" />
+                For you
               </span>
-              <strong>Viewing: {screenContext.label}</strong>
+              <strong>{screenContext.label}</strong>
             </div>
             <div className="embed-ambient-right">
               {screenContext.metrics && screenContext.metrics.length > 0 && (
@@ -1343,8 +1352,8 @@ function App() {
                 <button
                   type="button"
                   className="icon-button embed-ambient-close"
-                  aria-label="Hide ambient context bar"
-                  title="Hide ambient context bar (reappears when you switch views)"
+                  aria-label="Hide suggestions"
+                  title="Hide suggestions"
                   onClick={() => setAmbientDismissed(true)}
                 >
                   <X size={14} aria-hidden="true" />

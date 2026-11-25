@@ -18,7 +18,9 @@ export function isPortfolioSummary(route: Pick<RouteDecision, "contextId" | "int
   return route.contextId === "portsum" && route.intent.task === "show";
 }
 
-const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 2 });
+const usdWhole = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 });
+const usdCents = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** "$120,304" for whole dollars, "$35,738.20" otherwise (never "$35,738.2"). */
 export function formatPortfolioAmount(cents: number) {
-  return usd.format(cents / 100);
+  return (Number.isInteger(cents) && cents % 100 === 0 ? usdWhole : usdCents).format(cents / 100);
 }
