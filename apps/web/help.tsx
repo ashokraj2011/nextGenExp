@@ -145,6 +145,7 @@ export function Help() {
       <div className="help-width help-topbar-inner">
         <nav aria-label="Help sections">
           <a href="#cep-blueprint">CEP Blueprint</a>
+          <a href="#demo-playbook">5-Min Demo</a>
           <a href="#providers">Providers</a>
           <a href="#architecture">Architecture</a>
           <a href="#goal-planning">Multi-step requests</a>
@@ -176,8 +177,8 @@ export function Help() {
           </li>
           <li>
             <span className="help-stage-tag">Stage 2</span>
-            <h3>Stage 0 Action Gate &amp; Intent Routing</h3>
-            <p>Copilot ACP matches the prompt + Customer 360 signals against live <strong>High-Level Intents</strong> and classifies the turn into one visible mode:</p>
+            <h3>Unified Semantic Capability Router</h3>
+            <p>Classifies every message semantically across 8 registered capabilities (Verified Advisory, Stock Holdings, Stock Trading &amp; Tax Harvesting, IT Ops, RevOps, HITL Approvals, External Connectors, Dynamic UI) — plus admin-authored <strong>No-Code Action Flows</strong>:</p>
             <div className="help-mode-pills">
               <span className="help-mode-pill mode-chat">Plain Chat</span>
               <span className="help-mode-pill mode-verified">Verified Experience</span>
@@ -187,13 +188,13 @@ export function Help() {
           </li>
           <li>
             <span className="help-stage-tag">Stage 3</span>
-            <h3>Unified Recommendation Layer (sfield) &amp; Data</h3>
-            <p>The host invokes <code>{recommendationArbitrateToolRef}</code> through <code>sfield</code>, fanning out to pluggable <strong>RecommendationProvider</strong> adapters (<strong>TS + CCRE</strong>, <strong>Customer 360 NBA</strong>, <strong>IT Ops Runbooks</strong>, or external engines) alongside scoped portfolio &amp; goal reads.</p>
+            <h3>Unified sfield Governance &amp; Single Ledger</h3>
+            <p>Invokes <code>{recommendationArbitrateToolRef}</code> for pluggable recommendations alongside scoped reads and a single-source-of-truth holdings ledger (<code>Portfolio snapshot</code> = live share lots + cash + fixed income).</p>
           </li>
           <li>
             <span className="help-stage-tag">Stage 4</span>
-            <h3>Experience Render &amp; Live Write-Back</h3>
-            <p>Applies any published <strong>UI Builder</strong> layout (or renders a safe multi-domain <strong>Dynamic UI Canvas</strong>), displays the #1 arbitrated NBA honoring persistent dismissals, and supports live write-back to Customer 360 &amp; Ops stores.</p>
+            <h3>Host A2UI Compilation, HITL Gate &amp; Audited Writes</h3>
+            <p>Compiles verified A2UI v1.0 surfaces, applies published multi-domain <strong>UI Builder</strong> layouts, gates high-risk writes &amp; connectors via SHA-256 <strong>HITL Approvals</strong> (Chat + Admin), and logs every mutation to <strong>Write Audit</strong>.</p>
           </li>
         </ol>
         <div className="help-control-plane" aria-label="Admin master data control plane">
@@ -230,6 +231,37 @@ export function Help() {
             <ArrowUpRight size={15} aria-hidden="true" />
           </a>
         </div>
+      </section>
+      <section id="demo-playbook" className="help-section" aria-labelledby="demo-playbook-title">
+        <div className="help-section-heading">
+          <div>
+            <h2 id="demo-playbook-title">5-Minute Executive Demo Playbook</h2>
+            <p className="help-exchange-description">Five guided beats to showcase semantic routing, conversational trading &amp; tax-loss harvesting, multi-domain reuse, no-code admin flows, and sfield governance live.</p>
+          </div>
+          <a className="help-section-link" href="/chat">Launch Customer Chat <ArrowUpRight size={14} aria-hidden="true" /></a>
+        </div>
+        <ol className="help-cep-pipeline" aria-label="Five minute executive demo steps">
+          <li>
+            <span className="help-stage-tag">0:00 – 0:50 · Semantic Routing</span>
+            <h3>Verified Snapshot &amp; Live Equity Book</h3>
+            <p>Ask <strong>“Show my portfolio summary”</strong>, then ask a natural paraphrase: <strong>“whats in my equity book right now?”</strong>. Expand <strong>Advisory Reasoning</strong> to show the <em>Unified Capability Router (Semantic LLM)</em> and penny-for-penny ledger parity.</p>
+          </li>
+          <li>
+            <span className="help-stage-tag">0:50 – 2:10 · Trade &amp; TLH SSE Job</span>
+            <h3>Conversational Sell + Tax Harvesting</h3>
+            <p>Ask <strong>“I want to sell 40% of my Apple shares”</strong>, then simply type <strong>“yes”</strong> to run Tax-Loss Harvesting analysis (with 30-day wash-sale checks) and <strong>“execute bundle”</strong> to watch the 5-second live SSE countdown job settle balances via <code>sfield</code>.</p>
+          </li>
+          <li>
+            <span className="help-stage-tag">2:10 – 3:25 · Multi-Domain &amp; HITL</span>
+            <h3>No-Code Action Flow &amp; Approval Queue</h3>
+            <p>Switch to the <strong>IT Ops</strong> pack and ask <strong>“escalate to pagerduty”</strong> to trigger an admin-authored No-Code Action Flow bound to <code>cep.connector.invoke@1.0.0</code>. Approve inline in Chat or from <a href={`${adminPaths.logs}?source=approvals`}>Logs → Approvals (HITL)</a>.</p>
+          </li>
+          <li>
+            <span className="help-stage-tag">3:25 – 5:00 · Control Plane &amp; sfield</span>
+            <h3>UI Builder Templates &amp; 14-Step Diagram</h3>
+            <p>Preview pre-bound <strong>IT Ops</strong> &amp; <strong>Sales RevOps</strong> templates in <a href={adminPaths.builder}>UI Builder</a>, inspect <a href={`${adminPaths.logs}?source=write_audit`}>Write Audit</a>, and click <strong>Step 12</strong> below to show deterministic host A2UI compilation.</p>
+          </li>
+        </ol>
       </section>
       <section id="providers" className="help-section" aria-labelledby="providers-title">
         <div className="help-section-heading">
