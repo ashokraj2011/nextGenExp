@@ -23,7 +23,7 @@ import {
   setActiveExperienceRegistryStore,
 } from "../../packages/experience-registry";
 import { activeContexts } from "../../packages/ts-adapter";
-import { generateWidgetDraftWithLlm } from "./dynamic-ui-generator";
+import { generateWidgetFromMultimodal } from "./dynamic-ui-generator";
 import { generateBoundUiLayoutWithLlm } from "./ui-layout-generator";
 import { OpsIncidentStore } from "./ops-store";
 import { incidentDecisionInputSchema, incidentUpsertInputSchema } from "../../packages/contracts/ops";
@@ -676,9 +676,9 @@ export async function startApp(options: Options) {
         return json(res, { widgets: widgetLibrary.list(principalId, now()) });
       }
       if (id === "widget-generate" && method === "POST") {
-        const { prompt } = await body(req, widgetGenerateRequestSchema, 8 * 1024);
-        const widget = await generateWidgetDraftWithLlm(prompt, options.gateway, options.dataDir);
-        return json(res, { widget });
+        const input = await body(req, widgetGenerateRequestSchema, 6 * 1024 * 1024);
+        const generated = await generateWidgetFromMultimodal(input, options.gateway, options.dataDir);
+        return json(res, generated);
       }
       if (id === "widgets" && method === "POST") {
         const change = await body(req, widgetLibraryChangeSchema, 32 * 1024);

@@ -69,8 +69,16 @@ export const savedWidgetSchema = widgetDraftSchema.extend({
 export type SavedWidget = z.infer<typeof savedWidgetSchema>;
 
 export const widgetGenerateRequestSchema = z.object({
-  prompt: z.string().trim().min(2).max(600),
-}).strict();
+  prompt: z.string().trim().max(600).optional(),
+  imageDataUrl: z.string().regex(/^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/).max(5_000_000).optional(),
+  imageName: z.string().trim().max(120).optional(),
+  figmaUrl: z.string().trim().max(500).optional(),
+  figmaToken: z.string().trim().max(240).optional(),
+}).strict().refine(
+  (v) => Boolean((v.prompt && v.prompt.length >= 2) || v.imageDataUrl || v.figmaUrl),
+  { message: "Provide a text description, a screenshot, or a Figma frame URL." },
+);
+export type WidgetGenerateRequest = z.infer<typeof widgetGenerateRequestSchema>;
 
 export const widgetLibraryChangeSchema = z.union([
   z.object({ operation: z.literal("save"), id: z.string().regex(/^wdg_[a-z0-9]{12,32}$/).optional(), widget: widgetDraftSchema }).strict(),

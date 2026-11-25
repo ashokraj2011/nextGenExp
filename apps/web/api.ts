@@ -136,7 +136,17 @@ export const api = {
     summary: string;
   }>("/api/admin/ui-layout-generate", { prompt }),
   widgets: () => request<{ widgets: SavedWidget[] }>("/api/admin/widgets"),
-  generateWidget: (prompt: string) => request<{ widget: WidgetDraft }>("/api/admin/widget-generate", { prompt }),
+  generateWidget: (input: string | {
+    prompt?: string;
+    imageDataUrl?: string;
+    imageName?: string;
+    figmaUrl?: string;
+    figmaToken?: string;
+  }) => request<{
+    widget: WidgetDraft;
+    source?: "copilot_vision" | "figma_api" | "copilot_llm" | "synthesizer";
+    sourceSummary?: string;
+  }>("/api/admin/widget-generate", typeof input === "string" ? { prompt: input } : input),
   saveWidgetLibrary: (change: WidgetLibraryChange) => request<{ widget?: SavedWidget; widgets: SavedWidget[] }>("/api/admin/widgets", change),
   customers: () => request<{ customers: Customer360AdminRecord[] }>("/api/admin/customers"),
   saveCustomer: (input: Customer360ProfileInput) => request<{ customer?: Customer360AdminRecord; customers: Customer360AdminRecord[] }>("/api/admin/customers", input),

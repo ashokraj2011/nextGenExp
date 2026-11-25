@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 import {
-  ArrowUpRight, BookmarkPlus, Check, Copy, LayoutGrid, Pencil, Search, Sparkles, Trash2, Wand2,
+  ArrowUpRight, BookmarkPlus, Check, Copy, ImagePlus, LayoutGrid, Link2, Pencil, Search, Sparkles, Trash2, Wand2, X,
 } from "lucide-react";
 import {
   widgetKindLabels, widgetKinds, type SavedWidget, type WidgetDraft, type WidgetKind,
@@ -173,6 +173,99 @@ export function LiveWidgetPreview({ widget, compact = false }: { widget: WidgetD
   );
 }
 
+async function fileToResizedDataUrl(file: File): Promise<string> {
+  const raw = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Could not read screenshot file."));
+    reader.readAsDataURL(file);
+  });
+  if (raw.length < 450_000) return raw;
+  return await new Promise<string>((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const maxDim = 1280;
+      const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { resolve(raw); return; }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    img.onerror = () => resolve(raw);
+    img.src = raw;
+  });
+}
+
+function createSampleDesignMockupPng(): string {
+  const canvas = document.createElement("canvas");
+  canvas.width = 760;
+  canvas.height = 420;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+  ctx.fillStyle = "#f8fafc";
+  ctx.fillRect(0, 0, 760, 420);
+  // Card shell
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = "#cbd5e1";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(28, 28, 704, 364, 18);
+  ctx.fill();
+  ctx.stroke();
+  // Accent bar
+  ctx.fillStyle = "#2f7d22";
+  ctx.fillRect(28, 28, 704, 8);
+  // Badge
+  ctx.fillStyle = "#dcfce7";
+  ctx.beginPath();
+  ctx.roundRect(56, 56, 170, 28, 14);
+  ctx.fill();
+  ctx.fillStyle = "#166534";
+  ctx.font = "bold 13px sans-serif";
+  ctx.fillText("QUARTERLY WEALTH PULSE", 70, 75);
+  // Headline
+  ctx.fillStyle = "#0f172a";
+  ctx.font = "bold 28px sans-serif";
+  ctx.fillText("Private Client Portfolio Snapshot", 56, 122);
+  ctx.fillStyle = "#475569";
+  ctx.font = "15px sans-serif";
+  ctx.fillText("Q4 net worth performance, liquid cash reserve, and annual yield breakdown.", 56, 150);
+  // 3 KPI tiles
+  const tiles = [
+    { label: "TOTAL NET WORTH", val: "$184,200", delta: "+7.8% YTD" },
+    { label: "LIQUID CASH", val: "$42,000", delta: "4.65% APY" },
+    { label: "TAX SAVINGS", val: "$3,450", delta: "Harvested" },
+  ];
+  tiles.forEach((t, idx) => {
+    const x = 56 + idx * 224;
+    ctx.fillStyle = "#f1f5f9";
+    ctx.beginPath();
+    ctx.roundRect(x, 180, 206, 110, 12);
+    ctx.fill();
+    ctx.fillStyle = "#64748b";
+    ctx.font = "bold 11px sans-serif";
+    ctx.fillText(t.label, x + 16, 208);
+    ctx.fillStyle = "#0f172a";
+    ctx.font = "bold 26px sans-serif";
+    ctx.fillText(t.val, x + 16, 245);
+    ctx.fillStyle = "#15803d";
+    ctx.font = "bold 13px sans-serif";
+    ctx.fillText(t.delta, x + 16, 272);
+  });
+  // CTA button
+  ctx.fillStyle = "#2f7d22";
+  ctx.beginPath();
+  ctx.roundRect(56, 318, 220, 44, 22);
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 14px sans-serif";
+  ctx.fillText("Rebalance Portfolio  →", 84, 345);
+  return canvas.toDataURL("image/png");
+}
+
 export function WidgetStudio({
   widgets,
   onWidgetsChange,
@@ -182,7 +275,15 @@ export function WidgetStudio({
   onWidgetsChange: (next: SavedWidget[]) => void;
   onInsertIntoLayout: (widget: SavedWidget) => void;
 }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [prompt, setPrompt] = useState("");
+  const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
+  const [imageName, setImageName] = useState<string>("");
+  const [showFigmaPanel, setShowFigmaPanel] = useState(false);
+  const [figmaUrl, setFigmaUrl] = useState("");
+  const [figmaToken, setFigmaToken] = useState("");
+  const [dragOver, setDragOver] = useState(false);
+  const [genSource, setGenSource] = useState<string>("");
   const [draft, setDraft] = useState<WidgetDraft | null>(null);
   const [editingId, setEditingId] = useState<string | undefined>(undefined);
   const [generating, setGenerating] = useState(false);
@@ -193,18 +294,64 @@ export function WidgetStudio({
   const [filterKind, setFilterKind] = useState<WidgetKind | "all">("all");
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  async function generate(inputPrompt = prompt) {
-    const clean = inputPrompt.trim();
-    if (!clean || generating) return;
+  async function attachImageFile(file: File) {
+    if (!file.type.startsWith("image/")) {
+      setError("Please upload a PNG, JPG, or WebP screenshot.");
+      return;
+    }
+    setError("");
+    const dataUrl = await fileToResizedDataUrl(file);
+    setImageDataUrl(dataUrl);
+    setImageName(file.name || "pasted-screenshot.png");
+    setNotice(`Attached "${file.name || "pasted screenshot"}" — click Generate widget to extract it with Vision.`);
+  }
+
+  function onPasteScreenshot(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const items = event.clipboardData?.items;
+    if (!items) return;
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) {
+          event.preventDefault();
+          void attachImageFile(file);
+          return;
+        }
+      }
+    }
+  }
+
+  function onDropScreenshot(event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    setDragOver(false);
+    const file = event.dataTransfer.files?.[0];
+    if (file && file.type.startsWith("image/")) {
+      void attachImageFile(file);
+    }
+  }
+
+  const canGenerate = !generating && (prompt.trim().length >= 2 || Boolean(imageDataUrl) || Boolean(figmaUrl.trim()));
+
+  async function generate(override?: { prompt?: string; imageDataUrl?: string | null; imageName?: string }) {
+    const cleanPrompt = (override?.prompt ?? prompt).trim();
+    const activeImage = override?.imageDataUrl !== undefined ? override.imageDataUrl : imageDataUrl;
+    const activeImageName = override?.imageName ?? imageName;
+    const cleanFigma = figmaUrl.trim();
+    if ((!cleanPrompt && !activeImage && !cleanFigma) || generating) return;
     setGenerating(true);
     setError("");
     setNotice("");
     try {
-      const { widget } = await api.generateWidget(clean);
-      setPrompt(clean);
-      setDraft(widget);
+      const result = await api.generateWidget({
+        ...(cleanPrompt ? { prompt: cleanPrompt } : {}),
+        ...(activeImage ? { imageDataUrl: activeImage, imageName: activeImageName || "screenshot.png" } : {}),
+        ...(cleanFigma ? { figmaUrl: cleanFigma, ...(figmaToken.trim() ? { figmaToken: figmaToken.trim() } : {}) } : {}),
+      });
+      if (override?.prompt !== undefined) setPrompt(override.prompt);
+      setDraft(result.widget);
       setEditingId(undefined);
-      setNotice("Widget generated from your text. Fine-tune it or add it to your library.");
+      setGenSource(result.source ?? "");
+      setNotice(result.sourceSummary || "Widget generated. Fine-tune it or add it to your library.");
     } catch (reason) {
       setError(toolSetupErrorMessage(reason));
     } finally {
@@ -282,36 +429,145 @@ export function WidgetStudio({
 
   return (
     <div className="widget-studio">
-      <section className="ui-work-card widget-generator-card" aria-labelledby="widget-generator-heading">
+      <section
+        className={"ui-work-card widget-generator-card" + (dragOver ? " is-drag-over" : "")}
+        aria-labelledby="widget-generator-heading"
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={onDropScreenshot}
+      >
         <div className="widget-generator-top">
           <div>
-            <span className="widget-studio-kicker"><Sparkles size={13} aria-hidden="true" />Text-to-Widget Builder</span>
-            <h2 id="widget-generator-heading">Describe a widget in plain English</h2>
-            <p>Turn a sentence into an interactive CEP widget, preview it live, and save it to your reusable library.</p>
+            <span className="widget-studio-kicker"><Sparkles size={13} aria-hidden="true" />Prompt, Screenshot &amp; Figma-to-Widget Builder</span>
+            <h2 id="widget-generator-heading">Describe, paste a screenshot, or import a Figma frame</h2>
+            <p>
+              Type plain English, press <code>Cmd+V</code> / drag-and-drop any design screenshot (or Figma PNG), or paste a Figma frame URL — Copilot Vision turns it into a live interactive CEP widget.
+            </p>
           </div>
+          {genSource && (
+            <span className="ui-copilot-source-pill">
+              {genSource === "figma_api" ? "Figma API + Vision"
+                : genSource === "copilot_vision" ? "Copilot Vision"
+                : genSource === "copilot_llm" ? "Copilot ACP"
+                : "Synthesizer"}
+            </span>
+          )}
         </div>
 
         <form className="widget-prompt-form" onSubmit={(event) => { event.preventDefault(); void generate(); }}>
-          <label className="sr-only" htmlFor="widget-prompt-input">Describe the widget you want to create</label>
+          <label className="sr-only" htmlFor="widget-prompt-input">Describe the widget or paste a screenshot</label>
           <textarea
             id="widget-prompt-input"
             rows={2}
             maxLength={600}
             value={prompt}
-            placeholder="e.g. Create an emergency fund goal tracker showing $18,000 saved toward $25,000 with a boost savings button…"
+            placeholder="Describe a widget, or paste a screenshot with Cmd+V (optional instructions like 'match this KPI card and add a Rebalance CTA')…"
+            onPaste={onPasteScreenshot}
             onChange={(event) => setPrompt(event.target.value)}
           />
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            className="sr-only"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void attachImageFile(file);
+              e.target.value = "";
+            }}
+          />
+
+          {imageDataUrl && (
+            <div className="widget-design-preview-chip">
+              <img src={imageDataUrl} alt="Uploaded design mockup preview" />
+              <div>
+                <strong>{imageName || "Design screenshot"}</strong>
+                <small>Ready for Copilot Vision extraction</small>
+              </div>
+              <button
+                type="button"
+                className="ui-quiet-icon"
+                aria-label="Remove screenshot"
+                onClick={() => { setImageDataUrl(null); setImageName(""); }}
+              >
+                <X size={14} aria-hidden="true" />
+              </button>
+            </div>
+          )}
+
+          {showFigmaPanel && (
+            <div className="widget-figma-strip">
+              <label>
+                <span>Figma Frame URL</span>
+                <input
+                  type="url"
+                  value={figmaUrl}
+                  placeholder="https://www.figma.com/design/AbCdEf123/Wealth-Card?node-id=12-34"
+                  onChange={(e) => setFigmaUrl(e.target.value)}
+                />
+              </label>
+              <label>
+                <span>Figma Access Token (optional if FIGMA_ACCESS_TOKEN set in server env)</span>
+                <input
+                  type="password"
+                  value={figmaToken}
+                  placeholder="figd_... (or paste Figma frame PNG with Cmd+V above)"
+                  onChange={(e) => setFigmaToken(e.target.value)}
+                />
+              </label>
+            </div>
+          )}
+
           <div className="widget-prompt-actions">
-            <button type="submit" className="ui-button ui-button-primary" disabled={generating || prompt.trim().length < 2}>
+            <button type="submit" className="ui-button ui-button-primary" disabled={!canGenerate}>
               <Wand2 size={15} aria-hidden="true" />
-              {generating ? "Generating…" : "Generate widget"}
+              {generating ? "Generating…" : imageDataUrl ? "Generate from Screenshot" : figmaUrl.trim() ? "Import from Figma" : "Generate widget"}
+            </button>
+            <button
+              type="button"
+              className="ui-button ui-button-outline"
+              disabled={generating}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <ImagePlus size={15} aria-hidden="true" />
+              Upload Screenshot
+            </button>
+            <button
+              type="button"
+              className={"ui-button ui-button-outline" + (showFigmaPanel || figmaUrl.trim() ? " is-active-tool" : "")}
+              disabled={generating}
+              onClick={() => setShowFigmaPanel((v) => !v)}
+            >
+              <Link2 size={15} aria-hidden="true" />
+              {showFigmaPanel ? "Hide Figma URL" : "Import Figma URL"}
+            </button>
+            <button
+              type="button"
+              className="ui-button ui-button-plain"
+              disabled={generating}
+              onClick={() => {
+                const samplePng = createSampleDesignMockupPng();
+                if (!samplePng) return;
+                setImageDataUrl(samplePng);
+                setImageName("quarterly-wealth-pulse-mockup.png");
+                setPrompt("Convert this design screenshot into a live KPI widget");
+                void generate({
+                  prompt: "Convert this design screenshot into a live KPI widget",
+                  imageDataUrl: samplePng,
+                  imageName: "quarterly-wealth-pulse-mockup.png",
+                });
+              }}
+            >
+              <Sparkles size={14} aria-hidden="true" />
+              Try Sample Design Mockup
             </button>
           </div>
         </form>
 
         <div className="widget-example-chips" role="group" aria-label="Example widget prompts">
           {examplePrompts.map((sample) => (
-            <button key={sample} type="button" className="widget-example-chip" disabled={generating} onClick={() => void generate(sample)}>
+            <button key={sample} type="button" className="widget-example-chip" disabled={generating} onClick={() => void generate({ prompt: sample, imageDataUrl: null })}>
               {sample.length > 52 ? sample.slice(0, 50) + "…" : sample}
             </button>
           ))}

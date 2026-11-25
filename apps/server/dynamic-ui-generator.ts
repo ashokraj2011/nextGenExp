@@ -71,11 +71,29 @@ export async function callConfiguredLlmJson(
   systemPrompt: string,
   userPrompt: string,
   signal: AbortSignal,
+  image?: { base64: string; mimeType: string },
 ): Promise<unknown | null> {
   if (gateway.profile === "copilot_acp") {
     const cliHome = resolve(dataDir, "copilot-cli");
     mkdirSync(cliHome, { recursive: true, mode: 0o700 });
     const fullText = `${systemPrompt}\n\nUSER REQUEST:\n${userPrompt}\n\nReturn ONLY one valid JSON object matching the schema. No markdown fences, no commentary.`;
+    if (image) {
+      try {
+        const reply = await runCopilotPrompt(
+          gateway,
+          cliHome,
+          [
+            { type: "image", data: image.base64, mimeType: image.mimeType },
+            { type: "text", text: fullText },
+          ],
+          signal,
+          () => undefined,
+        );
+        return JSON.parse(stripJsonFences(reply.text));
+      } catch {
+        // If this Copilot CLI model does not support inline ACP image blocks, retry text-only below.
+      }
+    }
     const reply = await runCopilotPrompt(gateway, cliHome, [{ type: "text", text: fullText }], signal, () => undefined);
     return JSON.parse(stripJsonFences(reply.text));
   }
@@ -85,6 +103,12 @@ export async function callConfiguredLlmJson(
     ...(gateway.apiKey ? { Authorization: `Bearer ${gateway.apiKey}` } : {}),
     ...(gateway.headers ?? {}),
   };
+  const userContent = image
+    ? [
+        { type: "text", text: userPrompt },
+        { type: "image_url", image_url: { url: `data:${image.mimeType};base64,${image.base64}` } },
+      ]
+    : userPrompt;
   const response = await fetch(`${gateway.baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers,
@@ -96,7 +120,7 @@ export async function callConfiguredLlmJson(
       temperature: 0.3,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
+        { role: "user", content: userContent },
       ],
     }),
   });
@@ -1237,4 +1261,214 @@ export async function generateWidgetDraftWithLlm(
     clearTimeout(timer);
   }
   return generateWidgetFromText(prompt);
+}
+
+function parseDataUrl(dataUrl: string): { base64: string; mimeType: string } | null {
+  const match = dataUrl.match(/^data:(image\/(?:png|jpeg|jpg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) return null;
+  return {
+    mimeType: match[1] === "image/jpg" ? "image/jpeg" : match[1],
+    base64: match[2],
+  };
+}
+
+function parseFigmaUrl(rawUrl: string): { fileKey: string; nodeId?: string; slug?: string } | null {
+  try {
+    const u = new URL(rawUrl.trim());
+    if (!/figma\.com$/i.test(u.hostname)) return null;
+    const parts = u.pathname.split("/").filter(Boolean);
+    const markerIdx = parts.findIndex((p) => p === "design" || p === "file" || p === "proto" || p === "board");
+    if (markerIdx < 0 || !parts[markerIdx + 1]) return null;
+    const fileKey = parts[markerIdx + 1];
+    const slug = parts[markerIdx + 2] ? decodeURIComponent(parts[markerIdx + 2]).replace(/[-_]+/g, " ").trim() : undefined;
+    const rawNode = u.searchParams.get("node-id")?.trim();
+    const nodeId = rawNode ? rawNode.replace(/-/g, ":") : undefined;
+    return { fileKey, ...(nodeId ? { nodeId } : {}), ...(slug ? { slug } : {}) };
+  } catch {
+    return null;
+  }
+}
+
+function collectFigmaTextNodes(node: unknown, out: string[] = []): string[] {
+  if (!node || typeof node !== "object" || out.length >= 40) return out;
+  const obj = node as Record<string, unknown>;
+  if (typeof obj.characters === "string" && obj.characters.trim()) {
+    out.push(obj.characters.trim().slice(0, 140));
+  } else if (typeof obj.name === "string" && obj.type && (obj.type === "FRAME" || obj.type === "COMPONENT" || obj.type === "INSTANCE")) {
+    out.push(`[Frame: ${obj.name.trim().slice(0, 60)}]`);
+  }
+  if (Array.isArray(obj.children)) {
+    for (const child of obj.children) collectFigmaTextNodes(child, out);
+  }
+  return out;
+}
+
+async function fetchFigmaContext(
+  figmaUrl: string,
+  explicitToken?: string,
+  signal?: AbortSignal,
+): Promise<{
+  slug?: string;
+  extractedText: string[];
+  image?: { base64: string; mimeType: string };
+  fetchedFromApi: boolean;
+  note: string;
+}> {
+  const parsed = parseFigmaUrl(figmaUrl);
+  if (!parsed) {
+    return { extractedText: [], fetchedFromApi: false, note: "Could not parse Figma URL — use a figma.com/design/... or figma.com/file/... link." };
+  }
+  const token = explicitToken?.trim() || process.env.FIGMA_ACCESS_TOKEN?.trim();
+  if (!token) {
+    return {
+      slug: parsed.slug,
+      extractedText: [],
+      fetchedFromApi: false,
+      note: `Parsed Figma file "${parsed.slug || parsed.fileKey}" (no FIGMA_ACCESS_TOKEN set — add a token or paste a Figma screenshot with Cmd+V for pixel-exact vision extraction).`,
+    };
+  }
+  try {
+    const headers = { "X-Figma-Token": token };
+    const nodeEndpoint = parsed.nodeId
+      ? `https://api.figma.com/v1/files/${encodeURIComponent(parsed.fileKey)}/nodes?ids=${encodeURIComponent(parsed.nodeId)}`
+      : `https://api.figma.com/v1/files/${encodeURIComponent(parsed.fileKey)}?depth=3`;
+    const metaRes = await fetch(nodeEndpoint, { headers, signal });
+    if (!metaRes.ok) {
+      return {
+        slug: parsed.slug,
+        extractedText: [],
+        fetchedFromApi: false,
+        note: `Figma API returned HTTP ${metaRes.status} — generated from URL metadata instead.`,
+      };
+    }
+    const metaJson = await metaRes.json() as Record<string, unknown>;
+    const extractedText: string[] = [];
+    if (parsed.nodeId && metaJson.nodes && typeof metaJson.nodes === "object") {
+      const target = (metaJson.nodes as Record<string, { document?: unknown }>)[parsed.nodeId];
+      if (target?.document) collectFigmaTextNodes(target.document, extractedText);
+    } else if (metaJson.document) {
+      collectFigmaTextNodes(metaJson.document, extractedText);
+    }
+
+    let image: { base64: string; mimeType: string } | undefined;
+    if (parsed.nodeId) {
+      const imgMetaRes = await fetch(
+        `https://api.figma.com/v1/images/${encodeURIComponent(parsed.fileKey)}?ids=${encodeURIComponent(parsed.nodeId)}&format=png&scale=2`,
+        { headers, signal },
+      );
+      if (imgMetaRes.ok) {
+        const imgJson = await imgMetaRes.json() as { images?: Record<string, string> };
+        const pngUrl = imgJson.images?.[parsed.nodeId];
+        if (pngUrl) {
+          const pngRes = await fetch(pngUrl, { signal });
+          if (pngRes.ok) {
+            const buf = Buffer.from(await pngRes.arrayBuffer());
+            if (buf.byteLength > 0 && buf.byteLength < 3_500_000) {
+              image = { base64: buf.toString("base64"), mimeType: "image/png" };
+            }
+          }
+        }
+      }
+    }
+    return {
+      slug: parsed.slug || (typeof metaJson.name === "string" ? metaJson.name : parsed.fileKey),
+      extractedText,
+      image,
+      fetchedFromApi: true,
+      note: `Imported Figma frame "${parsed.slug || parsed.fileKey}" (${extractedText.length} text/layer nodes${image ? " + rendered PNG" : ""}).`,
+    };
+  } catch {
+    return {
+      slug: parsed.slug,
+      extractedText: [],
+      fetchedFromApi: false,
+      note: `Figma API unreachable — generated from Figma URL metadata ("${parsed.slug || parsed.fileKey}").`,
+    };
+  }
+}
+
+export async function generateWidgetFromMultimodal(
+  input: {
+    prompt?: string;
+    imageDataUrl?: string;
+    imageName?: string;
+    figmaUrl?: string;
+    figmaToken?: string;
+  },
+  gateway: GatewaySettings | null | undefined,
+  dataDir: string,
+): Promise<{
+  widget: WidgetDraft;
+  source: "copilot_vision" | "figma_api" | "copilot_llm" | "synthesizer";
+  sourceSummary: string;
+}> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 24_000);
+  timer.unref();
+
+  try {
+    let image = input.imageDataUrl ? parseDataUrl(input.imageDataUrl) ?? undefined : undefined;
+    let figmaInfo: Awaited<ReturnType<typeof fetchFigmaContext>> | undefined;
+
+    if (input.figmaUrl?.trim()) {
+      figmaInfo = await fetchFigmaContext(input.figmaUrl, input.figmaToken, controller.signal);
+      if (!image && figmaInfo.image) image = figmaInfo.image;
+    }
+
+    const basePrompt = input.prompt?.trim()
+      || (figmaInfo?.slug ? `Recreate the Figma design "${figmaInfo.slug}" as an interactive CEP widget` : "")
+      || (input.imageName ? `Recreate the uploaded design mockup (${input.imageName}) as an interactive CEP widget` : "Recreate the attached UI screenshot as an interactive CEP widget");
+
+    const enrichedPromptParts = [basePrompt];
+    if (image) {
+      enrichedPromptParts.push(
+        "A UI design screenshot is attached. Visually inspect the screenshot carefully: extract its real headline, badge, KPI numbers/labels, progress bars, comparison columns, checklist steps, or sliders, and map them accurately into the CEP WidgetDraft JSON schema.",
+      );
+    }
+    if (figmaInfo?.extractedText.length) {
+      enrichedPromptParts.push(`FIGMA LAYER & TEXT EXTRACTION:\n${figmaInfo.extractedText.slice(0, 30).join("\n")}`);
+    } else if (figmaInfo?.slug) {
+      enrichedPromptParts.push(`FIGMA DESIGN NAME: ${figmaInfo.slug}`);
+    }
+    const llmPrompt = enrichedPromptParts.join("\n\n");
+
+    if (gateway) {
+      try {
+        const raw = await callConfiguredLlmJson(gateway, dataDir, widgetStudioSystemPrompt, llmPrompt, controller.signal, image);
+        const parsed = widgetDraftSchema.safeParse(
+          raw && typeof raw === "object"
+            ? { ...(raw as Record<string, unknown>), prompt: basePrompt.slice(0, 600) }
+            : null,
+        );
+        if (parsed.success) {
+          const source = figmaInfo?.fetchedFromApi
+            ? "figma_api"
+            : image
+              ? "copilot_vision"
+              : "copilot_llm";
+          const sourceSummary = figmaInfo
+            ? figmaInfo.note
+            : image
+              ? `Generated from uploaded screenshot${input.imageName ? ` (${input.imageName})` : ""} via Copilot Vision.`
+              : "Generated from prompt via Copilot ACP.";
+          return { widget: parsed.data, source, sourceSummary };
+        }
+      } catch {
+        // Fall through to deterministic synthesizer
+      }
+    }
+
+    const fallbackPrompt = figmaInfo?.extractedText.length
+      ? `${basePrompt} ${figmaInfo.extractedText.slice(0, 8).join(" ")}`
+      : basePrompt;
+    return {
+      widget: generateWidgetFromText(fallbackPrompt),
+      source: "synthesizer",
+      sourceSummary: figmaInfo?.note ?? (image
+        ? `Synthesized widget structure from screenshot metadata${input.imageName ? ` (${input.imageName})` : ""}.`
+        : "Synthesized widget from text prompt."),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
