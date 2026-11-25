@@ -192,22 +192,58 @@ function ApprovalNode({ node, onFollowUp }: {
   node: Extract<DynamicCanvasNode, { type: "approval" }>;
   onFollowUp?: (prompt: string) => void;
 }) {
-  const [decision, setDecision] = useState<"pending" | "approved" | "rejected">(node.initialDecision ?? "pending");
+  const [decision, setDecision] = useState<"pending" | "approved" | "rejected" | "queued">(node.initialDecision ?? "pending");
   const [saving, setSaving] = useState(false);
   const [liveMessage, setLiveMessage] = useState<string>(node.decisionNote ?? "");
   const [error, setError] = useState("");
+  const [approverName, setApproverName] = useState(
+    node.dualControl ? "Duty Approver" : (node.requester || "CEP Operator"),
+  );
+  const [comment, setComment] = useState("");
 
-  async function decide(next: "approved" | "rejected") {
+  async function decide(next: "approved" | "rejected", queueOnly = false) {
     if (saving) return;
     setError("");
     const verb = next === "approved" ? node.approveLabel : node.rejectLabel;
+    if (node.approvalId) {
+      setSaving(true);
+      try {
+        const res = await api.decideApproval(node.approvalId, {
+          decision: next === "approved" ? "approve" : "deny",
+          actor: approverName.trim() || "CEP Approver",
+          ...(comment.trim() ? { comment: comment.trim() } : {}),
+        });
+        const apr = res.approval;
+        setDecision(next);
+        if (next === "approved" && apr.executionResult) {
+          setLiveMessage(
+            `${apr.executionResult.summary} · sfield run ${apr.executionResult.sfieldRunId}${apr.executionResult.auditId ? ` · audit ${apr.executionResult.auditId}` : ""}`,
+          );
+        } else {
+          setLiveMessage(`Approval ${apr.id} ${apr.status} by ${apr.decidedBy ?? approverName}.`);
+        }
+        notifyDomainDataUpdated();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not record approval decision.");
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     if (node.domain === "ops_incident" && node.recordId) {
       setSaving(true);
       try {
         const res = await api.decideIncident(node.recordId, {
           decision: next === "approved" ? "approve_rollback" : "reject_rollback",
-          actor: "CEP Operator",
+          actor: approverName.trim() || "CEP Operator",
+          ...(queueOnly ? { queueForApproval: true } : {}),
         });
+        if (res.status === "pending_approval" && res.approval) {
+          setDecision("queued");
+          setLiveMessage(`Queued for HITL review (${res.approval.id}) · Review in /admin/logs?source=approvals or type "show pending approvals" in Chat.`);
+          notifyDomainDataUpdated();
+          return;
+        }
         const inc = res.incident;
         setDecision(next);
         setLiveMessage(
@@ -233,8 +269,15 @@ function ApprovalNode({ node, onFollowUp }: {
       try {
         const res = await api.decideDeal(node.recordId, {
           decision: next === "approved" ? "approve_discount" : "reject_discount",
-          actor: "VP Revenue Operations",
+          actor: approverName.trim() || "VP Revenue Operations",
+          ...(queueOnly ? { queueForApproval: true } : {}),
         });
+        if (res.status === "pending_approval" && res.approval) {
+          setDecision("queued");
+          setLiveMessage(`Queued for HITL review (${res.approval.id}) · Review in /admin/logs?source=approvals or type "show pending approvals" in Chat.`);
+          notifyDomainDataUpdated();
+          return;
+        }
         const deal = res.deal;
         setDecision(next);
         setLiveMessage(
@@ -265,6 +308,14 @@ function ApprovalNode({ node, onFollowUp }: {
         <div>
           <h4>{node.title}</h4>
           {node.requester && <span className="dyn-approval-req">Requested by {node.requester}</span>}
+          {node.approvalId && (
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "4px", fontSize: "0.74rem", opacity: 0.85 }}>
+              <code>{node.approvalId}</code>
+              {node.sfieldToolRef && <code>{node.sfieldToolRef}</code>}
+              {node.payloadDigest && <code>sha256:{node.payloadDigest.slice(0, 12)}</code>}
+              {node.dualControl && <strong>4-eyes dual control</strong>}
+            </div>
+          )}
         </div>
         {node.riskLevel && (
           <span className={"dyn-risk-pill risk-" + node.riskLevel}>
@@ -280,19 +331,40 @@ function ApprovalNode({ node, onFollowUp }: {
       </dl>
       {error && <p className="dyn-form-error" role="alert">{error}</p>}
       {decision === "pending" ? (
-        <div className="dyn-approval-actions">
-          <button type="button" className="axe-primary-button" disabled={saving} onClick={() => void decide("approved")}>
-            <CheckCircle2 size={14} aria-hidden="true" />{saving ? "Applying…" : node.approveLabel}
-          </button>
-          <button type="button" className="secondary-button" disabled={saving} onClick={() => void decide("rejected")}>
-            <XCircle size={14} aria-hidden="true" />{node.rejectLabel}
-          </button>
+        <div style={{ display: "grid", gap: "10px" }}>
+          {node.approvalId && (
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.3fr)", gap: "8px" }}>
+              <label className="dyn-form-field">
+                <span>Approver</span>
+                <input value={approverName} onChange={(e) => setApproverName(e.target.value)} placeholder="Approver name" />
+              </label>
+              <label className="dyn-form-field">
+                <span>Decision note (optional)</span>
+                <input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Reason or ticket ref" />
+              </label>
+            </div>
+          )}
+          <div className="dyn-approval-actions">
+            <button type="button" className="axe-primary-button" disabled={saving} onClick={() => void decide("approved")}>
+              <CheckCircle2 size={14} aria-hidden="true" />{saving ? "Executing…" : node.approveLabel}
+            </button>
+            <button type="button" className="secondary-button" disabled={saving} onClick={() => void decide("rejected")}>
+              <XCircle size={14} aria-hidden="true" />{node.rejectLabel}
+            </button>
+            {!node.approvalId && (node.domain === "ops_incident" || node.domain === "sales_deal") && (
+              <button type="button" className="secondary-button" disabled={saving} onClick={() => void decide("approved", true)}>
+                <Clock size={14} aria-hidden="true" />Queue for Admin Review
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <div className="dyn-approval-result" role="status">
           {decision === "approved"
-            ? <><CheckCircle2 size={15} aria-hidden="true" /><strong>Approved</strong> — {liveMessage || `${node.approveLabel} recorded.`}</>
-            : <><XCircle size={15} aria-hidden="true" /><strong>Held / Rejected</strong> — {liveMessage || `${node.rejectLabel} recorded.`}</>}
+            ? <><CheckCircle2 size={15} aria-hidden="true" /><strong>Approved &amp; Executed</strong> — {liveMessage || `${node.approveLabel} recorded.`}</>
+            : decision === "queued"
+              ? <><Clock size={15} aria-hidden="true" /><strong>Queued for Approval</strong> — {liveMessage}</>
+              : <><XCircle size={15} aria-hidden="true" /><strong>Held / Denied</strong> — {liveMessage || `${node.rejectLabel} recorded.`}</>}
         </div>
       )}
     </div>

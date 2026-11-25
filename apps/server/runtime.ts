@@ -63,6 +63,38 @@ export const domainWriteToolId = "cep.domain.execute_write";
 export const domainWriteToolVersion = "1.0.0";
 export const domainWriteToolRef = `${domainWriteToolId}@${domainWriteToolVersion}`;
 
+export const connectorInvokeToolId = "cep.connector.invoke";
+export const connectorInvokeToolVersion = "1.0.0";
+export const connectorInvokeToolRef = `${connectorInvokeToolId}@${connectorInvokeToolVersion}`;
+
+const connectorInvokeInputJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["connectorId", "action", "actor"],
+  properties: {
+    connectorId: { type: "string", minLength: 1, maxLength: 64 },
+    action: { type: "string", minLength: 1, maxLength: 64 },
+    actor: { type: "string", minLength: 1, maxLength: 80 },
+    payloadJson: { type: "string", maxLength: 4000 },
+  },
+} as const;
+
+const connectorInvokeResultJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["ok", "connectorId", "connectorName", "statusCode", "elapsedMs", "summary", "responsePreview", "sandbox"],
+  properties: {
+    ok: { type: "boolean" },
+    connectorId: { type: "string", minLength: 1, maxLength: 64 },
+    connectorName: { type: "string", minLength: 1, maxLength: 100 },
+    statusCode: { type: "integer" },
+    elapsedMs: { type: "integer" },
+    summary: { type: "string", minLength: 1, maxLength: 320 },
+    responsePreview: { type: "string", maxLength: 600 },
+    sandbox: { type: "boolean" },
+  },
+} as const;
+
 const domainWriteInputJsonSchema = {
   type: "object",
   additionalProperties: false,
@@ -261,7 +293,7 @@ export class Runtime {
             actions.has(action) || agentActions.has(action)
             || ((agentId === fundingAgentId || agentId === experienceAgentId) && action === ASK_USER.policy.action)
           );
-          const writeAllowed = effect === "write" && action === domainWriteToolId && !agentId;
+          const writeAllowed = effect === "write" && (action === domainWriteToolId || action === connectorInvokeToolId) && !agentId;
           return principal.tenantId === "pzn-local" && principal.roles.includes("pzn-demo") && (readAllowed || writeAllowed)
             ? { decision: "allow", evidenceId: makeId("auth"), expiresAt: new Date(now() + axeBudget.activeSeconds * 1000).toISOString() }
             : { decision: "deny", code: "TOOL_DENIED", reason: "The demo permits scoped reads and host-governed domain writes." };
@@ -503,6 +535,7 @@ export class Runtime {
       actor: string;
       note?: string;
       updates?: Record<string, string>;
+      approvalId?: string;
     },
     signal: AbortSignal,
   ): Promise<{ summary: string; sfieldRunId: string; audit?: DomainWriteAuditEntry }> {
@@ -536,6 +569,7 @@ export class Runtime {
           actor: input.actor,
           summary: reason,
           status: "denied",
+          ...(input.approvalId ? { approvalId: input.approvalId } : {}),
         });
         throw new Error(reason);
       }
@@ -550,8 +584,90 @@ export class Runtime {
         actor: input.actor,
         summary,
         status: "succeeded",
+        ...(input.approvalId ? { approvalId: input.approvalId } : {}),
       });
       return { summary, sfieldRunId: scope.id, audit };
+    } finally {
+      await scope.close();
+    }
+  }
+
+  async executeConnectorInvoke(
+    principalId: string,
+    input: {
+      connectorId: string;
+      action: string;
+      actor: string;
+      payload?: Record<string, unknown>;
+      approvalId?: string;
+    },
+    signal: AbortSignal,
+  ): Promise<{
+    ok: boolean;
+    connectorId: string;
+    connectorName: string;
+    statusCode: number;
+    elapsedMs: number;
+    summary: string;
+    responsePreview: string;
+    sandbox: boolean;
+    sfieldRunId: string;
+    audit?: DomainWriteAuditEntry;
+  }> {
+    const scope = await this.sf.executions.open({
+      principal: principalFor(principalId),
+      purpose: "cep-connector-invoke",
+      preset: "bounded_auto",
+      budget: { maxToolCalls: 1 },
+    });
+    try {
+      const exec = await scope.registry.execute(
+        connectorInvokeToolRef,
+        {
+          connectorId: input.connectorId,
+          action: input.action,
+          actor: input.actor,
+          ...(input.payload ? { payloadJson: JSON.stringify(input.payload) } : {}),
+        },
+        { signal },
+      );
+      if (exec.status !== "succeeded" || !exec.output || typeof exec.output !== "object") {
+        const reason = exec.error?.message ?? "External connector invocation denied by sfield policy.";
+        this.writeAudit?.record({
+          sfieldRunId: scope.id,
+          sfieldToolRef: connectorInvokeToolRef,
+          domain: "external_connector",
+          recordId: input.connectorId,
+          action: input.action,
+          actor: input.actor,
+          summary: reason,
+          status: "denied",
+          ...(input.approvalId ? { approvalId: input.approvalId } : {}),
+        });
+        throw new Error(reason);
+      }
+      const out = exec.output as {
+        ok: boolean;
+        connectorId: string;
+        connectorName: string;
+        statusCode: number;
+        elapsedMs: number;
+        summary: string;
+        responsePreview: string;
+        sandbox: boolean;
+      };
+      const audit = this.writeAudit?.record({
+        sfieldRunId: scope.id,
+        sfieldToolRef: connectorInvokeToolRef,
+        domain: "external_connector",
+        recordId: out.connectorId,
+        action: input.action,
+        actor: input.actor,
+        summary: out.summary,
+        status: "succeeded",
+        ...(input.approvalId ? { approvalId: input.approvalId } : {}),
+      });
+      return { ...out, sfieldRunId: scope.id, audit };
     } finally {
       await scope.close();
     }
@@ -775,6 +891,57 @@ export class Runtime {
             recordId: inp.recordId,
             summary: `Updated Customer 360 bindings: ${applied.updatedFields.join(", ") || "none"}`,
           };
+        },
+      }),
+      defineTool({
+        id: connectorInvokeToolId,
+        version: connectorInvokeToolVersion,
+        description: "Execute an enabled external REST or MCP connector action under sfield host governance, timeout controls, and write audit logging.",
+        inputs: connectorInvokeInputJsonSchema,
+        outputs: connectorInvokeResultJsonSchema,
+        resource: { type: "external_connector", id: { ref: "inputs.connectorId" } },
+        policy: {
+          action: connectorInvokeToolId,
+          effect: "write",
+          requiresApproval: false,
+          maxAttempts: 1,
+          timeoutMs: 8_000,
+          classification: "public",
+          maxOutputBytes: 16_000,
+        },
+        handler: async (raw, ctx) => {
+          if (!this.connectorStore) throw new ToolError("CONNECTOR_STORE_UNAVAILABLE");
+          const inp = raw as { connectorId: string; action: string; actor: string; payloadJson?: string };
+          let payload: Record<string, unknown> = {};
+          if (inp.payloadJson) {
+            try {
+              const parsed = JSON.parse(inp.payloadJson) as unknown;
+              if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                payload = parsed as Record<string, unknown>;
+              }
+            } catch {
+              throw new ToolError("INVALID_PAYLOAD_JSON");
+            }
+          }
+          try {
+            const out = await this.connectorStore.invokeConnector(
+              inp.connectorId,
+              { action: inp.action, actor: inp.actor, payload },
+              ctx.signal,
+            );
+            return {
+              ok: out.ok,
+              connectorId: out.connectorId,
+              connectorName: out.connectorName,
+              statusCode: out.statusCode,
+              elapsedMs: out.elapsedMs,
+              summary: out.summary,
+              responsePreview: out.responsePreview,
+              sandbox: out.sandbox,
+            };
+          } catch (err) {
+            throw new ToolError("CONNECTOR_EXECUTION_FAILED", err instanceof Error ? err.message : "Connector failed");
+          }
         },
       }),
     ];

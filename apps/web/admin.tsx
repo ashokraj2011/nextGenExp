@@ -1,9 +1,9 @@
 import { CapabilityStudio } from "./capability-studio";
 import "./agentic.css";
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, FlaskConical, Layers, MessageSquare, Plug, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, FlaskConical, Layers, MessageSquare, Play, Plug, Plus, Trash2 } from "lucide-react";
 import type { RecommendationProviderDescriptor } from "../../packages/contracts/recommendation-provider";
-import type { ConnectorKind, ConnectorTestResult, ExternalConnector } from "../../packages/contracts/connector";
+import type { ConnectorEffect, ConnectorKind, ConnectorTestResult, ExternalConnector } from "../../packages/contracts/connector";
 import type { RecommendationDomain } from "../../packages/contracts/recommendation-provider";
 import {
   defaultAgentFundingWorkflow, defaultFundingWorkflow, fundingAgentToolLimit, fundingToolKey, fundingToolKeys,
@@ -375,11 +375,16 @@ function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
   const [connectors, setConnectors] = useState<ExternalConnector[]>([]);
   const [draftOpen, setDraftOpen] = useState(false);
   const [name, setName] = useState("");
-  const [kind, setKind] = useState<ConnectorKind>("rest_recommendation");
+  const [kind, setKind] = useState<ConnectorKind>("rest_action");
+  const [effect, setEffect] = useState<ConnectorEffect>("write");
   const [url, setUrl] = useState("");
+  const [authEnvVar, setAuthEnvVar] = useState("");
+  const [requiresApproval, setRequiresApproval] = useState(true);
+  const [dualControl, setDualControl] = useState(false);
   const [domain, setDomain] = useState<RecommendationDomain>("operations");
   const [description, setDescription] = useState("");
   const [testResults, setTestResults] = useState<Record<string, ConnectorTestResult>>({});
+  const [invokeResults, setInvokeResults] = useState<Record<string, { ok: boolean; text: string; approvalId?: string }>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
@@ -413,6 +418,45 @@ function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
     }
   }
 
+  async function invokeConn(conn: ExternalConnector) {
+    setBusyId(conn.id);
+    setError("");
+    try {
+      const res = await api.invokeConnector({
+        connectorId: conn.id,
+        action: conn.kind === "rest_action" ? "trigger_incident_webhook" : "invoke_connector",
+        actor: "CEP Admin",
+        note: `Admin invocation from Tool setup for ${conn.name}`,
+        payload: { source: "admin_tool_setup", connectorId: conn.id },
+      });
+      if (res.status === "pending_approval" && res.approval) {
+        setInvokeResults((prev) => ({
+          ...prev,
+          [conn.id]: {
+            ok: true,
+            approvalId: res.approval!.id,
+            text: `HITL Approval queued (${res.approval!.id}) · Approve in Chat ("show pending approvals") or /admin/logs?source=approvals.`,
+          },
+        }));
+      } else if (res.execution) {
+        setInvokeResults((prev) => ({
+          ...prev,
+          [conn.id]: {
+            ok: true,
+            text: `Executed via sfield (${res.execution!.sfieldRunId ?? "ok"}) · ${res.execution!.summary}`,
+          },
+        }));
+      }
+    } catch (err) {
+      setInvokeResults((prev) => ({
+        ...prev,
+        [conn.id]: { ok: false, text: messageFor(err) },
+      }));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function removeConn(id: string) {
     setBusyId(id);
     try {
@@ -427,7 +471,7 @@ function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
   async function createConnector(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim() || !url.trim()) {
-      setError("Connector name and valid URL are required.");
+      setError("Connector name and valid URL (https:// or sandbox://) are required.");
       return;
     }
     setBusyId("new");
@@ -441,11 +485,17 @@ function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
         domains: [domain],
         enabled: true,
         timeoutMs: 3000,
+        ...(authEnvVar.trim() ? { authHeaderName: "Authorization", authEnvVar: authEnvVar.trim().toUpperCase() } : {}),
+        effect,
+        requiresApproval,
+        dualControl,
+        sandboxMode: url.trim().startsWith("sandbox://"),
         description: description.trim() || `External ${kind} connector`,
       });
       setConnectors(res.connectors);
       setName("");
       setUrl("");
+      setAuthEnvVar("");
       setDescription("");
       setDraftOpen(false);
       onUpdated();
@@ -465,8 +515,8 @@ function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
             External REST &amp; MCP Connector Registry
           </h2>
           <p>
-            Plug in external decisioning engines (Pega CDH, Adobe, ServiceNow, PagerDuty, Salesforce, or MCP bridges) with zero code.
-            Enabled connectors mount live into <code>cep.recommendations.arbitrate@1.0.0</code>.
+            Mount external decisioning engines into <code>cep.recommendations.arbitrate@1.0.0</code> or execute external REST/MCP actions via{" "}
+            <code>cep.connector.invoke@1.0.0</code> with server-side secret resolution, HITL approval gating, and immutable Write Audit logging.
           </p>
         </div>
         <button type="button" className="secondary-button" onClick={() => setDraftOpen((v) => !v)}>
@@ -479,11 +529,17 @@ function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
           <div className="admin-fields">
             <div className="setup-field">
               <label htmlFor="conn-name">Connector name</label>
-              <input id="conn-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g., Salesforce Deal Ranker" required />
+              <input id="conn-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g., ServiceNow Change Webhook" required />
             </div>
             <div className="setup-field">
               <label htmlFor="conn-kind">Type</label>
-              <select id="conn-kind" value={kind} onChange={(e) => setKind(e.target.value as ConnectorKind)}>
+              <select id="conn-kind" value={kind} onChange={(e) => {
+                const nextKind = e.target.value as ConnectorKind;
+                setKind(nextKind);
+                if (nextKind === "rest_action") { setEffect("write"); setRequiresApproval(true); }
+                else { setEffect("read"); setRequiresApproval(false); }
+              }}>
+                <option value="rest_action">REST Action Tool (sfield)</option>
                 <option value="rest_recommendation">REST Recommendation Provider</option>
                 <option value="mcp_bridge">MCP Bridge</option>
                 <option value="rest_data">REST Data Source</option>
@@ -499,13 +555,36 @@ function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
               </select>
             </div>
           </div>
-          <div className="setup-field">
-            <label htmlFor="conn-url">Endpoint URL</label>
-            <input id="conn-url" type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://api.example.invalid/v1/recommend" required />
+          <div className="admin-fields">
+            <div className="setup-field">
+              <label htmlFor="conn-url">Endpoint URL (https:// or sandbox://)</label>
+              <input id="conn-url" type="text" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="sandbox://servicenow/change/create" required />
+            </div>
+            <div className="setup-field">
+              <label htmlFor="conn-effect">sfield Effect</label>
+              <select id="conn-effect" value={effect} onChange={(e) => setEffect(e.target.value as ConnectorEffect)}>
+                <option value="write">write (audited)</option>
+                <option value="read">read</option>
+              </select>
+            </div>
+            <div className="setup-field">
+              <label htmlFor="conn-env">Auth Secret Env Var (optional)</label>
+              <input id="conn-env" value={authEnvVar} onChange={(e) => setAuthEnvVar(e.target.value)} placeholder="e.g., SERVICENOW_API_KEY" />
+            </div>
           </div>
           <div className="setup-field">
             <label htmlFor="conn-desc">Description</label>
-            <input id="conn-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What this connector provides" />
+            <input id="conn-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What this connector executes or provides" />
+          </div>
+          <div style={{ display: "flex", gap: "18px", flexWrap: "wrap", alignItems: "center" }}>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "0.86rem" }}>
+              <input type="checkbox" checked={requiresApproval} onChange={(e) => setRequiresApproval(e.target.checked)} />
+              Require HITL approval before execution
+            </label>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "0.86rem" }}>
+              <input type="checkbox" checked={dualControl} onChange={(e) => setDualControl(e.target.checked)} />
+              Require separate approver (4-eyes)
+            </label>
           </div>
           <div>
             <button type="submit" className="send-button" disabled={busyId === "new"}>
@@ -517,21 +596,38 @@ function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
       <ul className="admin-tools" style={{ marginTop: "12px" }}>
         {connectors.map((conn) => {
           const test = testResults[conn.id];
+          const invoke = invokeResults[conn.id];
           return (
             <li key={conn.id}>
               <div className="admin-tool" style={{ cursor: "default", alignItems: "flex-start" }}>
                 <span>
                   <strong>{conn.name}</strong>
-                  <code>{conn.kind} · {conn.method} {conn.url} · domains: {conn.domains.join(", ")}</code>
+                  <code>
+                    {conn.kind} · {conn.effect} · {conn.method} {conn.url} · domains: {conn.domains.join(", ")}
+                    {conn.requiresApproval ? " · HITL approval" : ""}
+                    {conn.dualControl ? " · 4-eyes" : ""}
+                    {conn.authEnvVar ? ` · env:${conn.authEnvVar}` : ""}
+                  </code>
                   <small>{conn.description}</small>
                   {test && (
                     <small style={{ color: test.ok ? "var(--teal-dark)" : "#b91c1c", fontWeight: 600 }}>
                       Test ({test.elapsedMs}ms): {test.message}
                     </small>
                   )}
+                  {invoke && (
+                    <small style={{ color: invoke.ok ? "var(--teal-dark)" : "#b91c1c", fontWeight: 600 }}>
+                      {invoke.text}{" "}
+                      {invoke.approvalId && (
+                        <a href={`${adminPaths.logs}?source=approvals`} style={{ textDecoration: "underline" }}>Open Approval Queue</a>
+                      )}
+                    </small>
+                  )}
                   <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
                     <button type="button" className="secondary-button" disabled={busyId === conn.id} onClick={() => void testConn(conn.id)}>
                       <FlaskConical size={13} aria-hidden="true" />Test connection
+                    </button>
+                    <button type="button" className="secondary-button" disabled={busyId === conn.id || !conn.enabled} onClick={() => void invokeConn(conn)}>
+                      <Play size={13} aria-hidden="true" />Invoke via sfield
                     </button>
                     <button type="button" className="secondary-button" disabled={busyId === conn.id} onClick={() => void removeConn(conn.id)}>
                       <Trash2 size={13} aria-hidden="true" />Remove

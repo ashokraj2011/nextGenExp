@@ -94,20 +94,24 @@ export const dynamicFormNodeSchema = z.object({
 
 export const dynamicApprovalNodeSchema = z.object({
   type: z.literal("approval"),
-  title: z.string().trim().min(1).max(96),
+  title: z.string().trim().min(1).max(120),
   summary: bodyText,
   requester: z.string().trim().max(80).optional(),
   riskLevel: z.enum(["low", "medium", "high"]).optional(),
   details: z.array(z.object({
-    label: z.string().trim().min(1).max(48),
-    value: z.string().trim().min(1).max(100),
-  }).strict()).min(1).max(6),
+    label: z.string().trim().min(1).max(64),
+    value: z.string().trim().min(1).max(160),
+  }).strict()).min(1).max(8),
   approveLabel: z.string().trim().min(1).max(40),
   rejectLabel: z.string().trim().min(1).max(40),
   recordId: z.string().trim().max(64).optional(),
-  domain: z.enum(["ops_incident", "sales_deal", "generic"]).optional(),
+  domain: z.enum(["ops_incident", "sales_deal", "external_connector", "generic"]).optional(),
+  approvalId: z.string().trim().max(64).optional(),
+  payloadDigest: z.string().trim().max(128).optional(),
+  dualControl: z.boolean().optional(),
+  sfieldToolRef: z.string().trim().max(80).optional(),
   initialDecision: z.enum(["pending", "approved", "rejected"]).optional(),
-  decisionNote: z.string().trim().max(200).optional(),
+  decisionNote: z.string().trim().max(240).optional(),
 }).strict();
 
 export const dynamicTimelineNodeSchema = z.object({

@@ -73,12 +73,13 @@ export type DomainWriteAuditEntry = {
   auditId: string;
   sfieldRunId: string;
   sfieldToolRef: string;
-  domain: "ops_incident" | "sales_deal" | "customer360";
+  domain: "ops_incident" | "sales_deal" | "customer360" | "external_connector";
   recordId: string;
   action: string;
   actor: string;
   summary: string;
   status: "succeeded" | "denied";
+  approvalId?: string;
   createdAt: string;
 };
 export type EngagementAnalyticsView = {
@@ -99,7 +100,9 @@ export type EngagementAnalyticsView = {
     opsIncident: number;
     salesDeal: number;
     customer360: number;
+    externalConnector: number;
   };
+  pendingApprovalsCount?: number;
   recentWrites: DomainWriteAuditEntry[];
 };
 export type TurnView = {

@@ -52,13 +52,13 @@ export const DOMAIN_PACKS: readonly DomainPack[] = [
     topics: [
       { id: "p1-triage", name: "Active P1 Triage", prompt: "Build an IT incident triage dashboard for our active P1 alert" },
       { id: "rollback", name: "Rollback Approvals", prompt: "Show the production rollback approval card for INC-4821" },
-      { id: "timeline", name: "Incident Timeline", prompt: "Build a post-incident timeline and root-cause checklist for INC-4821" },
-      { id: "intake", name: "Escalation Form", prompt: "Create an incident escalation intake form for on-call engineering" },
+      { id: "pagerduty", name: "PagerDuty Webhook (HITL)", prompt: "Invoke PagerDuty connector for INC-4821 escalation" },
+      { id: "approvals", name: "Pending Approvals Queue", prompt: "Show pending approvals" },
     ],
     quickPrompts: [
       { label: "Triage P1 · INC-4821", prompt: "Build an IT incident triage dashboard for our active P1 alert" },
-      { label: "Post-incident timeline", prompt: "Build a post-incident timeline and root-cause checklist for INC-4821" },
-      { label: "Escalation intake form", prompt: "Create an incident escalation intake form for on-call engineering" },
+      { label: "Invoke PagerDuty (HITL)", prompt: "Invoke PagerDuty connector for INC-4821 escalation" },
+      { label: "Show pending approvals", prompt: "Show pending approvals" },
     ],
   },
   {

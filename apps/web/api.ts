@@ -3,7 +3,19 @@ import type { SavedWidget, WidgetDraft, WidgetLibraryChange } from "../../packag
 import type { IncidentDecisionInput, IncidentRecord, IncidentUpsertInput, OpsIncidentsView } from "../../packages/contracts/ops";
 import type { DealDecisionInput, DealRecord, DealUpsertInput, SalesDealsView } from "../../packages/contracts/sales";
 import type { RecommendationProviderDescriptor } from "../../packages/contracts/recommendation-provider";
-import type { ConnectorTestResult, ConnectorUpsertInput, ExternalConnector } from "../../packages/contracts/connector";
+import type {
+  ConnectorInvokeExecution,
+  ConnectorInvokeInput,
+  ConnectorTestResult,
+  ConnectorUpsertInput,
+  ExternalConnector,
+} from "../../packages/contracts/connector";
+import type {
+  ApprovalDecisionInput,
+  ApprovalPolicySettings,
+  ApprovalRecord,
+  ApprovalsView,
+} from "../../packages/contracts/approval";
 import type { Customer360AdminRecord, Customer360ProfileInput } from "../../packages/contracts/customer-360";
 import type {
   ExperienceRegistryView,
@@ -131,21 +143,48 @@ export const api = {
   saveOpsIncident: (input: IncidentUpsertInput) => request<{ incident: IncidentRecord; view: OpsIncidentsView }>("/api/ops/incidents", input),
   deleteOpsIncident: (incidentId: string) => request<{ deleted: boolean; view: OpsIncidentsView }>("/api/ops-incidents/" + incidentId + "/delete", {}),
   resetOpsIncidents: () => request<OpsIncidentsView>("/api/ops/incidents/reset", {}),
-  decideIncident: (incidentId: string, input: IncidentDecisionInput) => request<{ incident: IncidentRecord; view: OpsIncidentsView }>(
+  decideIncident: (incidentId: string, input: IncidentDecisionInput & { queueForApproval?: boolean }) => request<{
+    incident: IncidentRecord;
+    view: OpsIncidentsView;
+    status?: "pending_approval";
+    approval?: ApprovalRecord;
+    sfieldRunId?: string;
+    auditId?: string;
+  }>(
     "/api/ops-incidents/" + incidentId + "/decision", input,
   ),
   salesDeals: () => request<SalesDealsView>("/api/sales/deals"),
   saveSalesDeal: (input: DealUpsertInput) => request<{ deal: DealRecord; view: SalesDealsView }>("/api/sales/deals", input),
   deleteSalesDeal: (dealId: string) => request<{ deleted: boolean; view: SalesDealsView }>("/api/sales-deals/" + dealId + "/delete", {}),
   resetSalesDeals: () => request<SalesDealsView>("/api/sales/deals/reset", {}),
-  decideDeal: (dealId: string, input: DealDecisionInput) => request<{ deal: DealRecord; view: SalesDealsView }>(
+  decideDeal: (dealId: string, input: DealDecisionInput & { queueForApproval?: boolean }) => request<{
+    deal: DealRecord;
+    view: SalesDealsView;
+    status?: "pending_approval";
+    approval?: ApprovalRecord;
+    sfieldRunId?: string;
+    auditId?: string;
+  }>(
     "/api/sales-deals/" + dealId + "/decision", input,
   ),
-  recommendationProviders: () => request<{ toolRef: string; writeToolRef?: string; providers: RecommendationProviderDescriptor[] }>("/api/admin/recommendation-providers"),
+  recommendationProviders: () => request<{ toolRef: string; writeToolRef?: string; connectorToolRef?: string; providers: RecommendationProviderDescriptor[] }>("/api/admin/recommendation-providers"),
   connectors: () => request<{ connectors: ExternalConnector[] }>("/api/admin/connectors"),
   saveConnector: (input: ConnectorUpsertInput) => request<{ connector: ExternalConnector; connectors: ExternalConnector[] }>("/api/admin/connectors", input),
   deleteConnector: (id: string) => request<{ deleted: boolean; connectors: ExternalConnector[] }>("/api/admin/connector-delete", { id }),
   testConnector: (id: string) => request<ConnectorTestResult>("/api/admin/connector-test", { id }),
+  invokeConnector: (input: ConnectorInvokeInput) => request<{
+    status: "pending_approval" | "executed";
+    approval?: ApprovalRecord;
+    approvalsView?: ApprovalsView;
+    execution?: ConnectorInvokeExecution;
+  }>("/api/admin/connector-invoke", input),
+  approvals: () => request<ApprovalsView>("/api/approvals"),
+  saveApprovalPolicy: (policy: Partial<ApprovalPolicySettings>) => request<{ policy: ApprovalPolicySettings; view: ApprovalsView }>("/api/approvals/policy", policy),
+  decideApproval: (approvalId: string, input: ApprovalDecisionInput) => request<{
+    approval: ApprovalRecord;
+    execution?: { summary?: string; sfieldRunId?: string; audit?: DomainWriteAuditEntry; statusCode?: number; responsePreview?: string };
+    view: ApprovalsView;
+  }>("/api/approvals/" + approvalId + "/decide", input),
   writeAudit: () => request<{ toolRef: string; entries: DomainWriteAuditEntry[] }>("/api/admin/write-audit"),
   engagementAnalytics: () => request<EngagementAnalyticsView>("/api/admin/engagement-analytics"),
   previewFunding: (conversationId: string, clientRequestId: string, source?: typeof pendingActionsContext) => request<TurnAccepted>(

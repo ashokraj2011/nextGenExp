@@ -23,10 +23,12 @@ import { incidentDecisionInputSchema, incidentUpsertInputSchema } from "../../pa
 import { SalesDealStore } from "./sales-store";
 import { dealDecisionInputSchema, dealUpsertInputSchema } from "../../packages/contracts/sales";
 import { ConnectorStore } from "./connector-store";
-import { connectorUpsertSchema } from "../../packages/contracts/connector";
+import { connectorInvokeInputSchema, connectorUpsertSchema } from "../../packages/contracts/connector";
+import { ApprovalStore } from "./approval-store";
+import { approvalDecisionInputSchema, approvalPolicySettingsSchema, type ApprovalRecord } from "../../packages/contracts/approval";
 import { WriteAuditStore } from "./write-audit";
 import { recommendationArbitrateToolRef } from "../../packages/contracts/recommendation-provider";
-import { domainWriteToolRef, Runtime, sfieldNamespace } from "./runtime";
+import { connectorInvokeToolRef, domainWriteToolRef, Runtime, sfieldNamespace } from "./runtime";
 import { WidgetLibraryStore } from "./widget-library";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { capabilityIdSchema, capabilityRef, customerEventSchema, versionSchema, type ExecutionBudget } from "../../packages/contracts/agentic";
@@ -220,6 +222,7 @@ export async function startApp(options: Options) {
   const opsStore = new OpsIncidentStore(options.dataDir);
   const salesStore = new SalesDealStore(options.dataDir);
   const connectorStore = new ConnectorStore(options.dataDir);
+  const approvalStore = new ApprovalStore(options.dataDir);
   const writeAudit = new WriteAuditStore(options.dataDir);
   store.setDomainBindingContext(() => ({ incident: opsStore.primaryIncident(), deal: salesStore.primaryDeal() }));
   const registry = new CapabilityRegistry(store);
@@ -239,7 +242,114 @@ export async function startApp(options: Options) {
   }
   const experience = new ExperienceService(store, runtime, selectionMode, now, inspectorEnabled, offline && {
     chat: new ChatHarness(offline), close: () => offline.close(),
-  }, { gateway: options.gateway, dataDir: options.dataDir, customer360, portfolioSnapshots, goalProgressProvider, opsStore, salesStore });
+  }, { gateway: options.gateway, dataDir: options.dataDir, customer360, portfolioSnapshots, goalProgressProvider, opsStore, salesStore, connectorStore, approvalStore });
+
+  async function executeApprovedRecord(principalId: string, record: ApprovalRecord) {
+    if (record.targetKind === "external_connector") {
+      const action = record.action;
+      const actor = record.decidedBy ?? record.requester;
+      const payload = record.payload;
+      if (runtime) {
+        const exec = await runtime.executeConnectorInvoke(principalId, {
+          connectorId: record.recordId,
+          action,
+          actor,
+          payload,
+          approvalId: record.id,
+        }, AbortSignal.timeout(8000));
+        const finalRecord = approvalStore.markExecuted(record.id, {
+          summary: exec.summary,
+          sfieldRunId: exec.sfieldRunId,
+          ...(exec.audit?.auditId ? { auditId: exec.audit.auditId } : {}),
+          statusCode: exec.statusCode,
+          responsePreview: exec.responsePreview,
+        }) ?? record;
+        return { approval: finalRecord, execution: exec };
+      }
+      const exec = await connectorStore.invokeConnector(record.recordId, { action, actor, payload }, AbortSignal.timeout(8000));
+      const audit = writeAudit.record({
+        sfieldRunId: "offline",
+        sfieldToolRef: connectorInvokeToolRef,
+        domain: "external_connector",
+        recordId: exec.connectorId,
+        action,
+        actor,
+        summary: exec.summary,
+        status: "succeeded",
+        approvalId: record.id,
+      });
+      const finalRecord = approvalStore.markExecuted(record.id, {
+        summary: exec.summary,
+        sfieldRunId: "offline",
+        auditId: audit.auditId,
+        statusCode: exec.statusCode,
+        responsePreview: exec.responsePreview,
+      }) ?? record;
+      return { approval: finalRecord, execution: { ...exec, sfieldRunId: "offline", auditId: audit.auditId } };
+    }
+
+    const domain = record.domain as "ops_incident" | "sales_deal" | "customer360";
+    const actor = record.decidedBy ?? record.requester;
+    const note = typeof record.payload.note === "string" ? record.payload.note : record.comment;
+    const updates = record.payload.updates && typeof record.payload.updates === "object"
+      ? (record.payload.updates as Record<string, string>)
+      : undefined;
+    if (runtime) {
+      const governed = await runtime.executeGovernedWrite(principalId, {
+        domain,
+        recordId: record.recordId,
+        action: record.action,
+        actor,
+        ...(note ? { note } : {}),
+        ...(updates ? { updates } : {}),
+        approvalId: record.id,
+      }, AbortSignal.timeout(5000));
+      const finalRecord = approvalStore.markExecuted(record.id, {
+        summary: governed.summary,
+        sfieldRunId: governed.sfieldRunId,
+        ...(governed.audit?.auditId ? { auditId: governed.audit.auditId } : {}),
+      }) ?? record;
+      return { approval: finalRecord, execution: governed };
+    }
+    let summary = `${record.action} applied to ${record.recordId}`;
+    if (domain === "ops_incident") {
+      const updated = opsStore.decide(record.recordId, {
+        decision: record.action as "approve_rollback" | "reject_rollback" | "resolve" | "escalate",
+        actor,
+        ...(note ? { note } : {}),
+      });
+      if (!updated) throw new ApiError(404, "not_found", "Incident not found.");
+      summary = `${updated.id} → ${updated.status} (error rate ${updated.errorRatePct}%, p95 ${updated.p95LatencyMs}ms)`;
+    } else if (domain === "sales_deal") {
+      const updated = salesStore.decide(record.recordId, {
+        decision: record.action as "approve_discount" | "reject_discount" | "advance_stage",
+        actor,
+        ...(note ? { note } : {}),
+      });
+      if (!updated) throw new ApiError(404, "not_found", "Deal not found.");
+      summary = `${updated.id} (${updated.accountName}) → ${updated.stage} (${updated.discountStatus}, ${updated.winProbabilityPct}% prob.)`;
+    } else if (updates) {
+      const applied = profileStore.applyBindings(record.recordId, updates, now());
+      summary = `Updated Customer 360 bindings: ${applied.updatedFields.join(", ") || "none"}`;
+    }
+    const audit = writeAudit.record({
+      sfieldRunId: "offline",
+      sfieldToolRef: domainWriteToolRef,
+      domain,
+      recordId: record.recordId,
+      action: record.action,
+      actor,
+      summary,
+      status: "succeeded",
+      approvalId: record.id,
+    });
+    const finalRecord = approvalStore.markExecuted(record.id, {
+      summary,
+      sfieldRunId: "offline",
+      auditId: audit.auditId,
+    }) ?? record;
+    return { approval: finalRecord, execution: { summary, sfieldRunId: "offline", audit } };
+  }
   const mode = options.mode ?? "live";
   let vite: ViteDevServer | undefined;
   const streams = new Set<ServerResponse>();
@@ -597,6 +707,7 @@ export async function startApp(options: Options) {
       return json(res, {
         toolRef: recommendationArbitrateToolRef,
         writeToolRef: domainWriteToolRef,
+        connectorToolRef: connectorInvokeToolRef,
         providers: runtime?.recommendationProviderDescriptors() ?? [],
       });
     }
@@ -615,6 +726,102 @@ export async function startApp(options: Options) {
       const { id: connId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());
       return json(res, await connectorStore.testConnector(connId));
     }
+    if (
+      ((resource === "admin" && id === "connector-invoke" && !operation && inspectorEnabled)
+        || (resource === "connectors" && id === "invoke" && !operation))
+      && method === "POST"
+    ) {
+      const rawInput = await body(req, connectorInvokeInputSchema);
+      const action = rawInput.action ?? "invoke";
+      const actor = rawInput.actor ?? "CEP Operator";
+      const payload = rawInput.payload ?? {};
+      const conn = connectorStore.findById(rawInput.connectorId);
+      if (!conn) throw new ApiError(404, "not_found", "Connector not found.");
+      if (!conn.enabled) throw new ApiError(409, "connector_disabled", `Connector "${conn.name}" is disabled.`);
+      if (approvalStore.shouldGateConnector(conn)) {
+        const approval = approvalStore.createPending({
+          targetKind: "external_connector",
+          sfieldToolRef: connectorInvokeToolRef,
+          domain: "external_connector",
+          recordId: conn.id,
+          action,
+          title: `External Connector · ${conn.name}`,
+          summary: rawInput.note?.trim() || `Execute "${action}" against ${conn.url} (${conn.method}) via ${connectorInvokeToolRef}.`,
+          riskLevel: conn.effect === "write" ? "high" : "medium",
+          payload,
+          details: [
+            { label: "Connector", value: conn.name },
+            { label: "Endpoint", value: `${conn.method} ${conn.url}` },
+            { label: "Action", value: action },
+            { label: "sfield Effect", value: conn.effect },
+            { label: "4-Eyes Dual Control", value: (conn.dualControl || approvalStore.getPolicy().defaultDualControl) ? "Required" : "Inline allowed" },
+          ],
+          requester: actor,
+          dualControl: conn.dualControl || approvalStore.getPolicy().defaultDualControl,
+        });
+        return json(res, { status: "pending_approval", approval, approvalsView: approvalStore.view() }, 202);
+      }
+      if (runtime) {
+        const execution = await runtime.executeConnectorInvoke(principalId, {
+          connectorId: conn.id,
+          action,
+          actor,
+          payload,
+        }, AbortSignal.timeout(8000));
+        return json(res, { status: "executed", execution });
+      }
+      const execution = await connectorStore.invokeConnector(conn.id, {
+        action,
+        actor,
+        payload,
+      }, AbortSignal.timeout(8000));
+      const audit = writeAudit.record({
+        sfieldRunId: "offline",
+        sfieldToolRef: connectorInvokeToolRef,
+        domain: "external_connector",
+        recordId: conn.id,
+        action,
+        actor,
+        summary: execution.summary,
+        status: "succeeded",
+      });
+      return json(res, { status: "executed", execution: { ...execution, sfieldRunId: "offline", auditId: audit.auditId } });
+    }
+    if (resource === "approvals" && !id && method === "GET") {
+      return json(res, approvalStore.view());
+    }
+    if (resource === "approvals" && id === "policy" && !operation && method === "POST" && inspectorEnabled) {
+      const next = await body(req, approvalPolicySettingsSchema.partial());
+      const policy = approvalStore.updatePolicy(next);
+      return json(res, { policy, view: approvalStore.view() });
+    }
+    if (resource === "approvals" && id && operation === "decide" && method === "POST") {
+      const decisionInput = await body(req, approvalDecisionInputSchema);
+      const outcome = approvalStore.decide(id, decisionInput);
+      if (!outcome.ok) {
+        throw new ApiError(outcome.status, outcome.code, outcome.message);
+      }
+      if (outcome.record.status === "denied") {
+        writeAudit.record({
+          sfieldRunId: "approval_denied",
+          sfieldToolRef: outcome.record.sfieldToolRef,
+          domain: outcome.record.domain,
+          recordId: outcome.record.recordId,
+          action: outcome.record.action,
+          actor: decisionInput.actor,
+          summary: `Denied by ${decisionInput.actor}${decisionInput.comment ? `: ${decisionInput.comment}` : ""}`,
+          status: "denied",
+          approvalId: outcome.record.id,
+        });
+        return json(res, { approval: outcome.record, view: approvalStore.view() });
+      }
+      const executed = await executeApprovedRecord(principalId, outcome.record);
+      return json(res, {
+        approval: executed.approval,
+        execution: executed.execution,
+        view: approvalStore.view(),
+      });
+    }
     if (resource === "admin" && id === "write-audit" && !operation && method === "GET" && inspectorEnabled) {
       return json(res, {
         toolRef: domainWriteToolRef,
@@ -632,7 +839,9 @@ export async function startApp(options: Options) {
           opsIncident: writes.filter((w) => w.domain === "ops_incident").length,
           salesDeal: writes.filter((w) => w.domain === "sales_deal").length,
           customer360: writes.filter((w) => w.domain === "customer360").length,
+          externalConnector: writes.filter((w) => w.domain === "external_connector").length,
         },
+        pendingApprovalsCount: approvalStore.pending().length,
         recentWrites: writes.slice(0, 15),
       });
     }
@@ -650,7 +859,35 @@ export async function startApp(options: Options) {
       return json(res, opsStore.remove(id));
     }
     if (resource === "ops-incidents" && id && operation === "decision" && method === "POST") {
-      const data = await body(req, incidentDecisionInputSchema);
+      const data = await body(req, incidentDecisionInputSchema.extend({ queueForApproval: z.boolean().optional() }));
+      const existingInc = opsStore.findById(id);
+      if (!existingInc) throw new ApiError(404, "not_found", "Incident not found.");
+      const policy = approvalStore.getPolicy();
+      const shouldQueue = Boolean(data.queueForApproval) || (
+        data.decision === "approve_rollback" && policy.gateHighRiskOpsRollbacks && policy.defaultDualControl
+      );
+      if (shouldQueue) {
+        const approval = approvalStore.createPending({
+          targetKind: "domain_write",
+          sfieldToolRef: domainWriteToolRef,
+          domain: "ops_incident",
+          recordId: existingInc.id,
+          action: data.decision,
+          title: `Production Rollback · ${existingInc.id} (${existingInc.currentRelease} → ${existingInc.previousRelease})`,
+          summary: existingInc.summary,
+          riskLevel: existingInc.severity === "P1" ? "high" : "medium",
+          payload: { decision: data.decision, ...(data.note ? { note: data.note } : {}) },
+          details: [
+            { label: "Incident", value: `${existingInc.id} (${existingInc.severity})` },
+            { label: "Service", value: `${existingInc.service} · ${existingInc.environment}` },
+            { label: "Release Change", value: `${existingInc.currentRelease} → ${existingInc.previousRelease}` },
+            { label: "Error Rate", value: `${existingInc.errorRatePct}% (p95 ${existingInc.p95LatencyMs}ms)` },
+          ],
+          requester: data.actor?.trim() || "On-Call SRE Commander",
+          dualControl: policy.defaultDualControl,
+        });
+        return json(res, { status: "pending_approval", approval, incident: existingInc, view: opsStore.view() }, 202);
+      }
       if (runtime) {
         const governed = await runtime.executeGovernedWrite(principalId, {
           domain: "ops_incident",
@@ -691,7 +928,35 @@ export async function startApp(options: Options) {
       return json(res, salesStore.remove(id));
     }
     if (resource === "sales-deals" && id && operation === "decision" && method === "POST") {
-      const data = await body(req, dealDecisionInputSchema);
+      const data = await body(req, dealDecisionInputSchema.extend({ queueForApproval: z.boolean().optional() }));
+      const existingDeal = salesStore.list().find((d) => d.id.toLowerCase() === id.toLowerCase());
+      if (!existingDeal) throw new ApiError(404, "not_found", "Deal not found.");
+      const policy = approvalStore.getPolicy();
+      const shouldQueue = Boolean(data.queueForApproval) || (
+        data.decision === "approve_discount" && existingDeal.discountPct > 15 && policy.gateHighRiskSalesDiscounts && policy.defaultDualControl
+      );
+      if (shouldQueue) {
+        const approval = approvalStore.createPending({
+          targetKind: "domain_write",
+          sfieldToolRef: domainWriteToolRef,
+          domain: "sales_deal",
+          recordId: existingDeal.id,
+          action: data.decision,
+          title: `Deal Desk Discount · ${existingDeal.accountName} (${existingDeal.discountPct}% off)`,
+          summary: existingDeal.summary,
+          riskLevel: existingDeal.discountPct > 15 ? "high" : "medium",
+          payload: { decision: data.decision, ...(data.note ? { note: data.note } : {}) },
+          details: [
+            { label: "Deal ID", value: existingDeal.id },
+            { label: "Account", value: existingDeal.accountName },
+            { label: "ARR", value: `$${existingDeal.arrUsd.toLocaleString("en-US")}` },
+            { label: "Discount", value: `${existingDeal.discountPct}% (Standard cap: 15%)` },
+          ],
+          requester: data.actor?.trim() || "VP Revenue Operations",
+          dualControl: policy.defaultDualControl,
+        });
+        return json(res, { status: "pending_approval", approval, deal: existingDeal, view: salesStore.view() }, 202);
+      }
       if (runtime) {
         const governed = await runtime.executeGovernedWrite(principalId, {
           domain: "sales_deal",

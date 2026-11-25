@@ -6,12 +6,17 @@ import { runCopilotPrompt } from "./copilot-acp-client";
 import type { GatewaySettings } from "./gateway";
 import type { OpsIncidentStore } from "./ops-store";
 import type { SalesDealStore } from "./sales-store";
+import type { ConnectorStore } from "./connector-store";
+import type { ApprovalStore } from "./approval-store";
+import { connectorInvokeToolRef } from "./runtime";
 import { generateWidgetFromText } from "./widget-library";
 
-const dynamicUiTrigger = /\b(widget|table|bar chart|chart|graph|dashboard|visuali[sz]e|visuali[sz]ation|calculator|simulator|matrix|breakdown|dynamic ui|custom ui|interactive|approval\s+(?:card|flow|form|workflow|request)|timeline|roadmap|triage|incident\s+(?:triage|dashboard|timeline|queue|status|report|response)|rollback|deal\s+desk|sales\s+pipeline|discount\s+approval|close[- ]plan|intake\s+form|build\s+(?:me\s+)?a\b|design\s+(?:me\s+)?a\b|generate\s+(?:me\s+)?a\b|create\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist|workflow)|make\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist))\b/i;
+const dynamicUiTrigger = /\b(widget|table|bar chart|chart|graph|dashboard|visuali[sz]e|visuali[sz]ation|calculator|simulator|matrix|breakdown|dynamic ui|custom ui|interactive|approval\s+(?:card|flow|form|workflow|request|queue)|pending\s+approvals?|show\s+(?:my\s+)?approvals?|review\s+approvals?|hitl\s+queue|pagerduty|external\s+connector|invoke\s+connector|run\s+connector|trigger\s+webhook|timeline|roadmap|triage|incident\s+(?:triage|dashboard|timeline|queue|status|report|response)|rollback|deal\s+desk|sales\s+pipeline|discount\s+approval|close[- ]plan|intake\s+form|build\s+(?:me\s+)?a\b|design\s+(?:me\s+)?a\b|generate\s+(?:me\s+)?a\b|create\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist|workflow)|make\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist))\b/i;
 const nonDynamicGuard = /\b(weather|stock price|tomorrow|create a? ?rule)\b/i;
 const opsIncidentTrigger = /\b(incident|triage|rollback|sre|sev\s*[0-3]|p[1-3]\b|latency|5xx|error rate|it ops|operations dashboard|post-incident|production alert|inc-\d+)\b/i;
 const salesDealTrigger = /\b(deal\s*desk|deal-\d+|sales\s*pipeline|pipeline\s*(?:breakdown|chart|table|forecast)|revops|discount\s*approval|pricing\s*exception|mutual\s*action\s*plan|close[- ]plan|acme\s*cloud|enterprise\s*renewal)\b/i;
+const approvalQueueTrigger = /\b(pending\s+approvals?|approval\s+queue|show\s+(?:my\s+)?approvals?|review\s+approvals?|hitl\s+queue)\b/i;
+const connectorActionTrigger = /\b(pagerduty|external\s+connector|invoke\s+connector|run\s+connector|trigger\s+webhook|servicenow\s+webhook)\b/i;
 
 export function isDynamicUiRequest(message: string): boolean {
   const clean = message.trim();
@@ -25,6 +30,14 @@ export function isOpsIncidentPrompt(message: string): boolean {
 
 export function isSalesDealPrompt(message: string): boolean {
   return salesDealTrigger.test(message);
+}
+
+export function isApprovalQueuePrompt(message: string): boolean {
+  return approvalQueueTrigger.test(message);
+}
+
+export function isConnectorActionPrompt(message: string): boolean {
+  return connectorActionTrigger.test(message);
 }
 
 function stripJsonFences(raw: string): string {
@@ -450,6 +463,173 @@ export function synthesizeDynamicCanvas(
   };
 }
 
+function buildApprovalQueueCanvas(approvalStore: ApprovalStore, prompt: string): { intro: string; canvas: DynamicCanvasProps } {
+  const view = approvalStore.view();
+  const pending = view.approvals.filter((a) => a.status === "pending");
+  const decided = view.approvals.filter((a) => a.status !== "pending").slice(0, 6);
+  const nodes: DynamicCanvasNode[] = [
+    {
+      type: "metrics",
+      items: [
+        { label: "Pending Approvals", value: String(view.pendingCount), delta: "Live sfield HITL queue" },
+        { label: "Approval Mode", value: view.policy.defaultDualControl ? "4-Eyes Dual Control" : "Inline Chat Allowed", delta: "/admin/logs?source=approvals" },
+        { label: "Total Logged", value: String(view.approvals.length), delta: "SHA-256 digest bound" },
+      ],
+    },
+  ];
+  if (pending.length === 0) {
+    nodes.push({
+      type: "callout",
+      tone: "info",
+      title: "Approval queue is clear",
+      body: "No high-risk sfield writes or external connector calls are currently awaiting approval. Trigger an external connector (for example, \"invoke PagerDuty connector\") or enable 4-eyes dual control in /admin/logs?source=approvals to queue new approvals.",
+    });
+  } else {
+    for (const item of pending.slice(0, 3)) {
+      nodes.push({
+        type: "approval",
+        title: item.title,
+        summary: item.summary,
+        requester: item.requester,
+        riskLevel: item.riskLevel,
+        details: item.details,
+        approveLabel: "Approve & execute",
+        rejectLabel: "Deny request",
+        recordId: item.recordId,
+        domain: item.domain === "customer360" ? "generic" : item.domain,
+        approvalId: item.id,
+        payloadDigest: item.payloadDigest,
+        dualControl: item.dualControl,
+        sfieldToolRef: item.sfieldToolRef,
+        initialDecision: "pending",
+      });
+    }
+  }
+  if (decided.length > 0) {
+    nodes.push({
+      type: "table",
+      caption: "Recent Approval Decisions",
+      columns: ["Approval ID", "Target", "Status", "Approver"],
+      rows: decided.map((a) => [
+        a.id,
+        `${a.domain}:${a.recordId}`,
+        a.status,
+        a.decidedBy ?? "—",
+      ]),
+    });
+  }
+  return {
+    intro: pending.length > 0
+      ? `There ${pending.length === 1 ? "is 1 pending high-risk action" : `are ${pending.length} pending high-risk actions`} awaiting human approval. You can approve or deny directly in Chat below or from /admin/logs?source=approvals.`
+      : "Your live Human-in-the-Loop approval queue is currently clear.",
+    canvas: {
+      title: "Human-in-the-Loop Approval Queue",
+      badge: "sfield HITL · Live Queue",
+      subtitle: `${view.pendingCount} pending · Synchronized live with /admin/logs?source=approvals`,
+      generatedBy: "synthesizer",
+      dataSource: "approvals.json (sfield HITL)",
+      prompt,
+      nodes,
+      disclaimer: "Approvals are cryptographically bound to the prepared SHA-256 payload digest and execute through governed sfield write tools with immutable Write Audit logging.",
+      suggestedFollowUp: pending.length > 0 ? "Show pending approvals" : "Invoke PagerDuty connector for INC-4821",
+    },
+  };
+}
+
+function buildConnectorActionCanvas(
+  connectorStore: ConnectorStore,
+  approvalStore: ApprovalStore,
+  prompt: string,
+  requesterName?: string,
+): { intro: string; canvas: DynamicCanvasProps } {
+  const connectors = connectorStore.list();
+  const enabledAction = connectors.find((c) => c.enabled && (c.kind === "rest_action" || c.kind === "mcp_bridge"))
+    ?? connectors.find((c) => c.enabled)
+    ?? connectors[0];
+
+  if (!enabledAction) {
+    return {
+      intro: "No external connectors are registered yet. Register a connector in /admin to invoke it via sfield.",
+      canvas: {
+        title: "External Connectors",
+        badge: "Connector Registry",
+        generatedBy: "synthesizer",
+        prompt,
+        nodes: [{ type: "callout", tone: "caution", title: "No connectors configured", body: "Open Tool setup (/admin) to register and enable an external REST or MCP connector." }],
+        disclaimer: "External connectors run under sfield governance via cep.connector.invoke@1.0.0.",
+      },
+    };
+  }
+
+  const requester = requesterName || "CEP Operator";
+  const action = /\bescalat/i.test(prompt) ? "escalate_incident" : /\brollback/i.test(prompt) ? "notify_rollback" : "trigger_incident_webhook";
+  const approval = approvalStore.createPending({
+    targetKind: "external_connector",
+    sfieldToolRef: connectorInvokeToolRef,
+    domain: "external_connector",
+    recordId: enabledAction.id,
+    action,
+    title: `External Connector · ${enabledAction.name}`,
+    summary: `Prepared governed sfield call (${connectorInvokeToolRef}) for "${action}" against ${enabledAction.method} ${enabledAction.url}.`,
+    riskLevel: enabledAction.effect === "write" ? "high" : "medium",
+    payload: { prompt, connectorId: enabledAction.id, action, triggeredFrom: "chat" },
+    details: [
+      { label: "Connector", value: enabledAction.name },
+      { label: "Endpoint", value: `${enabledAction.method} ${enabledAction.url}` },
+      { label: "Action", value: action },
+      { label: "sfield Tool", value: connectorInvokeToolRef },
+      { label: "4-Eyes Dual Control", value: (enabledAction.dualControl || approvalStore.getPolicy().defaultDualControl) ? "Required" : "Inline allowed" },
+    ],
+    requester,
+    dualControl: enabledAction.dualControl || approvalStore.getPolicy().defaultDualControl,
+  });
+
+  return {
+    intro: `Prepared an external connector call to **${enabledAction.name}** via \`${connectorInvokeToolRef}\`. Because this connector is gated by HITL approval policy, review and approve it right here in Chat or from \`/admin/logs?source=approvals\`.`,
+    canvas: {
+      title: `External Connector Execution · ${enabledAction.name}`.slice(0, 96),
+      badge: "sfield Connector · HITL",
+      subtitle: `${enabledAction.method} ${enabledAction.url} · Approval ID ${approval.id}`,
+      generatedBy: "synthesizer",
+      dataSource: "connectors.json + approvals.json",
+      recordId: enabledAction.id,
+      prompt,
+      nodes: [
+        {
+          type: "approval",
+          title: approval.title,
+          summary: approval.summary,
+          requester: approval.requester,
+          riskLevel: approval.riskLevel,
+          details: approval.details,
+          approveLabel: "Approve & invoke",
+          rejectLabel: "Deny invocation",
+          recordId: approval.recordId,
+          domain: "external_connector",
+          approvalId: approval.id,
+          payloadDigest: approval.payloadDigest,
+          dualControl: approval.dualControl,
+          sfieldToolRef: approval.sfieldToolRef,
+          initialDecision: "pending",
+        },
+        {
+          type: "table",
+          caption: "Registered External Connectors",
+          columns: ["Connector", "Kind", "Effect", "Status"],
+          rows: connectors.slice(0, 6).map((c) => [
+            c.name,
+            c.kind,
+            c.effect,
+            c.enabled ? (c.requiresApproval ? "enabled (HITL)" : "enabled") : "disabled",
+          ]),
+        },
+      ],
+      disclaimer: "External connector calls execute through sfield cep.connector.invoke@1.0.0 with timeout enforcement, payload digest validation, and immutable Write Audit logging.",
+      suggestedFollowUp: "Show pending approvals",
+    },
+  };
+}
+
 export async function generateDynamicUi(input: {
   prompt: string;
   profileSummary?: string;
@@ -457,9 +637,18 @@ export async function generateDynamicUi(input: {
   dataDir: string;
   opsStore?: OpsIncidentStore;
   salesStore?: SalesDealStore;
+  connectorStore?: ConnectorStore;
+  approvalStore?: ApprovalStore;
+  requesterName?: string;
   signal?: AbortSignal;
 }): Promise<{ intro: string; canvas: DynamicCanvasProps }> {
-  const { prompt, profileSummary, gateway, dataDir, opsStore, salesStore } = input;
+  const { prompt, profileSummary, gateway, dataDir, opsStore, salesStore, connectorStore, approvalStore, requesterName } = input;
+  if (approvalStore && isApprovalQueuePrompt(prompt)) {
+    return buildApprovalQueueCanvas(approvalStore, prompt);
+  }
+  if (connectorStore && approvalStore && isConnectorActionPrompt(prompt)) {
+    return buildConnectorActionCanvas(connectorStore, approvalStore, prompt, requesterName);
+  }
   const opsLive = opsStore && isOpsIncidentPrompt(prompt) ? {
     view: opsStore.view(),
     primary: opsStore.primaryIncident(),

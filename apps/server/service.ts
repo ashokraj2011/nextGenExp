@@ -31,6 +31,8 @@ import type { ProviderArbitrationTrace } from "../../packages/contracts/api";
 import { createOpsRunbookProvider, createSalesDealDeskProvider, RecommendationArbitrator } from "../../packages/recommendations";
 import type { OpsIncidentStore } from "./ops-store";
 import type { SalesDealStore } from "./sales-store";
+import type { ConnectorStore } from "./connector-store";
+import type { ApprovalStore } from "./approval-store";
 import type { Customer360Service } from "./customer-360";
 import type { GatewaySettings } from "./gateway";
 import type { GoalProgressProvider } from "../../packages/goal-progress";
@@ -73,6 +75,8 @@ export class ExperienceService {
       goalProgressProvider?: GoalProgressProvider;
       opsStore?: OpsIncidentStore;
       salesStore?: SalesDealStore;
+      connectorStore?: ConnectorStore;
+      approvalStore?: ApprovalStore;
     },
   ) {
     const chat = runtime?.chat ?? offlineHistory?.chat;
@@ -303,6 +307,9 @@ export class ExperienceService {
           dataDir: this.dynamicUi.dataDir,
           opsStore: this.dynamicUi.opsStore,
           salesStore: this.dynamicUi.salesStore,
+          connectorStore: this.dynamicUi.connectorStore,
+          approvalStore: this.dynamicUi.approvalStore,
+          requesterName: persona?.displayName,
           signal,
         });
         current();
@@ -510,6 +517,9 @@ export class ExperienceService {
               dataDir: this.dynamicUi.dataDir,
               opsStore: this.dynamicUi.opsStore,
               salesStore: this.dynamicUi.salesStore,
+              connectorStore: this.dynamicUi.connectorStore,
+              approvalStore: this.dynamicUi.approvalStore,
+              requesterName: persona?.displayName,
               signal,
             });
             current();

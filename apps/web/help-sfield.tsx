@@ -262,8 +262,8 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
       </div>
 
       <div className="help-sfield-subsection">
-        <h3>Host platform tools (Arbitration &amp; Governed Writes)</h3>
-        <p>These two platform-level tools run exclusively inside host-owned sfield scopes and are never exposed to LLM agents directly.</p>
+        <h3>Host platform tools (Arbitration, Governed Writes &amp; External Connectors)</h3>
+        <p>These platform-level tools run exclusively inside host-owned sfield scopes and are never exposed to LLM agents directly.</p>
         <ul className="help-tool-registry" aria-label="sfield platform tools" role="list">
           <li>
             <div className="help-tool-name">
@@ -284,6 +284,16 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
             </div>
             <p>Executes operator-confirmed writes across IT Ops rollbacks, RevOps discount approvals, and Customer 360 form bindings with immutable audit proof.</p>
             <span className="help-tool-caller">Host · bounded_auto write scope</span>
+          </li>
+          <li>
+            <div className="help-tool-name">
+              <a className="help-section-link" href="/admin/logs?source=approvals">
+                External Connector Invoke (HITL) <ArrowUpRight size={13} aria-hidden="true" />
+              </a>
+              <code>cep.connector.invoke@1.0.0</code>
+            </div>
+            <p>Executes enabled REST/MCP external connectors under sfield governance with server-side secret resolution, SHA-256 HITL approval gating (Chat + Admin), and immutable audit logging.</p>
+            <span className="help-tool-caller">Host · bounded_auto + HITL gate</span>
           </li>
         </ul>
       </div>

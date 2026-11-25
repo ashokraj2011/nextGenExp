@@ -1,13 +1,214 @@
 import { useEffect, useId, useState } from "react";
-import { BarChart3, RotateCw, ShieldCheck } from "lucide-react";
+import { BarChart3, CheckCircle2, Clock, RotateCw, ShieldAlert, ShieldCheck, XCircle } from "lucide-react";
 import { adminPaths } from "../../packages/contracts/admin-paths";
 import type { Bootstrap, ConversationView, DomainWriteAuditEntry, EngagementAnalyticsView } from "../../packages/contracts/api";
+import type { ApprovalPolicySettings, ApprovalsView } from "../../packages/contracts/approval";
 import { pendingActionsContext } from "../../packages/contracts/workspace";
 import { api, toolSetupErrorMessage } from "./api";
 import { diagnosticHref } from "./admin-navigation";
 import { CallLogs, PendingActionLogs } from "./call-logs";
 import { Inspector } from "./inspector";
 import { readActiveConversation, rememberActiveConversation } from "./conversation-storage";
+
+function ApprovalQueuePanel() {
+  const [data, setData] = useState<ApprovalsView>();
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actorById, setActorById] = useState<Record<string, string>>({});
+  const [commentById, setCommentById] = useState<Record<string, string>>({});
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    void api.approvals().then((res) => {
+      if (active) setData(res);
+    }, (err: unknown) => {
+      if (active) setError(toolSetupErrorMessage(err));
+    });
+    return () => { active = false; };
+  }, [tick]);
+
+  async function togglePolicy(patch: Partial<ApprovalPolicySettings>) {
+    setError("");
+    setNotice("");
+    try {
+      const res = await api.saveApprovalPolicy(patch);
+      setData(res.view);
+      setNotice("Approval policy updated.");
+    } catch (err) {
+      setError(toolSetupErrorMessage(err));
+    }
+  }
+
+  async function decide(id: string, decision: "approve" | "deny", defaultActor: string) {
+    setBusyId(id);
+    setError("");
+    setNotice("");
+    try {
+      const actor = (actorById[id] ?? defaultActor).trim() || "Duty Approver";
+      const comment = (commentById[id] ?? "").trim();
+      const res = await api.decideApproval(id, {
+        decision,
+        actor,
+        ...(comment ? { comment } : {}),
+      });
+      setData(res.view);
+      setNotice(
+        decision === "approve"
+          ? `Approved & executed ${id} via sfield (${res.approval.executionResult?.sfieldRunId ?? "ok"}).`
+          : `Denied approval ${id}.`,
+      );
+    } catch (err) {
+      setError(toolSetupErrorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <section className="admin-card" aria-labelledby="hitl-approvals-title">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+        <div>
+          <h2 id="hitl-approvals-title" style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+            <ShieldAlert size={18} aria-hidden="true" />
+            Human-in-the-Loop Approval Queue (sfield)
+          </h2>
+          <p>
+            High-risk domain writes (<code>cep.domain.execute_write@1.0.0</code>) and external connectors (<code>cep.connector.invoke@1.0.0</code>) pause here and in Chat (type <em>"show pending approvals"</em>) until a human verifies the SHA-256 payload digest.
+          </p>
+        </div>
+        <button className="secondary-button" type="button" onClick={() => setTick((t) => t + 1)}>
+          <RotateCw size={15} aria-hidden="true" />Refresh
+        </button>
+      </div>
+
+      {data && (
+        <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", marginTop: "14px", padding: "12px 14px", border: "1px solid var(--line)", borderRadius: "10px" }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "0.85rem", fontWeight: 550 }}>
+            <input
+              type="checkbox"
+              checked={data.policy.defaultDualControl}
+              onChange={(e) => void togglePolicy({ defaultDualControl: e.target.checked })}
+            />
+            Require separate approver (4-eyes dual control)
+          </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "0.85rem" }}>
+            <input
+              type="checkbox"
+              checked={data.policy.gateExternalConnectorWrites}
+              onChange={(e) => void togglePolicy({ gateExternalConnectorWrites: e.target.checked })}
+            />
+            Gate external connector writes
+          </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "0.85rem" }}>
+            <input
+              type="checkbox"
+              checked={data.policy.gateHighRiskOpsRollbacks}
+              onChange={(e) => void togglePolicy({ gateHighRiskOpsRollbacks: e.target.checked })}
+            />
+            Gate P1 Ops rollbacks
+          </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "0.85rem" }}>
+            <input
+              type="checkbox"
+              checked={data.policy.gateHighRiskSalesDiscounts}
+              onChange={(e) => void togglePolicy({ gateHighRiskSalesDiscounts: e.target.checked })}
+            />
+            Gate Deal Desk discounts (&gt;15%)
+          </label>
+        </div>
+      )}
+
+      {notice && <p role="status" style={{ marginTop: "12px", color: "var(--teal-dark)", fontWeight: 600 }}>{notice}</p>}
+      {error && <p className="request-notice" role="alert" style={{ marginTop: "12px" }}>{error}</p>}
+      {!data && !error && <p className="workspace-loading" role="status">Loading approval queue…</p>}
+
+      {data && data.approvals.length === 0 && (
+        <p className="admin-muted" style={{ marginTop: "14px" }}>
+          No approvals queued yet. Click <strong>Invoke via sfield</strong> on a connector in <a href={adminPaths.tools}>Tool setup</a> or ask Chat to <em>"invoke PagerDuty connector"</em> to see live HITL approval gating.
+        </p>
+      )}
+
+      {data && data.approvals.length > 0 && (
+        <div style={{ display: "grid", gap: "12px", marginTop: "14px" }}>
+          {data.approvals.map((apr) => {
+            const defaultActor = apr.dualControl ? "Duty Approver" : "CEP Admin";
+            const actorVal = actorById[apr.id] ?? defaultActor;
+            const commentVal = commentById[apr.id] ?? "";
+            const isPending = apr.status === "pending";
+            return (
+              <article key={apr.id} className={"dyn-approval is-" + (apr.status === "executed" || apr.status === "approved" ? "approved" : apr.status === "denied" ? "rejected" : "pending")}>
+                <div className="dyn-approval-head">
+                  <div>
+                    <h4>{apr.title}</h4>
+                    <span className="dyn-approval-req">
+                      Requested by {apr.requester} · {new Date(apr.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                    </span>
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "4px", fontSize: "0.75rem", opacity: 0.85 }}>
+                      <code>{apr.id}</code>
+                      <code>{apr.sfieldToolRef}</code>
+                      <code>sha256:{apr.payloadDigest.slice(0, 12)}</code>
+                      {apr.dualControl && <strong>4-eyes required</strong>}
+                    </div>
+                  </div>
+                  <span className={"dyn-risk-pill risk-" + apr.riskLevel}>
+                    {apr.status} · {apr.riskLevel} risk
+                  </span>
+                </div>
+                <p className="dyn-approval-summary">{apr.summary}</p>
+                <dl className="dyn-approval-details">
+                  {apr.details.map((d) => (
+                    <div key={d.label}><dt>{d.label}</dt><dd>{d.value}</dd></div>
+                  ))}
+                </dl>
+                {isPending ? (
+                  <div style={{ display: "grid", gap: "10px" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.4fr)", gap: "8px" }}>
+                      <label className="dyn-form-field">
+                        <span>Approver</span>
+                        <input value={actorVal} onChange={(e) => setActorById((p) => ({ ...p, [apr.id]: e.target.value }))} />
+                      </label>
+                      <label className="dyn-form-field">
+                        <span>Comment (optional)</span>
+                        <input value={commentVal} onChange={(e) => setCommentById((p) => ({ ...p, [apr.id]: e.target.value }))} placeholder="Approval note or change ticket" />
+                      </label>
+                    </div>
+                    <div className="dyn-approval-actions">
+                      <button type="button" className="send-button" disabled={busyId === apr.id} onClick={() => void decide(apr.id, "approve", defaultActor)}>
+                        <CheckCircle2 size={14} aria-hidden="true" />{busyId === apr.id ? "Executing…" : "Approve & Execute"}
+                      </button>
+                      <button type="button" className="secondary-button" disabled={busyId === apr.id} onClick={() => void decide(apr.id, "deny", defaultActor)}>
+                        <XCircle size={14} aria-hidden="true" />Deny
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="dyn-approval-result" role="status">
+                    {apr.status === "executed" || apr.status === "approved" ? (
+                      <>
+                        <CheckCircle2 size={15} aria-hidden="true" />
+                        <span>
+                          <strong>Executed</strong> by {apr.decidedBy ?? "Approver"}
+                          {apr.executionResult ? ` — ${apr.executionResult.summary} (run ${apr.executionResult.sfieldRunId}${apr.executionResult.auditId ? `, audit ${apr.executionResult.auditId}` : ""})` : ""}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Clock size={15} aria-hidden="true" />
+                        <span><strong>{apr.status}</strong>{apr.decidedBy ? ` by ${apr.decidedBy}` : ""}{apr.comment ? ` — ${apr.comment}` : ""}</span>
+                      </>
+                    )}
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
 
 function WriteAuditLogs() {
   const [data, setData] = useState<{ toolRef: string; entries: DomainWriteAuditEntry[] }>();
@@ -33,8 +234,8 @@ function WriteAuditLogs() {
             Governed sfield Write Audit Log
           </h2>
           <p>
-            Every operator-confirmed write-back (IT rollbacks, Sales discount approvals, Customer 360 form updates) executed through{" "}
-            <code>{data?.toolRef ?? "cep.domain.execute_write@1.0.0"}</code>.
+            Every operator-confirmed write-back (IT rollbacks, Sales discount approvals, Customer 360 updates, and External Connector actions) executed through{" "}
+            <code>{data?.toolRef ?? "cep.domain.execute_write@1.0.0"}</code> and <code>cep.connector.invoke@1.0.0</code>.
           </p>
         </div>
         <button className="secondary-button" type="button" onClick={() => setTick((t) => t + 1)}>
@@ -45,7 +246,7 @@ function WriteAuditLogs() {
       {!data && !error && <p className="workspace-loading" role="status">Loading audit log…</p>}
       {data && data.entries.length === 0 && (
         <p className="admin-muted" style={{ marginTop: "14px" }}>
-          No governed write actions recorded yet. Approve a rollback in IT Ops, approve a discount in RevOps, or submit a Customer 360 form to see immutable sfield audit entries here.
+          No governed write actions recorded yet. Approve a rollback in IT Ops, approve a discount in RevOps, invoke an external connector, or submit a Customer 360 form to see immutable sfield audit entries here.
         </p>
       )}
       {data && data.entries.length > 0 && (
@@ -58,7 +259,7 @@ function WriteAuditLogs() {
                 <th>Record</th>
                 <th>Action &amp; Summary</th>
                 <th>Actor</th>
-                <th>sfield Run ID</th>
+                <th>Approval / sfield Run</th>
               </tr>
             </thead>
             <tbody>
@@ -67,9 +268,12 @@ function WriteAuditLogs() {
                   <td>{new Date(entry.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</td>
                   <td><code>{entry.domain}</code></td>
                   <td><strong>{entry.recordId}</strong></td>
-                  <td><code>{entry.action}</code> — {entry.summary}</td>
+                  <td><code>{entry.action}</code> ({entry.status}) — {entry.summary}</td>
                   <td>{entry.actor}</td>
-                  <td><code>{entry.sfieldRunId}</code></td>
+                  <td>
+                    {entry.approvalId && <><code>{entry.approvalId}</code><br /></>}
+                    <code>{entry.sfieldRunId}</code>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -106,7 +310,7 @@ function EngagementAnalyticsPanel() {
             <BarChart3 size={18} aria-hidden="true" />
             Closed-Loop Engagement &amp; Conversion Analytics
           </h2>
-          <p>Live platform telemetry aggregating chat turns, rendered surfaces, customer feedback, NBA dismissals, and governed sfield write-backs.</p>
+          <p>Live platform telemetry aggregating chat turns, rendered surfaces, customer feedback, NBA dismissals, HITL approvals, and governed sfield write-backs.</p>
         </div>
         <button className="secondary-button" type="button" onClick={() => setTick((t) => t + 1)}>
           <RotateCw size={15} aria-hidden="true" />Refresh
@@ -123,15 +327,20 @@ function EngagementAnalyticsPanel() {
             </div>
             <div className="analytics-kpi-tile">
               <dt>Governed sfield Writes</dt>
-              <dd><strong>{data.governedWritesTotal}</strong><span>IT Ops {data.writesByDomain.opsIncident} · RevOps {data.writesByDomain.salesDeal} · C360 {data.writesByDomain.customer360}</span></dd>
+              <dd>
+                <strong>{data.governedWritesTotal}</strong>
+                <span>
+                  Ops {data.writesByDomain.opsIncident} · RevOps {data.writesByDomain.salesDeal} · C360 {data.writesByDomain.customer360} · Ext {data.writesByDomain.externalConnector}
+                </span>
+              </dd>
             </div>
             <div className="analytics-kpi-tile">
               <dt>Surfaces &amp; Feedback</dt>
               <dd><strong>{data.surfacesRendered} rendered</strong><span>{satPct !== null ? `${satPct}% helpful (${data.feedbackHelpful}/${totalFeedback})` : "No ratings yet"}</span></dd>
             </div>
             <div className="analytics-kpi-tile">
-              <dt>NBA Dismissals</dt>
-              <dd><strong>{data.nbaDismissals}</strong><span>Honored across sessions</span></dd>
+              <dt>NBA Dismissals &amp; HITL</dt>
+              <dd><strong>{data.nbaDismissals} dismissed</strong><span>{data.pendingApprovalsCount ?? 0} approvals pending</span></dd>
             </div>
           </dl>
 
@@ -185,6 +394,7 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
   const path = adminPaths[view];
   const title = view === "logs" ? "Call logs" : "Developer inspector";
   const pendingActionView = view === "logs" && query.get("source") === pendingActionsContext;
+  const approvalsView = view === "logs" && query.get("source") === "approvals";
   const writeAuditView = view === "logs" && query.get("source") === "write_audit";
   const analyticsView = view === "logs" && query.get("source") === "analytics";
 
@@ -203,25 +413,27 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
   }, [query, selectThread]);
 
   useEffect(() => {
-    if (!selectedId || pendingActionView || writeAuditView || analyticsView) return;
+    if (!selectedId || pendingActionView || approvalsView || writeAuditView || analyticsView) return;
     let active = true;
     void api.conversation(selectedId).then((row) => {
       if (active) setConversation(row);
     }, (error: unknown) => { if (active) setNotice(toolSetupErrorMessage(error)); });
     return () => { active = false; };
-  }, [selectedId, refresh, pendingActionView, writeAuditView, analyticsView]);
+  }, [selectedId, refresh, pendingActionView, approvalsView, writeAuditView, analyticsView]);
 
   const loaded = conversation?.id === selectedId ? conversation : undefined;
   const requestedTurn = loaded?.id === query.get("thread") ? query.get("turn") ?? undefined : undefined;
   const pendingQuery = new URLSearchParams({ source: pendingActionsContext });
+  const approvalsQuery = new URLSearchParams({ source: "approvals" });
   const writeAuditQuery = new URLSearchParams({ source: "write_audit" });
   const analyticsQuery = new URLSearchParams({ source: "analytics" });
   if (selectedId) {
     pendingQuery.set("thread", selectedId);
+    approvalsQuery.set("thread", selectedId);
     writeAuditQuery.set("thread", selectedId);
     analyticsQuery.set("thread", selectedId);
   }
-  const isChatCallsView = !pendingActionView && !writeAuditView && !analyticsView;
+  const isChatCallsView = !pendingActionView && !approvalsView && !writeAuditView && !analyticsView;
   return <main className="admin-main admin-diagnostics" aria-labelledby="diagnostics-title">
     <header className="admin-heading"><h1 id="diagnostics-title">{title}</h1></header>
     {view === "logs" && <nav className="log-sources" aria-label="Log sources">
@@ -229,12 +441,15 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
         href={diagnosticHref(adminPaths.logs, selectedId, requestedTurn)}>Chat calls</a>
       <a className="rail-link" aria-current={pendingActionView ? "page" : undefined}
         href={adminPaths.logs + "?" + pendingQuery}>Pending actions</a>
+      <a className="rail-link" aria-current={approvalsView ? "page" : undefined}
+        href={adminPaths.logs + "?" + approvalsQuery}>Approvals (HITL)</a>
       <a className="rail-link" aria-current={writeAuditView ? "page" : undefined}
         href={adminPaths.logs + "?" + writeAuditQuery}>Write audit (sfield)</a>
       <a className="rail-link" aria-current={analyticsView ? "page" : undefined}
         href={adminPaths.logs + "?" + analyticsQuery}>Engagement analytics</a>
     </nav>}
     {pendingActionView ? <PendingActionLogs profiles={configuration?.personas ?? []} />
+      : approvalsView ? <ApprovalQueuePanel />
       : writeAuditView ? <WriteAuditLogs />
       : analyticsView ? <EngagementAnalyticsPanel />
       : <section className="admin-card diagnostics-picker">
