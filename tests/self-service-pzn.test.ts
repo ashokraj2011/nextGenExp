@@ -98,7 +98,7 @@ test("Self-service Data Dictionary, Rule Engine, Draft/Publish isolation, and Li
       contentId: "general_savings_tip_text",
       title: "Automate Monthly Investing",
       headline: "Build wealth steadily with recurring transfers.",
-      body: "Set up an automatic monthly transfer to stay consistent through market cycles.",
+      body: "Your cash balance is {{portfolio.cash_usd}}.",
       ctaLabel: "Set Up Auto-Invest",
       ctaPrompt: "Show me how to automate monthly investing.",
       disclosureText: "",
@@ -176,7 +176,11 @@ test("Self-service Data Dictionary, Rule Engine, Draft/Publish isolation, and Li
     const tsRes = await tsAdapter.selectEligibleContent({ mid: alice.syntheticMid, context: "vip-wealth-banner" });
     assert.deepEqual(tsRes.contentIds, ["general_savings_tip_text"]);
 
-    const { candidates, rejections } = resolveCandidates(tsRes.contentIds);
+    const jordan = env.profiles.findByPersonaId("demo-returning")!;
+    const second = await tsAdapter.selectEligibleContent({ mid: jordan.syntheticMid, context: "vip-wealth-banner" });
+    const { candidates, rejections } = resolveCandidates(tsRes.contentIds, tsRes.renderedEntries);
+    assert.match(lookupContent(resolveCandidates(second.contentIds, second.renderedEntries).candidates[0])!.body, /\$10,000/);
+    assert.match(lookupContent(candidates[0])!.body, /\$12,500/);
     assert.equal(rejections.length, 0);
     assert.equal(candidates.length, 1);
     const entry = lookupContent(candidates[0]);

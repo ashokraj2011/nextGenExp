@@ -35,6 +35,7 @@ export const incidentRecordSchema = z.object({
 }).strict();
 
 export const incidentDecisionInputSchema = z.object({
+  expectedUpdatedAt: z.string().max(64).optional(),
   decision: z.enum(["approve_rollback", "reject_rollback", "resolve", "escalate"]),
   actor: z.string().trim().max(80).optional(),
   note: z.string().trim().max(240).optional(),

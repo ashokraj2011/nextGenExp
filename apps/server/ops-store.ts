@@ -212,6 +212,7 @@ export class OpsIncidentStore {
     const idx = this.incidents.findIndex((item) => item.id.toLowerCase() === id.toLowerCase());
     if (idx < 0) return null;
     const existing = this.incidents[idx];
+    if (input.decision.endsWith("_rollback") && existing.rollbackStatus !== "pending") return null;
     const now = new Date();
     const clock = formatUtcClock(now);
     const actor = input.actor?.trim() || "CEP Operator";

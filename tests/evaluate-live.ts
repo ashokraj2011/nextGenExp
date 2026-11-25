@@ -3,7 +3,7 @@ import { performance } from "node:perf_hooks";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { startApp } from "../apps/server/http";
+import { startApp } from "./operator-fixture";
 import { gatewayFromEnv } from "../apps/server/gateway";
 import type { SelectionMode } from "../packages/contracts/domain";
 import type { TurnView } from "../packages/contracts/api";

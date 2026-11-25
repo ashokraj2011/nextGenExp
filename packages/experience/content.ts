@@ -28,11 +28,12 @@ if (contentById.size !== contentCatalog.entries.length || Buffer.byteLength(JSON
   throw new Error("Content fixtures exceed the current catalog limits or contain duplicate IDs");
 }
 
-export function resolveCandidates(ids: string[]) {
+export function resolveCandidates(ids: string[], renderedEntries?: ContentEntry[]) {
   const candidates: Candidate[] = [];
   const rejections: { contentId: string; stage: "catalog_resolution"; reasonCode: string }[] = [];
   ids.forEach((contentId, index) => {
-    const content = findEffectiveContentById(contentId)
+    const publishedEntry = renderedEntries?.find((entry) => entry.contentId === contentId);
+    const content = publishedEntry ?? findEffectiveContentById(contentId)
       ?? contentById.get(contentId)
       ?? getActiveSelfServicePznProvider()?.findPublishedContentEntry(contentId);
     if (!content || content.publicationStatus !== "published") {
@@ -41,14 +42,14 @@ export function resolveCandidates(ids: string[]) {
     }
     candidates.push({
       candidateId: "candidate_" + randomUUID().replaceAll("-", ""),
-      contentId, contentVersion: content.version, tsRank: index + 1,
+      contentId, contentVersion: content.version, tsRank: index + 1, ...(publishedEntry && { publishedEntry }),
     });
   });
   return { candidates, rejections };
 }
 
 export function lookupContent(candidate: Candidate): ContentEntry | undefined {
-  const content = findEffectiveContentById(candidate.contentId)
+  const content = candidate.publishedEntry ?? findEffectiveContentById(candidate.contentId)
     ?? contentById.get(candidate.contentId)
     ?? getActiveSelfServicePznProvider()?.findPublishedContentEntry(candidate.contentId);
   return content?.publicationStatus === "published" && content.version === candidate.contentVersion ? content : undefined;

@@ -46,7 +46,7 @@ import type { CapabilityManifest, CapabilityRef, OutputKind } from "../../packag
 import type { AgenticTrace } from "./decision-trace";
 import type { EvaluationRow } from "../../packages/contracts/evaluation";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
-import type { Bootstrap, Conversation, ConversationChange, ConversationView, DomainWriteAuditEntry, EngagementAnalyticsView, TurnAccepted, TurnView } from "../../packages/contracts/api";
+import type { RecordUpdate, Bootstrap, Conversation, ConversationChange, ConversationView, DomainWriteAuditEntry, EngagementAnalyticsView, TurnAccepted, TurnView } from "../../packages/contracts/api";
 import { pendingActionsContext, type WorkspaceActionLog, type WorkspaceNextStep, type WorkspacePendingAction, type WorkspacePin } from "../../packages/contracts/workspace";
 import type { TurnPayloads } from "../../packages/contracts/inspector";
 import type { ContextCatalog, PropensityResult, SelectionMode } from "../../packages/contracts/domain";
@@ -185,6 +185,7 @@ export const api = {
   saveToolSetup: (setup: ToolSetup, revision?: string) => requestJson<ToolSetup>("/api/admin/tools", setup, revision),
   createCcreRule: (rule: MockCcreRule) => request<MockCcreRule>("/api/admin/ccre-rules", rule),
   previewTreatmentSelector: (input: TreatmentPreviewInput) => request<TreatmentPreview>("/api/admin/treatment-preview", input),
+  recordUpdates: (id: string) => request<RecordUpdate[]>("/api/conversations/" + id + "/updates"),
   conversation: (id: string) => request<ConversationView>("/api/conversations/" + id),
   changeConversation: (id: string, change: ConversationChange) => request<Conversation>("/api/conversations/" + id + "/settings", change),
   nextStep: (personaId: string) => request<WorkspaceNextStep | null>("/api/workspace/" + personaId + "/next-step"),
@@ -235,7 +236,7 @@ export const api = {
   }>("/api/admin/connector-invoke", input),
   approvals: () => request<ApprovalsView>("/api/approvals"),
   saveApprovalPolicy: (policy: Partial<ApprovalPolicySettings>) => request<{ policy: ApprovalPolicySettings; view: ApprovalsView }>("/api/approvals/policy", policy),
-  decideApproval: (approvalId: string, input: ApprovalDecisionInput) => request<{
+  decideApproval: (approvalId: string, input: Omit<ApprovalDecisionInput, "actor"> & { actor?: string }) => request<{
     approval: ApprovalRecord;
     job?: TradeJob;
     execution?: { summary?: string; sfieldRunId?: string; audit?: DomainWriteAuditEntry; jobId?: string; statusCode?: number; responsePreview?: string };
@@ -246,7 +247,7 @@ export const api = {
   deleteActionFlow: (id: string) => request<{ deleted: boolean; flows: ActionFlow[] }>("/api/admin/action-flow-delete", { id }),
   tradingPortfolio: (personaId: string) => request<PortfolioBalanceSnapshot>("/api/trading/" + personaId + "/portfolio"),
   taxHarvestPreview: (input: TaxHarvestPreviewInput) => request<TaxHarvestAnalysis>("/api/trading/tax-harvest", input),
-  startTradeJob: (input: TradeJobCreateInput) => request<TradeJob | { status: "pending_approval"; approval: ApprovalRecord; approvalsView: ApprovalsView }>("/api/trading/jobs", input),
+  startTradeJob: (input: TradeJobCreateInput) => request<TradeJob | { status: "pending_approval"; approval: ApprovalRecord; approvalsView?: ApprovalsView }>("/api/trading/jobs", input),
   tradeJobStatus: (jobId: string) => request<TradeJob>("/api/trading/" + jobId + "/status"),
   cancelTradeJob: (jobId: string) => request<TradeJob>("/api/trading/" + jobId + "/cancel", {}),
   writeAudit: () => request<{ toolRef: string; entries: DomainWriteAuditEntry[] }>("/api/admin/write-audit"),

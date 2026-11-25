@@ -20,6 +20,7 @@ export const scheduledJobSchema = z.object({
   thresholdUsd: z.number().nonnegative().optional(),
   enabled: z.boolean().default(true),
   autoPushProactive: z.boolean().default(true),
+  deliveryPrincipal: z.string().optional(),
   lastRunAt: z.string().optional(),
   lastStatus: z.enum(["alert_pushed", "no_action", "error"]).optional(),
   lastSummary: z.string().optional(),
@@ -28,6 +29,7 @@ export const scheduledJobSchema = z.object({
 export type ScheduledJob = z.infer<typeof scheduledJobSchema>;
 
 export const scheduledJobUpsertSchema = scheduledJobSchema.omit({
+  deliveryPrincipal: true,
   lastRunAt: true,
   lastStatus: true,
   lastSummary: true,

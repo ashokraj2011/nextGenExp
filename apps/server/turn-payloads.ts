@@ -82,6 +82,15 @@ function registryPayload(inspection: Inspection, call: CallRecord): RegistryTool
   };
 }
 
+async function customerLookupPayload(sf: SField, inspection: Inspection, turn: TurnRecord) {
+  const read = turn.customerTask;
+  if (!read?.sfieldRunId || !read.sfieldCallId) return;
+  const run = await sf.persistence.getRun(read.sfieldRunId);
+  if (run?.tenantId !== "pzn-local" || run.subjectId !== turn.scope.principalId) return;
+  const call = (await sf.persistence.listCalls(run.runId)).find((entry) => entry.callId === read.sfieldCallId);
+  return call && registryPayload(inspection, call);
+}
+
 async function glossaryPayloads(sf: SField, inspection: Inspection, turn: TurnRecord) {
   const routerRunId = turn.attempts.route?.runId;
   if (!turn.glossaryScopeId || !routerRunId) return null;
@@ -214,7 +223,7 @@ async function experiencePayloads(sf: SField, store: Store, inspection: Inspecti
 }
 
 export async function readTurnPayloads(sf: SField, store: Store, inspection: Inspection, turn: TurnRecord, conversation: ConversationRecord): Promise<TurnPayloads> {
-  const [topicScores, router, glossary, treatment, portfolio, goal, composer, workflow, agentic] = await Promise.all([
+  const [topicScores, router, glossary, treatment, portfolio, goal, composer, workflow, agentic, customerLookup] = await Promise.all([
     topicScoresPayloads(sf, inspection, turn),
     modelPayloads(sf, store, inspection, turn, "route"),
     glossaryPayloads(sf, inspection, turn),
@@ -224,6 +233,7 @@ export async function readTurnPayloads(sf: SField, store: Store, inspection: Ins
     modelPayloads(sf, store, inspection, turn, "compose"),
     workflowPayloads(sf, store, inspection, turn),
     experiencePayloads(sf, store, inspection, turn),
+    customerLookupPayload(sf, inspection, turn),
   ]);
-  return { turnId: turn.public.id, topicScores, router, glossary, treatment, portfolio, goal, composer, workflow, ...(agentic && { agentic }) };
+  return { turnId: turn.public.id, topicScores, router, glossary, treatment, portfolio, goal, composer, workflow, ...(agentic && { agentic }), ...(customerLookup && { customerLookup }) };
 }

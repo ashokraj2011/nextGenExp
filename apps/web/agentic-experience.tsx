@@ -88,8 +88,8 @@ export function SavingsChart({
   const previewBaselineLine = isPreview ? toPolyline(previewBaselinePoints, activeMonths) : "";
 
   const progressPct = Math.min(100, Math.round((displayProjected / Math.max(targetCents, 1)) * 100));
-  const thresholdCents = investingEligibility?.thresholdCents ?? 1_000_000;
-  const previewEligible = displayCashAfter !== undefined ? displayCashAfter > thresholdCents : undefined;
+  const thresholdCents = investingEligibility?.thresholdCents;
+  const previewEligible = displayCashAfter !== undefined && thresholdCents !== undefined ? displayCashAfter > thresholdCents : undefined;
   const effectiveEligible = isPreview ? previewEligible : investingEligibility?.eligible;
 
   return <section className={"content-card axe-chart" + (isPreview ? " is-live-preview" : "")} aria-label="Projected savings">
@@ -171,7 +171,7 @@ export function SavingsChart({
       <div className={"axe-ts-verdict " + (effectiveEligible ? "is-eligible" : "is-ineligible")} role="status">
         <div className="axe-ts-verdict-top">
           <strong>
-            Cash Investing Card: {effectiveEligible ? "Appears (Eligible)" : "Disappears (Filtered Out)"}
+            Cash Investing Card: {effectiveEligible === undefined ? "Check eligibility" : effectiveEligible ? "Eligible" : "Unavailable"}
           </strong>
           <span className="axe-ts-verdict-badge">
             {isPreview ? "Live Preview · Click Recalculate to Verify" : "Verified by Treatment Selector"}
@@ -179,9 +179,8 @@ export function SavingsChart({
         </div>
         <p>
           {isPreview
-            ? (effectiveEligible
-              ? `Hypothetical cash after transfer (${dollars(displayCashAfter ?? 0)}) stays above the ${dollars(thresholdCents)} CCRE rule — click Recalculate so sfield verifies with Treatment Selector.`
-              : `Hypothetical cash after transfer (${dollars(displayCashAfter ?? 0)}) drops to or below the ${dollars(thresholdCents)} CCRE rule — click Recalculate so sfield confirms Treatment Selector hides the investing card.`)
+            ? (thresholdCents === undefined ? "Recalculate to check the current treatment rules."
+              : `This preview uses the published cash threshold of ${dollars(thresholdCents)}. Recalculate to confirm eligibility.`)
             : investingEligibility?.reason}
         </p>
       </div>

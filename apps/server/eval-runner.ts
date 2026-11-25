@@ -76,6 +76,8 @@ export class EvalRunnerStore {
   }
 
   async runSuite(deps: {
+    approvedCorrections?: { prompt: string; widgetId: string; title: string }[];
+    replayCorrection?: (prompt: string) => Promise<{ recordId?: string; title?: string }>;
     mode: "deterministic" | "live_llm";
     gateway: GatewaySettings | null;
     profileStore: CustomerProfileStore;
@@ -588,6 +590,12 @@ export class EvalRunnerStore {
       },
     );
 
+    for (const c of deps.approvedCorrections ?? []) {
+      await runCase({ id: "correction_" + c.widgetId, name: "Approved correction · " + c.title, category: "a2ui_schema", severity: "high", prompt: c.prompt, expected: c.widgetId + " · " + c.title }, async () => {
+        const actual = await deps.replayCorrection?.(c.prompt);
+        return { passed: actual?.recordId === c.widgetId && actual.title === c.title, actual: actual?.title ?? "No matching card", details: "Rendered card ID: " + (actual?.recordId ?? "none") };
+      });
+    }
     const passedCases = results.filter((r) => r.passed).length;
     const failedCases = results.length - passedCases;
     const criticalFailures = results.filter((r) => !r.passed && r.severity === "critical").length;

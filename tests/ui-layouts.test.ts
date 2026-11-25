@@ -9,8 +9,10 @@ import type { TurnAccepted } from "../packages/contracts/api";
 import type { TurnPayloads } from "../packages/contracts/inspector";
 import { decodeChatInput } from "../packages/contracts/inspector";
 import type { DisplayExperience } from "../packages/contracts/surface";
+import type { EvalRunReport } from "../packages/contracts/eval-suite";
+import type { UxProposal } from "../packages/contracts/ux-evolution";
 import type { UiDesign, UiLayoutCatalog, UiLayoutRecord } from "../packages/contracts/ui-layout";
-import { startApp } from "../apps/server/http";
+import { startApp } from "./operator-fixture";
 import { testClient, testProject } from "./client";
 import { startFixtureGateway } from "./gateway-fixture";
 import { startTestPreview } from "./preview";
@@ -27,6 +29,22 @@ const design: UiDesign = {
     { kind: "block", id: "compare", component: "PznComparison" },
   ],
 };
+
+test("approved feedback replays the original request and detects when its card is unpublished", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "layout-corrections-"));
+  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir, gateway: null, mode: "test" });
+  t.after(async () => { await app.close(); await rm(dataDir, { recursive: true, force: true }); });
+  const client = await testClient(app.url);
+  const { created } = await client.request<{ created: UxProposal[] }>("/api/admin/ux-evolution-scan", { includeSampleTraffic: true });
+  assert.ok(created.length);
+  const { proposal } = await client.request<{ proposal: UxProposal }>("/api/admin/ux-evolution-approve", { id: created[0].id });
+  assert.equal(proposal.regression?.prompt, created[0].samplePrompts[0]);
+  const check = async () => (await client.request<{ report: EvalRunReport }>("/api/admin/eval-run", { mode: "deterministic" }))
+    .report.results.find((r) => r.id === "correction_" + proposal.shippedWidgetId);
+  assert.equal((await check())?.passed, true);
+  await client.request("/api/admin/widgets", { operation: "set_availability", id: proposal.shippedWidgetId, availableForConsumption: false });
+  assert.equal((await check())?.passed, false);
+});
 
 test("publishes layouts for scoped chat intents and preserves drafts, snapshots and attachments on restart", async (t) => {
   const dataDir = await mkdtemp(join(tmpdir(), "pzn-ui-layouts-"));

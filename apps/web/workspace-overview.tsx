@@ -177,7 +177,7 @@ export function WorkspaceHome({ activeProfile, pendingActions, disabled, modelUn
   return <div className="workspace-overview workspace-home">
     <WelcomeBanner displayName={activeProfile?.displayName} modelUnavailable={modelUnavailable} />
     {activeProfile && <>
-      {portfolio ? <PortfolioSnapshotBlock {...portfolio} title="Account summary" footer={
+      {portfolio ? <PortfolioSnapshotBlock {...portfolio} compact title="Account summary" footer={
         <button className="overview-action" type="button" disabled={actionsDisabled} onClick={onReviewPortfolio}>
           Ask about portfolio <ArrowUpRight size={15} aria-hidden="true" />
         </button>

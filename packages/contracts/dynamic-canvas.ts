@@ -106,6 +106,7 @@ export const dynamicApprovalNodeSchema = z.object({
   rejectLabel: z.string().trim().min(1).max(40),
   recordId: z.string().trim().max(64).optional(),
   domain: z.enum(["ops_incident", "sales_deal", "external_connector", "stock_trade", "workflow", "generic"]).optional(),
+  expectedUpdatedAt: z.string().max(64).optional(),
   approvalId: z.string().trim().max(64).optional(),
   payloadDigest: z.string().trim().max(128).optional(),
   dualControl: z.boolean().optional(),
@@ -190,6 +191,7 @@ export const dynamicCanvasSchema = z.object({
   prompt: z.string().trim().max(600).optional(),
   nodes: z.array(dynamicNodeSchema).min(1).max(6),
   disclaimer: z.string().trim().min(1).max(240),
+  choices: z.array(z.object({ id: z.string().min(1).max(64), label: z.string().min(1).max(120) }).strict()).max(12).optional(),
   suggestedFollowUp: z.string().trim().max(160).optional(),
 }).strict();
 

@@ -1,3 +1,4 @@
+import { author as operatorCredentials } from "./operator-fixture";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
@@ -27,7 +28,7 @@ try {
   browser = await chromium.launch(executablePath ? { executablePath } : existsSync(chromium.executablePath()) ? {} : { channel: "chrome" });
   const screenshots = resolve(process.env.PZN_TEST_SCREENSHOTS ?? "test-results");
   await mkdir(screenshots, { recursive: true });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  const page = await browser.newPage({ httpCredentials: { ...operatorCredentials, origin: preview.url }, viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   page.setDefaultTimeout(12_000);
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
@@ -50,8 +51,8 @@ try {
   }), true);
   await page.getByRole("link", { name: "Start a conversation", exact: true }).click();
   await page.getByRole("heading", { name: "Welcome, Alice.", exact: true }).waitFor();
-  await page.getByRole("link", { name: "CEP Customer Engagement Platform", exact: true }).click();
-  assert.equal(new URL(page.url()).pathname, "/");
+  await page.getByRole("link", { name: "CEP Wealth Advisory", exact: true }).click();
+  assert.equal(new URL(page.url()).pathname, "/wealth");
   await openAdmin(page, "help");
   await page.getByRole("heading", { name: "How CEP works", exact: true, level: 1 }).waitFor();
   const architecture = page.getByRole("region", { name: "How chat answers a message", exact: true });
@@ -162,6 +163,9 @@ try {
   assert.equal(await sidebar.locator('a[href^="/admin"]').count(), 0);
   assert.equal(await page.getByText("Test mode", { exact: true }).count(), 0);
   await page.getByRole("heading", { name: "Welcome, Alice.", exact: true }).waitFor();
+  assert.equal(await page.getByLabel("Your question", { exact: true }).isVisible(), true);
+  assert.equal(await page.getByRole("region", { name: "Your snapshot and suggestions" }).count(), 0);
+  assert.equal(await page.getByRole("button", { name: "Compare balances", exact: true }).isVisible(), false);
   const shortcuts = page.getByRole("navigation", { name: "Workspace shortcuts" });
   await shortcuts.getByRole("button", { name: "Savings goal", exact: true }).click();
   await page.getByRole("img", { name: /Down payment savings from \$7,500 to \$26,000/ }).waitFor();
@@ -172,6 +176,7 @@ try {
   await openCustomerChat(page);
   await page.getByRole("heading", { name: "Welcome, Alice.", exact: true }).waitFor();
   await page.screenshot({ path: resolve(screenshots, "welcome-desktop.png") });
+  if (!await page.getByRole("button", { name: /Compare two terms/ }).isVisible()) await page.getByText("Explore suggested questions", { exact: true }).click();
   await page.getByRole("button", { name: /Compare two terms/ }).click();
   await page.getByRole("heading", { name: "Compare balance definitions" }).waitFor();
   await page.locator('[data-renderer="a2ui"]').waitFor();
@@ -190,6 +195,7 @@ try {
   await page.reload();
   await page.getByRole("heading", { name: "Available balance", exact: true, level: 3 }).waitFor();
   assert.equal(await page.getByRole("button", { name: "Helpful", exact: true, pressed: true }).count(), 1);
+  assert.equal(await page.getByRole("button", { name: /Advisory Reasoning/ }).count(), 0);
   await sidebar.getByRole("button", { name: "Overview", exact: true }).click();
   await page.getByRole("heading", { name: "Welcome, Alice.", exact: true }).waitFor();
   await sidebar.getByRole("button", { name: /^Compare available and current balance/ }).click();
@@ -240,6 +246,7 @@ try {
   await page.getByRole("heading", { name: "Understanding your portfolio" }).waitFor();
 
   await page.getByRole("button", { name: "New conversation", exact: true }).click();
+  if (!await page.getByRole("button", { name: /Guide me through a task/ }).isVisible()) await page.getByText("Explore suggested questions", { exact: true }).click();
   await page.getByRole("button", { name: /Guide me through a task/ }).click();
   await page.getByRole("heading", { name: "Transfer checklist" }).waitFor();
   assert.deepEqual(await page.locator(".steps-list h4").allTextContents(), [
@@ -301,6 +308,7 @@ try {
   ]);
   await page.screenshot({ path: resolve(screenshots, "ccre-rule-preview.png"), fullPage: true });
   await page.getByRole("button", { name: "Save and test in chat", exact: true }).click();
+  if (!await page.getByRole("button", { name: /Compare two terms/ }).isVisible()) await page.getByText("Explore suggested questions", { exact: true }).click();
   await page.getByRole("button", { name: /Compare two terms/ }).click();
   await page.getByText("Available balance is the amount marked ready to use. Current balance is the total recorded in the ledger. Which one would you like to understand better?", { exact: true }).waitFor();
   await openAdmin(page, "logs");
@@ -308,7 +316,7 @@ try {
   await page.getByText("Mock CCRE evaluation", { exact: true }).click();
   assert.match(await page.locator('pre[aria-label="Mock CCRE evaluation"]').innerText(), /"outcome": "excluded"/);
 
-  const author = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  const author = await browser.newPage({ httpCredentials: { ...operatorCredentials, origin: preview.url }, viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   author.setDefaultTimeout(12_000);
   author.on("pageerror", (error) => pageErrors.push(error.message));
   await author.goto(preview.url + adminPaths.chat);
@@ -371,7 +379,7 @@ try {
   assert.equal(await author.getByLabel("Field group", { exact: true }).inputValue(), "customer");
   assert.equal(await author.getByLabel("Value", { exact: true }).inputValue(), "demo-learner");
 
-  const portfolioPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  const portfolioPage = await browser.newPage({ httpCredentials: { ...operatorCredentials, origin: preview.url }, viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   portfolioPage.setDefaultTimeout(12_000);
   portfolioPage.on("pageerror", (error) => pageErrors.push(error.message));
   await portfolioPage.goto(preview.url + "/planning");
@@ -387,6 +395,7 @@ try {
   await jordanProfile.getByText("On file", { exact: true }).waitFor();
   await demoProfiles.getByRole("button", { name: "Start chat as Jordan Lee", exact: true }).click();
   await jordanProfileTrigger.waitFor();
+  if (!await portfolioPage.getByRole("button", { name: /Learn about retirement/ }).isVisible()) await portfolioPage.getByText("Explore suggested questions", { exact: true }).click();
   await portfolioPage.getByRole("button", { name: /Learn about retirement/ }).click();
   await portfolioPage.getByRole("heading", { name: "Retirement planning basics", exact: true }).waitFor();
   assert.equal(await portfolioPage.getByRole("heading", { name: "Update your beneficiaries", exact: true }).count(), 0);
@@ -446,6 +455,7 @@ try {
   const marcusProfile = demoProfiles.getByRole("article", { name: "Marcus Reed", exact: true });
   await marcusProfile.getByText("Awaiting first deposit", { exact: true }).waitFor();
   await marcusProfile.getByRole("button", { name: "Start chat as Marcus Reed", exact: true }).click();
+  if (!await portfolioPage.getByRole("button", { name: /Update mailing address/ }).isVisible()) await portfolioPage.getByText("Explore suggested questions", { exact: true }).click();
   await portfolioPage.getByRole("button", { name: /Update mailing address/ }).click();
   await portfolioPage.getByRole("heading", { name: "Update your mailing address", exact: true }).waitFor();
   await portfolioPage.getByRole("heading", { name: "Fund your account", exact: true }).waitFor();
@@ -453,8 +463,11 @@ try {
   await openAdmin(portfolioPage, "logs");
   const scoresStage = portfolioLogs.locator(".payload-stage").filter({ hasText: "Treatment Selector topic scores · succeeded" });
   await scoresStage.getByText("Treatment Selector topic scores · succeeded", { exact: true }).click();
-  assert.deepEqual(JSON.parse(await scoresStage.getByLabel("Mock topic scores request", { exact: true }).innerText()), marcusCalls.scores.treatmentSelectorInput);
-  assert.deepEqual(JSON.parse(await scoresStage.getByLabel("Topic scores response", { exact: true }).innerText()), topicScores);
+  const actualScoresRequest = JSON.parse(await scoresStage.getByLabel("Mock topic scores request", { exact: true }).innerText());
+  assert.equal(actualScoresRequest.mid, marcusCalls.scores.treatmentSelectorInput.mid);
+  assert.deepEqual(actualScoresRequest.contextIds, [...marcusCalls.scores.treatmentSelectorInput.contextIds, "wealth-next-best-offers"]);
+  const actualScores = JSON.parse(await scoresStage.getByLabel("Topic scores response", { exact: true }).innerText());
+  assert.deepEqual(actualScores, { ...topicScores, scores: [...topicScores.scores, { contextId: "wealth-next-best-offers", score: null }] });
   await portfolioLogs.getByText("Treatment Selector · succeeded", { exact: true }).click();
   await portfolioLogs.getByText("Mock CCRE evaluation", { exact: true }).click();
   const fundingEvaluation = JSON.parse(await portfolioLogs.locator('pre[aria-label="Mock CCRE evaluation"]').innerText());
@@ -489,6 +502,7 @@ try {
   await openAdmin(portfolioPage, "chat");
   await portfolioPage.getByRole("button", { name: "Profiles, current profile Marcus Reed", exact: true }).click();
   await marcusProfile.getByRole("button", { name: "Start chat as Marcus Reed", exact: true }).click();
+  if (!await portfolioPage.getByRole("button", { name: /Update mailing address/ }).isVisible()) await portfolioPage.getByText("Explore suggested questions", { exact: true }).click();
   await portfolioPage.getByRole("button", { name: /Update mailing address/ }).click();
   await portfolioPage.getByRole("button", { name: "Preview funding", exact: true }).click();
   await portfolioPage.getByText("Which funding method would you like to preview?", { exact: true }).waitFor();
@@ -503,10 +517,11 @@ try {
   await portfolioLogs.getByText("Customer reply that resumed this run", { exact: true }).click();
   assert.match(await portfolioLogs.getByLabel("Customer reply that resumed this run", { exact: true }).innerText(), /Use the cash management account/);
 
-  const goalPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  const goalPage = await browser.newPage({ httpCredentials: { ...operatorCredentials, origin: preview.url }, viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   goalPage.setDefaultTimeout(12_000);
   goalPage.on("pageerror", (error) => pageErrors.push(error.message));
   await goalPage.goto(preview.url);
+  if (!await goalPage.getByRole("button", { name: /Home-buying goal/ }).isVisible()) await goalPage.getByText("Explore suggested questions", { exact: true }).click();
   await goalPage.getByRole("button", { name: /Home-buying goal/ }).click();
   const goal = goalPage.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Home down payment", exact: true });
   const goalValues = goal.locator(".goal-values");
@@ -526,7 +541,7 @@ try {
   await goalPage.getByText("Goal Progress · succeeded", { exact: true }).click();
   assert.match(await goalPage.locator('pre[aria-label="Goal Progress tool response"]').innerText(), /"targetCents": 5000000/);
 
-  const mobile = await browser.newPage({ viewport: { width: 360, height: 780 }, isMobile: true, deviceScaleFactor: 1, reducedMotion: "reduce", hasTouch: true });
+  const mobile = await browser.newPage({ httpCredentials: { ...operatorCredentials, origin: preview.url }, viewport: { width: 360, height: 780 }, isMobile: true, deviceScaleFactor: 1, reducedMotion: "reduce", hasTouch: true });
   mobile.setDefaultTimeout(12_000);
   await mobile.goto(preview.url + "/planning");
   const retirementLink = mobile.getByRole("navigation", { name: "Planning topics" }).getByRole("link", { name: "Retirement", exact: true });
@@ -566,6 +581,7 @@ try {
   await mobileProfiles.getByRole("button", { name: "Close profiles", exact: true }).click();
   await mobileMenu.click();
   await mobile.getByRole("button", { name: "Close conversation navigation" }).click();
+  if (!await mobile.getByRole("button", { name: /Compare two terms/ }).isVisible()) await mobile.getByText("Explore suggested questions", { exact: true }).click();
   await mobile.getByRole("button", { name: /Compare two terms/ }).click();
   await mobile.getByRole("heading", { name: "Compare balance definitions" }).waitFor();
   const columns = await mobile.locator(".compare-column").evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().left));
@@ -607,7 +623,7 @@ try {
   await mobile.getByRole("button", { name: "Run preview" }).click();
   await mobile.getByText("Matching content", { exact: true }).waitFor();
   await mobile.screenshot({ path: resolve(screenshots, "tool-setup-mobile.png"), fullPage: true });
-  const fallback = await browser.newPage();
+  const fallback = await browser.newPage({httpCredentials: { ...operatorCredentials, origin: preview.url }});
   await fallback.route(/\/api\/turns\/turn_[a-f0-9]+$/, async (route) => {
     const response = await route.fetch();
     const payload = await response.json();
@@ -615,6 +631,7 @@ try {
     await route.fulfill({ response, json: payload });
   });
   await fallback.goto(preview.url + "/chat");
+  if (!await fallback.getByRole("button", { name: /Compare two terms/ }).isVisible()) await fallback.getByText("Explore suggested questions", { exact: true }).click();
   await fallback.getByRole("button", { name: /Compare two terms/ }).click();
   await fallback.locator('[data-renderer="fallback"]').waitFor();
   await fallback.getByRole("heading", { name: "Compare balance definitions" }).waitFor();
@@ -623,7 +640,7 @@ try {
   await fallback.getByLabel("Your question").press("Enter");
   await fallback.locator('[data-renderer="fallback"]').getByRole("img", { name: /Down payment savings/ }).waitFor();
 
-  const signInContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  const signInContext = await browser.newContext({ httpCredentials: { ...operatorCredentials, origin: preview.url }, viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   const signInPage = await signInContext.newPage();
   signInPage.on("pageerror", (error) => pageErrors.push(error.message));
   await signInPage.goto(preview.url + "/chat");
@@ -726,7 +743,7 @@ try {
   await currentProfile("Jordan Lee").waitFor();
   await jordanCash.waitFor();
 
-  const mobileSignIn = await browser.newPage({ viewport: { width: 360, height: 780 }, reducedMotion: "reduce" });
+  const mobileSignIn = await browser.newPage({ httpCredentials: { ...operatorCredentials, origin: preview.url }, viewport: { width: 360, height: 780 }, reducedMotion: "reduce" });
   await mobileSignIn.goto(preview.url + "/login");
   await mobileSignIn.getByRole("button", { name: "Sign in as Marcus Reed", exact: true }).waitFor();
   assert.equal(await mobileSignIn.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);

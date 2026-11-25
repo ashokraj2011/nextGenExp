@@ -169,6 +169,7 @@ export function UxEvolutionPanel() {
                 </div>
               )}
 
+              {prop.regression && <p>Evaluation checks “{prop.regression.prompt}” against the published card.</p>}
               <div className="uxe-card-foot">
                 {prop.status === "pending" ? (
                   <button

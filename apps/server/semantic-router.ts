@@ -47,6 +47,7 @@ const semanticRouterSystemPrompt = [
   "5. Choose 'external_connector' for triggering/invoking external webhooks or bridges (PagerDuty, ServiceNow, external connectors).",
   "6. Choose 'ops_incident' for production incidents, latency/5xx outages, SRE triage, or release rollbacks.",
   "7. Choose 'sales_deal_desk' for Q4 sales pipeline, RevOps forecast, Deal Desk discount approvals, or enterprise close plans.",
+  "A request to visualize the current portfolio allocation is a verified_experience. The Portfolio Snapshot supplies the asset mix.",
   "8. Choose 'custom_dynamic_ui' ONLY when the user explicitly wants an interactive calculator, custom chart/table/form/matrix/checklist/dashboard that does not fit capabilities 1-7.",
   'Return ONLY valid JSON: { "capabilityId": "...", "confidence": 0.95, "reasoning": "short 1-sentence reason", "extractedParams": {} }.',
 ].join("\n");
@@ -149,7 +150,7 @@ export async function routeCapabilityUnified(input: {
   const fallback = deterministicCapabilityRoute(clean);
 
   // In automated mock-gateway tests, or on guarded/short prompts, keep routing deterministic with zero extra model calls.
-  if (mode === "test" || !gateway || clean.length < 6 || nonDynamicGuard.test(clean)) {
+  if (mode === "test" || !gateway || clean.length < 6 || nonDynamicGuard.test(clean) || /\b(?:DEAL|INC)-[A-Z0-9]+\b/i.test(clean)) {
     return fallback;
   }
 

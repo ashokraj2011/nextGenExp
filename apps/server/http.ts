@@ -23,6 +23,7 @@ import {
   setActiveExperienceRegistryStore,
 } from "../../packages/experience-registry";
 import { activeContexts } from "../../packages/ts-adapter";
+import { compileDynamicCanvas } from "../../packages/experience/compile";
 import { generateWidgetFromMultimodal } from "./dynamic-ui-generator";
 import { generateBoundUiLayoutWithLlm } from "./ui-layout-generator";
 import { OpsIncidentStore } from "./ops-store";
@@ -95,7 +96,7 @@ import type { AddressInfo } from "node:net";
 import type { ViteDevServer } from "vite";
 import { z } from "zod";
 import demo from "../../fixtures/host.json";
-import { type Bootstrap } from "../../packages/contracts/api";
+import type { Bootstrap, TurnView } from "../../packages/contracts/api";
 import type { SelectionMode } from "../../packages/contracts/domain";
 import { actionBody, conversationChangeBody, createBody, eventBody, idPattern, messageBody, previewFundingBody, retryBody } from "../../packages/contracts/http-inputs";
 import { pendingActionsContext, workspacePinsSchema } from "../../packages/contracts/workspace";
@@ -110,7 +111,10 @@ import { ExperienceService } from "./service";
 import { addCcreRule, previewTreatmentSelector, toolSetupTag, toolSetupView, validateToolSetup } from "./tool-setup";
 import { readWorkspacePendingActions } from "./workspace-actions";
 
+import { operatorAccess } from "./operator-access";
+
 type Options = {
+  operators?: Record<string, string>;
   dataDir: string;
   gateway: GatewaySettings | null;
   projectRoot: string;
@@ -130,6 +134,12 @@ const MIME: Record<string, string> = {
   ".woff2": "font/woff2", ".woff": "font/woff", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml",
 };
 const pagePaths = new Set(["/", "/chat", "/wealth", "/it-ops", "/revops", "/recommendations", "/integrations", "/embed", "/login", "/planning", "/__test/a2ui", ...Object.values(adminPaths)]);
+
+function visibleTurn(turn: TurnView, operator?: string): TurnView {
+  if (operator) return turn;
+  const { semanticRoute, customerLookup, providerArbitration, piiRedaction, ...customerTurn } = turn;
+  return customerTurn;
+}
 
 function json(res: ServerResponse, body: unknown, status = 200) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
@@ -194,6 +204,7 @@ export async function startApp(options: Options) {
   const customer360 = new Customer360Service(options.dataDir);
   const selectionMode = options.selectionMode ?? "semantic_rerank";
   const inspectorEnabled = options.inspectorEnabled ?? true;
+  const identifyOperator = operatorAccess(options.dataDir, options.operators);
   const profile = options.gateway?.profile;
   const sessionCookie = profile === "openai" ? "pzn_openai_session" : profile === "copilot_acp" ? "pzn_copilot_session" : "pzn_session";
   const sessionPattern = new RegExp("(?:^|;\\s*)" + sessionCookie + "=(local_[a-f0-9]{32})(?:;|$)");
@@ -299,7 +310,7 @@ export async function startApp(options: Options) {
   if ((options.mode ?? "live") !== "test") scheduledJobs.startTicker();
   setActiveEquityLedger(tradeStore);
   const writeAudit = new WriteAuditStore(options.dataDir);
-  store.setDomainBindingContext(() => ({ incident: opsStore.primaryIncident(), deal: salesStore.primaryDeal() }));
+  store.setDomainBindingContext((id) => ({ incident: opsStore.findById(id), deal: salesStore.list().find((deal) => deal.id === id) }));
   const registry = new CapabilityRegistry(store);
   const sfieldPath = join(options.dataDir, "sfield.sqlite");
   const offline = options.gateway ? undefined : new SqlitePersistence({ path: sfieldPath });
@@ -355,15 +366,15 @@ export async function startApp(options: Options) {
   };
   tradeStore.reconcilePendingJobs(makeTradeSettler("system-reconcile"));
 
+  const integrationService = new IntegrationTaskService(integrationTasks, approvalStore, () => runtime);
   const experience = new ExperienceService(store, runtime, selectionMode, now, inspectorEnabled, offline && {
     chat: new ChatHarness(offline), close: () => offline.close(),
   }, {
     mode, gateway: options.gateway, dataDir: options.dataDir, customer360, portfolioSnapshots, goalProgressProvider,
     opsStore, salesStore, connectorStore, approvalStore, tradeStore, actionFlowStore, workflowEngine, knowledgeBase, widgetLibrary, piiFirewall,
-    onTradeSettle: makeTradeSettler,
+    integrationService, onTradeSettle: makeTradeSettler,
   });
 
-  const integrationService = new IntegrationTaskService(integrationTasks, approvalStore, () => runtime);
   const demoMcp = createDemoMcpServer();
 
   async function executeApprovedRecord(principalId: string, record: ApprovalRecord) {
@@ -493,6 +504,10 @@ export async function startApp(options: Options) {
       return { approval: finalRecord, execution: { ...exec, sfieldRunId: "offline", auditId: audit.auditId } };
     }
 
+    if (typeof record.payload.expectedUpdatedAt === "string") {
+      const current = record.domain === "ops_incident" ? opsStore.findById(record.recordId) : salesStore.list().find((d) => d.id === record.recordId);
+      if (current?.updatedAt !== record.payload.expectedUpdatedAt) throw new ApiError(409, "stale_approval", "The record changed. Review it again before approving.");
+    }
     const domain = record.domain as "ops_incident" | "sales_deal" | "customer360";
     const actor = record.decidedBy ?? record.requester;
     const note = typeof record.payload.note === "string" ? record.payload.note : record.comment;
@@ -577,7 +592,17 @@ export async function startApp(options: Options) {
     const { pathname } = url;
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
+    const operator = inspectorEnabled ? identifyOperator(req, res) : undefined;
+    const requireOperator = () => {
+      if (!inspectorEnabled) throw new ApiError(404, "not_found", "This page is unavailable.");
+      if (!operator) {
+        res.setHeader("WWW-Authenticate", 'Basic realm="Workspace administration", charset="UTF-8"');
+        throw new ApiError(401, "operator_required", "Sign in with your operator account.");
+      }
+      return operator;
+    };
     if (!pathname.startsWith("/api/")) {
+      if (isAdminPath(pathname) || ["/integrations", "/recommendations", "/it-ops", "/revops"].includes(pathname)) requireOperator();
       if ((isAdminPath(pathname) || pathname === "/help") && !inspectorEnabled) throw new ApiError(404, "not_found", "This page is unavailable.");
       if (pathname === "/sdk/cep-embed.js" && req.method === "GET") {
         res.writeHead(200, {
@@ -625,6 +650,10 @@ export async function startApp(options: Options) {
       throw new ApiError(404, "not_found", "This item is unavailable.");
     }
     const method = req.method;
+    const internalApi = ["admin", "debug", "pzn", "approvals", "connectors", "ops", "ops-incidents", "sales", "sales-deals", "workflows", "workflow-runs"].includes(resource)
+      || (resource === "integrations" && id !== "demo-mcp")
+      || (resource === "proactive" && id === "trigger");
+    if (internalApi) requireOperator();
     const adminBootstrap = resource === "admin" && id === "bootstrap" && !operation && inspectorEnabled;
     if (method === "GET" && ((resource === "bootstrap" && !id) || adminBootstrap)) {
       const intentPrompts = experienceRegistry.listIntents()
@@ -636,7 +665,7 @@ export async function startApp(options: Options) {
           isCustom: !item.isBuiltIn || item.isCustomized,
         }));
       const state: Bootstrap = {
-        conversations: store.conversations(principalId).filter((conversation) => adminBootstrap || conversation.audience !== "admin"),
+        conversations: store.conversations(principalId, Boolean(operator)).filter((conversation) => adminBootstrap || conversation.audience !== "admin"),
         personas: await loadBootstrapPersonas(principalId),
         scenarios: tsFixtures.scenarios.map(({ scenarioId, label }) => ({ scenarioId, label })),
         intentPrompts,
@@ -668,12 +697,16 @@ export async function startApp(options: Options) {
         const { updates } = await body(req, z.object({
           updates: z.record(dataBindingKeySchema, z.string().max(160)),
         }).strict());
+        const actor = operator ?? workspacePersona.displayName;
+        if (!operator && Object.keys(updates).some((key) => !["goal.target", "customer.displayName", "customer.beneficiaryStatus"].includes(key))) {
+          throw new ApiError(403, "field_read_only", "This field can only be changed by an operator.");
+        }
         if (runtime) {
           const governed = await runtime.executeGovernedWrite(principalId, {
             domain: "customer360",
             recordId: personaId,
             action: "apply_bindings",
-            actor: workspacePersona.displayName,
+            actor,
             updates,
           }, AbortSignal.timeout(5000));
           return json(res, {
@@ -689,7 +722,7 @@ export async function startApp(options: Options) {
           domain: "customer360",
           recordId: personaId,
           action: "apply_bindings",
-          actor: workspacePersona.displayName,
+          actor,
           summary: `Updated Customer 360 bindings: ${applied.updatedFields.join(", ") || "none"}`,
           status: "succeeded",
         });
@@ -886,6 +919,13 @@ export async function startApp(options: Options) {
         const evalMode = input.mode ?? "deterministic";
         return json(res, await evalRunner.runSuite({
           mode: evalMode,
+          approvedCorrections: uxEvolution.view().proposals.flatMap((p) => p.status === "approved" && p.regression ? [p.regression] : []),
+          replayCorrection: async (prompt) => {
+            const widget = widgetLibrary.renderPublishedWidget(principalId, prompt);
+            if (!widget) return {};
+            const rendered = compileDynamicCanvas(widget.intro, widget.canvas, now() + 60_000).display.blocks.find((b) => b.component === "PznDynamicCanvas");
+            return { recordId: rendered?.props.recordId, title: rendered?.props.title };
+          },
           gateway: options.gateway,
           profileStore,
           tradeStore,
@@ -945,12 +985,12 @@ export async function startApp(options: Options) {
       }
       if (id === "scheduled-jobs" && method === "POST") {
         const input = await body(req, scheduledJobUpsertSchema, 8 * 1024);
-        return json(res, scheduledJobs.upsert(input));
+        return json(res, scheduledJobs.upsert(input, principalId));
       }
       if (id === "scheduled-jobs-run" && method === "POST") {
         const { id: jobId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());
         try {
-          return json(res, scheduledJobs.runJob(jobId, "manual"));
+          return json(res, scheduledJobs.runJob(jobId, "manual", principalId));
         } catch (err) {
           throw new ApiError(404, "scheduled_job_not_found", err instanceof Error ? err.message : "Job not found.");
         }
@@ -1035,9 +1075,11 @@ export async function startApp(options: Options) {
       }
       if (id) {
         const conversation = store.conversation(id, principalId);
-        if (conversation.audience === "admin" && !inspectorEnabled) throw new ApiError(404, "not_found", "This conversation is unavailable.");
+        if (conversation.audience === "admin" || (!operator && store.hasOperatorContent(id))) requireOperator();
+        if (method === "GET" && operation === "updates") return json(res, await experience.recordUpdates(conversation, Boolean(operator)));
         if (method === "GET" && !operation) {
-          return json(res, { ...presentConversation(conversation), turns: await experience.conversationTurns(conversation) });
+          const turns = await experience.conversationTurns(conversation);
+          return json(res, { ...presentConversation(conversation), turns: turns.map((turn) => visibleTurn(turn, operator)) });
         }
         if (method === "POST" && operation === "settings") {
           return json(res, store.changeConversation(id, principalId, await body(req, conversationChangeBody), now()));
@@ -1049,20 +1091,18 @@ export async function startApp(options: Options) {
         if (method === "POST" && operation === "turns") {
           const { message, clientRequestId } = await body(req, messageBody);
           const fresh = store.conversation(conversation.id, principalId);
-          return json(res, experience.submit(fresh, message, clientRequestId), 202);
+          return json(res, experience.submit(fresh, message, clientRequestId, "message", undefined, undefined, undefined, operator), 202);
         }
       }
     }
     if (resource === "turns" && id) {
       const turn = store.ownTurn(id, principalId);
-      if (!inspectorEnabled && store.conversation(turn.scope.conversationId, principalId).audience === "admin") {
-        throw new ApiError(404, "not_found", "This message is unavailable.");
-      }
-      if (method === "GET" && !operation) return json(res, await experience.turnView(turn));
+      if (store.conversation(turn.scope.conversationId, principalId).audience === "admin" || (!operator && store.hasOperatorContent(turn.scope.conversationId))) requireOperator();
+      if (method === "GET" && !operation) return json(res, visibleTurn(await experience.turnView(turn), operator));
       if (method === "POST" && operation === "cancel") return json(res, experience.cancel(turn));
       if (method === "POST" && operation === "retry") {
         const { clientRequestId } = await body(req, retryBody);
-        return json(res, await experience.retry(store.ownTurn(id, principalId), clientRequestId), 202);
+        return json(res, await experience.retry(turn, clientRequestId, operator), 202);
       }
       if (method === "GET" && operation === "events") {
         const rawCursor = req.headers["last-event-id"] ?? url.searchParams.get("after") ?? "0";
@@ -1097,7 +1137,7 @@ export async function startApp(options: Options) {
     }
     if (resource === "experiences" && id && operation === "actions" && method === "POST") {
       const { envelope, clientRequestId } = await body(req, actionBody);
-      return json(res, experience.followUp(principalId, id, envelope, clientRequestId), 202);
+      return json(res, experience.followUp(principalId, id, envelope, clientRequestId, operator), 202);
     }
     if (resource === "admin" && id === "recommendation-providers" && !operation && method === "GET" && inspectorEnabled) {
       return json(res, {
@@ -1129,7 +1169,7 @@ export async function startApp(options: Options) {
     ) {
       const rawInput = await body(req, connectorInvokeInputSchema);
       const action = rawInput.action ?? "invoke";
-      const actor = rawInput.actor ?? "CEP Operator";
+      const actor = requireOperator();
       const payload = rawInput.payload ?? {};
       const conn = connectorStore.findById(rawInput.connectorId);
       if (!conn) throw new ApiError(404, "not_found", "Connector not found.");
@@ -1249,14 +1289,16 @@ export async function startApp(options: Options) {
     }
     if (resource === "proactive") {
       if (id === "alerts" && !operation && method === "GET") {
+        requireOperator();
         return json(res, proactiveStore.view());
       }
       if (id === "trigger" && !operation && method === "POST") {
         const input = await body(req, proactiveTriggerInputSchema, 8 * 1024);
-        return json(res, proactiveStore.trigger(input), 201);
+        return json(res, proactiveStore.trigger(input, principalId), 201);
       }
       if (id && operation === "dismiss" && method === "POST") {
-        return json(res, proactiveStore.dismiss(id));
+        const view = proactiveStore.dismiss(id, operator ? undefined : principalId);
+        return json(res, operator ? view : { alerts: [], activeCount: 0 });
       }
       if (id === "stream" && !operation && method === "GET") {
         res.writeHead(200, {
@@ -1267,8 +1309,9 @@ export async function startApp(options: Options) {
         });
         streams.add(res);
         res.write(`event: proactive.connected\ndata: ${JSON.stringify({ ok: true })}\n\n`);
+        const personaId = url.searchParams.get("personaId");
         const unsubscribe = proactiveStore.subscribe((alert) => {
-          if (!res.writableEnded) {
+          if (alert.principalId === principalId && alert.personaId === personaId && !res.writableEnded) {
             res.write(`event: proactive.alert\ndata: ${JSON.stringify(alert)}\n\n`);
           }
         });
@@ -1342,7 +1385,7 @@ export async function startApp(options: Options) {
         const input = await body(req, tradeJobCreateInputSchema);
         const legs = input.legs.map((l) => ({ ...l, symbol: l.symbol.toUpperCase(), reason: l.reason ?? "primary" as const }));
         const grossCents = tradeStore.estimateGrossCents(input.personaId, legs);
-        if (!input.bypassApprovalGate && approvalStore.shouldGateTrade(grossCents)) {
+        if (approvalStore.shouldGateTrade(grossCents)) {
           const policy = approvalStore.getPolicy();
           const usd = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
           const approval = approvalStore.createPending({
@@ -1362,13 +1405,13 @@ export async function startApp(options: Options) {
               { label: "Tax Harvesting", value: input.taxHarvestAnalyzed ? "Analyzed" : "Skipped" },
               { label: "4-Eyes Dual Control", value: policy.defaultDualControl ? "Required" : "Inline allowed" },
             ],
-            requester: input.actor ?? "Customer",
+            requester: operator ?? principalId,
             dualControl: policy.defaultDualControl,
           });
-          return json(res, { status: "pending_approval", approval, approvalsView: approvalStore.view() }, 202);
+          return json(res, { status: "pending_approval", approval, ...(operator && { approvalsView: approvalStore.view() }) }, 202);
         }
         try {
-          const job = tradeStore.startTradeJob(input, makeTradeSettler(principalId));
+          const job = tradeStore.startTradeJob({ ...input, actor: operator ?? principalId }, makeTradeSettler(principalId));
           return json(res, job, 202);
         } catch (err) {
           throw new ApiError(400, "trade_rejected", err instanceof Error ? err.message : "Trade order could not be queued.");
@@ -1417,7 +1460,7 @@ export async function startApp(options: Options) {
       return json(res, { policy, view: approvalStore.view() });
     }
     if (resource === "approvals" && id && operation === "decide" && method === "POST") {
-      const decisionInput = await body(req, approvalDecisionInputSchema);
+      const decisionInput = { ...await body(req, approvalDecisionInputSchema.omit({ actor: true }).extend({ actor: z.string().optional() })), actor: requireOperator() };
       const outcome = approvalStore.decide(id, decisionInput);
       if (!outcome.ok) {
         throw new ApiError(outcome.status, outcome.code, outcome.message);
@@ -1488,9 +1531,10 @@ export async function startApp(options: Options) {
       return json(res, opsStore.remove(id));
     }
     if (resource === "ops-incidents" && id && operation === "decision" && method === "POST") {
-      const data = await body(req, incidentDecisionInputSchema.extend({ queueForApproval: z.boolean().optional() }));
+      const data = { ...await body(req, incidentDecisionInputSchema.extend({ queueForApproval: z.boolean().optional() })), actor: requireOperator() };
       const existingInc = opsStore.findById(id);
       if (!existingInc) throw new ApiError(404, "not_found", "Incident not found.");
+      if ((data.expectedUpdatedAt && data.expectedUpdatedAt !== existingInc.updatedAt) || (data.decision.endsWith("_rollback") && existingInc.rollbackStatus !== "pending")) throw new ApiError(409, "decision_unavailable", "The incident changed or has no pending rollback. Reopen the incident to review it.");
       const policy = approvalStore.getPolicy();
       const shouldQueue = Boolean(data.queueForApproval) || (
         data.decision === "approve_rollback" && policy.gateHighRiskOpsRollbacks && policy.defaultDualControl
@@ -1505,7 +1549,7 @@ export async function startApp(options: Options) {
           title: `Production Rollback · ${existingInc.id} (${existingInc.currentRelease} → ${existingInc.previousRelease})`,
           summary: existingInc.summary,
           riskLevel: existingInc.severity === "P1" ? "high" : "medium",
-          payload: { decision: data.decision, ...(data.note ? { note: data.note } : {}) },
+          payload: { decision: data.decision, expectedUpdatedAt: existingInc.updatedAt, ...(data.note ? { note: data.note } : {}) },
           details: [
             { label: "Incident", value: `${existingInc.id} (${existingInc.severity})` },
             { label: "Service", value: `${existingInc.service} · ${existingInc.environment}` },
@@ -1557,9 +1601,10 @@ export async function startApp(options: Options) {
       return json(res, salesStore.remove(id));
     }
     if (resource === "sales-deals" && id && operation === "decision" && method === "POST") {
-      const data = await body(req, dealDecisionInputSchema.extend({ queueForApproval: z.boolean().optional() }));
+      const data = { ...await body(req, dealDecisionInputSchema.extend({ queueForApproval: z.boolean().optional() })), actor: requireOperator() };
       const existingDeal = salesStore.list().find((d) => d.id.toLowerCase() === id.toLowerCase());
       if (!existingDeal) throw new ApiError(404, "not_found", "Deal not found.");
+      if ((data.expectedUpdatedAt && data.expectedUpdatedAt !== existingDeal.updatedAt) || (data.decision.endsWith("_discount") && existingDeal.discountStatus !== "pending")) throw new ApiError(409, "decision_unavailable", "The deal changed or has no pending discount. Reopen the deal to review it.");
       const policy = approvalStore.getPolicy();
       const shouldQueue = Boolean(data.queueForApproval) || (
         data.decision === "approve_discount" && existingDeal.discountPct > 15 && policy.gateHighRiskSalesDiscounts && policy.defaultDualControl
@@ -1574,7 +1619,7 @@ export async function startApp(options: Options) {
           title: `Deal Desk Discount · ${existingDeal.accountName} (${existingDeal.discountPct}% off)`,
           summary: existingDeal.summary,
           riskLevel: existingDeal.discountPct > 15 ? "high" : "medium",
-          payload: { decision: data.decision, ...(data.note ? { note: data.note } : {}) },
+          payload: { decision: data.decision, expectedUpdatedAt: existingDeal.updatedAt, ...(data.note ? { note: data.note } : {}) },
           details: [
             { label: "Deal ID", value: existingDeal.id },
             { label: "Account", value: existingDeal.accountName },
@@ -1655,12 +1700,12 @@ export async function startApp(options: Options) {
       }
       if (id === "tasks" && operation === "run" && method === "POST") {
         const data = await body(req, runTaskRequestSchema, 32 * 1024);
-        const out = await guard(() => integrationService.run(principalId, { ...data, requestedBy: data.requestedBy ?? "CEP Operator" }));
+        const out = await guard(() => integrationService.run(principalId, { ...data, requestedBy: requireOperator() }));
         return json(res, out, out.approval ? 202 : 200);
       }
       if (id === "copilot" && !operation && method === "POST") {
         const data = await body(req, integrationCopilotRequestSchema, 48 * 1024);
-        return json(res, await runIntegrationCopilot(data, integrationService, principalId, { gateway: options.gateway, dataDir: options.dataDir }));
+        return json(res, await runIntegrationCopilot(data, integrationService, principalId, { operatorName: requireOperator(), gateway: options.gateway, dataDir: options.dataDir }));
       }
       if (id === "runs" && operation === "reconcile" && method === "POST") {
         const { runId } = await body(req, z.object({ runId: z.string().min(3).max(64) }).strict());
@@ -1676,7 +1721,7 @@ export async function startApp(options: Options) {
       };
       const pznGate = (operation: string, args: Record<string, unknown>, requester?: string) => (
         pznGateFor(approvalStore.getPolicy(), operation).gated
-          ? requestPznApproval(approvalStore, selfServicePzn, { operation, args, requester })
+          ? requestPznApproval(approvalStore, selfServicePzn, { operation, args, requester: requireOperator() })
           : null
       );
       const pendingResponse = (approval: ApprovalRecord) => json(res, {
@@ -1843,6 +1888,7 @@ export async function startApp(options: Options) {
       server.listen(options.port ?? 0, "127.0.0.1", () => { server.off("error", reject); accept(); });
     });
     experience.reconcile();
+    experience.startWatchChecks();
   } catch (error) {
     await vite?.close();
     await experience.close();

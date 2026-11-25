@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { gatewayFromEnv } from "../apps/server/gateway";
 import type { IncomingHttpHeaders } from "node:http";
 import host from "../fixtures/host.json";
-import { startApp } from "../apps/server/http";
+import { startApp } from "./operator-fixture";
 import type { Bootstrap, TurnAccepted, TurnView, ConversationView } from "../packages/contracts/api";
 import type { TurnPayloads } from "../packages/contracts/inspector";
 import {

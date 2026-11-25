@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ChatHarness, newId } from "@sfield/core";
 import { SqlitePersistence } from "@sfield/store-sqlite";
-import { startApp } from "../apps/server/http";
+import { startApp } from "./operator-fixture";
 import { sfieldNamespace } from "../apps/server/runtime";
 import { Store } from "../apps/server/store";
 import type { ConversationView } from "../packages/contracts/api";

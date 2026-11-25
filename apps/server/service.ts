@@ -25,7 +25,11 @@ import { contentCatalog, lookupContent, modelBundle, resolveCandidates } from ".
 import { compileChatReply, compileDynamicCanvas, compileExperience, compileFundingOptions, compileFundingPreview, compileRuleCreation, makeId } from "../../packages/experience/compile";
 import { verifyContextProposal, verifyRoute, requireCheck, Rejected } from "../../packages/experience/verify";
 import { ApiError, presentConversation, Store, type ConversationRecord, type Stage, type TurnRecord } from "./store";
-import { generateDynamicUi, isDynamicUiRequest, isOpsIncidentPrompt, isSalesDealPrompt } from "./dynamic-ui-generator";
+import type { IntegrationTaskService } from "./integration-tasks";
+import type { StoredWatch } from "./store";
+import { answerCustomerLookup, watchRequest } from "./customer-record-chat";
+import { matchingDeals, recordPrompt } from "./record-context";
+import { generateDynamicUi, isApprovalQueuePrompt, isConnectorActionPrompt, isDynamicUiRequest, isOpsIncidentPrompt, isSalesDealPrompt } from "./dynamic-ui-generator";
 import { routeCapabilityUnified } from "./semantic-router";
 import { recommendationArbitrateToolRef } from "../../packages/contracts/recommendation-provider";
 import type { ProviderArbitrationTrace } from "../../packages/contracts/api";
@@ -39,7 +43,7 @@ import { extractDocumentAction, hasAttachedDocumentBlock } from "./document-extr
 import type { ApprovalStore } from "./approval-store";
 import type { SettlementCallback, TradeStore } from "./trade-store";
 import type { ActionFlowStore } from "./action-flow-store";
-import { compileSavedWidgetToCanvas, type WidgetLibraryStore } from "./widget-library";
+import { type WidgetLibraryStore } from "./widget-library";
 import { rehydrateObjectStrings, rehydratePiiText, type PiiFirewallStore } from "./pii-firewall";
 import type { Customer360Service } from "./customer-360";
 import type { GatewaySettings } from "./gateway";
@@ -71,6 +75,41 @@ export class ExperienceService {
   private readonly jobs = new Map<string, Promise<void>>();
   private readonly history: PznChatHistory;
   private closing = false;
+  private watchTimer?: ReturnType<typeof setInterval>;
+  private watchReads = new Map<string, Promise<void>>();
+
+  startWatchChecks() {
+    this.watchTimer = setInterval(() => {
+      for (const w of this.store.dueWatches()) void this.refreshWatch(w);
+    }, 60_000);
+    this.watchTimer.unref();
+  }
+
+  private refreshWatch(w: StoredWatch) {
+    const running = this.watchReads.get(w.id);
+    if (running) return running;
+    const read = (async () => {
+      let value: string | undefined;
+      try {
+        if (w.kind === "deal") {
+          const deal = this.dynamicUi?.salesStore?.list().find((d) => d.id === w.recordId);
+          value = deal && (["Commit", "Closed Won"].includes(deal.stage) ? "ready" : deal.stage);
+        } else {
+          const mid = findProfileById(w.personaId)?.syntheticMid;
+          if (mid) value = (await this.dynamicUi?.integrationService?.customerRead(w.principalId, mid, w.ref, w.recordId))?.watchValue;
+        }
+      } catch { /* A failed read keeps the watch pending until the next check. */ }
+      this.store.observeWatch(w, value);
+    })().finally(() => this.watchReads.delete(w.id));
+    this.watchReads.set(w.id, read);
+    return read;
+  }
+
+  async recordUpdates(conversation: ConversationRecord, operator: boolean) {
+    const visible = () => this.store.watches(conversation).filter((w) => w.kind === "task" || operator);
+    await Promise.all(visible().filter((w) => w.state === "watching" && this.store.watchDue(w.id)).map((w) => this.refreshWatch(w)));
+    return visible().map(({ id, recordId, label, state, value, updatedAt }) => ({ id, recordId, label, state, value, updatedAt }));
+  }
 
   constructor(
     readonly store: Store, private readonly runtime: Runtime | null, readonly selectionMode: SelectionMode, private readonly now: () => number,
@@ -79,6 +118,7 @@ export class ExperienceService {
       mode?: "live" | "test";
       gateway?: GatewaySettings | null;
       dataDir: string;
+      integrationService?: IntegrationTaskService;
       customer360?: Customer360Service;
       portfolioSnapshots?: PortfolioSnapshotProvider;
       goalProgressProvider?: GoalProgressProvider;
@@ -118,22 +158,22 @@ export class ExperienceService {
     return current;
   }
 
-  submit(conversation: ConversationRecord, message: string, requestId: string, origin = "message", retry?: TurnRecord, workflow?: WorkflowLaunch, agentLaunch?: AgentLaunch) {
+  submit(conversation: ConversationRecord, message: string, requestId: string, origin = "message", retry?: TurnRecord, workflow?: WorkflowLaunch, agentLaunch?: AgentLaunch, operatorName?: string) {
     if (conversation.audience === "admin" && !this.canCreateRule) {
       throw new ApiError(404, "not_found", "This conversation is unavailable.");
     }
     const { turn, created } = this.store.accept({
-      conversation, message, requestId, origin, retry, workflow, agentLaunch, selectionMode: this.selectionMode, now: this.now(),
+      conversation, message, requestId, origin, retry, workflow, agentLaunch, operatorName, selectionMode: this.selectionMode, now: this.now(),
     });
     if (created) this.schedule(turn);
     return this.accepted(turn);
   }
 
-  async retry(turn: TurnRecord, requestId: string) {
+  async retry(turn: TurnRecord, requestId: string, currentOperator?: string) {
     const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
     const { message } = await this.turnView(turn);
     const origin = workspaceFundingContext(turn.origin) ? turn.origin : "retry:" + turn.public.id;
-    return this.submit(conversation, message, requestId, origin, turn);
+    return this.submit(conversation, message, requestId, origin, turn, undefined, undefined, currentOperator);
   }
 
   previewWorkspaceFunding(conversation: ConversationRecord, requestId: string, source?: typeof pendingActionsContext) {
@@ -145,7 +185,7 @@ export class ExperienceService {
     return this.submit(conversation, fundingPreviewWorkflow.label, requestId, origin);
   }
 
-  followUp(principalId: string, experienceId: string, envelope: ActionMessage, requestId: string) {
+  followUp(principalId: string, experienceId: string, envelope: ActionMessage, requestId: string, operatorName?: string) {
     const { action } = envelope;
     const { turn, actions } = this.store.experience(experienceId, principalId);
     const signed = actions.find((entry) => entry.actionId === action.context.actionId && entry.componentId === action.sourceComponentId);
@@ -153,9 +193,12 @@ export class ExperienceService {
       throw new ApiError(400, "action_invalid", "This follow-up is unavailable.");
     }
     const conversation = this.store.conversation(turn.scope.conversationId, principalId);
+    if (!operatorName && (conversation.audience === "admin" || this.store.hasOperatorContent(conversation.id))) {
+      throw new ApiError(403, "operator_required", "Sign in with your operator account to continue this turn.");
+    }
     const origin = (signed.agentAction ? "experience_action:" : signed.workflow ? "workflow:" : "follow_up:") + signed.actionId;
     const submit = (launch?: AgentLaunch, actionOrigin = origin) => this.submit(conversation, signed.userMessage, requestId, actionOrigin, undefined,
-      signed.workflow && { recommendation: signed.workflow, sourceExperienceId: experienceId }, launch);
+      signed.workflow && { recommendation: signed.workflow, sourceExperienceId: experienceId }, launch, operatorName);
     const agentAction = signed.agentAction;
     if (agentAction) {
       const values = inputValuesSchema.safeParse(action.context.values);
@@ -304,6 +347,47 @@ export class ExperienceService {
         const conversation = this.store.conversation(initial.scope.conversationId, initial.scope.principalId);
         const persona = findProfileById(conversation.personaId);
 
+        const previous = this.store.previousCompletedTurn(conversation.id, initial.ordinal);
+        const message = initial.public.message;
+        const lookup = persona && this.dynamicUi.integrationService && await answerCustomerLookup(
+          this.dynamicUi.integrationService, conversation.principalId, persona.syntheticMid, message, previous?.customerTask,
+        );
+        if (lookup) {
+          current();
+          if (lookup.watch) this.store.watch(conversation, lookup.watch, lookup.watch.value);
+          const expires = this.now() + DECISION_TTL;
+          const result = lookup.canvas ? compileDynamicCanvas(lookup.text, lookup.canvas, expires) : compileChatReply(lookup.text, "reply", expires);
+          this.store.update(id, (row) => {
+            row.customerTask = lookup.subject;
+            row.public.actionMode = lookup.canvas ? "dynamic_ui" : "plain_chat";
+            row.trace.components = result.display.blocks.map((b) => b.component);
+            if (lookup.subject) row.trace.customerRead = { toolRef: lookup.subject.ref, runId: lookup.subject.runId };
+          });
+          this.store.finish(id, { type: "completed", result }, this.now());
+          return;
+        }
+        const scopedPrompt = recordPrompt(message, previous?.recordId, initial.operatorName ? this.dynamicUi.salesStore?.list() ?? [] : [], initial.operatorName ? this.dynamicUi.opsStore?.list() ?? [] : []);
+        if (watchRequest.test(message) && initial.operatorName && /\bquote\b/i.test(message)) {
+          const matches = matchingDeals(scopedPrompt, this.dynamicUi.salesStore?.list() ?? []);
+          if (matches.length !== 1) {
+            const question = "Which deal should I watch? Include its deal ID with your request.";
+            this.store.finish(id, { type: "completed", result: compileChatReply(question, "reply", this.now() + DECISION_TTL) }, this.now());
+            return;
+          }
+          const [deal] = matches;
+          const ready = ["Commit", "Closed Won"].includes(deal.stage);
+          if (!ready) {
+            this.store.watch(conversation, {
+              kind: "deal", ref: "deal.stage", recordId: deal.id, target: "ready", label: deal.id + " reaches Commit",
+            }, deal.stage);
+          }
+          this.store.update(id, (row) => { row.recordId = deal.id; });
+          const reply = ready ? `${deal.id} has reached ${deal.stage}.`
+            : `I’ll post an update here when ${deal.id} reaches Commit. Its current stage is ${deal.stage}.`;
+          this.store.finish(id, { type: "completed", result: compileChatReply(reply, "reply", this.now() + DECISION_TTL) }, this.now());
+          return;
+        }
+
         // Run Visual PII Firewall inspection (toggleable ON/OFF in Admin)
         let activePiiTokenMap = new Map<string, string>();
         let scrubbedProfileSummaryOverride: string | undefined;
@@ -341,7 +425,7 @@ export class ExperienceService {
             stage = "compose";
             this.store.progress(id, "composition", this.now());
             const now = this.now();
-            if (extracted.actionType === "wire_workflow" && this.dynamicUi.workflowEngine) {
+            if (extracted.actionType === "wire_workflow" && initial.operatorName && this.dynamicUi.workflowEngine) {
               const started = await this.dynamicUi.workflowEngine.startRun("wire_transfer_governed", {
                 personaId: conversation.personaId,
                 actorName: persona?.displayName ?? "Customer",
@@ -405,7 +489,7 @@ export class ExperienceService {
                 conversationId: conversation.id,
                 principalId: initial.scope.principalId,
                 onTradeSettle: this.dynamicUi.onTradeSettle,
-                requesterName: persona?.displayName,
+                requesterName: initial.operatorName ?? persona?.displayName,
                 semanticRoute: {
                   capabilityId: "stock_trade",
                   capabilityLabel: "Document-to-Action · Equity Order",
@@ -486,7 +570,7 @@ export class ExperienceService {
         }
 
         // 0b. Policy & Knowledge Base RAG interception
-        if (this.dynamicUi.knowledgeBase && isPolicyQuestion(initial.public.message)) {
+        if (this.dynamicUi.knowledgeBase && !/\b(?:DEAL|INC)-[A-Z0-9]+\b/i.test(scopedPrompt) && isPolicyQuestion(initial.public.message)) {
           const ragResult = this.dynamicUi.knowledgeBase.search(initial.public.message, 3);
           if (ragResult.citations.length > 0) {
             stage = "compose";
@@ -511,8 +595,8 @@ export class ExperienceService {
         }
 
         const activeDraft = this.dynamicUi.tradeStore?.getDraft(conversation.id);
-        const matchedWorkflow = this.dynamicUi.workflowEngine?.matchPrompt(initial.public.message);
-        const matchedActionFlow = this.dynamicUi.actionFlowStore?.matchPrompt(initial.public.message);
+        const matchedWorkflow = initial.operatorName && this.dynamicUi.workflowEngine?.matchPrompt(initial.public.message);
+        const matchedActionFlow = initial.operatorName && this.dynamicUi.actionFlowStore?.matchPrompt(initial.public.message);
 
         // 1. Conversational continuation for an active stock trade draft in this thread
         if (activeDraft && this.dynamicUi.tradeStore) {
@@ -541,7 +625,7 @@ export class ExperienceService {
               conversationId: conversation.id,
               principalId: initial.scope.principalId,
               onTradeSettle: this.dynamicUi.onTradeSettle,
-              requesterName: persona?.displayName,
+              requesterName: initial.operatorName ?? persona?.displayName,
               tradeContinuation: {
                 draft: activeDraft,
                 intent: wantsExec ? "execute" : wantsTax ? "tax_analysis" : "adjust_qty",
@@ -630,7 +714,7 @@ export class ExperienceService {
             matchedActionFlow,
             personaId: conversation.personaId,
             conversationId: conversation.id,
-            requesterName: persona?.displayName,
+            requesterName: initial.operatorName ?? persona?.displayName,
             signal,
           });
           current();
@@ -652,14 +736,12 @@ export class ExperienceService {
         }
 
         // 2b. Saved Custom Widget Library match (e.g. "Birthday Celebration" widget)
-        const matchedWidget = this.dynamicUi.mode !== "test"
-          ? this.dynamicUi.widgetLibrary?.matchCustomWidget(initial.scope.principalId, initial.public.message)
-          : undefined;
-        if (matchedWidget) {
+        const built = !/\b(?:DEAL|INC)-[A-Z0-9]+\b/i.test(scopedPrompt) && this.dynamicUi.widgetLibrary?.renderPublishedWidget(initial.scope.principalId, initial.public.message, persona?.displayName);
+        if (built) {
+          const matchedWidget = built.widget;
           stage = "compose";
           this.store.progress(id, "composition", this.now());
           const now = this.now();
-          const built = compileSavedWidgetToCanvas(matchedWidget, initial.public.message, persona?.displayName);
           const dynamicResult = compileDynamicCanvas(built.intro, built.canvas, now + DECISION_TTL);
           this.store.update(id, (row) => {
             row.public.actionMode = "dynamic_ui";
@@ -681,7 +763,7 @@ export class ExperienceService {
           ? recentForRoute.slice(-2).map((r) => `User: "${r.request}" -> ${r.intentId ?? r.contextId ?? "reply"}`).join(" | ")
           : undefined;
         const semanticRoute = await routeCapabilityUnified({
-          prompt: initial.public.message,
+          prompt: scopedPrompt,
           mode: this.dynamicUi.mode ?? "live",
           gateway: this.dynamicUi.gateway,
           dataDir: this.dynamicUi.dataDir,
@@ -698,6 +780,10 @@ export class ExperienceService {
             reasoning: semanticRoute.reasoning,
           };
         });
+        if (!initial.operatorName && ["hitl_approvals", "external_connector", "ops_incident", "sales_deal_desk"].includes(semanticRoute.capabilityId)) {
+          this.store.finish(id, { type: "completed", result: compileChatReply("That workspace requires an operator sign-in.", "reply", this.now() + DECISION_TTL) }, this.now());
+          return;
+        }
         if (semanticRoute.capabilityId !== "verified_experience") {
         stage = "compose";
         this.store.progress(id, "composition", this.now());
@@ -713,7 +799,7 @@ export class ExperienceService {
           ? `${lookupInfo.lookup.personaName} (${lookupInfo.lookup.highlights.join(", ")})`
           : undefined);
         const generatedRaw = await generateDynamicUi({
-          prompt: initial.public.message,
+          prompt: scopedPrompt,
           profileSummary,
           gateway: this.dynamicUi.gateway,
           dataDir: this.dynamicUi.dataDir,
@@ -727,7 +813,7 @@ export class ExperienceService {
           conversationId: conversation.id,
           principalId: initial.scope.principalId,
           onTradeSettle: this.dynamicUi.onTradeSettle,
-          requesterName: persona?.displayName,
+          requesterName: initial.operatorName ?? persona?.displayName,
           semanticRoute,
           signal,
         });
@@ -749,7 +835,7 @@ export class ExperienceService {
         try {
           if (arbDomain === "operations" && this.dynamicUi.opsStore) {
             const opsArb = await new RecommendationArbitrator([
-              createOpsRunbookProvider(() => this.dynamicUi!.opsStore!.list()),
+              createOpsRunbookProvider(() => this.dynamicUi!.opsStore!.list().filter((r) => r.id === generated.canvas.recordId)),
             ]).arbitrate({
               principalId: initial.scope.principalId,
               personaId: conversation.personaId,
@@ -773,7 +859,7 @@ export class ExperienceService {
             };
           } else if (arbDomain === "sales" && this.dynamicUi.salesStore) {
             const salesArb = await new RecommendationArbitrator([
-              createSalesDealDeskProvider(() => this.dynamicUi!.salesStore!.list()),
+              createSalesDealDeskProvider(() => this.dynamicUi!.salesStore!.list().filter((r) => r.id === generated.canvas.recordId)),
             ]).arbitrate({
               principalId: initial.scope.principalId,
               personaId: conversation.personaId,
@@ -813,6 +899,7 @@ export class ExperienceService {
         this.store.update(id, (row) => {
           row.public.actionMode = "dynamic_ui";
           if (lookupInfo) row.public.customerLookup = lookupInfo.lookup;
+          row.recordId = generated.canvas.recordId;
           if (providerArbitration) row.public.providerArbitration = providerArbitration;
           row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
         });
@@ -930,7 +1017,7 @@ export class ExperienceService {
         }
         if (proposal.status === "reply" || proposal.status === "no_match") {
           const activeTurn = current();
-          if (this.dynamicUi && isDynamicUiRequest(activeTurn.public.message)) {
+          if (this.dynamicUi && isDynamicUiRequest(activeTurn.public.message) && (initial.operatorName || (!isSalesDealPrompt(activeTurn.public.message) && !isOpsIncidentPrompt(activeTurn.public.message) && !isApprovalQueuePrompt(activeTurn.public.message) && !isConnectorActionPrompt(activeTurn.public.message)))) {
             this.store.progress(id, "composition", this.now());
             const persona = findProfileById(conversation.personaId);
             const profileSummary = persona
@@ -947,7 +1034,7 @@ export class ExperienceService {
               approvalStore: this.dynamicUi.approvalStore,
               tradeStore: this.dynamicUi.tradeStore,
               personaId: conversation.personaId,
-              requesterName: persona?.displayName,
+              requesterName: initial.operatorName ?? persona?.displayName,
               signal,
             });
             current();
@@ -1005,7 +1092,7 @@ export class ExperienceService {
         const ids = normalizedIdsSchema.parse(recommendations
           ? recommendations.flatMap((item) => item.kind === "content" ? [item.id] : [])
           : result.output);
-        const { candidates: resolved, rejections } = resolveCandidates(ids);
+        const { candidates: resolved, rejections } = resolveCandidates(ids, current().treatmentEntries);
         const noPromotions = runtime.experiences.execution.world.exclusions(turn);
         const candidates = resolved.filter((candidate) => {
           const content = lookupContent(candidate);
@@ -1241,7 +1328,7 @@ export class ExperienceService {
       throw new TurnFailure("ts_unavailable");
     }
     const { ids, candidates, rejections, content, workflow } = nextStepRecommendation(
-      treatmentRecommendationsSchema.parse(result.output), turn.toolSetup, contextId,
+      treatmentRecommendationsSchema.parse(result.output), turn.toolSetup, contextId, runtime.current(id).treatmentEntries,
     );
     const current = runtime.current(id);
     const now = this.now();
@@ -1366,6 +1453,8 @@ export class ExperienceService {
 
   async close() {
     this.closing = true;
+    clearInterval(this.watchTimer);
+    await Promise.allSettled(this.watchReads.values());
     for (const controller of this.controllers.values()) controller.abort(new Error("Shutting down"));
     await Promise.allSettled(this.jobs.values());
     try {

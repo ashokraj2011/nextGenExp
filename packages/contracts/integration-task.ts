@@ -90,6 +90,8 @@ export const taskIdempotencySchema = z.object({
   keyField: z.string().max(64).optional(),
 }).strict();
 
+const slugField = () => z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,47}$/);
+
 export const taskContractInputSchema = z.object({
   integrationId: slugSchema,
   taskId: slugSchema,
@@ -115,6 +117,11 @@ export const taskContractInputSchema = z.object({
   manualReconcile: z.boolean().optional(),
   /** Input field naming the business entity the call acts on (sfield resource). */
   resourceIdField: z.string().max(64).optional(),
+  customerExperience: z.object({
+    topic: z.string().trim().regex(/^[a-zA-Z][a-zA-Z -]{1,39}$/), idPrefix: z.string().regex(/^[A-Z]{2,12}$/),
+    memberField: slugField(), fields: z.array(z.object({ key: slugField(), label: z.string().trim().min(1).max(48) }).strict()).min(1).max(4),
+    watch: z.object({ field: slugField(), value: z.string().trim().min(1).max(50) }).strict().optional(),
+  }).strict().optional(),
   binding: z.object({
     /** sandbox: handler name; http: path appended to integration.baseUrl; mcp: the MCP tool name. */
     target: z.string().trim().min(1).max(200),

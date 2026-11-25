@@ -1,3 +1,4 @@
+import { operatorHeader } from "./operator-fixture";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
@@ -6,17 +7,17 @@ import type { DisplayExperience } from "../packages/contracts/surface";
 import type { Trace } from "../apps/web/api";
 
 export const testProject = new URL("../", import.meta.url);
-export async function testClient(base: string, existingCookie?: string) {
+export async function testClient(base: string, existingCookie?: string, role: "operator" | "customer" = "operator") {
   const initial = await fetch(base + "/api/bootstrap", { headers: existingCookie ? { Cookie: existingCookie } : undefined });
   assert.equal(initial.status, 200);
   const cookie = existingCookie ?? initial.headers.get("set-cookie")!.split(";")[0];
   const response = (path: string, payload?: unknown, headers?: Record<string, string>) => fetch(base + path, {
-    method: payload === undefined ? "GET" : "POST", headers: { Cookie: cookie, "Content-Type": "application/json", ...headers },
+    method: payload === undefined ? "GET" : "POST", headers: { Cookie: cookie, ...(role === "operator" && { Authorization: operatorHeader() }), "Content-Type": "application/json", ...headers },
     body: payload === undefined ? undefined : JSON.stringify(payload),
   });
 
-  const request = async <T>(path: string, payload?: unknown, expected = 200) => {
-    const result = await response(path, payload);
+  const request = async <T>(path: string, payload?: unknown, expected = 200, headers?: Record<string, string>) => {
+    const result = await response(path, payload, headers);
     const value = await result.json();
     assert.equal(result.status, expected, JSON.stringify(value));
     return value as T;

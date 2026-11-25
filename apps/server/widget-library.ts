@@ -10,7 +10,7 @@ const WIDGET_STOPWORDS = new Set([
   "this", "that", "with", "from", "have", "what", "when", "where", "which", "would", "could", "should",
   "about", "into", "your", "their", "there", "here", "today", "tomorrow", "please", "help", "want", "need",
   "show", "make", "build", "create", "generate", "design", "widget", "card", "component", "block", "layout",
-  "just", "very", "more", "some", "also", "like", "give", "tell", "know", "take", "open", "view", "check",
+  "chart", "graph", "table", "dashboard", "visualize", "visualise", "summary", "just", "very", "more", "some", "also", "like", "give", "tell", "know", "take", "open", "view", "check",
   "account", "balance", "balances", "portfolio", "rule", "rules", "wire", "transfer", "stock", "stocks",
 ]);
 
@@ -440,11 +440,15 @@ export class WidgetLibraryStore {
     return { widget: saved, widgets: next.slice().sort((a, b) => b.updatedAt - a.updatedAt) };
   }
 
+  renderPublishedWidget(principalId: string, prompt: string, personaName?: string) {
+    const widget = this.matchCustomWidget(principalId, prompt);
+    return widget && { widget, ...compileSavedWidgetToCanvas(widget, prompt, personaName) };
+  }
+
   matchCustomWidget(principalId: string, prompt: string): SavedWidget | undefined {
     const trimmed = prompt.trim();
     if (trimmed.length < 3 || /\bcreate\s+(?:a\s+)?rule\b/i.test(trimmed)) return undefined;
     const tokens = extractWidgetTokens(trimmed);
-    if (tokens.length === 0) return undefined;
 
     const data = this.load();
     const seen = new Set<string>();
@@ -463,6 +467,9 @@ export class WidgetLibraryStore {
       }
     }
 
+    const exact = candidates.find((w) => w.prompt.trim().toLowerCase() === trimmed.toLowerCase());
+    if (exact) return exact;
+    if (!tokens.length) return undefined;
     let best: { widget: SavedWidget; score: number } | undefined;
     for (const w of candidates) {
       const nameLower = w.name.toLowerCase();

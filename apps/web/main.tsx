@@ -5,7 +5,7 @@ import { CreateSurfaceMessageSchema, type ActionMessage } from "@a2ui/web_core/v
 import {
   ArrowLeft, ArrowUp, ArrowUpRight, BookOpenText, ChevronDown, ChevronRight, Columns2, Eye, GraduationCap, House, LayoutDashboard,
   ListChecks, LogIn, LogOut, MapPin, MessageSquare, Mic, MicOff, PanelLeft, PanelLeftClose, Paperclip, Plus, RotateCcw, Sparkles,
-  Square, ThumbsDown, ThumbsUp, Wallet, X,
+  Square, ThumbsDown, ThumbsUp, X,
 } from "lucide-react";
 import {
   failureCopy, progressLabels, type Bootstrap, type Conversation, type ConversationChange, type ConversationView,
@@ -27,7 +27,6 @@ import { DemoProfiles, ProfileAvatar } from "./demo-profiles";
 import { DomainLiveHud, DomainWelcomeHome, useDomainPack } from "./domain-pack-ui";
 import type { DomainPack } from "../../packages/contracts/domain-packs";
 import { LabMark } from "./lab-mark";
-import { LiveMetricsHud } from "./live-metrics-rail";
 import { planningTopics } from "./planning-topics";
 import { ReasoningPanel } from "./reasoning-panel";
 import { applyTheme, readStoredTheme, ThemeToggle } from "./theme";
@@ -69,6 +68,7 @@ const starters = [
   { Icon: ListChecks, label: "Guide me through a task", message: "Walk me through the transfer steps." },
   { Icon: GraduationCap, label: "Learn about retirement", message: "I'd like to learn about retirement." },
   { Icon: House, label: "Home-buying goal", message: homeGoalPrompt },
+  { Icon: House, label: "Explore a savings plan", message: "I want to buy a house in two years. Show me how close I am and help me explore a savings plan." },
   { Icon: MapPin, label: "Update mailing address", message: "I need to update my mailing address." },
 ];
 
@@ -94,50 +94,18 @@ const ConversationControls = createContext<ConversationOperations>({
   previewFunding: () => undefined,
 });
 
-function StarterPrompts({ disabled, activeProfile }: { disabled: boolean; activeProfile?: DemoPersona }) {
+function StarterPrompts({ disabled }: { disabled: boolean }) {
   const aui = useAui();
-  const dynamicStarters = useMemo(() => {
-    if (adminChat || !activeProfile) return [];
-    const items: { Icon: typeof Sparkles; label: string; message: string; personalized: true }[] = [];
-    const cashCents = activeProfile.overview?.portfolio?.cashCents ?? 0;
-    if (activeProfile.profile.accountFundingStatus === "unfunded") {
-      items.push({
-        Icon: Wallet,
-        label: "Deposit $500 to start",
-        message: "I want to deposit $500 into my investment account.",
-        personalized: true,
-      });
-    } else if (cashCents > 10_000_00) {
-      items.push({
-        Icon: Sparkles,
-        label: `Review ${formatPortfolioAmount(cashCents)} cash`,
-        message: "Let me know my portfolio summary.",
-        personalized: true,
-      });
-    }
-    if (activeProfile.overview?.homeGoal) {
-      items.push({
-        Icon: Sparkles,
-        label: "Simulate 2-year home plan",
-        message: "I want to buy a house in two years. Show me how close I am and help me explore a savings plan.",
-        personalized: true,
-      });
-    }
-    return items;
-  }, [activeProfile]);
-
-  return <div className="composer-starters" role="group" aria-label="Suggested questions">
-    {dynamicStarters.map(({ Icon, label, message }) => (
-      <button key={label} type="button" className="starter starter-personalized" disabled={disabled} onClick={() => aui.thread().append(message)}>
-        <Icon size={14} aria-hidden="true" />{label}
-      </button>
-    ))}
-    {starters.map(({ Icon, label, message }) => (
-      <button key={label} type="button" className="starter" disabled={disabled} onClick={() => aui.thread().append(message)}>
-        <Icon size={14} aria-hidden="true" />{label}
-      </button>
-    ))}
-  </div>;
+  return <details className="starter-disclosure">
+    <summary>Explore suggested questions</summary>
+    <div className="composer-starters" role="group" aria-label="Suggested questions">
+      {starters.map(({ Icon, label, message }) => (
+        <button key={label} type="button" className="starter" disabled={disabled} onClick={() => aui.thread().append(message)}>
+          <Icon size={14} aria-hidden="true" />{label}
+        </button>
+      ))}
+    </div>
+  </details>;
 }
 
 function UserMessage() {
@@ -242,12 +210,12 @@ function AssistantMessage() {
 
           {turn.status === "working" ? (
             <>
-              <div role="status" aria-live="polite" className="sr-only">{progressLabels[turn.progress]}…</div>
-              <ReasoningPanel status={turn.status} progress={turn.progress} history={steps} />
+              <div role="status" aria-live="polite" className={adminChat ? "sr-only" : "customer-progress"}>{progressLabels[turn.progress]}…</div>
+              {adminChat && <ReasoningPanel status={turn.status} progress={turn.progress} history={steps} />}
             </>
           ) : (
             <>
-              {steps.length > 0 && turn.status === "completed" && (
+              {adminChat && steps.length > 0 && turn.status === "completed" && (
                 <ReasoningPanel
                   status={turn.status}
                   progress={turn.progress}
@@ -295,12 +263,11 @@ function AssistantMessage() {
   );
 }
 
-function Composer({ draft, onDraft, running, pending, disabled, notice, input, showStarters, hero, activeProfile, nextSuggestions, domainPack }: {
+function Composer({ draft, onDraft, running, pending, disabled, notice, input, showStarters, hero, nextSuggestions, domainPack }: {
   draft: string; onDraft: (value: string) => void; running: boolean; pending: boolean; disabled: boolean; notice: string;
   input: React.RefObject<HTMLTextAreaElement | null>;
   showStarters: boolean;
   hero?: boolean;
-  activeProfile?: DemoPersona;
   nextSuggestions: NextSuggestion[];
   domainPack?: DomainPack;
 }) {
@@ -366,7 +333,7 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
 
   return <div className={hero ? "composer-area composer-hero" : "composer-area composer-dock"}>
     <div className="composer-inner">
-      {!hero && showStarters && <StarterPrompts disabled={disabled || pending} activeProfile={activeProfile} />}
+      {!hero && showStarters && <StarterPrompts disabled={disabled || pending} />}
       {!hero && !showStarters && !running && (
         <NextSuggestionChips
           suggestions={nextSuggestions}
@@ -472,14 +439,14 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
         <span className="composer-guardrail">
           {voice.listening
             ? <span className="voice-live-badge"><span aria-hidden="true" />Listening via microphone…</span>
-            : (adminChat ? "Admin test environment" : (domainPack?.guardrailLabel ?? "CEP Advisory Guardrails Active"))}
+            : (adminChat ? "Admin test environment" : null)}
         </span>
         <div className="composer-footer-right">
           {nearLimit && <span className="composer-count">{draft.length}/{MAX_MESSAGE_LENGTH}</span>}
           <p className="composer-hint">Enter to send <span aria-hidden="true">·</span> Shift+Enter for a new line</p>
         </div>
       </div>
-      {hero && showStarters && <StarterPrompts disabled={disabled || pending} activeProfile={activeProfile} />}
+      {hero && showStarters && <StarterPrompts disabled={disabled || pending} />}
     </div>
   </div>;
 }
@@ -525,6 +492,23 @@ function Chat({
   const turns = conversation?.turns ?? noTurns;
   const latest = turns.at(-1);
   const running = latest?.status === "working";
+  const [updates, setUpdates] = useState<Awaited<ReturnType<typeof api.recordUpdates>>>([]);
+  useEffect(() => {
+    setUpdates([]);
+    if (!conversation?.id || running) return;
+    let closed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const read = async () => {
+      try {
+        const next = await api.recordUpdates(conversation.id);
+        if (closed) return;
+        setUpdates(next);
+        if (next.some((w) => w.state === "watching")) timer = setTimeout(read, 30_000);
+      } catch { if (!closed) timer = setTimeout(read, 30_000); }
+    };
+    void read();
+    return () => { closed = true; clearTimeout(timer); };
+  }, [conversation?.id, latest?.id, running]);
   const messages = useMemo(() => visibleMessages(turns), [turns]);
   const runtime = useExternalStoreRuntime({
     messages, convertMessage: (message) => message, isRunning: running, activeRunId: running ? latest?.id : undefined,
@@ -572,7 +556,7 @@ function Chat({
   const composerEl = archived ? <div className="composer-area archived-conversation"><p>This conversation is archived.</p>
     <button className="secondary-button" type="button" disabled={pending} onClick={onRestore}>Restore conversation</button>
   </div> : <Composer draft={draft} onDraft={onDraft} running={running} pending={pending} disabled={!configuration} input={input}
-    notice={notice} showStarters={turns.length === 0 && domainPack.id === "wealth"} hero={useHeroComposer} activeProfile={activeProfile}
+    notice={notice} showStarters={turns.length === 0 && domainPack.id === "wealth"} hero={useHeroComposer}
     nextSuggestions={nextSuggestions} domainPack={domainPack} />;
 
   return <AssistantRuntimeProvider runtime={runtime}>
@@ -601,17 +585,6 @@ function Chat({
                 onPrompt={(prompt) => void onSend(prompt)}
               />
             )}
-            {!adminChat && turns.length > 0 && section === "summary" && domainPack.id === "wealth" && (
-              <LiveMetricsHud
-                activeProfile={activeProfile}
-                pendingActions={pendingActions}
-                disabled={!canWrite}
-                onReviewPortfolio={() => void onSend(portfolioPrompt)}
-                onReviewGoal={() => void onSend(homeGoalPrompt)}
-                onPreviewFunding={() => onPreviewFunding(pendingActionsContext)}
-                onReviewGuide={(message) => void onSend(message)}
-              />
-            )}
             {useHeroComposer && (
               <div className="editorial-hero-stage">
                 {domainPack.id === "wealth"
@@ -628,6 +601,7 @@ function Chat({
                 : <DomainWelcomeHome domainId={domainPack.id} disabled={!canWrite} onPrompt={(prompt) => void onSend(prompt)} />
             )}
             {showOverview && <WorkspaceOverview {...overviewProps} section={section} showNextStep={!turns.length} />}
+            {updates.length > 0 && <section className="thread-updates" aria-label="Record updates" aria-live="polite">{updates.map((w) => <p key={w.id}>{w.state === "reached" ? <strong>Update received</strong> : <strong>Watching</strong>} · {w.label} · Current status: {w.value}</p>)}</section>}
             {turns.length > 0 && <div className="messages">
               <ThreadPrimitive.Messages>{({ message }) => message.role === "user" ? <UserMessage /> : <AssistantMessage />}</ThreadPrimitive.Messages>
             </div>}
@@ -778,7 +752,6 @@ function App() {
   const [embedAccent, setEmbedAccent] = useState(entry.embedAccent);
   const [screenContext, setScreenContext] = useState<CepEmbedScreenContext | null>(null);
   const [ambientDismissed, setAmbientDismissed] = useState(false);
-  const workspaceMainRef = useRef<HTMLElement>(null);
   const [proactiveAlert, setProactiveAlert] = useState<ProactiveAlert | null>(null);
   const [signedInProfileId, setSignedInProfileId] = useState(entry.profileId);
   const [domainPack, setDomainPack] = useDomainPack();
@@ -813,27 +786,6 @@ function App() {
     return ctx ? JSON.stringify(ctx) : undefined;
   }, [activeSection, activeProfile, domainPack.id]);
 
-  useEffect(() => {
-    if (adminChat || embedMode || domainPack.id !== "wealth") return;
-    const node = workspaceMainRef.current;
-    if (!node) return;
-    const readContext = () => {
-      const raw = node.getAttribute("data-cep-context");
-      if (!raw) return;
-      try {
-        const parsed = JSON.parse(raw) as CepEmbedScreenContext;
-        if (parsed && typeof parsed.label === "string") setScreenContext(parsed);
-      } catch { /* ignore malformed attribute */ }
-    };
-    readContext();
-    const observer = new MutationObserver(() => readContext());
-    observer.observe(node, { attributes: true, attributeFilter: ["data-cep-context"] });
-    return () => observer.disconnect();
-  }, [domainPack.id, wealthDomContextJson]);
-
-  useEffect(() => {
-    if (!embedMode && domainPack.id === "wealth") setAmbientDismissed(false);
-  }, [activeSection, domainPack.id]);
   const chat = overviewOpen ? undefined : conversation;
   const pendingActions = usePendingActions(!adminChat ? activeProfile?.personaId : undefined);
   const draftKey = chat?.id ?? "new:" + (conversation?.personaId ?? signedInProfileId ?? "");
@@ -1172,9 +1124,10 @@ function App() {
   }, [latest]);
 
   useEffect(() => {
-    if (adminChat) return;
+    setProactiveAlert(null);
+    if (adminChat || !activeProfile) return;
     let alive = true;
-    const stream = new EventSource("/api/proactive/stream");
+    const stream = new EventSource("/api/proactive/stream?personaId=" + encodeURIComponent(activeProfile.personaId));
     stream.addEventListener("proactive.alert", (evt) => {
       if (!alive) return;
       try {
@@ -1194,7 +1147,7 @@ function App() {
       alive = false;
       stream.close();
     };
-  }, []);
+  }, [activeProfile?.personaId]);
 
   const modelStatus = adminChat
     ? (configuration?.mode === "test" ? "Test mode" : configuration?.gatewayConfigured ? "Model connected" : "Model offline")
@@ -1275,7 +1228,6 @@ function App() {
       </div>
     </aside>}
     <main
-      ref={workspaceMainRef}
       className="workspace"
       inert={railOpen}
       data-cep-active={wealthDomContextJson ? "true" : undefined}
@@ -1320,7 +1272,7 @@ function App() {
           )}
           <div className="topbar-actions">
             <ThemeToggle compact />
-            {configuration && (
+            {adminChat && configuration && (
               <span className="model-status" data-connected={configuration.gatewayConfigured}>
                 <span aria-hidden="true" />{modelStatus}
               </span>
@@ -1328,7 +1280,7 @@ function App() {
           </div>
         </header>
       )}
-      {(embedMode || (!adminChat && domainPack.id === "wealth")) && screenContext && !ambientDismissed && (
+      {embedMode && screenContext && !ambientDismissed && (
         <section className="embed-ambient-bar" aria-label="Your snapshot and suggestions">
           <div className="embed-ambient-top">
             <div className="embed-ambient-title">

@@ -137,6 +137,7 @@ export type Conversation = {
   audience?: "admin";
 };
 export type ConversationChange = { operation: "rename"; title: string } | { operation: "archive" | "restore" };
+export type RecordUpdate = { id: string; recordId: string; label: string; state: "watching" | "reached"; value: string; updatedAt: number };
 export type ConversationView = Conversation & { turns: TurnView[] };
 export type DemoPersona = {
   personaId: string;

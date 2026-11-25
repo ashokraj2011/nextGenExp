@@ -186,9 +186,9 @@ export async function discoverMcpTools(integration: Integration, store: Integrat
  * connect → import → publish → run flow can be tried without an external system. State is in memory.
  */
 export function createDemoMcpServer() {
-  const orders = new Map<string, { status: string; total: number }>([
-    ["ORD-1001", { status: "shipped", total: 129.5 }],
-    ["ORD-1002", { status: "processing", total: 42 }],
+  const orders = new Map<string, { status: string; total: number; memberId: string }>([
+    ["ORD-1001", { status: "shipped", total: 129.5, memberId: "DEMO-MID-1001" }],
+    ["ORD-1002", { status: "processing", total: 42, memberId: "DEMO-MID-1002" }],
   ]);
   const refunds = new Map<string, { refundId: string; status: string }>();
   const subscriptions = new Set(["SUB-77", "SUB-78"]);
@@ -197,8 +197,8 @@ export function createDemoMcpServer() {
     {
       name: "lookup_order", description: "Look up an order's status and total by order id.",
       annotations: { readOnlyHint: true, title: "Look up order" },
-      inputSchema: { type: "object", properties: { orderId: { type: "string", minLength: 3, maxLength: 40 } }, required: ["orderId"] },
-      outputSchema: { type: "object", properties: { found: { type: "boolean" }, orderId: { type: "string" }, status: { type: "string" }, total: { type: "number" } }, required: ["found"] },
+      inputSchema: { type: "object", properties: { memberId: { type: "string" }, orderId: { type: "string", minLength: 3, maxLength: 40 } }, required: ["orderId"] },
+      outputSchema: { type: "object", properties: { found: { type: "boolean" }, memberId: { type: "string" }, orderId: { type: "string" }, status: { type: "string" }, total: { type: "number" } }, required: ["found"] },
     },
     {
       name: "refund_order", description: "Refund part or all of an order. Repeating a request id returns the original refund.",
@@ -224,7 +224,7 @@ export function createDemoMcpServer() {
     switch (msg.params?.name) {
       case "lookup_order": {
         const order = orders.get(String(args.orderId ?? ""));
-        const data = order ? { found: true, orderId: String(args.orderId), ...order } : { found: false };
+        const data = order && (!args.memberId || args.memberId === order.memberId) ? { found: true, orderId: String(args.orderId), status: order.status, total: order.total, ...(args.memberId ? { memberId: order.memberId } : {}) } : { found: false };
         return { ...ok(msg.id, { ...text(JSON.stringify(data)), structuredContent: data }), headers };
       }
       case "refund_order": {

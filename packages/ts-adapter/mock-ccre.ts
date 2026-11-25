@@ -20,6 +20,8 @@ export function applyMockCcreRules(contentIds: string[], rules: readonly MockCcr
   const candidates = new Set(contentIds);
   const results: MockCcreEvaluation["results"] = scoped.map(({ name, contentId, condition }) => ({
     name, contentId,
+    ...(condition.kind === "attribute" && condition.namespaceId === "portfolio" && condition.attributeId === "cash_usd"
+      && candidates.has(contentId) && condition.operator === "gt" && typeof condition.value === "number" && { cashAboveCents: Math.round(condition.value * 100) }),
     outcome: !candidates.has(contentId) ? "outside_list" : matches(condition, input) ? "matched" : "excluded",
   }));
   const excluded = new Set(results.filter(({ outcome }) => outcome === "excluded").map(({ contentId }) => contentId));

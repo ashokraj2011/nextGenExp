@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import test, { type TestContext } from "node:test";
-import { startApp } from "../apps/server/http";
+import { startApp } from "./operator-fixture";
 import { agenticBudgetFromEnv } from "../apps/server/agentic-budget";
 import { capabilityIssue, CapabilityRegistry } from "../apps/server/capability-registry";
 import { verifyPlan } from "../apps/server/execution-plan";
@@ -67,6 +67,19 @@ function block<T extends DisplayBlock["component"]>(experience: DisplayExperienc
 }
 const actionPath = (experience: DisplayExperience) => "/api/experiences/" + experience.experienceId + "/actions";
 const liveCalls = (turnId: string) => "/api/debug/payloads/" + turnId;
+
+test("the savings projection quotes the configured investing rule when it evaluates projected cash", async (t) => {
+  const { client } = await fixture(t);
+  const condition = { kind: "attribute", glossaryVersion: "pzn-ccre-mock-v1", namespaceId: "portfolio", attributeId: "cash_usd", operator: "gt", value: 20000 };
+  await client.request("/api/admin/tools", { ...defaultToolSetup, ccreRules: [{ scenarioId: "normal", contextId: "portsum", contentId: "portfolio_cash_investing", name: "Investing cash minimum", condition }] });
+  const chat = await client.conversation();
+  const result = await client.ask(chat.id, homeRequest);
+  const verdict = block(result.turn.experience, "PznSavingsChart")?.props.investingEligibility;
+  assert.ok(verdict);
+  assert.equal(verdict.eligible, false);
+  assert.equal(verdict.thresholdCents, 2_000_000);
+  assert.match(verdict.reason, /\$20,000/);
+});
 
 test("a home purchase plan combines two TS contexts and revises the savings projection through a signed form", async (t) => {
   const { client, foreign } = await fixture(t);

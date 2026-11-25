@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { ChatHarness, newId, type ChatScope } from "@sfield/core";
 import { SqlitePersistence } from "@sfield/store-sqlite";
 import { gatewayFromEnv, type GatewaySettings } from "../server/gateway";
-import { startApp } from "../server/http";
+import { startApp } from "../../tests/operator-fixture";
 import { sfieldNamespace } from "../server/runtime";
 import type { Bootstrap, ConversationView, TurnView } from "../../packages/contracts/api";
 import { decodeChatInput, type TurnPayloads } from "../../packages/contracts/inspector";

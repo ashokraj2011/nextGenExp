@@ -15,6 +15,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("PZN_PO
 const defaultDataDir = profile === "openai" ? ".pzn-data/openai" : profile === "copilot_acp" ? ".pzn-data/copilot" : ".pzn-data";
 const app = await startApp({
   projectRoot, dataDir: resolve(projectRoot, process.env.PZN_DATA_DIR ?? defaultDataDir), gateway,
+  operators: process.env.PZN_OPERATORS_JSON ? JSON.parse(process.env.PZN_OPERATORS_JSON) : undefined,
   selectionMode: mode, port, goalBudget: agenticBudgetFromEnv(process.env.PZN_AXE_BUDGET_JSON), dev: process.argv.includes("--dev"), inspectorEnabled: process.env.PZN_INSPECTOR !== "off",
 });
 console.log("Financial planning demo  " + app.url);

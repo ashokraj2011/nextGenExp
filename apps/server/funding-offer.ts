@@ -29,9 +29,9 @@ export function fundingOfferExpiry(store: Store, turn: TurnRecord, launch: Workf
   return expiry;
 }
 
-export function nextStepRecommendation(response: TreatmentRecommendations, setup: ToolSetup | undefined, contextId: string = nextStepContext) {
+export function nextStepRecommendation(response: TreatmentRecommendations, setup: ToolSetup | undefined, contextId: string = nextStepContext, renderedEntries?: Parameters<typeof resolveCandidates>[1]) {
   const ids = response.recommendations.flatMap((item) => item.kind === "content" ? [item.id] : []);
-  const { candidates, rejections } = resolveCandidates(ids);
+  const { candidates, rejections } = resolveCandidates(ids, renderedEntries);
   const content = candidates.map(lookupContent).find((entry) => entry?.allowedComponents.includes("PznContentCard")
     && entry.kind !== "promotion" && !entry.portfolioData && !entry.metricSpec
     && (contextId !== pendingActionsContext || entry.contentId === "fund_account"));

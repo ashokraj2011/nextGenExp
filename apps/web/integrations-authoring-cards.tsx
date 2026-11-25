@@ -233,6 +233,23 @@ export function TaskDraftCard({
 
       <FieldsEditor label="Input" schema={draft.inputSchema} onChange={(inputSchema) => set({ inputSchema })} />
       <FieldsEditor label="Output" schema={draft.outputSchema} onChange={(outputSchema) => set({ outputSchema })} />
+      {draft.effect === "read" && <fieldset className="int-auth-section"><legend>Customer chat</legend>
+        <label><input type="checkbox" checked={Boolean(draft.customerExperience)} onChange={(e) => set({ customerExperience: e.target.checked ? { topic: "order", idPrefix: "ORD", memberField: "memberId", fields: [{ key: "status", label: "Status" }] } : undefined })} /> Offer this lookup in chat</label>
+        {draft.customerExperience && <div className="pzn-form-grid">
+          <label>Topic<input value={draft.customerExperience.topic} onChange={(e) => set({ customerExperience: { ...draft.customerExperience!, topic: e.target.value } })} /></label>
+          <label>Record prefix<input value={draft.customerExperience.idPrefix} onChange={(e) => set({ customerExperience: { ...draft.customerExperience!, idPrefix: e.target.value.toUpperCase() } })} /></label>
+          <label>Record ID field<input value={draft.resourceIdField ?? ""} onChange={(e) => set({ resourceIdField: e.target.value })} /></label>
+          <label>Member ID field<input value={draft.customerExperience.memberField} onChange={(e) => set({ customerExperience: { ...draft.customerExperience!, memberField: e.target.value } })} /></label>
+          {draft.customerExperience.fields.map((field, index) => <div key={index}>
+            <label>Output key<input value={field.key} onChange={(e) => set({ customerExperience: { ...draft.customerExperience!, fields: draft.customerExperience!.fields.map((f, i) => i === index ? { ...f, key: e.target.value } : f) } })} /></label>
+            <label>Card label<input value={field.label} onChange={(e) => set({ customerExperience: { ...draft.customerExperience!, fields: draft.customerExperience!.fields.map((f, i) => i === index ? { ...f, label: e.target.value } : f) } })} /></label>
+            <button type="button" onClick={() => set({ customerExperience: { ...draft.customerExperience!, fields: draft.customerExperience!.fields.filter((_, i) => i !== index) } })}>Remove field</button>
+          </div>)}
+          {draft.customerExperience.fields.length < 4 && <button type="button" onClick={() => set({ customerExperience: { ...draft.customerExperience!, fields: [...draft.customerExperience!.fields, { key: "", label: "" }] } })}>Add card field</button>}
+          <label>Watch field<input value={draft.customerExperience.watch?.field ?? ""} onChange={(e) => set({ customerExperience: { ...draft.customerExperience!, watch: e.target.value ? { field: e.target.value, value: draft.customerExperience!.watch?.value ?? "" } : undefined } })} /></label>
+          {draft.customerExperience.watch && <label>Notify on value<input value={draft.customerExperience.watch.value} onChange={(e) => set({ customerExperience: { ...draft.customerExperience!, watch: { ...draft.customerExperience!.watch!, value: e.target.value } } })} /></label>}
+        </div>}
+      </fieldset>}
 
       <div className="int-auth-section">
         <span className="pzn-stage-kicker">Approval</span>

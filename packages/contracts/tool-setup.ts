@@ -82,7 +82,7 @@ export type MockCcreCondition = z.infer<typeof mockCcreConditionSchema>;
 export type MockCcreRule = z.infer<typeof mockCcreRuleSchema>;
 export type MockCcreEvaluation = {
   beforeRules: string[];
-  results: { name: string; contentId: string; outcome: "matched" | "excluded" | "outside_list" }[];
+  results: { name: string; contentId: string; outcome: "matched" | "excluded" | "outside_list"; reason?: string; cashAboveCents?: number }[];
 };
 export const toolSetupSchema = z.object({
   enabled: z.object({

@@ -278,6 +278,7 @@ export class Runtime implements IntegrationTaskRuntime {
     private readonly approvalStore?: ApprovalStore,
     private readonly integrationTasks?: IntegrationTaskStore,
   ) {
+    this.integrationExecutor = new TaskCallExecutor(integrationTasks?.orders);
     this.funding = new FundingAgent(store, () => this.sf, now);
     const execution = new AgenticExecution(store, () => this.sf, now, (turnId) => this.current(turnId), portfolioSnapshots, goalProgressProvider, goalBudget);
     this.experiences = new ExperienceAgent(execution, () => this.sf);
@@ -487,7 +488,7 @@ export class Runtime implements IntegrationTaskRuntime {
     if (!setup.enabled.selection) return null;
     const adapter = this.treatmentAdapter({ scenarioId: host.defaultScenarioId, ordinal: 1 }, setup, { principalId, personaId });
     const result = await adapter.selectEligibleContent({ mid: persona.syntheticMid, context: nextStepContext }, AbortSignal.timeout(5000));
-    const { content, workflow } = nextStepRecommendation(result.recommendations, setup);
+    const { content, workflow } = nextStepRecommendation(result.recommendations, setup, nextStepContext, result.renderedEntries);
     if (!content) return null;
     const reason = content.contentId === "fund_account" && this.effectiveFundingStatus(persona, principalId) === "unfunded"
       ? "This account is awaiting its first deposit" : undefined;
@@ -508,6 +509,9 @@ export class Runtime implements IntegrationTaskRuntime {
       const result = await this.turnTreatmentAdapter(turn, conversation).selectEligibleContent(input, ctx.signal);
       if (turn.route && isPortfolioSummary(turn.route)) {
         requireCheck(this.store.update(turn.public.id, (row) => { row.portfolioForRule = result.portfolio ?? undefined; }), "TURN_INACTIVE");
+      }
+      if (result.renderedEntries) {
+        requireCheck(this.store.update(turn.public.id, (row) => { row.treatmentEntries = result.renderedEntries; }), "TURN_INACTIVE");
       }
       ccre = result.ccre;
       return result;
@@ -769,7 +773,7 @@ export class Runtime implements IntegrationTaskRuntime {
 
   /* ---------------- Integration tasks: dedicated tool per task version + dispatcher tools ---------------- */
 
-  private readonly integrationExecutor = new TaskCallExecutor();
+  private readonly integrationExecutor: TaskCallExecutor;
   private readonly registeredIntegrationRefs = new Set<string>();
   private readonly pendingIntegrationCalls = new Map<string, {
     scope: ExecutionScope; callId: string; sfieldToolRef: string; toolInputs: JsonObject; timer: NodeJS.Timeout;

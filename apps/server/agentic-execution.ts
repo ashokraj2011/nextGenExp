@@ -159,18 +159,17 @@ export class AgenticExecution {
           );
           const contentId = "portfolio_cash_investing";
           const eligible = tsResult.contentIds.includes(contentId);
-          const ruleHit = tsResult.ccre?.results?.find((ev) => ev.contentId === contentId);
-          const ruleName = ruleHit?.name || "Cash above $10,000";
-          const thresholdCents = 1_000_000;
-          const cashStr = formatPortfolioAmount(cashAfterCents);
-          const reason = eligible
-            ? `Treatment Selector (portsum) kept the Cash Investing card eligible: remaining portfolio cash (${cashStr}) stays above the $10,000 CCRE rule ("${ruleName}").`
-            : `Treatment Selector (portsum) removed the Cash Investing card: remaining portfolio cash (${cashStr}) is at or below the $10,000 CCRE rule ("${ruleName}").`;
+          const hits = tsResult.ccre?.results.filter((ev) => ev.contentId === contentId) ?? [];
+          const ruleHit = hits.find((h) => h.outcome === "excluded") ?? hits[0];
+          const ruleName = ruleHit?.name ?? "Published treatment policy";
+          const thresholdCents = hits.length === 1 && ruleHit && "cashAboveCents" in ruleHit ? ruleHit.cashAboveCents : undefined;
+          const decision = eligible ? "Eligible" : "Unavailable";
+          const reason = typeof thresholdCents === "number"
+            ? `${decision}. This offer requires more than ${formatPortfolioAmount(thresholdCents)} in cash. The projected cash balance is ${formatPortfolioAmount(cashAfterCents)}.`
+            : `${decision}. ${hits.map((hit) => hit.reason ?? hit.name).join(" ") || "Treatment Selector returned no matching rule for this offer."}`;
           return {
-            eligible,
-            contentId,
-            ruleName,
-            thresholdCents,
+            eligible, contentId, ruleName,
+            ...(typeof thresholdCents === "number" && { thresholdCents }),
             cashAfterCents,
             reason,
             evaluatedBy: "treatment-selector" as const,

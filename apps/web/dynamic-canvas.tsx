@@ -198,9 +198,6 @@ function ApprovalNode({ node, onFollowUp }: {
   const [saving, setSaving] = useState(false);
   const [liveMessage, setLiveMessage] = useState<string>(node.decisionNote ?? "");
   const [error, setError] = useState("");
-  const [approverName, setApproverName] = useState(
-    node.dualControl ? "Duty Approver" : (node.requester || "CEP Operator"),
-  );
   const [comment, setComment] = useState("");
 
   async function decide(next: "approved" | "rejected", queueOnly = false) {
@@ -212,7 +209,7 @@ function ApprovalNode({ node, onFollowUp }: {
       try {
         const res = await api.decideApproval(node.approvalId, {
           decision: next === "approved" ? "approve" : "deny",
-          actor: approverName.trim() || "CEP Approver",
+          actor: undefined,
           ...(comment.trim() ? { comment: comment.trim() } : {}),
         });
         const apr = res.approval;
@@ -222,7 +219,7 @@ function ApprovalNode({ node, onFollowUp }: {
             `${apr.executionResult.summary} · sfield run ${apr.executionResult.sfieldRunId}${apr.executionResult.auditId ? ` · audit ${apr.executionResult.auditId}` : ""}`,
           );
         } else {
-          setLiveMessage(`Approval ${apr.id} ${apr.status} by ${apr.decidedBy ?? approverName}.`);
+          setLiveMessage(`Approval ${apr.id} ${apr.status} by ${apr.decidedBy ?? "operator"}.`);
         }
         notifyDomainDataUpdated();
       } catch (err) {
@@ -237,7 +234,7 @@ function ApprovalNode({ node, onFollowUp }: {
       try {
         const res = await api.decideIncident(node.recordId, {
           decision: next === "approved" ? "approve_rollback" : "reject_rollback",
-          actor: approverName.trim() || "CEP Operator",
+          expectedUpdatedAt: node.expectedUpdatedAt,
           ...(queueOnly ? { queueForApproval: true } : {}),
         });
         if (res.status === "pending_approval" && res.approval) {
@@ -271,7 +268,7 @@ function ApprovalNode({ node, onFollowUp }: {
       try {
         const res = await api.decideDeal(node.recordId, {
           decision: next === "approved" ? "approve_discount" : "reject_discount",
-          actor: approverName.trim() || "VP Revenue Operations",
+          expectedUpdatedAt: node.expectedUpdatedAt,
           ...(queueOnly ? { queueForApproval: true } : {}),
         });
         if (res.status === "pending_approval" && res.approval) {
@@ -336,10 +333,6 @@ function ApprovalNode({ node, onFollowUp }: {
         <div style={{ display: "grid", gap: "10px" }}>
           {node.approvalId && (
             <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.3fr)", gap: "8px" }}>
-              <label className="dyn-form-field">
-                <span>Approver</span>
-                <input value={approverName} onChange={(e) => setApproverName(e.target.value)} placeholder="Approver name" />
-              </label>
               <label className="dyn-form-field">
                 <span>Decision note (optional)</span>
                 <input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Reason or ticket ref" />
@@ -490,10 +483,6 @@ function canvasToWidgetDraft(props: DynamicCanvasProps): WidgetDraft {
 export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (prompt: string) => void }) {
   const titleId = useId();
   const [savedState, setSavedState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [resetState, setResetState] = useState<"idle" | "resetting" | "done">("idle");
-  const isOpsIncident = Boolean(props.recordId && props.recordId.startsWith("INC-"));
-  const isSalesDeal = Boolean(props.recordId && props.recordId.startsWith("DEAL-"));
-
   async function saveWidget() {
     if (savedState === "saving" || savedState === "saved") return;
     setSavedState("saving");
@@ -502,26 +491,6 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
       setSavedState("saved");
     } catch {
       setSavedState("error");
-    }
-  }
-
-  async function resetDomainDemo() {
-    if (resetState === "resetting") return;
-    setResetState("resetting");
-    try {
-      if (isOpsIncident) {
-        await api.resetOpsIncidents();
-        notifyDomainDataUpdated();
-        setResetState("done");
-        props.onFollowUp?.("Build an IT incident triage dashboard with live status");
-      } else if (isSalesDeal) {
-        await api.resetSalesDeals();
-        notifyDomainDataUpdated();
-        setResetState("done");
-        props.onFollowUp?.("Build a Q4 deal desk and discount approval dashboard for DEAL-904");
-      }
-    } catch {
-      setResetState("idle");
     }
   }
 
@@ -545,18 +514,6 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
           {props.subtitle && <p className="dyn-canvas-subtitle">{props.subtitle}</p>}
         </div>
         <div className="dyn-header-actions">
-          {(isOpsIncident || isSalesDeal) && (
-            <button
-              type="button"
-              className="dyn-save-btn"
-              disabled={resetState === "resetting"}
-              onClick={() => void resetDomainDemo()}
-              title={isOpsIncident ? "Reset incidents.json back to active P1 demo state" : "Reset deals.json back to pending approval demo state"}
-            >
-              <RotateCcw size={13} aria-hidden="true" />
-              {resetState === "resetting" ? "Resetting…" : "Reset demo"}
-            </button>
-          )}
           {!(props.recordId?.startsWith("wdg_") || props.dataSource?.startsWith("Widget Library")) && (
             <button
               type="button"
@@ -572,6 +529,7 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
         </div>
       </header>
 
+      {props.choices?.length ? <div className="composer-starters" aria-label="Matching records">{props.choices.map((r) => <button key={r.id} type="button" className="starter" disabled={!props.onFollowUp} onClick={() => props.onFollowUp?.("Show " + r.id)}>{r.label} · {r.id}</button>)}</div> : null}
       <div className="dyn-canvas-nodes">
         {props.nodes.map((node, idx) => {
           if (node.type === "metrics") {

@@ -226,7 +226,7 @@ const addressSteps = {
     contracts: ["composer", "domain"],
   },
   render: render(
-    "Chat renders Advisory Reasoning (Stage 0 Verified Experience badge + Customer 360 trace), the address guide, the funding card, and the Preview funding button.",
+    "Chat shows the address guide, the funding card, and the Preview funding button. Open the turn in Admin Logs to inspect the calls.",
     { label: "Verified inputs · excerpt", value: {
       actionMode: "verified_experience",
       selectedCandidateId: addressCandidateId,

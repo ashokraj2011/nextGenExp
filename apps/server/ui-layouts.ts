@@ -106,17 +106,7 @@ export async function previewUiLayout(
     PznSavingsChart: { component: "PznSavingsChart", props: savingsProjection(goal, 24, 100_000, {
       transferFromCashCents: Math.min(1_000_000, portfolio.cashCents),
       portfolioCashBeforeCents: portfolio.cashCents,
-      investingEligibility: {
-        eligible: portfolio.cashCents - Math.min(1_000_000, portfolio.cashCents) > 1_000_000,
-        contentId: "portfolio_cash_investing",
-        ruleName: "Cash above $10,000",
-        thresholdCents: 1_000_000,
-        cashAfterCents: Math.max(0, portfolio.cashCents - Math.min(1_000_000, portfolio.cashCents)),
-        reason: portfolio.cashCents - Math.min(1_000_000, portfolio.cashCents) > 1_000_000
-          ? "Treatment Selector (portsum) kept the Cash Investing card eligible: hypothetical cash stays above the $10,000 CCRE rule."
-          : "Treatment Selector (portsum) removed the Cash Investing card: hypothetical cash drops to or below the $10,000 CCRE rule.",
-        evaluatedBy: "treatment-selector",
-      },
+      // The chat run supplies eligibility after Treatment Selector evaluates the projected balance.
     }) },
     PznSavingsMetric: { component: "PznSavingsMetric", props: requiredContribution(goal, 24) },
     PznContentCard: { component: "PznContentCard", props: { ...education.shared, body: education.body, description: education.description } },

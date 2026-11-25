@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { gatewayFromEnv } from "../apps/server/gateway";
-import { startApp } from "../apps/server/http";
+import { startApp } from "./operator-fixture";
 import type { Bootstrap } from "../packages/contracts/api";
 import type { TurnPayloads } from "../packages/contracts/inspector";
 import { testClient, testProject } from "./client";

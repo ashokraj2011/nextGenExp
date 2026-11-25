@@ -12,7 +12,7 @@ import host from "../../fixtures/host.json";
 import { applyMockCcreRules } from "./mock-ccre";
 import { scoreContexts } from "./propensity";
 import { normalizeRecommendations, type Recommendation, type TreatmentV3 } from "./recommendations";
-import { getActiveSelfServicePznProvider } from "../recommendations/self-service-engine";
+import { getActiveSelfServicePznProvider, pznTextContentToCatalogEntry } from "../recommendations/self-service-engine";
 import agenticRecommendations from "../../fixtures/agentic-recommendations.json";
 
 const rejectionSchema = z.object({
@@ -135,24 +135,30 @@ export class FixtureTsAdapter implements TsAdapter {
           ...evalResult.eligibleContents.map((c) => c.contentId),
           ...evalResult.filteredOutContents.map((c) => c.contentId),
         ];
-        const ccreResults = [
-          ...evalResult.eligibleContents.map((c) => ({
-            name: c.attachedRuleIds.length ? c.reason : "Always eligible",
-            contentId: c.contentId,
-            outcome: "matched" as const,
-          })),
-          ...evalResult.filteredOutContents.map((c) => ({
-            name: c.reason,
-            contentId: c.contentId,
-            outcome: "excluded" as const,
-          })),
-        ];
+        const ccreResults = [...evalResult.eligibleContents, ...evalResult.filteredOutContents].map((card) => {
+          const rules = [...evalResult.contextRuleResults, ...evalResult.ruleResults.filter((r) => card.attachedRuleIds.includes(r.ruleId))];
+          const rule = rules.length === 1 ? rules[0] : undefined;
+          const clause = rule?.effect === "include_when_true" && rule.clauses.length === 1 ? rule.clauses[0] : undefined;
+          const cashAboveCents = clause?.namespaceId === "portfolio" && clause.attributeId === "cash_usd" && clause.operator === "gt" && typeof clause.expectedValue === "number" ? Math.round(clause.expectedValue * 100) : undefined;
+          return {
+            name: rules.map((r) => r.ruleName).join(", ") || card.reason,
+            contentId: card.contentId, outcome: card.eligible ? "matched" as const : "excluded" as const,
+            reason: [card.reason, ...rules.flatMap((r) => r.clauses.map((c) => c.reason))].join(" "),
+            ...(cashAboveCents !== undefined && { cashAboveCents }),
+          };
+        });
         const recommendations: TreatmentRecommendations = {
           schemaVersion: "2.0",
           recommendations: contentIds.map((id) => ({ kind: "content" as const, id })),
         };
         return {
           contentIds,
+          renderedEntries: evalResult.eligibleContents.flatMap((card) => {
+            const template = selfServicePub.contents.find((entry) => entry.contentId === card.contentId);
+            if (!template) return [];
+            const entry = pznTextContentToCatalogEntry({ ...template, headline: card.headline, body: card.renderedBody });
+            return [{ ...entry, sourceRef: `${entry.sourceRef}@${context}:v${selfServicePub.version}` }];
+          }),
           ccre: { beforeRules, results: ccreResults },
           portfolio: null,
           recommendations,
@@ -193,7 +199,7 @@ export class FixtureTsAdapter implements TsAdapter {
         )).map(({ recommendation }) => recommendation),
       ],
     };
-    return { ...result, portfolio, recommendations };
+    return { ...result, portfolio, recommendations, renderedEntries: undefined };
   }
 
   async selectRecommendations(request: TreatmentRequest, signal?: AbortSignal) {

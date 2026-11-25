@@ -138,7 +138,12 @@ export class UxEvolutionStore {
         const proposals = Array.isArray(parsed.proposals)
           ? parsed.proposals.flatMap((p) => {
               const res = uxProposalSchema.safeParse(p);
-              return res.success ? [res.data] : [];
+              if (!res.success) return [];
+              const proposal = res.data;
+              if (proposal.status === "approved" && !proposal.regression && proposal.shippedWidgetId) {
+                proposal.regression = { prompt: proposal.samplePrompts[0], widgetId: proposal.shippedWidgetId, title: proposal.title };
+              }
+              return [proposal];
             })
           : [];
         return {
@@ -328,6 +333,7 @@ export class UxEvolutionStore {
         operation: "save",
         widget: {
           ...target.widgetDraft,
+          prompt: target.samplePrompts[0],
           availableForConsumption: true,
         },
       },
@@ -351,6 +357,7 @@ export class UxEvolutionStore {
 
     target.status = "approved";
     target.shippedWidgetId = savedWidget.widget?.id;
+    if (savedWidget.widget) target.regression = { prompt: target.samplePrompts[0], widgetId: savedWidget.widget.id, title: savedWidget.widget.name };
     target.shippedPolicyDocId = shippedPolicyDocId;
     target.shippedAt = new Date().toISOString();
     this.save();

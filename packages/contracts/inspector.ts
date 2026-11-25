@@ -77,6 +77,7 @@ export type AgenticPayloads = {
   calls: RegistryToolPayloads[];
 };
 export type TurnPayloads = {
+  customerLookup?: RegistryToolPayloads;
   agentic?: AgenticPayloads;
   turnId: string;
   topicScores: TreatmentPayloads | null;

@@ -1,3 +1,4 @@
+import { author as operatorCredentials } from "./operator-fixture";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { startTestPreview } from "./preview";
@@ -7,7 +8,7 @@ import { adminPaths } from "../packages/contracts/admin-paths";
 const app = await startTestPreview();
 const browser = await chromium.launch();
 try {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 840 } });
+  const page = await browser.newPage({ httpCredentials: { ...operatorCredentials, origin: app.url }, viewport: { width: 1280, height: 840 } });
   await page.goto(app.url + "/chat");
   const question = page.getByRole("textbox", { name: "Your question" });
   await question.fill("I want to buy a house in two years. Show me how close I am and help me explore a savings plan.");
@@ -15,7 +16,9 @@ try {
   const latest = () => page.locator('[data-renderer="a2ui"]').last();
   await latest().getByRole("region", { name: "Projected savings", exact: true }).getByText("$50,000", { exact: false }).first().waitFor();
   await latest().getByRole("slider", { name: "Monthly contribution" }).press("End");
+  const surfaceCount = await page.locator('[data-renderer="a2ui"]').count();
   await latest().getByRole("button", { name: "Recalculate", exact: true }).click();
+  await page.locator('[data-renderer="a2ui"]').nth(surfaceCount).waitFor();
   await latest().getByRole("region", { name: "Projected savings", exact: true }).getByText("$146,000", { exact: false }).first().waitFor();
   assert.equal(await page.locator('[data-renderer="fallback"]').count(), 0);
   await latest().getByRole("button", { name: "Save savings plan", exact: true }).click();
@@ -34,8 +37,8 @@ try {
   await openCustomerChat(page);
 
   await page.setViewportSize({ width: 390, height: 840 });
-  await latest().getByRole("img", { name: /Projected savings rise/ }).waitFor();
-  assert.ok(await latest().getByRole("img", { name: /Projected savings rise/ }).isVisible());
+  await latest().getByRole("img", { name: /Projected savings (?:rise|reach)/ }).waitFor();
+  assert.ok(await latest().getByRole("img", { name: /Projected savings (?:rise|reach)/ }).isVisible());
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
   await page.setViewportSize({ width: 1280, height: 840 });
   await openAdmin(page, "tools");

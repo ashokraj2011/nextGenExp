@@ -3,6 +3,7 @@
 !.env.example
 .runtime/
 .pzn-data/
+operator-credentials.json
 dist/
 node_modules/
 test-results/

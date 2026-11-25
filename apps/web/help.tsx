@@ -244,7 +244,7 @@ export function Help() {
           <li>
             <span className="help-stage-tag">0:00 – 0:50 · Semantic Routing</span>
             <h3>Verified Snapshot &amp; Live Equity Book</h3>
-            <p>Ask <strong>“Show my portfolio summary”</strong>, then ask a natural paraphrase: <strong>“whats in my equity book right now?”</strong>. Expand <strong>Advisory Reasoning</strong> to show the <em>Unified Capability Router (Semantic LLM)</em> and penny-for-penny ledger parity.</p>
+            <p>Ask <strong>“Show my portfolio summary”</strong>, then ask a natural paraphrase: <strong>“whats in my equity book right now?”</strong>. In <strong>Admin test chat</strong>, expand <strong>Advisory Reasoning</strong> to see how the request was routed.</p>
           </li>
           <li>
             <span className="help-stage-tag">0:50 – 2:10 · Trade &amp; TLH SSE Job</span>

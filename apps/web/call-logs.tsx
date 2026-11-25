@@ -131,7 +131,8 @@ function TurnPayloadLog({ turn }: { turn: TurnView }) {
         {payloads.agentic.model && <ModelStage title="Experience Agent model" stage={payloads.agentic.model} />}
         {payloads.agentic.calls.map((call, i) => <ReadToolStage key={call.tool + ":" + i} title={call.tool} stage={call} />)}
       </details>}
-      {((!payloads.workflow && !payloads.agentic) || payloads.topicScores || payloads.router || payloads.treatment) && <>
+      {payloads.customerLookup && <ReadToolStage title="Customer record lookup" stage={payloads.customerLookup} />}
+      {((!payloads.workflow && !payloads.agentic && !payloads.customerLookup) || payloads.topicScores || payloads.router || payloads.treatment) && <>
         {payloads.topicScores && <TreatmentStage stage={payloads.topicScores} scoring />}
         <ModelStage title="Context Router" stage={payloads.router} />
         {payloads.glossary && <ReadToolStage title="CCRE glossary" payloadLabel="Glossary" stage={payloads.glossary} />}

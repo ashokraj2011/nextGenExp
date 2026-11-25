@@ -21,10 +21,10 @@
 1. In Chat (as **Alice Morgan**), ask:
    > `Show my portfolio summary`
    - **Point out:** The verified **Portfolio Snapshot** (`Total value`, `Invested`, `Cash`) + eligible `#1 Next Best Action` (**Explore investing options**).
-   - Expand **Advisory Reasoning** → show **1. Customer 360 Lookup**, **2. Unified Capability Router**, **3. Recommendation Arbitration (`cep.recommendations.arbitrate@1.0.0`)**, and **Host Verification**.
+   - In admin test chat (`/admin/chat`), repeat the question and expand **Advisory Reasoning** → show **1. Customer 360 Lookup**, **2. Unified Capability Router**, **3. Recommendation Arbitration (`cep.recommendations.arbitrate@1.0.0`)**, and **Host Verification**.
 2. Now ask a natural paraphrase that doesn't match any static keyword:
    > `whats in my equity book right now?`
-   - **Point out:** The **Unified Semantic Capability Router** (`Semantic LLM` badge in Advisory Reasoning) routes directly to **Live Stock Holdings & Tax-Lot Positions**, displaying all 6 tickers (`AAPL`, `MSFT`, `NVDA`, `INTC`, `BA`, `PFE`), cost basis, live prices, unrealized P/L, and **`(TLH)`** tax-loss harvesting tags — summing **penny-for-penny** with `Portfolio snapshot` (single source of truth).
+   - **Point out:** The **Unified Semantic Capability Router** (`Semantic LLM` badge in admin test chat) routes directly to **Live Stock Holdings & Tax-Lot Positions**, displaying all 6 tickers (`AAPL`, `MSFT`, `NVDA`, `INTC`, `BA`, `PFE`), cost basis, live prices, unrealized P/L, and **`(TLH)`** tax-loss harvesting tags — summing **penny-for-penny** with `Portfolio snapshot` (single source of truth).
 
 **Executive soundbite:**  
 *"The LLM proposes intent and structure, never raw HTML and never unverified numbers. Every figure comes from scoped `sfield` reads and a single holdings ledger."*

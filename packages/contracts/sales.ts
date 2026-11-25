@@ -30,6 +30,7 @@ export const dealRecordSchema = z.object({
 }).strict();
 
 export const dealDecisionInputSchema = z.object({
+  expectedUpdatedAt: z.string().max(64).optional(),
   decision: z.enum(["approve_discount", "reject_discount", "advance_stage"]),
   actor: z.string().trim().max(80).optional(),
   note: z.string().trim().max(240).optional(),

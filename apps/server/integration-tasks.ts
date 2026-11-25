@@ -1,3 +1,4 @@
+import { customerOrderTask, orderSource } from "./commerce-orders";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -141,10 +142,14 @@ export class TransportFailure extends Error {
 type SandboxHandler = (input: Record<string, unknown>) => Promise<TransportResponse>;
 
 /** Deterministic sandbox systems used by the seeded demo integration and the tests. */
-function createSandboxHandlers(): Record<string, SandboxHandler> {
+function createSandboxHandlers(orders?: ReturnType<typeof orderSource>): Record<string, SandboxHandler> {
   const tickets = new Map<string, { ticketId: string; status: string }>();
   let seq = 4800;
   return {
+    "commerce.lookup_order": async (input) => {
+      const order = orders?.(input.orderId, input.memberId);
+      return { status: 200, body: order ? { ...order, found: true } : { found: false } };
+    },
     "itsm.create_ticket": async (input) => {
       const key = String(input.idempotencyKey ?? "");
       const existing = key ? tickets.get(key) : undefined;
@@ -231,7 +236,8 @@ function readPath(value: unknown, path: string): unknown {
 }
 
 export class TaskCallExecutor {
-  private readonly sandbox = createSandboxHandlers();
+  private readonly sandbox;
+  constructor(orders?: ReturnType<typeof orderSource>) { this.sandbox = createSandboxHandlers(orders); }
 
   async execute(integration: Integration, contract: TaskContract, input: Record<string, unknown>, signal: AbortSignal): Promise<TaskCallResult> {
     const writes = contract.effect !== "read";
@@ -332,10 +338,16 @@ export class IntegrationTaskStore {
   private readonly filePath: string;
   private state: Persisted;
 
+  readonly orders: ReturnType<typeof orderSource>;
   constructor(dataDir: string) {
+    this.orders = orderSource(dataDir);
     this.filePath = join(dataDir, "integration-tasks.json");
     this.state = this.load();
     if (this.state.integrations.length === 0) this.seed();
+    if (!this.integration("commerce_sandbox")) {
+      this.upsertIntegration({ id: "commerce_sandbox", name: "Order fulfillment", transport: "sandbox" });
+      this.publish(this.upsertDraft(customerOrderTask).ref);
+    }
   }
 
   private load(): Persisted {
@@ -416,6 +428,15 @@ export class IntegrationTaskStore {
     for (const cond of input.approvalPolicy.when) if (!props[cond.field]) issues.push(`approval condition uses "${cond.field}", which is not an input field`);
     if (input.approvalPolicy.mode === "conditional" && input.approvalPolicy.when.length === 0) issues.push("conditional approval needs at least one condition");
     if (input.resourceIdField && !props[input.resourceIdField]) issues.push(`resource field "${input.resourceIdField}" is not an input field`);
+    const binding = input.customerExperience;
+    if (binding) {
+      const out = (input.outputSchema as SchemaLike).properties ?? {};
+      if (input.effect !== "read" || input.resultKind !== "data" || input.approvalPolicy.mode !== "none") issues.push("Customer chat requires an ungated read returning data.");
+      if (!input.resourceIdField || input.resourceIdField === binding.memberField || [binding.memberField, input.resourceIdField].some((k) => props[k]?.type !== "string" || out[k]?.type !== "string")) issues.push("Input and output must declare distinct string record and member ID fields.");
+      if (((input.inputSchema as SchemaLike).required ?? []).some((k) => k !== binding.memberField && k !== input.resourceIdField)) issues.push("Chat supplies only the member ID and record ID.");
+      for (const { key } of binding.fields) if (key === binding.memberField || !["string", "boolean", "number", "integer"].includes(String(out[key]?.type))) issues.push("Choose a public scalar output field: " + key);
+      if (binding.watch && !binding.fields.some((f) => f.key === binding.watch!.field)) issues.push("Watch a displayed field.");
+    }
     const codes = new Set(input.outcomeCodes.map((c) => c.code));
     for (const rule of input.outcomeMapping) if (!codes.has(rule.code)) issues.push(`mapping references undeclared outcome code ${rule.code}`);
     if (!input.outcomeCodes.some((c) => c.success)) issues.push("declare at least one success outcome code");
@@ -658,6 +679,27 @@ export class IntegrationTaskService {
   view() {
     const runtime = this.runtime();
     return this.store.view(runtime?.registeredIntegrationTools() ?? new Set(), runtime !== null);
+  }
+
+  customerReads() {
+    return this.store.published().filter((c) => c.customerExperience && c.effect === "read" && c.approvalPolicy.mode === "none"
+      && this.store.integration(c.integrationId)?.enabled && this.store.latestPublished(c.integrationId, c.taskId)?.ref === c.ref);
+  }
+
+  async customerRead(principal: string, mid: string, ref: string, id: string) {
+    const contract = this.customerReads().find((c) => c.ref === ref);
+    if (!contract?.customerExperience || !contract.resourceIdField) return;
+    const binding = contract.customerExperience;
+    const key = contract.resourceIdField;
+    const { run } = await this.run(principal, { toolRef: ref, requestedBy: principal,
+      input: { [key]: id, [binding.memberField]: mid }, provenance: { [key]: "user_confirmed", [binding.memberField]: "system_resolved" } });
+    const output = run.output as Record<string, unknown> | undefined;
+    if (run.state !== "succeeded" || !run.outcome?.success || !output || output[key] !== id || output[binding.memberField] !== mid) return;
+    const fields = binding.fields.flatMap(({ key, label }) => Object.hasOwn(output, key) && ["string", "number", "boolean"].includes(typeof output[key])
+      ? [{ label, value: String(output[key]).slice(0, 90) }] : []);
+    if (!fields.length) return;
+    const watchValue = binding.watch && Object.hasOwn(output, binding.watch.field) ? String(output[binding.watch.field]) : undefined;
+    return { fields, watchValue, runId: run.runId, sfieldRunId: run.sfieldRunId, sfieldCallId: run.sfieldCallId };
   }
 
   /** Dedicated tool if the version was registered at startup; otherwise the effect's dispatcher (no restart needed). */

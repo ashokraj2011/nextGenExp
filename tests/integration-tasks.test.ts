@@ -1,10 +1,11 @@
+import { reviewer, operatorHeader } from "./operator-fixture";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { startApp } from "../apps/server/http";
+import { startApp } from "./operator-fixture";
 import { breakingChanges, IntegrationTaskStore, needsApproval, schemaIssues } from "../apps/server/integration-tasks";
 import type { IntegrationTasksView, TaskRun } from "../packages/contracts/integration-task";
 import type { ApprovalRecord } from "../packages/contracts/approval";
@@ -64,7 +65,7 @@ test("integration tasks run through sfield with native digest-bound approvals, r
 
   const view = await client.request<IntegrationTasksView>("/api/integrations");
   assert.deepEqual(view.contracts.filter((c) => c.sfieldRegistered).map((c) => c.ref).sort(), [
-    "int.itsm_sandbox.create_ticket@1.0.0", "int.itsm_sandbox.find_ticket@1.0.0", "int.itsm_sandbox.generate_mapping_schema@1.0.0",
+    "int.commerce_sandbox.lookup_order@1.0.0", "int.itsm_sandbox.create_ticket@1.0.0", "int.itsm_sandbox.find_ticket@1.0.0", "int.itsm_sandbox.generate_mapping_schema@1.0.0",
   ]);
 
   // 1. Ungated write executes through an sfield run; the engine fills the idempotency key.
@@ -84,15 +85,15 @@ test("integration tasks run through sfield with native digest-bound approvals, r
   assert.equal(p1.run.state, "pending_approval");
   assert.ok(p1.run.sfieldApprovalId?.startsWith("apr_"));
   assert.ok(p1.approval?.details.some((d) => d.label === "Model-proposed fields" && d.value.includes("title")));
-  const decided = await client.request<{ approval: ApprovalRecord; taskRun: TaskRun }>(`/api/approvals/${p1.approval!.id}/decide`, { decision: "approve", actor: "On-call Lead" });
+  const decided = await client.request<{ approval: ApprovalRecord; taskRun: TaskRun }>(`/api/approvals/${p1.approval!.id}/decide`, { decision: "approve", actor: "On-call Lead" }, 200, { Authorization: operatorHeader(reviewer) });
   assert.equal(decided.approval.status, "executed");
   assert.equal(decided.taskRun.state, "succeeded");
   assert.equal(decided.taskRun.outcome?.code, "CREATED");
-  await client.request(`/api/approvals/${p1.approval!.id}/decide`, { decision: "approve", actor: "On-call Lead" }, 409);
+  await client.request(`/api/approvals/${p1.approval!.id}/decide`, { decision: "approve", actor: "On-call Lead" }, 409, { Authorization: operatorHeader(reviewer) });
 
   // 4. Denial: sfield's approval is denied too, nothing is sent.
   const p1b = await run({ title: "Payments degraded", priority: "P1", service: "payments" }, 202);
-  await client.request(`/api/approvals/${p1b.approval!.id}/decide`, { decision: "deny", actor: "On-call Lead", comment: "Duplicate of INC" });
+  await client.request(`/api/approvals/${p1b.approval!.id}/decide`, { decision: "deny", actor: "On-call Lead", comment: "Duplicate of INC" }, 200, { Authorization: operatorHeader(reviewer) });
   const afterDeny = await client.request<IntegrationTasksView>("/api/integrations");
   assert.equal(afterDeny.runs.find((r) => r.runId === p1b.run.runId)?.state, "denied");
 
@@ -144,7 +145,7 @@ test("integration tasks run through sfield with native digest-bound approvals, r
   assert.equal(badDispatch.run.error?.kind, "validation_input");
   const p1v11 = await run({ title: "Edge outage", priority: "P1", service: "edge" }, 202, V11);
   assert.equal(p1v11.approval?.sfieldToolRef, V11);
-  const decidedV11 = await client.request<{ approval: ApprovalRecord; taskRun: TaskRun }>(`/api/approvals/${p1v11.approval!.id}/decide`, { decision: "approve", actor: "On-call Lead" });
+  const decidedV11 = await client.request<{ approval: ApprovalRecord; taskRun: TaskRun }>(`/api/approvals/${p1v11.approval!.id}/decide`, { decision: "approve", actor: "On-call Lead" }, 200, { Authorization: operatorHeader(reviewer) });
   assert.equal(decidedV11.taskRun.state, "succeeded");
   assert.equal(decidedV11.approval.status, "executed");
   const viewAfter = await client.request<IntegrationTasksView>("/api/integrations");
@@ -195,7 +196,7 @@ test("pending integration approvals survive a server restart and still execute e
   assert.ok(list.some((a) => a.id === pending.approval.id && a.status === "pending"), "approval is still pending after restart");
 
   const decided = await client.request<{ approval: ApprovalRecord; taskRun: TaskRun; execution: { summary: string } }>(
-    `/api/approvals/${pending.approval.id}/decide`, { decision: "approve", actor: "On-call Lead" });
+    `/api/approvals/${pending.approval.id}/decide`, { decision: "approve", actor: "On-call Lead" }, 200, { Authorization: operatorHeader(reviewer) });
   assert.equal(decided.taskRun.state, "succeeded", JSON.stringify(decided.taskRun));
   assert.equal(decided.taskRun.outcome?.code, "CREATED");
   assert.equal(decided.taskRun.idempotencyKey, pending.run.idempotencyKey, "the approved idempotency key is reused");
@@ -205,7 +206,7 @@ test("pending integration approvals survive a server restart and still execute e
   assert.equal(decided.taskRun.sfieldRunId, pending.run.sfieldRunId);
   const sfApprovals = await app.internals.runtime!.sfieldApprovals(pending.run.sfieldRunId!);
   assert.deepEqual(sfApprovals.map((a) => a.id), [pending.run.sfieldApprovalId], "exactly one sfield approval, the original");
-  await client.request(`/api/approvals/${pending.approval.id}/decide`, { decision: "approve", actor: "On-call Lead" }, 409);
+  await client.request(`/api/approvals/${pending.approval.id}/decide`, { decision: "approve", actor: "On-call Lead" }, 409, { Authorization: operatorHeader(reviewer) });
 
   // Denial after a restart also works and sends nothing.
   const p1b = await client.request<{ run: TaskRun; approval: ApprovalRecord }>("/api/integrations/tasks/run",
@@ -213,7 +214,7 @@ test("pending integration approvals survive a server restart and still execute e
   await app.close();
   app = await start();
   client = await testClient(app.url);
-  await client.request(`/api/approvals/${p1b.approval.id}/decide`, { decision: "deny", actor: "On-call Lead" });
+  await client.request(`/api/approvals/${p1b.approval.id}/decide`, { decision: "deny", actor: "On-call Lead" }, 200, { Authorization: operatorHeader(reviewer) });
   const view = await client.request<IntegrationTasksView>("/api/integrations");
   assert.equal(view.runs.find((r) => r.runId === p1b.run.runId)?.state, "denied");
 });
@@ -327,11 +328,11 @@ test("chat authoring: connect an MCP server, import tools, publish, run, and dra
   await client.request("/api/integrations/contracts/publish", { ref: REFUND });
   const refund = await client.request<{ run: TaskRun; approval: ApprovalRecord }>("/api/integrations/tasks/run", { toolRef: REFUND, input: { orderId: "ORD-1001", amount: 10 } }, 202);
   assert.match(String(refund.run.input.requestId), /^idem_/);
-  const approved = await client.request<{ taskRun: TaskRun }>(`/api/approvals/${refund.approval.id}/decide`, { decision: "approve", actor: "Finance Lead" });
+  const approved = await client.request<{ taskRun: TaskRun }>(`/api/approvals/${refund.approval.id}/decide`, { decision: "approve", actor: "Finance Lead" }, 200, { Authorization: operatorHeader(reviewer) });
   assert.equal(approved.taskRun.state, "succeeded", JSON.stringify(approved.taskRun));
   assert.match(String((approved.taskRun.output as { refundId: string }).refundId), /^RF-/);
   const tooMuch = await client.request<{ run: TaskRun; approval: ApprovalRecord }>("/api/integrations/tasks/run", { toolRef: REFUND, input: { orderId: "ORD-1002", amount: 9999 } }, 202);
-  const rejected = await client.request<{ taskRun: TaskRun }>(`/api/approvals/${tooMuch.approval.id}/decide`, { decision: "approve", actor: "Finance Lead" });
+  const rejected = await client.request<{ taskRun: TaskRun }>(`/api/approvals/${tooMuch.approval.id}/decide`, { decision: "approve", actor: "Finance Lead" }, 200, { Authorization: operatorHeader(reviewer) });
   assert.equal(rejected.taskRun.state, "failed");
   assert.equal(rejected.taskRun.outcome?.code, "TOOL_ERROR");
 

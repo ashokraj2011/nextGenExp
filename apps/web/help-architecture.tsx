@@ -9,7 +9,7 @@ import { addressUpdateExample } from "./help-flow";
 const participants = [
   {
     name: "Chat and A2UI", shortName: "Chat", Icon: MessageSquare,
-    description: "Profile-scoped chat workbench. Renders Advisory Reasoning (with Stage 0 badge), verified A2UI cards, Dynamic LLM Canvas, and #1 NBA.",
+    description: "Shows progress, account information, and the next available action. A2UI renders the cards and forms in the conversation.",
   },
   {
     name: "CEP app server", shortName: "App server", Icon: Network,

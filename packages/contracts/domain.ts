@@ -116,7 +116,7 @@ export type RouteDecision = Dated & {
   routerRunId: string;
   intent: Intent;
 };
-export type Candidate = { candidateId: string; contentId: string; contentVersion: string; tsRank: number };
+export type Candidate = { candidateId: string; contentId: string; contentVersion: string; tsRank: number; publishedEntry?: ContentEntry };
 export type ContentDecision = Dated & {
   decisionId: string;
   scope: Scope;

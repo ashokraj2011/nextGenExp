@@ -10,7 +10,7 @@ A governed, multi-domain **Customer Engagement Platform (CEP)** built on **`sfie
 
 | Pillar | Capabilities Included |
 | :--- | :--- |
-| **Unified Semantic Routing** | Declarative 8-capability catalog (`packages/contracts/capabilities-catalog.ts`) + live LLM Semantic Capability Router (`apps/server/semantic-router.ts`) with parameter extraction and transparent routing traces inside **Advisory Reasoning**. |
+| **Unified Semantic Routing** | Declarative 8-capability catalog (`packages/contracts/capabilities-catalog.ts`) + live LLM Semantic Capability Router (`apps/server/semantic-router.ts`) with parameter extraction and transparent routing traces inside **Advisory Reasoning** in admin test chat. |
 | **Governed Wealth & Single-Source-of-Truth Ledger** | Verified A2UI experiences (Portfolio Snapshot, Balances, Home Goal, Retirement, Beneficiaries, Address Update, Funding Preview) + **Live Stock Holdings & Tax-Lot Ledger** (`apps/server/trade-store.ts`) synchronized penny-for-penny with Customer 360 (`Portfolio snapshot` = `SUM(shares × price)` + Cash + Fixed Income). |
 | **Conversational Trade & Tax-Loss Harvesting Engine** | Simulate buying/selling shares by count or `%`, run **Tax-Loss Harvesting Analysis** with editable loss-offset recommendations and a real **30-day Wash-Sale Ledger**, drive drafts conversationally (`"yes"`, `"change to 50%"`, `"execute bundle"`), and execute **durable SSE-streamed timed jobs** with mid-flight **Cancel** and automatic `sfield` settlement. |
 | **Multi-Domain Reusability** | Declarative Domain Packs (**Wealth Advisory**, **IT Operations & SRE**, **Sales & Revenue Ops**) with sidebar Domain Pack Switcher, live operational HUDs, persisted JSON/SQLite stores (`incidents.json`, `deals.json`, `customer-profiles.json`), and full Admin Entity CRUD at `/admin/customers`. |
@@ -61,11 +61,17 @@ Copy `.env.example` to `.env` and set `LLM_PROVIDER=gateway`, `LLM_BASE_URL`, `L
 
 ---
 
+### Operator sign-in
+
+Customer chat opens at `/`. The admin, integration, sales and operations workspaces prompt for an operator account. On first start the server saves the local operator username and generated password in `operator-credentials.json` inside the active data directory. For Copilot on port 4180 the default path is `.pzn-data/copilot/operator-credentials.json`. To use separate identities for approvals, set `PZN_OPERATORS_JSON` to a JSON object mapping two or more usernames to passwords of at least 12 characters each. Customer sign-in uses the local profile picker.
+
+In `/integrations`, the **Customer chat** settings on a read task map the record ID, member ID and fields customers may see. Publish the task to make it available in chat. For example, Alice can ask “Where is my order ORD-1001?” and then “Tell me when it is delivered.” The server checks the registered source and posts the status change to that thread.
+
 ## Navigation & Admin Control Plane Map
 
 | Route | Purpose |
 | :--- | :--- |
-| `/` and `/chat` | Customer Engagement Chat Workbench (Domain Pack Switcher, Advisory Reasoning, A2UI v1.0 cards, Dynamic UI Canvas, inline HITL Approvals, Stock Trade & Tax-Harvest Simulator). |
+| `/` and `/chat` | Customer chat with pinned sections, an account summary, personalized pending actions and saved threads. |
 | `/planning` | Customer planning overview & topic launcher. |
 | `/login` | Demo profile selector (**Alice Morgan**, **Jordan Lee**, **Marcus Reed**). |
 | `/admin` | **Tool Setup**, Treatment Selector overrides, CCRE rule builder, **Recommendation Providers (`sfield`)**, **External REST & MCP Connector Registry** (`Invoke via sfield`), and Capability Studio. |

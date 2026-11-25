@@ -444,7 +444,7 @@ function seedContexts(ts: string): PznContext[] {
 export class SelfServicePznStore implements ActiveSelfServicePznProvider {
   private readonly db: SqliteDatabase;
   private readonly ownsDb: boolean;
-  private readonly lastRenderedByContentId = new Map<string, { headline: string; body: string }>();
+
 
   constructor(dataDirOrDb: string | SqliteDatabase) {
     if (typeof dataDirOrDb === "string") {
@@ -969,8 +969,7 @@ export class SelfServicePznStore implements ActiveSelfServicePznProvider {
       const pub = this.getPublishedPublication(ctx.contextId);
       const found = pub?.contents.find((item) => item.contentId === contentId);
       if (found) {
-        const rendered = this.lastRenderedByContentId.get(contentId);
-        return pznTextContentToCatalogEntry(rendered ? { ...found, headline: rendered.headline, body: rendered.body } : found);
+        return pznTextContentToCatalogEntry(found);
       }
     }
     return undefined;
@@ -989,9 +988,6 @@ export class SelfServicePznStore implements ActiveSelfServicePznProvider {
       publicationVersion: pub.version,
       attributeOverrides: overrides,
     });
-    for (const item of result.eligibleContents) {
-      this.lastRenderedByContentId.set(item.contentId, { headline: item.headline, body: item.renderedBody });
-    }
     return result;
   }
 

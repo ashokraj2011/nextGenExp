@@ -441,6 +441,17 @@
 .editorial-hero-stage .composer-hero .composer-icon {
   margin-bottom: 10px;
 }
+.workspace-section-picker { display: none; }
+@media (max-width: 540px) {
+  .workspace-menu .workspace-section-picker { display: block; flex: 1; }
+  .workspace-menu .workspace-section-picker select { min-height: 34px; width: 100%; border: 0; border-radius: 6px; padding-inline: 12px; color: var(--ink); background: var(--surface); font: inherit; font-weight: 600; }
+  .workspace-menu .workspace-section-picker + nav { display: none; }
+}
+.customer-progress { padding-block: .45rem; color: var(--soft-ink); }
+.thread-updates { margin: 12px auto; width: min(92%, 840px); color: var(--teal-dark); font-size: .85rem; }
+.starter-disclosure { margin: .6rem 0 0; color: var(--soft-ink); font-size: .82rem; }
+.starter-disclosure > summary { width: fit-content; cursor: pointer; padding: .4rem 0; }
+.starter-disclosure > summary:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
 .editorial-hero-stage .composer-hero .composer-starters {
   justify-content: center;
   margin: 16px 0 4px;

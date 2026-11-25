@@ -40,7 +40,7 @@ export async function readWorkspacePendingActions(
 
   const { recommendations, ccre } = selection;
   record({ ...log, status: "succeeded", response: recommendations, ccre });
-  const { candidates, workflow } = nextStepRecommendation(recommendations, setup, pendingActionsContext);
+  const { candidates, workflow } = nextStepRecommendation(recommendations, setup, pendingActionsContext, selection.renderedEntries);
   const actions: WorkspacePendingAction[] = [];
   for (const candidate of candidates) {
     const content = lookupContent(candidate);

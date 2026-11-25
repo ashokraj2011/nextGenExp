@@ -155,11 +155,12 @@ export class ScheduledJobStore {
     };
   }
 
-  upsert(rawInput: ScheduledJobUpsertInput): ScheduledJobsView {
+  upsert(rawInput: ScheduledJobUpsertInput, principalId?: string): ScheduledJobsView {
     const parsed = scheduledJobUpsertSchema.parse(rawInput);
     const existing = this.state.jobs.find((j) => j.id === parsed.id);
     const record: ScheduledJob = {
       ...parsed,
+      deliveryPrincipal: principalId ?? existing?.deliveryPrincipal,
       ...(existing?.lastRunAt ? { lastRunAt: existing.lastRunAt } : {}),
       ...(existing?.lastStatus ? { lastStatus: existing.lastStatus } : {}),
       ...(existing?.lastSummary ? { lastSummary: existing.lastSummary } : {}),
@@ -172,7 +173,7 @@ export class ScheduledJobStore {
     return this.view();
   }
 
-  runJob(jobId: string, triggeredBy: "scheduler" | "manual" = "manual"): { execution: ScheduledJobExecution; view: ScheduledJobsView } {
+  runJob(jobId: string, triggeredBy: "scheduler" | "manual" = "manual", principalId?: string): { execution: ScheduledJobExecution; view: ScheduledJobsView } {
     const job = this.state.jobs.find((j) => j.id === jobId);
     if (!job) throw new Error(`Scheduled job "${jobId}" not found.`);
 
@@ -202,7 +203,7 @@ export class ScheduledJobStore {
               metricValue: `$${savedUsd}`,
               ctaLabel: "Simulate 40% AAPL Trim + Tax Harvest",
               ctaPrompt: "I want to sell 40% of my Apple shares",
-            });
+            }, principalId ?? job.deliveryPrincipal);
             alertId = pushed.alert.id;
           }
         } else {
@@ -226,7 +227,7 @@ export class ScheduledJobStore {
               metricValue: `$${cashUsd.toLocaleString("en-US")}`,
               ctaLabel: "Review Portfolio Allocation",
               ctaPrompt: "Let me know my portfolio summary.",
-            });
+            }, principalId ?? job.deliveryPrincipal);
             alertId = pushed.alert.id;
           }
         } else {
@@ -248,7 +249,7 @@ export class ScheduledJobStore {
               metricValue: `${inc.errorRatePct}%`,
               ctaLabel: "Open P1 Rollback Triage",
               ctaPrompt: "Build an IT incident triage dashboard for our active P1 alert",
-            });
+            }, principalId ?? job.deliveryPrincipal);
             alertId = pushed.alert.id;
           }
         } else {
@@ -271,7 +272,7 @@ export class ScheduledJobStore {
               metricValue: `$${deal.arrUsd.toLocaleString("en-US")}`,
               ctaLabel: "Review Deal Desk Approval",
               ctaPrompt: "Show the enterprise discount approval card for Acme Cloud Corp",
-            });
+            }, principalId ?? job.deliveryPrincipal);
             alertId = pushed.alert.id;
           }
         } else {

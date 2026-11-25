@@ -8,7 +8,7 @@ export const investingEligibilitySchema = z.object({
   eligible: z.boolean(),
   contentId: z.string(),
   ruleName: z.string(),
-  thresholdCents: cents,
+  thresholdCents: cents.optional(),
   cashAfterCents: cents,
   reason: z.string(),
   evaluatedBy: z.literal("treatment-selector"),

@@ -4,8 +4,8 @@ import { formatPortfolioAmount, type PortfolioSnapshot } from "../../packages/co
 
 const asOfFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" });
 
-export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedIncomeCents, title = "Portfolio snapshot", footer, onExploreAllocation }:
-  PortfolioSnapshot & { title?: string; footer?: ReactNode; onExploreAllocation?: (prompt: string) => void }) {
+export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedIncomeCents, title = "Portfolio snapshot", compact = false, footer, onExploreAllocation }:
+  PortfolioSnapshot & { title?: string; compact?: boolean; footer?: ReactNode; onExploreAllocation?: (prompt: string) => void }) {
   const titleId = useId();
   const deployId = useId();
   const splitId = useId();
@@ -47,7 +47,7 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
       <div><dt>Invested</dt><dd>{formatPortfolioAmount(invested)}</dd></div>
       <div><dt>Cash</dt><dd>{formatPortfolioAmount(cashCents)}</dd></div>
     </dl>
-    <h4>Portfolio breakdown</h4>
+    {!compact && <><h4>Portfolio breakdown</h4>
     <div className="portfolio-allocation-bar" aria-hidden="true">
       {allocation.map((item) => <span className={item.color} key={item.color} style={{ width: activePct(item) + "%" }} />)}
     </div>
@@ -61,7 +61,7 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
           {simOpen && diff !== 0 && <em className={diff > 0 ? "alloc-delta-pos" : "alloc-delta-neg"}>({diff > 0 ? "+" : ""}{diff}%)</em>}
         </li>;
       })}
-    </ul>
+    </ul></>}
 
     {onExploreAllocation && maxCashDollars >= 500 && (
       <div className="portfolio-sim-wrap">

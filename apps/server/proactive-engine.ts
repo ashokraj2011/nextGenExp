@@ -113,7 +113,7 @@ export class ProactiveEventStore {
     };
   }
 
-  trigger(rawInput: ProactiveTriggerInput): { alert: ProactiveAlert; view: ProactiveView } {
+  trigger(rawInput: ProactiveTriggerInput, principalId?: string): { alert: ProactiveAlert; view: ProactiveView } {
     const input = proactiveTriggerInputSchema.parse(rawInput);
     const tpl = EVENT_TEMPLATES[input.eventType];
     const alert: ProactiveAlert = {
@@ -128,6 +128,7 @@ export class ProactiveEventStore {
       ctaLabel: input.ctaLabel || tpl.ctaLabel,
       ctaPrompt: input.ctaPrompt || tpl.ctaPrompt,
       personaId: input.personaId || "demo-learner",
+      principalId,
       createdAt: new Date().toISOString(),
       dismissed: false,
     };
@@ -138,8 +139,8 @@ export class ProactiveEventStore {
     return { alert, view: this.view() };
   }
 
-  dismiss(id: string): ProactiveView {
-    const next = this.alerts.map((a) => (a.id === id ? { ...a, dismissed: true } : a));
+  dismiss(id: string, principalId?: string): ProactiveView {
+    const next = this.alerts.map((a) => (a.id === id && (!principalId || a.principalId === principalId) ? { ...a, dismissed: true } : a));
     this.save(next);
     return this.view();
   }

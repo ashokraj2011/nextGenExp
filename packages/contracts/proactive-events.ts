@@ -21,6 +21,7 @@ export const proactiveAlertSchema = z.object({
   ctaLabel: z.string(),
   ctaPrompt: z.string(),
   personaId: z.string(),
+  principalId: z.string().optional(),
   createdAt: z.string(),
   dismissed: z.boolean().default(false),
 });

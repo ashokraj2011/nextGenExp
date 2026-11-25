@@ -193,6 +193,7 @@ export class SalesDealStore {
     const idx = this.deals.findIndex((d) => d.id.toLowerCase() === id.toLowerCase());
     if (idx < 0) return null;
     const existing = this.deals[idx];
+    if (input.decision.endsWith("_discount") && existing.discountStatus !== "pending") return null;
     const now = new Date();
     const clock = formatUtcClock(now);
     const actor = input.actor?.trim() || "VP Revenue Operations";

@@ -18,6 +18,11 @@ export function WorkspaceMenu({ pins, section, onSelect, onCustomize, trigger, d
 }) {
   const items = ["summary", ...pins] as const;
   return <div className="workspace-menu">
+    <label className="workspace-section-picker"><span className="sr-only">Workspace section</span>
+      <select value={section} onChange={(event) => onSelect(event.target.value as WorkspaceSection)}>
+        {items.map((item) => <option key={item} value={item}>{workspaceSections[item].label}</option>)}
+      </select>
+    </label>
     <nav aria-label="Workspace shortcuts">
       {items.map((item) => {
         const { label, Icon } = workspaceSections[item];

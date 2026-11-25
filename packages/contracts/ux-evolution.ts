@@ -27,6 +27,7 @@ export const uxProposalSchema = z.object({
   widgetDraft: widgetDraftSchema,
   policyDraft: uxPolicyDraftSchema.optional(),
   createdAt: z.string(),
+  regression: z.object({ prompt: z.string(), widgetId: z.string(), title: z.string() }).optional(),
   shippedWidgetId: z.string().optional(),
   shippedPolicyDocId: z.string().optional(),
   shippedAt: z.string().optional(),

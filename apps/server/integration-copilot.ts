@@ -175,7 +175,7 @@ export async function runIntegrationCopilot(
   req: IntegrationCopilotRequest,
   service: IntegrationTaskService,
   principalId: string,
-  options: { gateway?: GatewaySettings | null; dataDir?: string },
+  options: { gateway?: GatewaySettings | null; dataDir?: string; operatorName?: string },
 ): Promise<IntegrationCopilotResponse> {
   const view = service.view();
   let plan: Plan | null = null;
@@ -233,7 +233,7 @@ export async function runIntegrationCopilot(
         const required = (contract.inputSchema as { required?: string[] }).required ?? [];
         const complete = required.every((k) => prefill[k] !== undefined && prefill[k] !== "");
         if (contract.effect === "read" && complete && contract.sfieldRoute !== "unavailable") {
-          const out = await service.run(principalId, { toolRef: contract.ref, input: prefill, requestedBy: "Integrations Chat", provenance });
+          const out = await service.run(principalId, { toolRef: contract.ref, input: prefill, requestedBy: options.operatorName ?? principalId, provenance });
           cards.push({ kind: "task_run", run: out.run });
           actions.push({ tool: contract.ref, summary: `${out.run.state}${out.run.outcome ? ` (${out.run.outcome.code})` : ""}`, status: out.run.state === "failed" ? "error" : "ok" });
         } else {

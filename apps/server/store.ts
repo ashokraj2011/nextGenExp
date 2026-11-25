@@ -9,7 +9,7 @@ import { AgenticStore } from "./agentic-store";
 import { EventEmitter } from "node:events";
 import { SqliteDatabase } from "@sfield/store-sqlite";
 import type { UsageSummary } from "@sfield/core";
-import type { CatalogSnapshot, ContentDecision, PropensityResult, RouteDecision, BalanceProof, Scope, SelectionMode } from "../../packages/contracts/domain";
+import type { ContentEntry, CatalogSnapshot, ContentDecision, PropensityResult, RouteDecision, BalanceProof, Scope, SelectionMode } from "../../packages/contracts/domain";
 import type { Conversation, ConversationChange, FailureCode, Progress, PublicEvent, PublicEventType, TurnStatus, TurnView } from "../../packages/contracts/api";
 import type { GatewayExchange } from "../../packages/contracts/inspector";
 import type { GoalProgress } from "../../packages/contracts/goal-progress";
@@ -39,6 +39,7 @@ export type StageTrace = Pick<UsageSummary, "elapsedMs" | "modelCalls" | "provid
   state: string; errorCode?: string;
 };
 export type TurnTrace = {
+  customerRead?: { toolRef: string; runId: string };
   surface: "chat";
   sourcePageContext: string | null;
   markers: Record<string, number>;
@@ -71,6 +72,8 @@ export type FundingRun = {
   waiting?: { requestId: string; expiresAt: number };
   outcome?: string;
 };
+export type WatchSource = { kind: "deal" | "task"; ref: string; recordId: string; target: string; label: string };
+export type StoredWatch = WatchSource & { id: string; conversationId: string; principalId: string; personaId: string; value: string; state: "watching" | "reached"; updatedAt: number };
 export type TurnRecord = {
   public: TurnView;
   historyStatus?: TurnStatus;
@@ -101,6 +104,10 @@ export type TurnRecord = {
   treatmentScores?: { scopeId: string; input: ContextScoresRequest };
   treatmentMockInput?: { mid: string; context: string };
   treatmentCcre?: MockCcreEvaluation;
+  treatmentEntries?: ContentEntry[];
+  recordId?: string;
+  operatorName?: string;
+  customerTask?: { ref: string; recordId: string; runId: string; sfieldRunId?: string; sfieldCallId?: string; confirmWatch?: boolean };
   catalog?: CatalogSnapshot;
   propensity?: PropensityResult;
   route?: RouteDecision;
@@ -123,13 +130,16 @@ function inaccessible(): never {
   throw new ApiError(404, "not_found", "This item is unavailable.");
 }
 
+const operatorTurn = `json_extract(record, '$.public.actionMode') = 'dynamic_ui'
+  AND json_extract(record, '$.public.semanticRoute.capabilityId') IN ('hitl_approvals','external_connector','ops_incident','sales_deal_desk')`;
+
 export class Store {
   private readonly db: SqliteDatabase;
   readonly axe: AgenticStore;
   private readonly events = new EventEmitter().setMaxListeners(0);
-  private domainBindingContext?: () => { incident?: IncidentRecord; deal?: DealRecord };
+  private domainBindingContext?: (id: string) => { incident?: IncidentRecord; deal?: DealRecord };
 
-  setDomainBindingContext(provider: () => { incident?: IncidentRecord; deal?: DealRecord }) {
+  setDomainBindingContext(provider: (id: string) => { incident?: IncidentRecord; deal?: DealRecord }) {
     this.domainBindingContext = provider;
   }
   constructor(path: string) {
@@ -166,6 +176,13 @@ export class Store {
       );
       CREATE INDEX IF NOT EXISTS turns_conversation ON turns(conversation_id);
       CREATE INDEX IF NOT EXISTS turns_running ON turns(status);
+      CREATE INDEX IF NOT EXISTS operator_turns ON turns(conversation_id) WHERE ${operatorTurn};
+      CREATE INDEX IF NOT EXISTS completed_conversation_turns ON turns(conversation_id, ordinal) WHERE status = 'completed';
+      CREATE TABLE IF NOT EXISTS record_watches (
+        id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id), checked_at INTEGER NOT NULL DEFAULT 0, record TEXT NOT NULL,
+        UNIQUE(conversation_id, id)
+      );
+      CREATE INDEX IF NOT EXISTS watches_due ON record_watches(json_extract(record, '$.state'), checked_at);
       CREATE TABLE IF NOT EXISTS public_events (
         sequence INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT UNIQUE NOT NULL,
         turn_id TEXT NOT NULL REFERENCES turns(id), type TEXT NOT NULL, payload TEXT NOT NULL
@@ -186,6 +203,32 @@ export class Store {
             OR json_extract(record, '$.public.experience.outcome') = 'create_rule'
         );
     `);
+  }
+
+  watch(conversation: ConversationRecord, source: WatchSource, value: string) {
+    const id = [conversation.id, source.kind, source.ref, source.recordId, source.target].join(":");
+    const record: StoredWatch = { ...source, id, conversationId: conversation.id, principalId: conversation.principalId, personaId: conversation.personaId, value, state: "watching", updatedAt: Date.now() };
+    this.db.run("INSERT OR IGNORE INTO record_watches(id,conversation_id,checked_at,record) VALUES(?,?,?,?)", id, conversation.id, Date.now(), JSON.stringify(record));
+  }
+
+  watches(conversation: ConversationRecord) {
+    return this.db.all<{ record: string }>("SELECT record FROM record_watches WHERE conversation_id=? ORDER BY rowid", conversation.id)
+      .map((r) => JSON.parse(r.record) as StoredWatch);
+  }
+
+  watchDue(id: string) {
+    return Boolean(this.db.one("SELECT id FROM record_watches WHERE id=? AND checked_at < ?", id, Date.now() - 5_000));
+  }
+
+  dueWatches() {
+    return this.db.all<{ record: string }>("SELECT record FROM record_watches WHERE json_extract(record,'$.state')='watching' AND checked_at < ? ORDER BY checked_at LIMIT 12", Date.now() - 60_000)
+      .map((r) => JSON.parse(r.record) as StoredWatch);
+  }
+
+  observeWatch(w: StoredWatch, value?: string) {
+    const now = Date.now();
+    const next = value === undefined || value === w.value ? w : { ...w, value, updatedAt: now, state: value === w.target ? "reached" : "watching" };
+    this.db.run("UPDATE record_watches SET record=?, checked_at=? WHERE id=? AND json_extract(record,'$.state')='watching'", JSON.stringify(next), now, w.id);
   }
 
   session(id?: string) {
@@ -262,8 +305,15 @@ export class Store {
     return record;
   }
 
-  conversations(principalId: string) {
-    return this.db.all<{ record: string }>("SELECT record FROM conversations WHERE principal_id = ? ORDER BY updated_at DESC, rowid DESC", principalId)
+  hasOperatorContent(conversationId: string) {
+    return Boolean(this.db.one(`SELECT 1 FROM turns WHERE conversation_id = ? AND ${operatorTurn} LIMIT 1`, conversationId));
+  }
+
+  conversations(principalId: string, includeOperatorThreads = true) {
+    const visibility = includeOperatorThreads ? "" : ` AND NOT EXISTS (
+      SELECT 1 FROM turns WHERE conversation_id = conversations.id AND ${operatorTurn}
+    )`;
+    return this.db.all<{ record: string }>(`SELECT record FROM conversations WHERE principal_id = ?${visibility} ORDER BY updated_at DESC, rowid DESC`, principalId)
       .map((row) => presentConversation(parse<ConversationRecord>(row)!));
   }
 
@@ -343,6 +393,13 @@ export class Store {
       .map((row) => parse<TurnRecord>(row)!);
   }
 
+  previousCompletedTurn(conversationId: string, ordinal: number) {
+    return parse<TurnRecord>(this.db.one(`
+      SELECT record FROM turns WHERE conversation_id = ? AND status = 'completed' AND ordinal < ?
+      ORDER BY ordinal DESC LIMIT 1
+    `, conversationId, ordinal));
+  }
+
   recentCompletedTurns(principalId: string) {
     return this.db.all<{ record: string }>(`
       SELECT turns.record FROM turns JOIN conversations ON conversations.id=turns.conversation_id
@@ -383,7 +440,7 @@ export class Store {
 
   accept(input: {
     conversation: ConversationRecord; requestId: string; origin: string; message: string; selectionMode: SelectionMode; now: number;
-    retry?: TurnRecord; workflow?: WorkflowLaunch; agentLaunch?: AgentLaunch;
+    retry?: TurnRecord; workflow?: WorkflowLaunch; agentLaunch?: AgentLaunch; operatorName?: string;
   }) {
     let created = false;
     const turn = this.db.tx(() => {
@@ -423,6 +480,7 @@ export class Store {
         ordinal: retry?.ordinal ?? (latest?.ordinal ?? 0) + 1,
         requestId, origin, selectionMode, attempts: {},
         workflow: launch,
+        operatorName: input.operatorName,
         agentLaunch: input.agentLaunch ?? retry?.agentLaunch,
         fundingRun: continuation,
         ...(uiLayouts.length && { uiLayouts }),
@@ -477,7 +535,7 @@ export class Store {
       }
     }
     try {
-      const extra = this.domainBindingContext?.();
+      const extra = turn.recordId && turn.operatorName ? this.domainBindingContext?.(turn.recordId) : undefined;
       const bindings = resolveMultiDomainBindings(turn.scope.personaId, {
         effectiveFundingStatus: this.axe.fundingStatus(turn.scope),
         incident: extra?.incident,

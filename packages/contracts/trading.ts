@@ -32,7 +32,6 @@ export const tradeJobCreateInputSchema = z.object({
   legs: z.array(tradeLegInputSchema).min(1).max(8),
   taxHarvestAnalyzed: z.boolean().default(false),
   durationSeconds: z.number().int().min(2).max(12).default(5),
-  bypassApprovalGate: z.boolean().optional(),
 }).strict();
 
 export type TradeSide = z.infer<typeof tradeSideSchema>;

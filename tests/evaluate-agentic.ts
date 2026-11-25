@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { startApp } from "../apps/server/http";
+import { startApp } from "./operator-fixture";
 import { gatewayFromEnv } from "../apps/server/gateway";
 import type { DisplayBlock } from "../packages/contracts/surface";
 import type { DecisionEvent } from "../packages/contracts/agentic";
