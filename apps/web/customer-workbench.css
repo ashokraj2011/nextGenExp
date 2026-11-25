@@ -2050,3 +2050,213 @@
     justify-content: flex-start;
   }
 }
+
+/* === Stock Trade Simulator, Tax-Loss Harvesting & Timed Job === */
+.dyn-trade-ticket {
+  display: grid;
+  gap: 14px;
+}
+.dyn-trade-builder {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+.dyn-trade-controls {
+  display: grid;
+  grid-template-columns: minmax(0, .75fr) minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 10px;
+}
+@media (max-width: 720px) {
+  .dyn-trade-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.dyn-trade-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.dyn-trade-chips-label {
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-right: 4px;
+}
+.dyn-trade-chip {
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--white);
+  color: var(--ink);
+  font-size: .76rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.dyn-trade-chip:hover {
+  border-color: var(--teal);
+  color: var(--teal-dark);
+}
+.dyn-trade-chip.is-active {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #ffffff;
+}
+.dyn-trade-question {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--teal-border);
+  background: var(--teal-pale);
+}
+.dyn-trade-question strong {
+  display: block;
+  font-size: .92rem;
+  color: var(--teal-dark);
+}
+.dyn-trade-question p {
+  margin: 4px 0 0;
+  font-size: .85rem;
+  line-height: 1.5;
+  color: var(--soft-ink);
+}
+.dyn-tax-panel {
+  display: grid;
+  gap: 12px;
+  padding: 15px;
+  border-radius: 12px;
+  border: 1px solid var(--teal-border);
+  border-left: 4px solid var(--teal);
+  background: var(--white);
+}
+.dyn-tax-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.dyn-tax-head h4 {
+  margin: 0;
+  font-size: .95rem;
+  color: var(--ink);
+}
+.dyn-tax-head p {
+  margin: 5px 0 0;
+  font-size: .85rem;
+  line-height: 1.5;
+  color: var(--soft-ink);
+  max-width: 66ch;
+}
+.dyn-tax-qty-input {
+  width: 78px;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--white);
+  color: var(--ink);
+  font: inherit;
+  font-size: .82rem;
+}
+.dyn-tax-washsale {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 9px;
+  background: #fef9e7;
+  border: 1px solid #f2dca2;
+  color: #7a5209;
+  font-size: .79rem;
+  line-height: 1.45;
+}
+.dyn-trade-timer {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 14px;
+  border: 1px solid var(--teal-border);
+  border-left: 4px solid var(--teal);
+  background: var(--teal-pale);
+}
+.dyn-trade-timer-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.dyn-trade-timer-head h4 {
+  margin: 0;
+  font-size: .95rem;
+  color: var(--ink);
+}
+.dyn-trade-timer-head p {
+  margin: 4px 0 0;
+  font-size: .84rem;
+  color: var(--soft-ink);
+}
+.dyn-trade-countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--teal);
+  color: #ffffff;
+  font-size: .82rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.dyn-trade-timer-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: .79rem;
+  color: var(--muted);
+}
+.dyn-trade-settled {
+  display: grid;
+  gap: 12px;
+}
+.dyn-trade-diff {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.dyn-trade-diff > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+.dyn-trade-diff span {
+  font-size: .73rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.dyn-trade-diff strong {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  font-size: .92rem;
+  color: var(--ink);
+}
+.dyn-trade-diff small {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--teal-dark);
+}

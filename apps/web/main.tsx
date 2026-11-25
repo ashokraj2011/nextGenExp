@@ -688,6 +688,16 @@ function App() {
   }, [entry]);
 
   useEffect(() => {
+    const onDomainUpdate = () => {
+      void (adminChat ? api.adminBootstrap() : api.bootstrap()).then((fresh) => {
+        setConfiguration((prev) => (prev ? { ...prev, personas: fresh.personas } : fresh));
+      }).catch(() => undefined);
+    };
+    window.addEventListener("cep-domain-data-updated", onDomainUpdate);
+    return () => window.removeEventListener("cep-domain-data-updated", onDomainUpdate);
+  }, []);
+
+  useEffect(() => {
     if (adminChat) return;
     const onPageShow = (event: PageTransitionEvent) => {
       if (event.persisted && readProfileSession() !== signedInProfileId) location.reload();

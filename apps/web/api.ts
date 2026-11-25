@@ -16,6 +16,13 @@ import type {
   ApprovalRecord,
   ApprovalsView,
 } from "../../packages/contracts/approval";
+import type {
+  PortfolioBalanceSnapshot,
+  TaxHarvestAnalysis,
+  TaxHarvestPreviewInput,
+  TradeJob,
+  TradeJobCreateInput,
+} from "../../packages/contracts/trading";
 import type { Customer360AdminRecord, Customer360ProfileInput } from "../../packages/contracts/customer-360";
 import type {
   ExperienceRegistryView,
@@ -185,6 +192,10 @@ export const api = {
     execution?: { summary?: string; sfieldRunId?: string; audit?: DomainWriteAuditEntry; statusCode?: number; responsePreview?: string };
     view: ApprovalsView;
   }>("/api/approvals/" + approvalId + "/decide", input),
+  tradingPortfolio: (personaId: string) => request<PortfolioBalanceSnapshot>("/api/trading/" + personaId + "/portfolio"),
+  taxHarvestPreview: (input: TaxHarvestPreviewInput) => request<TaxHarvestAnalysis>("/api/trading/tax-harvest", input),
+  startTradeJob: (input: TradeJobCreateInput) => request<TradeJob>("/api/trading/jobs", input),
+  tradeJobStatus: (jobId: string) => request<TradeJob>("/api/trading/" + jobId + "/status"),
   writeAudit: () => request<{ toolRef: string; entries: DomainWriteAuditEntry[] }>("/api/admin/write-audit"),
   engagementAnalytics: () => request<EngagementAnalyticsView>("/api/admin/engagement-analytics"),
   previewFunding: (conversationId: string, clientRequestId: string, source?: typeof pendingActionsContext) => request<TurnAccepted>(

@@ -851,3 +851,39 @@
   border-color: var(--line);
   color: var(--ink);
 }
+
+:root[data-theme="dark"] .dyn-trade-builder,
+:root[data-theme="dark"] .dyn-trade-diff > div {
+  background: var(--paper);
+  border-color: var(--line);
+}
+:root[data-theme="dark"] .dyn-tax-panel {
+  background: var(--white);
+  border-color: var(--teal-border);
+  border-left-color: #4aa83a;
+}
+:root[data-theme="dark"] .dyn-trade-chip {
+  background: var(--white);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+:root[data-theme="dark"] .dyn-trade-chip.is-active {
+  background: #3a922a;
+  border-color: #3a922a;
+  color: #ffffff;
+}
+:root[data-theme="dark"] .dyn-trade-question,
+:root[data-theme="dark"] .dyn-trade-timer {
+  background: var(--teal-pale);
+  border-color: var(--teal-border);
+}
+:root[data-theme="dark"] .dyn-tax-qty-input {
+  background: #0d120f;
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+:root[data-theme="dark"] .dyn-tax-washsale {
+  background: #272011;
+  border-color: #54421a;
+  color: #f3cd7a;
+}

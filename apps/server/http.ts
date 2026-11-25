@@ -26,6 +26,8 @@ import { ConnectorStore } from "./connector-store";
 import { connectorInvokeInputSchema, connectorUpsertSchema } from "../../packages/contracts/connector";
 import { ApprovalStore } from "./approval-store";
 import { approvalDecisionInputSchema, approvalPolicySettingsSchema, type ApprovalRecord } from "../../packages/contracts/approval";
+import { TradeStore } from "./trade-store";
+import { taxHarvestPreviewInputSchema, tradeJobCreateInputSchema } from "../../packages/contracts/trading";
 import { WriteAuditStore } from "./write-audit";
 import { recommendationArbitrateToolRef } from "../../packages/contracts/recommendation-provider";
 import { connectorInvokeToolRef, domainWriteToolRef, Runtime, sfieldNamespace } from "./runtime";
@@ -223,6 +225,7 @@ export async function startApp(options: Options) {
   const salesStore = new SalesDealStore(options.dataDir);
   const connectorStore = new ConnectorStore(options.dataDir);
   const approvalStore = new ApprovalStore(options.dataDir);
+  const tradeStore = new TradeStore(options.dataDir, profileStore);
   const writeAudit = new WriteAuditStore(options.dataDir);
   store.setDomainBindingContext(() => ({ incident: opsStore.primaryIncident(), deal: salesStore.primaryDeal() }));
   const registry = new CapabilityRegistry(store);
@@ -242,7 +245,7 @@ export async function startApp(options: Options) {
   }
   const experience = new ExperienceService(store, runtime, selectionMode, now, inspectorEnabled, offline && {
     chat: new ChatHarness(offline), close: () => offline.close(),
-  }, { gateway: options.gateway, dataDir: options.dataDir, customer360, portfolioSnapshots, goalProgressProvider, opsStore, salesStore, connectorStore, approvalStore });
+  }, { gateway: options.gateway, dataDir: options.dataDir, customer360, portfolioSnapshots, goalProgressProvider, opsStore, salesStore, connectorStore, approvalStore, tradeStore });
 
   async function executeApprovedRecord(principalId: string, record: ApprovalRecord) {
     if (record.targetKind === "external_connector") {
@@ -787,6 +790,67 @@ export async function startApp(options: Options) {
       });
       return json(res, { status: "executed", execution: { ...execution, sfieldRunId: "offline", auditId: audit.auditId } });
     }
+    if (resource === "trading") {
+      if (id && operation === "portfolio" && method === "GET") {
+        return json(res, tradeStore.snapshotFor(id));
+      }
+      if (id === "tax-harvest" && !operation && method === "POST") {
+        const input = await body(req, taxHarvestPreviewInputSchema);
+        try {
+          return json(res, tradeStore.analyzeTaxHarvest(input.personaId, input.symbol, input.shares));
+        } catch (err) {
+          throw new ApiError(400, "tax_harvest_invalid", err instanceof Error ? err.message : "Could not run tax-loss harvesting analysis.");
+        }
+      }
+      if (id === "jobs" && !operation && method === "POST") {
+        const input = await body(req, tradeJobCreateInputSchema);
+        try {
+          const job = tradeStore.startTradeJob(input, async (settlement) => {
+            const toDollars = (cents: number) => (Math.max(0, cents) / 100).toFixed(2);
+            const profile = profileStore.findByPersonaId(settlement.personaId);
+            const nextAvailable = Math.max(0, (profile?.availableBalanceCents ?? settlement.nextCashCents) + settlement.cashDeltaCents);
+            const nextCurrent = Math.max(0, (profile?.currentBalanceCents ?? settlement.nextCashCents) + settlement.cashDeltaCents);
+            const updates: Record<string, string> = {
+              "portfolio.cash": toDollars(settlement.nextCashCents),
+              "portfolio.equities": toDollars(settlement.nextEquityCents),
+              "balances.available": toDollars(nextAvailable),
+              "balances.current": toDollars(nextCurrent),
+            };
+            if (runtime) {
+              const governed = await runtime.executeGovernedWrite(principalId, {
+                domain: "customer360",
+                recordId: settlement.personaId,
+                action: "settle_stock_trade",
+                actor: settlement.actor,
+                note: settlement.summary,
+                updates,
+              }, AbortSignal.timeout(5000));
+              return { sfieldRunId: governed.sfieldRunId, auditId: governed.audit?.auditId };
+            }
+            profileStore.applyBindings(settlement.personaId, updates, now());
+            const audit = writeAudit.record({
+              sfieldRunId: "offline",
+              sfieldToolRef: domainWriteToolRef,
+              domain: "customer360",
+              recordId: settlement.personaId,
+              action: "settle_stock_trade",
+              actor: settlement.actor,
+              summary: settlement.summary,
+              status: "succeeded",
+            });
+            return { sfieldRunId: "offline", auditId: audit.auditId };
+          });
+          return json(res, job, 202);
+        } catch (err) {
+          throw new ApiError(400, "trade_rejected", err instanceof Error ? err.message : "Trade order could not be queued.");
+        }
+      }
+      if (id && operation === "status" && method === "GET") {
+        const job = tradeStore.getJob(id);
+        if (!job) throw new ApiError(404, "job_not_found", "Trade job not found.");
+        return json(res, job);
+      }
+    }
     if (resource === "approvals" && !id && method === "GET") {
       return json(res, approvalStore.view());
     }
@@ -1044,6 +1108,7 @@ export async function startApp(options: Options) {
       await vite?.close();
       await new Promise<void>((accept, reject) => server.close((error) => error ? reject(error) : accept()));
       await experience.close();
+      tradeStore.close();
       if (getActiveCustomerProfileStore() === profileStore) setActiveCustomerProfileStore(null);
       if (getActiveExperienceRegistryStore() === experienceRegistry) setActiveExperienceRegistryStore(null);
     },

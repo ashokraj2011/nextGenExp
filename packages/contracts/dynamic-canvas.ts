@@ -126,6 +126,32 @@ export const dynamicTimelineNodeSchema = z.object({
   }).strict()).min(2).max(8),
 }).strict();
 
+export const dynamicTradeTicketNodeSchema = z.object({
+  type: z.literal("trade_ticket"),
+  personaId: z.string().trim().min(1).max(64),
+  actorName: z.string().trim().min(1).max(80),
+  side: z.enum(["buy", "sell"]),
+  symbol: z.string().trim().min(1).max(12),
+  companyName: z.string().trim().min(1).max(64),
+  existingShares: z.number().int().nonnegative(),
+  avgCostCents: z.number().int().nonnegative(),
+  priceCents: z.number().int().positive(),
+  holdingPeriod: z.enum(["long_term", "short_term"]),
+  cashBalanceCents: z.number().int().nonnegative(),
+  equityTotalCents: z.number().int().nonnegative(),
+  fixedIncomeCents: z.number().int().nonnegative(),
+  suggestedPercent: z.number().min(1).max(100).optional(),
+  suggestedShares: z.number().int().positive().optional(),
+  askTaxHarvest: z.boolean(),
+  holdings: z.array(z.object({
+    symbol: z.string().trim().min(1).max(12),
+    name: z.string().trim().min(1).max(64),
+    shares: z.number().int().nonnegative(),
+    avgCostCents: z.number().int().nonnegative(),
+    priceCents: z.number().int().positive(),
+  }).strict()).min(1).max(12),
+}).strict();
+
 export const dynamicNodeSchema = z.discriminatedUnion("type", [
   dynamicMetricsNodeSchema,
   dynamicTableNodeSchema,
@@ -138,6 +164,7 @@ export const dynamicNodeSchema = z.discriminatedUnion("type", [
   dynamicFormNodeSchema,
   dynamicApprovalNodeSchema,
   dynamicTimelineNodeSchema,
+  dynamicTradeTicketNodeSchema,
 ]);
 
 export type DynamicCanvasNode = z.infer<typeof dynamicNodeSchema>;

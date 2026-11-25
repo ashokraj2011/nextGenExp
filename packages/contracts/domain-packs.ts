@@ -36,8 +36,8 @@ export const DOMAIN_PACKS: readonly DomainPack[] = [
     ],
     quickPrompts: [
       { label: "Review portfolio mix", prompt: "Let me know my portfolio summary." },
+      { label: "Sell 40% Apple + Tax Harvest", prompt: "I want to sell 40% of my Apple shares" },
       { label: "Model 2-year home plan", prompt: "Show my home-buying goal and savings progress." },
-      { label: "Explore retirement basics", prompt: "I'd like to learn about retirement." },
     ],
   },
   {

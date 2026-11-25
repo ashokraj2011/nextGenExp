@@ -33,6 +33,7 @@ import type { OpsIncidentStore } from "./ops-store";
 import type { SalesDealStore } from "./sales-store";
 import type { ConnectorStore } from "./connector-store";
 import type { ApprovalStore } from "./approval-store";
+import type { TradeStore } from "./trade-store";
 import type { Customer360Service } from "./customer-360";
 import type { GatewaySettings } from "./gateway";
 import type { GoalProgressProvider } from "../../packages/goal-progress";
@@ -77,6 +78,7 @@ export class ExperienceService {
       salesStore?: SalesDealStore;
       connectorStore?: ConnectorStore;
       approvalStore?: ApprovalStore;
+      tradeStore?: TradeStore;
     },
   ) {
     const chat = runtime?.chat ?? offlineHistory?.chat;
@@ -309,6 +311,8 @@ export class ExperienceService {
           salesStore: this.dynamicUi.salesStore,
           connectorStore: this.dynamicUi.connectorStore,
           approvalStore: this.dynamicUi.approvalStore,
+          tradeStore: this.dynamicUi.tradeStore,
+          personaId: conversation.personaId,
           requesterName: persona?.displayName,
           signal,
         });
@@ -519,6 +523,8 @@ export class ExperienceService {
               salesStore: this.dynamicUi.salesStore,
               connectorStore: this.dynamicUi.connectorStore,
               approvalStore: this.dynamicUi.approvalStore,
+              tradeStore: this.dynamicUi.tradeStore,
+              personaId: conversation.personaId,
               requesterName: persona?.displayName,
               signal,
             });

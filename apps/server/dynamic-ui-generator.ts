@@ -8,15 +8,17 @@ import type { OpsIncidentStore } from "./ops-store";
 import type { SalesDealStore } from "./sales-store";
 import type { ConnectorStore } from "./connector-store";
 import type { ApprovalStore } from "./approval-store";
+import { parseStockTradePrompt, type TradeStore } from "./trade-store";
 import { connectorInvokeToolRef } from "./runtime";
 import { generateWidgetFromText } from "./widget-library";
 
-const dynamicUiTrigger = /\b(widget|table|bar chart|chart|graph|dashboard|visuali[sz]e|visuali[sz]ation|calculator|simulator|matrix|breakdown|dynamic ui|custom ui|interactive|approval\s+(?:card|flow|form|workflow|request|queue)|pending\s+approvals?|show\s+(?:my\s+)?approvals?|review\s+approvals?|hitl\s+queue|pagerduty|external\s+connector|invoke\s+connector|run\s+connector|trigger\s+webhook|timeline|roadmap|triage|incident\s+(?:triage|dashboard|timeline|queue|status|report|response)|rollback|deal\s+desk|sales\s+pipeline|discount\s+approval|close[- ]plan|intake\s+form|build\s+(?:me\s+)?a\b|design\s+(?:me\s+)?a\b|generate\s+(?:me\s+)?a\b|create\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist|workflow)|make\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist))\b/i;
+const dynamicUiTrigger = /\b(widget|table|bar chart|chart|graph|dashboard|visuali[sz]e|visuali[sz]ation|calculator|simulator|matrix|breakdown|dynamic ui|custom ui|interactive|approval\s+(?:card|flow|form|workflow|request|queue)|pending\s+approvals?|show\s+(?:my\s+)?approvals?|review\s+approvals?|hitl\s+queue|pagerduty|external\s+connector|invoke\s+connector|run\s+connector|trigger\s+webhook|timeline|roadmap|triage|incident\s+(?:triage|dashboard|timeline|queue|status|report|response)|rollback|deal\s+desk|sales\s+pipeline|discount\s+approval|close[- ]plan|intake\s+form|(?:sell|buy|purchase|trim|trade)\b.*\b(?:shares?|stocks?|aapl|apple|msft|microsoft|nvda|nvidia|intc|intel|boeing|pfizer|voo)\b|tax[- ]?loss\s+harvest(?:ing)?|stock\s+holdings?|build\s+(?:me\s+)?a\b|design\s+(?:me\s+)?a\b|generate\s+(?:me\s+)?a\b|create\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist|workflow)|make\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist))\b/i;
 const nonDynamicGuard = /\b(weather|stock price|tomorrow|create a? ?rule)\b/i;
 const opsIncidentTrigger = /\b(incident|triage|rollback|sre|sev\s*[0-3]|p[1-3]\b|latency|5xx|error rate|it ops|operations dashboard|post-incident|production alert|inc-\d+)\b/i;
 const salesDealTrigger = /\b(deal\s*desk|deal-\d+|sales\s*pipeline|pipeline\s*(?:breakdown|chart|table|forecast)|revops|discount\s*approval|pricing\s*exception|mutual\s*action\s*plan|close[- ]plan|acme\s*cloud|enterprise\s*renewal)\b/i;
 const approvalQueueTrigger = /\b(pending\s+approvals?|approval\s+queue|show\s+(?:my\s+)?approvals?|review\s+approvals?|hitl\s+queue)\b/i;
 const connectorActionTrigger = /\b(pagerduty|external\s+connector|invoke\s+connector|run\s+connector|trigger\s+webhook|servicenow\s+webhook)\b/i;
+const stockTradeTrigger = /\b((?:sell|buy|purchase|trim|trade|simulate\s+(?:a\s+)?(?:sell|buy|trade))\b.*\b(?:shares?|stocks?|aapl|apple|msft|microsoft|nvda|nvidia|intc|intel|boeing|pfizer|voo)\b|tax[- ]?loss\s+harvest(?:ing)?|stock\s+holdings?)\b/i;
 
 export function isDynamicUiRequest(message: string): boolean {
   const clean = message.trim();
@@ -630,6 +632,67 @@ function buildConnectorActionCanvas(
   };
 }
 
+function buildStockTradeCanvas(
+  tradeStore: TradeStore,
+  personaId: string,
+  requesterName: string | undefined,
+  prompt: string,
+): { intro: string; canvas: DynamicCanvasProps } {
+  const parsed = parseStockTradePrompt(prompt);
+  const snapshot = tradeStore.snapshotFor(personaId);
+  const target = snapshot.holdings.find((h) => h.symbol === parsed.symbol) ?? snapshot.holdings[0];
+  const usd = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const marketValueCents = target.shares * target.priceCents;
+  const unrealizedCents = (target.priceCents - target.avgCostCents) * target.shares;
+  const unrealizedSign = unrealizedCents >= 0 ? "+" : "-";
+
+  const intro = parsed.side === "sell"
+    ? `You currently hold **${target.shares} shares of ${target.name} (${target.symbol})** (${usd(marketValueCents)} at ${usd(target.priceCents)}/sh, avg cost ${usd(target.avgCostCents)}, unrealized ${unrealizedSign}${usd(Math.abs(unrealizedCents))}). Confirm the **quantity or percentage** you want to sell below and choose whether to run **Tax-Loss Harvesting analysis** before launching the timed execution job.`
+    : `Your available cash is **${usd(snapshot.cashCents)}** and you currently hold **${target.shares} shares of ${target.name} (${target.symbol})** at ${usd(target.priceCents)}/sh. Choose how many shares to buy below and launch the timed execution job.`;
+
+  return {
+    intro,
+    canvas: {
+      title: `${parsed.side === "sell" ? "Sell" : "Buy"} ${target.name} (${target.symbol}) — Trade & Tax-Harvest Simulator`,
+      badge: parsed.side === "sell" ? "Trade + Tax Harvesting" : "Stock Order Simulator",
+      subtitle: `Existing position: ${target.shares} shares · Live price ${usd(target.priceCents)} · Cash ${usd(snapshot.cashCents)}`,
+      generatedBy: "synthesizer",
+      dataSource: "trades-portfolio.json + Customer 360 (sfield)",
+      recordId: target.symbol,
+      prompt,
+      nodes: [
+        {
+          type: "trade_ticket",
+          personaId,
+          actorName: requesterName || "Customer",
+          side: parsed.side,
+          symbol: target.symbol,
+          companyName: target.name,
+          existingShares: target.shares,
+          avgCostCents: target.avgCostCents,
+          priceCents: target.priceCents,
+          holdingPeriod: target.holdingPeriod,
+          cashBalanceCents: snapshot.cashCents,
+          equityTotalCents: snapshot.equityCents,
+          fixedIncomeCents: snapshot.fixedIncomeCents,
+          ...(parsed.percent ? { suggestedPercent: parsed.percent } : {}),
+          ...(parsed.shares ? { suggestedShares: parsed.shares } : {}),
+          askTaxHarvest: parsed.side === "sell",
+          holdings: snapshot.holdings.map((h) => ({
+            symbol: h.symbol,
+            name: h.name,
+            shares: h.shares,
+            avgCostCents: h.avgCostCents,
+            priceCents: h.priceCents,
+          })),
+        },
+      ],
+      disclaimer: "Simulated trade execution runs as an asynchronous timed job and settles cash and equity balances into your live CEP Customer 360 profile via sfield cep.domain.execute_write@1.0.0. Tax estimates are illustrative only.",
+      suggestedFollowUp: "Show my portfolio summary",
+    },
+  };
+}
+
 export async function generateDynamicUi(input: {
   prompt: string;
   profileSummary?: string;
@@ -639,10 +702,15 @@ export async function generateDynamicUi(input: {
   salesStore?: SalesDealStore;
   connectorStore?: ConnectorStore;
   approvalStore?: ApprovalStore;
+  tradeStore?: TradeStore;
+  personaId?: string;
   requesterName?: string;
   signal?: AbortSignal;
 }): Promise<{ intro: string; canvas: DynamicCanvasProps }> {
-  const { prompt, profileSummary, gateway, dataDir, opsStore, salesStore, connectorStore, approvalStore, requesterName } = input;
+  const { prompt, profileSummary, gateway, dataDir, opsStore, salesStore, connectorStore, approvalStore, tradeStore, personaId, requesterName } = input;
+  if (tradeStore && stockTradeTrigger.test(prompt)) {
+    return buildStockTradeCanvas(tradeStore, personaId || "demo-learner", requesterName, prompt);
+  }
   if (approvalStore && isApprovalQueuePrompt(prompt)) {
     return buildApprovalQueueCanvas(approvalStore, prompt);
   }
