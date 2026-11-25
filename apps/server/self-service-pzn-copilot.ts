@@ -26,6 +26,7 @@ export type PznSfieldToolExecutor = <T = unknown>(
 import { callConfiguredLlmJson } from "./dynamic-ui-generator";
 import type { GatewaySettings } from "./gateway";
 import type { SelfServicePznStore } from "./self-service-pzn-store";
+import type { ApprovalRecord } from "../../packages/contracts/approval";
 
 type PlannedOp =
   | {
@@ -103,7 +104,8 @@ type PlannedOp =
   | { op: "show_catalog" }
   | { op: "show_rule_builder"; initialNamespaceId?: string; initialAttributeId?: string }
   | { op: "show_rules" }
-  | { op: "show_context_matrix" };
+  | { op: "show_context_matrix" }
+  | { op: "show_approvals" };
 
 interface LlmCopilotPlan {
   reply?: string;
@@ -184,6 +186,7 @@ RETURN STRICT JSON ONLY:
     // { "op": "show_rule_builder", "initialNamespaceId": "portfolio", "initialAttributeId": "cash_usd" }
     // { "op": "show_rules" }
     // { "op": "show_context_matrix" }
+    // { "op": "show_approvals" }
   ],
   "suggestedPrompts": ["2 to 4 concise follow-up prompts the user can click next"]
 }
@@ -207,6 +210,17 @@ function deterministicPlan(message: string, ws: PznStudioWorkspaceState, activeC
   })();
 
   // 0. Explicit interactive widget requests (define rule widget, show rules, show context matrix)
+  if (/(pending approvals?|approval queue|approval policy|approvals?\b.*(show|list|review)|(show|list|review).*approvals?)/i.test(lower)) {
+    return {
+      reply: "Here is the **Approval Queue** for recommendation changes, with the configurable approval policy (which changes need approval and when a second approver is required).",
+      operations: [{ op: "show_approvals" }],
+      suggestedPrompts: [
+        "Show all contexts with attached contents and rules",
+        `Test ${targetCtxId} for Alice Morgan and Jordan Lee`,
+        "Open the interactive rule builder widget",
+      ],
+    };
+  }
   if (/^\s*(open|show|launch)?\s*(the\s+)?(rule builder|define a rule|create a rule|new rule widget)\s*$/i.test(lower)
     || /(open|launch|show)\s+(me\s+)?(the\s+)?(interactive\s+)?rule\s*(builder|widget|editor)/i.test(lower)) {
     return {
@@ -486,8 +500,11 @@ export async function runSelfServicePznCopilot(
     gateway?: GatewaySettings | null;
     dataDir?: string;
     executeSfieldTool?: PznSfieldToolExecutor;
+    /** Returns a pending approval when the operation is gated by the approval policy; null when it may run now. */
+    requestApproval?: (operation: string, args: Record<string, unknown>) => ApprovalRecord | null;
   },
 ): Promise<PznCopilotResponse> {
+  let pendingApprovals = 0;
   const invokeTool = async <T>(
     toolRef: string,
     operation: string,
@@ -536,6 +553,20 @@ export async function runSelfServicePznCopilot(
   const cards: PznCopilotCard[] = [];
   let activeContextId = req.activeContextId;
   const operations = Array.isArray(plan.operations) ? plan.operations : [];
+  /** If the policy gates this operation, record a pending approval card instead of executing. */
+  const gated = (tool: string, sfieldToolRef: string, operation: string, args: Record<string, unknown>): boolean => {
+    const approval = options?.requestApproval?.(operation, args) ?? null;
+    if (!approval) return false;
+    pendingApprovals += 1;
+    actionsExecuted.push({
+      tool,
+      sfieldToolRef,
+      summary: `Approval ${approval.id} requested (${approval.riskLevel} risk${approval.dualControl ? ", second approver required" : ", self-approval allowed"})`,
+      status: "pending",
+    });
+    cards.push({ kind: "approval_request", approval });
+    return true;
+  };
 
   for (const op of operations) {
     try {
@@ -548,6 +579,7 @@ export async function runSelfServicePznCopilot(
             owner: op.owner || "Personalization Team",
             sourceSystem: op.sourceSystem || "custom_attribute",
           };
+          if (gated("dictionary.upsertNamespace", pznSfieldToolRefs.dataDictionary, "upsert_namespace", payload)) break;
           const { data: saved, sfieldToolRef, sfieldRunId } = await invokeTool<PznNamespace>(
             pznSfieldToolRefs.dataDictionary,
             "upsert_namespace",
@@ -574,6 +606,7 @@ export async function runSelfServicePznCopilot(
             resolverPath: op.resolverPath || `customAttributes.${attrId}`,
             piiClassification: op.piiClassification ?? "none",
           };
+          if (gated("dictionary.upsertAttribute", pznSfieldToolRefs.dataDictionary, "upsert_attribute", payload)) break;
           const { data: saved, sfieldToolRef, sfieldRunId } = await invokeTool<PznAttribute>(
             pznSfieldToolRefs.dataDictionary,
             "upsert_attribute",
@@ -676,6 +709,10 @@ export async function runSelfServicePznCopilot(
         case "publish_context": {
           const ctxId = slug(op.contextId, activeContextId ?? "wealth-next-best-offers");
           const payload = { contextId: ctxId, publishedBy: "Self-Service Copilot", notes: op.notes || "Published via chat" };
+          if (gated("context.publish", pznSfieldToolRefs.ruleMetadata, "publish_context", payload)) {
+            activeContextId = ctxId;
+            break;
+          }
           const { data: pub, sfieldToolRef, sfieldRunId } = await invokeTool<PznContextPublication>(
             pznSfieldToolRefs.ruleMetadata,
             "publish_context",
@@ -699,6 +736,10 @@ export async function runSelfServicePznCopilot(
         }
         case "unpublish_context": {
           const ctxId = slug(op.contextId, activeContextId ?? "wealth-next-best-offers");
+          if (gated("context.unpublish", pznSfieldToolRefs.ruleMetadata, "unpublish_context", { contextId: ctxId })) {
+            activeContextId = ctxId;
+            break;
+          }
           const { data: updated, sfieldToolRef, sfieldRunId } = await invokeTool<PznContext>(
             pznSfieldToolRefs.ruleMetadata,
             "unpublish_context",
@@ -799,6 +840,11 @@ export async function runSelfServicePznCopilot(
           cards.push({ kind: "rules_catalog_widget", rules: rulesList });
           break;
         }
+        case "show_approvals": {
+          actionsExecuted.push({ tool: "approvals.queue", summary: "Loaded approval queue and policy", status: "ok" });
+          cards.push({ kind: "approvals_queue_widget" });
+          break;
+        }
         case "show_context_matrix": {
           const { data: wsNow, sfieldToolRef, sfieldRunId } = await invokeTool<PznStudioWorkspaceState>(
             pznSfieldToolRefs.ruleMetadata,
@@ -829,7 +875,16 @@ export async function runSelfServicePznCopilot(
     : "";
 
   return {
-    reply: (plan.reply?.trim() || "Completed your Recommendation Self-Service request.") + errorSuffix,
+    // When anything was gated, the model's prose may claim it already happened, so state the facts instead.
+    reply: (pendingApprovals > 0
+      ? [
+          actionsExecuted.some((a) => a.status === "ok")
+            ? `Done: ${actionsExecuted.filter((a) => a.status === "ok").map((a) => a.summary).join("; ")}.`
+            : "",
+          `⏳ ${pendingApprovals} change${pendingApprovals > 1 ? "s need" : " needs"} approval before going live. Nothing has been published or deleted yet. Review the approval card below.`,
+        ].filter(Boolean).join("\n\n")
+      : (plan.reply?.trim() || "Completed your Recommendation Self-Service request."))
+      + errorSuffix,
     generatedBy,
     actionsExecuted,
     cards,

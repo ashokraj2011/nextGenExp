@@ -741,7 +741,8 @@ export function RecommendationStudio() {
                     `Unpublished "${activeContextRecord.contextId}".`,
                     (res) => {
                       setWorkspace(res.workspace);
-                      loadContextIntoForm(res.context);
+                      if (res.context) loadContextIntoForm(res.context);
+                      if (res.approval) setNotice(`Unpublishing needs approval (${res.approval.id}). Review it under /recommendations → Approvals.`);
                     },
                   )}
                 >
@@ -1384,8 +1385,9 @@ export function RecommendationStudio() {
                     `Saved namespace "${nsForm.id}".`,
                     (res) => {
                       setWorkspace(res.workspace);
-                      setSelectedNsId(res.namespace.id);
-                      setAttrForm((a) => ({ ...a, namespaceId: res.namespace.id }));
+                      const nsId = res.namespace?.id ?? nsForm.id;
+                      setSelectedNsId(nsId);
+                      setAttrForm((a) => ({ ...a, namespaceId: nsId }));
                       setShowNewNs(false);
                       setNsForm({ id: "", displayName: "", businessDefinition: "", owner: "Personalization Team", sourceSystem: "custom_attribute" });
                     },

@@ -2,8 +2,10 @@ import { z } from "zod";
 
 export const approvalRiskLevelSchema = z.enum(["low", "medium", "high"]);
 export const approvalStatusSchema = z.enum(["pending", "approved", "denied", "executed", "expired"]);
-export const approvalTargetKindSchema = z.enum(["domain_write", "external_connector", "stock_trade", "workflow_step"]);
-export const approvalDomainSchema = z.enum(["ops_incident", "sales_deal", "customer360", "external_connector", "stock_trade", "workflow"]);
+export const approvalTargetKindSchema = z.enum(["domain_write", "external_connector", "stock_trade", "workflow_step", "pzn_change"]);
+export const approvalDomainSchema = z.enum(["ops_incident", "sales_deal", "customer360", "external_connector", "stock_trade", "workflow", "pzn_self_service"]);
+export const pznDualControlModeSchema = z.enum(["off", "high_risk", "always"]);
+export type PznDualControlMode = z.infer<typeof pznDualControlModeSchema>;
 
 export const approvalDetailSchema = z.object({
   label: z.string().trim().min(1).max(64),
@@ -50,6 +52,11 @@ export const approvalPolicySettingsSchema = z.object({
   gateHighRiskTrades: z.boolean().default(true),
   highRiskTradeThresholdUsd: z.number().int().min(1000).max(1_000_000).default(10_000),
   defaultDualControl: z.boolean().default(false),
+  gatePznPublish: z.boolean().default(true),
+  gatePznDestructive: z.boolean().default(true),
+  gatePznDictionaryChanges: z.boolean().default(false),
+  pznDualControl: pznDualControlModeSchema.default("high_risk"),
+  pznApprovalExpiryMinutes: z.number().int().min(5).max(1440).default(30),
 }).strict();
 
 export const approvalDecisionInputSchema = z.object({

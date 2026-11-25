@@ -14,6 +14,7 @@ import {
   Plus,
   Search,
   Settings2,
+  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   ThumbsDown,
@@ -30,6 +31,7 @@ import { api, toolSetupErrorMessage } from "./api";
 import { ProfileAvatar } from "./demo-profiles";
 import { LabMark } from "./lab-mark";
 import { InlineCard } from "./recommendation-chat";
+import { ApprovalQueueWidget } from "./recommendation-approvals";
 import {
   ContentLibraryWidget,
   ContextMatrixWidget,
@@ -43,7 +45,7 @@ import "./customer-workbench.css";
 import "./recommendation-studio.css";
 import "./recommendation-workspace.css";
 
-type WorkspaceSection = "summary" | "contexts" | "rules" | "dictionary" | "live_ts";
+type WorkspaceSection = "summary" | "contexts" | "rules" | "dictionary" | "live_ts" | "approvals";
 
 type RecMessage = {
   id: string;
@@ -101,9 +103,11 @@ const SECTION_TABS: { id: WorkspaceSection; label: string; Icon: typeof LayoutDa
   { id: "rules", label: "Rules", Icon: SlidersHorizontal },
   { id: "dictionary", label: "Dictionary", Icon: BookOpen },
   { id: "live_ts", label: "Live TS", Icon: Play },
+  { id: "approvals", label: "Approvals", Icon: ShieldCheck },
 ];
 
 const RAIL_TOPICS = [
+  { id: "approvals", label: "Pending Approvals", prompt: "Show pending approvals", Icon: ShieldCheck },
   { id: "define_rule", label: "Define a Rule (Widget)", prompt: "Open the interactive rule builder widget", Icon: SlidersHorizontal },
   { id: "context_matrix", label: "Contexts & Attached Contents", prompt: "Show all contexts with attached contents and rules", Icon: Layers },
   { id: "rules_list", label: "All Rules Catalog", prompt: "Show all rules", Icon: FileText },
@@ -302,6 +306,12 @@ export function RecommendationWorkspace() {
         return [
           { label: "Compare Alice & Jordan MIDs", prompt: "Test wealth-next-best-offers for Alice Morgan and Jordan Lee" },
           { label: "What-if Alice Cash = $5,000", prompt: "Simulate wealth-next-best-offers for Alice Morgan with portfolio.cash_usd = 5000" },
+          { label: "Show Context Matrix", prompt: "Show all contexts with attached contents and rules" },
+        ];
+      case "approvals":
+        return [
+          { label: "Show Pending Approvals", prompt: "Show pending approvals" },
+          { label: "Publish wealth-next-best-offers", prompt: "Publish wealth-next-best-offers" },
           { label: "Show Context Matrix", prompt: "Show all contexts with attached contents and rules" },
         ];
       default:
@@ -637,6 +647,12 @@ export function RecommendationWorkspace() {
                   />
                 </div>
               )}
+
+              {section === "approvals" && (
+                <div className="rec-widgets-stack">
+                  <ApprovalQueueWidget onWorkspaceChange={setWorkspace} onRunPrompt={(p) => void sendPrompt(p)} />
+                </div>
+              )}
             </div>
           ) : (
             <div className="rec-chat-stream" aria-label="Recommendation conversation">
@@ -683,7 +699,7 @@ export function RecommendationWorkspace() {
                             {expandedReasoning[msg.id] && (
                               <ul className="rec-reasoning-list">
                                 {msg.actionsExecuted.map((a, i) => (
-                                  <li key={i} className={a.status === "ok" ? "is-ok" : "is-err"}>
+                                  <li key={i} className={a.status === "ok" ? "is-ok" : a.status === "pending" ? "is-pending" : "is-err"}>
                                     <span className="pzn-code">{a.sfieldToolRef ?? a.tool}</span>
                                     {a.sfieldRunId && <span className="pzn-badge" style={{ marginLeft: 6 }}>{a.sfieldRunId.slice(0, 14)}</span>}{" "}
                                     {a.summary}

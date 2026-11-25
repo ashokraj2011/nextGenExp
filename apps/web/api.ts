@@ -326,14 +326,14 @@ export const api = {
   payloads: (id: string) => request<TurnPayloads>("/api/admin/logs/" + id),
   pendingActionLogs: () => request<WorkspaceActionLog[]>("/api/admin/pending-action-logs"),
   pznWorkspace: () => request<PznStudioWorkspaceState>("/api/pzn/workspace"),
-  pznSaveNamespace: (input: PznNamespaceInput) => request<{ namespace: PznNamespace; workspace: PznStudioWorkspaceState }>("/api/pzn/namespaces", input),
-  pznDeleteNamespace: (id: string) => request<{ workspace: PznStudioWorkspaceState }>("/api/pzn/namespaces/delete", { id }),
-  pznSaveAttribute: (input: PznAttributeInput) => request<{ attribute: PznAttribute; workspace: PznStudioWorkspaceState }>("/api/pzn/attributes", input),
-  pznDeleteAttribute: (namespaceId: string, attributeId: string) => request<{ workspace: PznStudioWorkspaceState }>("/api/pzn/attributes/delete", { namespaceId, attributeId }),
+  pznSaveNamespace: (input: PznNamespaceInput) => request<{ status?: "pending_approval"; approval?: ApprovalRecord; namespace?: PznNamespace; workspace: PznStudioWorkspaceState }>("/api/pzn/namespaces", input),
+  pznDeleteNamespace: (id: string) => request<{ status?: "pending_approval"; approval?: ApprovalRecord; workspace: PznStudioWorkspaceState }>("/api/pzn/namespaces/delete", { id }),
+  pznSaveAttribute: (input: PznAttributeInput) => request<{ status?: "pending_approval"; approval?: ApprovalRecord; attribute?: PznAttribute; workspace: PznStudioWorkspaceState }>("/api/pzn/attributes", input),
+  pznDeleteAttribute: (namespaceId: string, attributeId: string) => request<{ status?: "pending_approval"; approval?: ApprovalRecord; workspace: PznStudioWorkspaceState }>("/api/pzn/attributes/delete", { namespaceId, attributeId }),
   pznSaveContent: (input: PznTextContentInput) => request<{ content: PznTextContent; workspace: PznStudioWorkspaceState }>("/api/pzn/contents", input),
-  pznDeleteContent: (contentId: string) => request<{ workspace: PznStudioWorkspaceState }>("/api/pzn/contents/delete", { contentId }),
+  pznDeleteContent: (contentId: string) => request<{ status?: "pending_approval"; approval?: ApprovalRecord; workspace: PznStudioWorkspaceState }>("/api/pzn/contents/delete", { contentId }),
   pznSaveRule: (input: PznRuleInput) => request<{ rule: PznRule; workspace: PznStudioWorkspaceState }>("/api/pzn/rules", input),
-  pznDeleteRule: (ruleId: string) => request<{ workspace: PznStudioWorkspaceState }>("/api/pzn/rules/delete", { ruleId }),
+  pznDeleteRule: (ruleId: string) => request<{ status?: "pending_approval"; approval?: ApprovalRecord; workspace: PznStudioWorkspaceState }>("/api/pzn/rules/delete", { ruleId }),
   pznTestRule: (mid: string, rule: PznRuleInput, attributeOverrides?: Record<string, PznRuleValue>) => (
     request<{ mid: string; customerDisplayName: string; resolvedAttributes: Record<string, unknown>; evaluation: PznRuleEvalResult }>(
       "/api/pzn/rules/test",
@@ -342,13 +342,13 @@ export const api = {
   ),
   pznSaveContext: (input: PznContextInput) => request<{ context: PznContext; workspace: PznStudioWorkspaceState }>("/api/pzn/contexts", input),
   pznPublishContext: (contextId: string, notes?: string, publishedBy?: string) => (
-    request<{ publication: PznContextPublication; workspace: PznStudioWorkspaceState }>(
+    request<{ status?: "pending_approval"; approval?: ApprovalRecord; publication?: PznContextPublication; workspace: PznStudioWorkspaceState }>(
       "/api/pzn/contexts/publish",
       { contextId, ...(notes ? { notes } : {}), ...(publishedBy ? { publishedBy } : {}) },
     )
   ),
-  pznUnpublishContext: (contextId: string) => request<{ context: PznContext; workspace: PznStudioWorkspaceState }>("/api/pzn/contexts/unpublish", { contextId }),
-  pznDeleteContext: (contextId: string) => request<{ workspace: PznStudioWorkspaceState }>("/api/pzn/contexts/delete", { contextId }),
+  pznUnpublishContext: (contextId: string) => request<{ status?: "pending_approval"; approval?: ApprovalRecord; context?: PznContext; workspace: PznStudioWorkspaceState }>("/api/pzn/contexts/unpublish", { contextId }),
+  pznDeleteContext: (contextId: string) => request<{ status?: "pending_approval"; approval?: ApprovalRecord; workspace: PznStudioWorkspaceState }>("/api/pzn/contexts/delete", { contextId }),
   pznEvaluateTs: (input: PznTsEvaluateRequest) => request<PznTsEvaluationResult>("/api/pzn/ts/evaluate", input),
   pznCopilot: (input: PznCopilotRequest) => request<PznCopilotResponse>("/api/pzn/copilot", input),
 };

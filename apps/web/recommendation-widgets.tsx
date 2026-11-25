@@ -28,6 +28,8 @@ import {
   type PznTsEvaluationResult,
 } from "../../packages/contracts/self-service-pzn";
 import { api, toolSetupErrorMessage } from "./api";
+import type { ApprovalRecord } from "../../packages/contracts/approval";
+import { ApprovalRequestCard } from "./recommendation-approvals";
 
 function slugify(value: string, fallback = "item_1"): string {
   const s = value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^[^a-z]+/, "").replace(/_+/g, "_");
@@ -436,6 +438,7 @@ export function ContextMatrixWidget({
   const [busyCtx, setBusyCtx] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [pendingApproval, setPendingApproval] = useState<ApprovalRecord | null>(null);
 
   const contentMap = useMemo(() => new Map(workspace.contents.map((c) => [c.contentId, c])), [workspace.contents]);
   const ruleMap = useMemo(() => new Map(workspace.rules.map((r) => [r.ruleId, r])), [workspace.rules]);
@@ -446,7 +449,13 @@ export function ContextMatrixWidget({
     try {
       const res = await api.pznPublishContext(contextId, "Published from Recommendations Workspace widget");
       onWorkspaceChange(res.workspace);
-      setNotice(`Published "${contextId}" v${res.publication.version} live to Treatment Selector.`);
+      if (res.approval) {
+        setPendingApproval(res.approval);
+        setNotice(`Publishing "${contextId}" needs approval (${res.approval.id}) — ${res.approval.dualControl ? "a second approver must approve" : "you can approve it below"}.`);
+      } else {
+        setPendingApproval(null);
+        setNotice(`Published "${contextId}" v${res.publication?.version ?? "?"} live to Treatment Selector.`);
+      }
     } catch (e) {
       setError(toolSetupErrorMessage(e));
     } finally {
@@ -502,6 +511,14 @@ export function ContextMatrixWidget({
 
       {notice && <p className="pzn-notice" role="status">{notice}</p>}
       {error && <p className="pzn-error" role="alert">{error}</p>}
+      {pendingApproval && (
+        <ApprovalRequestCard
+          key={pendingApproval.id}
+          approval={pendingApproval}
+          onWorkspaceChange={onWorkspaceChange}
+          onRunPrompt={onRunPrompt}
+        />
+      )}
 
       <div className="pzn-list">
         {workspace.contexts.map((ctx) => (

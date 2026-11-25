@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ApprovalRecord } from "./approval";
 
 export const pznDataTypes = ["enum", "boolean", "number", "currency_usd", "string", "string_list"] as const;
 export type PznDataType = typeof pznDataTypes[number];
@@ -435,7 +436,7 @@ export type PznCopilotActionLog = {
   sfieldToolRef?: string;
   sfieldRunId?: string;
   summary: string;
-  status: "ok" | "error";
+  status: "ok" | "error" | "pending";
 };
 
 export type PznCopilotCard =
@@ -445,6 +446,8 @@ export type PznCopilotCard =
   | { kind: "rule_builder_widget"; initialNamespaceId?: string; initialAttributeId?: string }
   | { kind: "rules_catalog_widget"; rules: PznRule[] }
   | { kind: "context_matrix_widget"; contexts: PznContext[]; contents: PznTextContent[]; rules: PznRule[] }
+  | { kind: "approval_request"; approval: ApprovalRecord }
+  | { kind: "approvals_queue_widget" }
   | {
       kind: "context";
       context: PznContext;

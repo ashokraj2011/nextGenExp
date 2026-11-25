@@ -22,6 +22,7 @@ import type {
 import { pznOperatorLabels } from "../../packages/contracts/self-service-pzn";
 import { api, toolSetupErrorMessage } from "./api";
 import { ContextMatrixWidget, RuleBuilderWidget, RulesCatalogWidget } from "./recommendation-widgets";
+import { ApprovalQueueWidget, ApprovalRequestCard } from "./recommendation-approvals";
 
 type ChatMessage = {
   id: string;
@@ -90,6 +91,20 @@ export function InlineCard({
   onSendPrompt: (prompt: string) => void;
 }) {
   const effectiveMid = activeMid ?? workspace.customers[0]?.syntheticMid ?? "DEMO-MID-1001";
+
+  if (card.kind === "approval_request") {
+    return (
+      <ApprovalRequestCard
+        approval={card.approval}
+        onWorkspaceChange={onWorkspaceChange}
+        onRunPrompt={onSendPrompt}
+      />
+    );
+  }
+
+  if (card.kind === "approvals_queue_widget") {
+    return <ApprovalQueueWidget onWorkspaceChange={onWorkspaceChange} onRunPrompt={onSendPrompt} />;
+  }
 
   if (card.kind === "rule_builder_widget") {
     return (
@@ -606,10 +621,10 @@ export function RecommendationChatExperience({
                         {msg.actionsExecuted.map((a, aIdx) => (
                           <span
                             key={aIdx}
-                            className={"pzn-badge " + (a.status === "ok" ? "is-pass" : "is-fail")}
+                            className={"pzn-badge " + (a.status === "ok" ? "is-pass" : a.status === "pending" ? "is-warn" : "is-fail")}
                             title={a.sfieldRunId ? `sfield run ${a.sfieldRunId} · ${a.summary}` : a.summary}
                           >
-                            {a.status === "ok" ? "✓" : "✗"} {a.sfieldToolRef ?? a.tool}
+                            {a.status === "ok" ? "✓" : a.status === "pending" ? "⏳" : "✗"} {a.sfieldToolRef ?? a.tool}
                           </span>
                         ))}
                       </div>

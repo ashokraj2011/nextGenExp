@@ -63,6 +63,7 @@ import { connectorInvokeToolRef, domainWriteToolRef, Runtime, sfieldNamespace } 
 import { WidgetLibraryStore } from "./widget-library";
 import { SelfServicePznStore } from "./self-service-pzn-store";
 import { runSelfServicePznCopilot } from "./self-service-pzn-copilot";
+import { applyPznOperationDirect, PznApprovalError, pznGateFor, pznToolRefForOperation, requestPznApproval, verifyPznApproval } from "./pzn-approvals";
 import {
   pznAttributeInputSchema,
   pznContextInputSchema,
@@ -301,7 +302,7 @@ export async function startApp(options: Options) {
   try {
     runtime = options.gateway
       ? await Runtime.open(store, sfieldPath, options.gateway, now, inspectorEnabled, portfolioSnapshots, goalProgressProvider, options.goalBudget, {
-          customer360, opsStore, salesStore, profileStore, writeAudit, connectorStore, selfServicePzn,
+          customer360, opsStore, salesStore, profileStore, writeAudit, connectorStore, selfServicePzn, approvalStore,
         })
       : null;
     await offline?.init({ namespace: sfieldNamespace, ownerId: newId("owner") });
@@ -358,6 +359,35 @@ export async function startApp(options: Options) {
   });
 
   async function executeApprovedRecord(principalId: string, record: ApprovalRecord) {
+    if (record.targetKind === "pzn_change") {
+      const args = (record.payload.args && typeof record.payload.args === "object" ? record.payload.args : {}) as Record<string, unknown>;
+      const operation = record.action;
+      try {
+        if (runtime) {
+          const exec = await runtime.executePznTool(principalId, pznToolRefForOperation(operation), operation, { ...args, approvalId: record.id });
+          const finalRecord = approvalStore.markExecuted(record.id, { summary: exec.summary, sfieldRunId: exec.sfieldRunId }) ?? record;
+          return { approval: finalRecord, execution: { summary: exec.summary, sfieldRunId: exec.sfieldRunId } };
+        }
+        const verifiedArgs = verifyPznApproval(approvalStore, selfServicePzn, operation, { ...args, approvalId: record.id });
+        const summary = applyPznOperationDirect(selfServicePzn, operation, verifiedArgs);
+        const audit = writeAudit.record({
+          sfieldRunId: "offline",
+          sfieldToolRef: record.sfieldToolRef,
+          domain: "pzn_self_service",
+          recordId: record.recordId,
+          action: operation,
+          actor: record.decidedBy ?? record.requester,
+          summary,
+          status: "succeeded",
+          approvalId: record.id,
+        });
+        const finalRecord = approvalStore.markExecuted(record.id, { summary, sfieldRunId: "offline", auditId: audit.auditId }) ?? record;
+        return { approval: finalRecord, execution: { summary, sfieldRunId: "offline", auditId: audit.auditId } };
+      } catch (err) {
+        const code = err instanceof PznApprovalError ? err.code : "pzn_change_failed";
+        throw new ApiError(409, code, `Approved, but the change could not be applied: ${err instanceof Error ? err.message : "unknown error"}`);
+      }
+    }
     if (record.targetKind === "workflow_step") {
       const runId = typeof record.payload.runId === "string" ? record.payload.runId : record.recordId;
       const actor = record.decidedBy ?? record.requester;
@@ -1564,6 +1594,14 @@ export async function startApp(options: Options) {
         }
         return { data: fallback(), summary: opName, sfieldRunId: "offline", sfieldToolRef: toolRef };
       };
+      const pznGate = (operation: string, args: Record<string, unknown>, requester?: string) => (
+        pznGateFor(approvalStore.getPolicy(), operation).gated
+          ? requestPznApproval(approvalStore, selfServicePzn, { operation, args, requester })
+          : null
+      );
+      const pendingResponse = (approval: ApprovalRecord) => json(res, {
+        status: "pending_approval", approval, workspace: selfServicePzn.getWorkspaceState(),
+      }, 202);
       if (id === "sfield-tools" && !operation && method === "GET") {
         return json(res, { tools: pznRegisteredSfieldTools, runtimeConnected: Boolean(runtime) });
       }
@@ -1573,21 +1611,29 @@ export async function startApp(options: Options) {
       }
       if (id === "namespaces" && !operation && method === "POST") {
         const data = await body(req, pznNamespaceInputSchema, 32 * 1024);
+        const pendingNs = pznGate("upsert_namespace", data);
+        if (pendingNs) return pendingResponse(pendingNs);
         const out = await invokePzn(pznSfieldToolRefs.dataDictionary, "upsert_namespace", data, () => selfServicePzn.upsertNamespace(data));
         return json(res, { namespace: out.data, sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
       if (id === "namespaces" && operation === "delete" && method === "POST") {
         const { id: nsId } = await body(req, z.object({ id: pznSlugSchema }).strict());
+        const pendingNsDel = pznGate("delete_namespace", { id: nsId });
+        if (pendingNsDel) return pendingResponse(pendingNsDel);
         const out = await invokePzn(pznSfieldToolRefs.dataDictionary, "delete_namespace", { id: nsId }, () => { selfServicePzn.deleteNamespace(nsId); return { deleted: true }; });
         return json(res, { sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
       if (id === "attributes" && !operation && method === "POST") {
         const data = await body(req, pznAttributeInputSchema, 32 * 1024);
+        const pendingAttr = pznGate("upsert_attribute", data);
+        if (pendingAttr) return pendingResponse(pendingAttr);
         const out = await invokePzn(pznSfieldToolRefs.dataDictionary, "upsert_attribute", data, () => selfServicePzn.upsertAttribute(data));
         return json(res, { attribute: out.data, sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
       if (id === "attributes" && operation === "delete" && method === "POST") {
         const { namespaceId, attributeId } = await body(req, z.object({ namespaceId: pznSlugSchema, attributeId: pznSlugSchema }).strict());
+        const pendingAttrDel = pznGate("delete_attribute", { namespaceId, attributeId });
+        if (pendingAttrDel) return pendingResponse(pendingAttrDel);
         const out = await invokePzn(pznSfieldToolRefs.dataDictionary, "delete_attribute", { namespaceId, attributeId }, () => { selfServicePzn.deleteAttribute(namespaceId, attributeId); return { deleted: true }; });
         return json(res, { sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
@@ -1598,6 +1644,8 @@ export async function startApp(options: Options) {
       }
       if (id === "contents" && operation === "delete" && method === "POST") {
         const { contentId } = await body(req, z.object({ contentId: pznSlugSchema }).strict());
+        const pendingContentDel = pznGate("delete_content", { contentId });
+        if (pendingContentDel) return pendingResponse(pendingContentDel);
         const out = await invokePzn(pznSfieldToolRefs.ruleMetadata, "delete_content", { contentId }, () => { selfServicePzn.deleteContent(contentId); return { deleted: true }; });
         return json(res, { sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
@@ -1608,6 +1656,8 @@ export async function startApp(options: Options) {
       }
       if (id === "rules" && operation === "delete" && method === "POST") {
         const { ruleId } = await body(req, z.object({ ruleId: pznSlugSchema }).strict());
+        const pendingRuleDel = pznGate("delete_rule", { ruleId });
+        if (pendingRuleDel) return pendingResponse(pendingRuleDel);
         const out = await invokePzn(pznSfieldToolRefs.ruleMetadata, "delete_rule", { ruleId }, () => { selfServicePzn.deleteRule(ruleId); return { deleted: true }; });
         return json(res, { sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
@@ -1627,16 +1677,22 @@ export async function startApp(options: Options) {
           publishedBy: z.string().max(80).optional(),
           notes: z.string().max(240).optional(),
         }).strict());
+        const pendingPublish = pznGate("publish_context", data, data.publishedBy);
+        if (pendingPublish) return pendingResponse(pendingPublish);
         const out = await invokePzn(pznSfieldToolRefs.ruleMetadata, "publish_context", data, () => selfServicePzn.publishContext(data.contextId, data.publishedBy, data.notes));
         return json(res, { publication: out.data, sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
       if (id === "contexts" && operation === "unpublish" && method === "POST") {
         const { contextId } = await body(req, z.object({ contextId: pznSlugSchema }).strict());
+        const pendingCtx = pznGate("unpublish_context", { contextId });
+        if (pendingCtx) return pendingResponse(pendingCtx);
         const out = await invokePzn(pznSfieldToolRefs.ruleMetadata, "unpublish_context", { contextId }, () => selfServicePzn.unpublishContext(contextId));
         return json(res, { context: out.data, sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
       if (id === "contexts" && operation === "delete" && method === "POST") {
         const { contextId } = await body(req, z.object({ contextId: pznSlugSchema }).strict());
+        const pendingCtx = pznGate("delete_context", { contextId });
+        if (pendingCtx) return pendingResponse(pendingCtx);
         const out = await invokePzn(pznSfieldToolRefs.ruleMetadata, "delete_context", { contextId }, () => { selfServicePzn.deleteContext(contextId); return { deleted: true }; });
         return json(res, { sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
@@ -1650,6 +1706,7 @@ export async function startApp(options: Options) {
         return json(res, await runSelfServicePznCopilot(data, selfServicePzn, {
           gateway: options.gateway,
           dataDir: options.dataDir,
+          requestApproval: (operation: string, args: Record<string, unknown>) => pznGate(operation, args),
           ...(runtime ? {
             executeSfieldTool: <T>(toolRef: string, opName: string, payload?: unknown) => (
               runtime.executePznTool<T>(principalId, toolRef, opName, payload)

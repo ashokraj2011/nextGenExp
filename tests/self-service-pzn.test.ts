@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SelfServicePznStore } from "../apps/server/self-service-pzn-store";
 import { runSelfServicePznCopilot } from "../apps/server/self-service-pzn-copilot";
+import { ApprovalStore } from "../apps/server/approval-store";
+import { applyPznOperationDirect, pznGateFor, requestPznApproval, verifyPznApproval } from "../apps/server/pzn-approvals";
 import { CustomerProfileStore, setActiveCustomerProfileStore } from "../packages/customer-profiles";
 import { FixtureTsAdapter } from "../packages/ts-adapter";
 import { resolveCandidates, lookupContent } from "../packages/experience/content";
@@ -230,6 +232,87 @@ test("Self-service Copilot chat executes dictionary, authoring, publish, and liv
     assert.equal(tsCards[0].evaluation.eligibleContents.length, 1);
     assert.equal(tsCards[1].evaluation.eligibleContents.length, 0);
     assert.equal(tsCards[1].evaluation.filteredOutContents[0].reasonCode, "RULE_FALSE");
+  } finally {
+    env.cleanup();
+  }
+});
+
+test("configurable approvals gate publish/destructive changes and enforce 4-eyes only when policy requires", async () => {
+  const env = setup();
+  try {
+    const approvals = new ApprovalStore(env.dir);
+    approvals.updatePolicy({ gatePznPublish: true, gatePznDestructive: true, gatePznDictionaryChanges: false, pznDualControl: "high_risk" });
+
+    env.pzn.upsertContent({
+      contentId: "appr_offer", title: "Approval Offer", headline: "", body: "Body", ctaLabel: "", ctaPrompt: "",
+      disclosureText: "", tags: [], status: "published",
+    });
+    env.pzn.upsertContext({
+      contextId: "appr_ctx", displayName: "Approval Ctx", description: "Gated context", channel: "all",
+      contextRuleIds: [], attachments: [{ contentId: "appr_offer", rank: 1, ruleIds: [], ruleMatchMode: "all" }],
+    });
+
+    // Drafts and reads are never gated; dictionary edits are off by default.
+    assert.equal(pznGateFor(approvals.getPolicy(), "upsert_context").gated, false);
+    assert.equal(pznGateFor(approvals.getPolicy(), "upsert_attribute").gated, false);
+
+    // 1. Copilot "publish" turns into a pending approval card instead of executing.
+    const turn = await runSelfServicePznCopilot({ message: "Publish appr_ctx", activeContextId: "appr_ctx" }, env.pzn, {
+      requestApproval: (operation, args) => (
+        pznGateFor(approvals.getPolicy(), operation).gated
+          ? requestPznApproval(approvals, env.pzn, { operation, args, requester: "Author A" })
+          : null
+      ),
+    });
+    assert.equal(env.pzn.getContext("appr_ctx")?.status, "draft");
+    const card = turn.cards.find((c) => c.kind === "approval_request");
+    assert.ok(card && card.kind === "approval_request");
+    assert.ok(turn.actionsExecuted.some((a) => a.status === "pending"));
+    assert.match(turn.reply, /Nothing has been published or deleted yet/);
+    const publishApproval = card.approval;
+    assert.equal(publishApproval.riskLevel, "medium");
+    assert.equal(publishApproval.dualControl, false, "publish is medium risk, so high_risk mode allows self-approval");
+
+    // 2. The sfield-boundary check refuses the gated op without an approved approval.
+    assert.throws(() => verifyPznApproval(approvals, env.pzn, "publish_context", { contextId: "appr_ctx" }), /requires an approved/);
+    assert.throws(
+      () => verifyPznApproval(approvals, env.pzn, "publish_context", { ...(publishApproval.payload.args as object), approvalId: publishApproval.id }),
+      /pending, not approved/,
+    );
+
+    // 3. Self-approval is allowed here; then the approved change applies.
+    assert.ok(approvals.decide(publishApproval.id, { decision: "approve", actor: "Author A" }).ok);
+    // Tampered args are rejected even with an approved id.
+    assert.throws(
+      () => verifyPznApproval(approvals, env.pzn, "publish_context", { contextId: "appr_ctx", notes: "tampered", approvalId: publishApproval.id }),
+      /differs from what approval/,
+    );
+    const args = verifyPznApproval(approvals, env.pzn, "publish_context", { ...(publishApproval.payload.args as object), approvalId: publishApproval.id });
+    applyPznOperationDirect(env.pzn, "publish_context", args);
+    assert.equal(env.pzn.getContext("appr_ctx")?.status, "published");
+
+    // 4. Destructive change under high_risk mode requires a second approver.
+    const unpublish = requestPznApproval(approvals, env.pzn, { operation: "unpublish_context", args: { contextId: "appr_ctx" }, requester: "Author A" });
+    assert.equal(unpublish.riskLevel, "high");
+    assert.equal(unpublish.dualControl, true);
+    const selfApprove = approvals.decide(unpublish.id, { decision: "approve", actor: "Author A" });
+    assert.equal(selfApprove.ok, false);
+    assert.ok(approvals.decide(unpublish.id, { decision: "approve", actor: "Approver B" }).ok);
+
+    // 5. Staleness: if the context changes after the request, the approval no longer applies.
+    env.pzn.upsertContext({
+      contextId: "appr_ctx", displayName: "Approval Ctx (edited)", description: "Gated context", channel: "all",
+      contextRuleIds: [], attachments: [{ contentId: "appr_offer", rank: 1, ruleIds: [], ruleMatchMode: "all" }],
+    });
+    assert.throws(() => verifyPznApproval(approvals, env.pzn, "unpublish_context", { contextId: "appr_ctx", approvalId: unpublish.id }), /changed after approval/);
+
+    // 6. Policy is configurable: dual control off -> no second approver; gate off -> runs without approval.
+    approvals.updatePolicy({ pznDualControl: "off" });
+    assert.equal(requestPznApproval(approvals, env.pzn, { operation: "delete_context", args: { contextId: "appr_ctx" } }).dualControl, false);
+    approvals.updatePolicy({ pznDualControl: "always" });
+    assert.equal(requestPznApproval(approvals, env.pzn, { operation: "publish_context", args: { contextId: "appr_ctx" } }).dualControl, true);
+    approvals.updatePolicy({ gatePznPublish: false });
+    assert.deepEqual(verifyPznApproval(approvals, env.pzn, "publish_context", { contextId: "appr_ctx" }), { contextId: "appr_ctx" });
   } finally {
     env.cleanup();
   }

@@ -56,6 +56,8 @@ import type { SalesDealStore } from "./sales-store";
 import type { ConnectorStore } from "./connector-store";
 import type { WriteAuditStore } from "./write-audit";
 import type { SelfServicePznStore } from "./self-service-pzn-store";
+import type { ApprovalStore } from "./approval-store";
+import { PznApprovalError, splitApprovalId, verifyPznApproval } from "./pzn-approvals";
 import {
   pznDataDictionaryToolId,
   pznDataDictionaryToolInputJsonSchema,
@@ -270,6 +272,7 @@ export class Runtime {
     private readonly writeAudit?: WriteAuditStore,
     private readonly connectorStore?: ConnectorStore,
     private readonly selfServicePzn?: SelfServicePznStore,
+    private readonly approvalStore?: ApprovalStore,
   ) {
     this.funding = new FundingAgent(store, () => this.sf, now);
     const execution = new AgenticExecution(store, () => this.sf, now, (turnId) => this.current(turnId), portfolioSnapshots, goalProgressProvider, goalBudget);
@@ -287,6 +290,7 @@ export class Runtime {
       writeAudit?: WriteAuditStore;
       connectorStore?: ConnectorStore;
       selfServicePzn?: SelfServicePznStore;
+      approvalStore?: ApprovalStore;
     },
   ) {
     const record = inspectorEnabled ? (id: string, exchange: GatewayExchange) => store.saveGatewayExchange(id, exchange) : undefined;
@@ -298,6 +302,7 @@ export class Runtime {
       extraProviders?.customer360, extraProviders?.opsStore, extraProviders?.salesStore,
       extraProviders?.profileStore, extraProviders?.writeAudit, extraProviders?.connectorStore,
       extraProviders?.selfServicePzn,
+      extraProviders?.approvalStore,
     );
     const agentTools = [...runtime.experiences.tools(), ...runtime.experiences.execution.tools()];
     const agentActions = new Set(agentTools.map(({ ref }) => axeToolAction(ref)));
@@ -727,6 +732,9 @@ export class Runtime {
       const out = exec.output as { ok: boolean; operation: string; summary: string; resultJson: string };
       const data = JSON.parse(out.resultJson) as T;
       if (!isReadOnly && operation !== "get_dictionary" && operation !== "get_workspace" && !operation.startsWith("list_") && operation !== "test_rule") {
+        const approvalId = payload && typeof payload === "object" && typeof (payload as { approvalId?: unknown }).approvalId === "string"
+          ? (payload as { approvalId: string }).approvalId
+          : undefined;
         this.writeAudit?.record({
           sfieldRunId: scope.id,
           sfieldToolRef: toolRef,
@@ -736,11 +744,31 @@ export class Runtime {
           actor: principalId,
           summary: out.summary,
           status: "succeeded",
+          ...(approvalId ? { approvalId } : {}),
         });
       }
       return { data, summary: out.summary, sfieldRunId: scope.id, sfieldToolRef: toolRef };
     } finally {
       await scope.close();
+    }
+  }
+
+  /** Parses a PZN tool payload and enforces the configurable approval policy inside the sfield tool boundary. */
+  private pznVerifiedPayload(operation: string, payloadJson?: string): Record<string, unknown> {
+    let raw: Record<string, unknown> = {};
+    if (payloadJson) {
+      try {
+        raw = JSON.parse(payloadJson) as Record<string, unknown>;
+      } catch {
+        throw new ToolError("INVALID_PAYLOAD", "payloadJson is not valid JSON.");
+      }
+    }
+    if (!this.approvalStore || !this.selfServicePzn) return splitApprovalId(raw).args;
+    try {
+      return verifyPznApproval(this.approvalStore, this.selfServicePzn, operation, raw);
+    } catch (err) {
+      if (err instanceof PznApprovalError) throw new ToolError(err.code, err.message);
+      throw err;
     }
   }
 
@@ -1034,7 +1062,7 @@ export class Runtime {
         handler: async (raw) => {
           if (!this.selfServicePzn) throw new ToolError("PZN_STORE_UNAVAILABLE", "Self-service PZN store is not attached.");
           const inp = raw as { operation: string; payloadJson?: string };
-          const payload = inp.payloadJson ? JSON.parse(inp.payloadJson) as Record<string, unknown> : {};
+          const payload = this.pznVerifiedPayload(inp.operation, inp.payloadJson);
           try {
             switch (inp.operation) {
               case "get_dictionary": {
@@ -1085,7 +1113,7 @@ export class Runtime {
         handler: async (raw) => {
           if (!this.selfServicePzn) throw new ToolError("PZN_STORE_UNAVAILABLE", "Self-service PZN store is not attached.");
           const inp = raw as { operation: string; payloadJson?: string };
-          const payload = inp.payloadJson ? JSON.parse(inp.payloadJson) as Record<string, unknown> : {};
+          const payload = this.pznVerifiedPayload(inp.operation, inp.payloadJson);
           try {
             switch (inp.operation) {
               case "get_workspace": {
@@ -1171,7 +1199,7 @@ export class Runtime {
         handler: async (raw) => {
           if (!this.selfServicePzn) throw new ToolError("PZN_STORE_UNAVAILABLE", "Self-service PZN store is not attached.");
           const inp = raw as { operation: string; payloadJson?: string };
-          const payload = inp.payloadJson ? JSON.parse(inp.payloadJson) as Record<string, unknown> : {};
+          const payload = this.pznVerifiedPayload(inp.operation, inp.payloadJson);
           try {
             switch (inp.operation) {
               case "evaluate": {

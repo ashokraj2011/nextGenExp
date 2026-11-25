@@ -477,3 +477,22 @@
   color: var(--text, #17211b);
   min-width: 0;
 }
+
+.pzn-approval-card.is-pending {
+  border-left: 4px solid #d97706;
+}
+
+.pzn-approval-card.is-executed,
+.pzn-approval-card.is-approved {
+  border-left: 4px solid var(--teal, #2d7a22);
+}
+
+.pzn-approval-card.is-denied,
+.pzn-approval-card.is-expired {
+  border-left: 4px solid #dc2626;
+  opacity: 0.9;
+}
+
+.rec-reasoning-list li.is-pending {
+  color: #92400e;
+}

@@ -24,6 +24,11 @@ const defaultPolicy: ApprovalPolicySettings = {
   gateHighRiskTrades: true,
   highRiskTradeThresholdUsd: 10_000,
   defaultDualControl: false,
+  gatePznPublish: true,
+  gatePznDestructive: true,
+  gatePznDictionaryChanges: false,
+  pznDualControl: "high_risk",
+  pznApprovalExpiryMinutes: 30,
 };
 
 interface PersistedApprovals {
@@ -31,7 +36,7 @@ interface PersistedApprovals {
   records: ApprovalRecord[];
 }
 
-function canonicalJson(value: unknown): string {
+export function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
@@ -178,6 +183,7 @@ export class ApprovalStore {
     details: { label: string; value: string }[];
     requester: string;
     dualControl?: boolean;
+    ttlMs?: number;
   }): ApprovalRecord {
     this.sweepExpired();
     const payloadDigest = computeApprovalDigest({
@@ -206,7 +212,7 @@ export class ApprovalStore {
       requester: input.requester.slice(0, 80),
       dualControl: input.dualControl ?? this.state.policy.defaultDualControl,
       createdAt: new Date(now).toISOString(),
-      expiresAt: new Date(now + APPROVAL_TTL_MS).toISOString(),
+      expiresAt: new Date(now + (input.ttlMs ?? APPROVAL_TTL_MS)).toISOString(),
     };
     const records = [record, ...this.state.records].slice(0, 150);
     this.save({ ...this.state, records });
