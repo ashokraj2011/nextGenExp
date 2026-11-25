@@ -557,16 +557,18 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
               {resetState === "resetting" ? "Resetting…" : "Reset demo"}
             </button>
           )}
-          <button
-            type="button"
-            className="dyn-save-btn"
-            disabled={savedState === "saving" || savedState === "saved"}
-            onClick={() => void saveWidget()}
-          >
-            {savedState === "saved"
-              ? <><Check size={14} aria-hidden="true" />Saved to Library</>
-              : <><BookmarkPlus size={14} aria-hidden="true" />{savedState === "saving" ? "Saving…" : "Save to Library"}</>}
-          </button>
+          {!(props.recordId?.startsWith("wdg_") || props.dataSource?.startsWith("Widget Library")) && (
+            <button
+              type="button"
+              className="dyn-save-btn"
+              disabled={savedState === "saving" || savedState === "saved"}
+              onClick={() => void saveWidget()}
+            >
+              {savedState === "saved"
+                ? <><Check size={14} aria-hidden="true" />Saved to Library</>
+                : <><BookmarkPlus size={14} aria-hidden="true" />{savedState === "saving" ? "Saving…" : "Save to Library"}</>}
+            </button>
+          )}
         </div>
       </header>
 
