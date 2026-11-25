@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { pznSlugSchema } from "./self-service-pzn";
 import type { WorkflowRecommendation } from "./funding-workflow";
 import type { RoutingIntentId } from "./routing-intents";
 
@@ -33,7 +34,7 @@ export type ExperienceProposal = {
 };
 
 export const contextEntrySchema = z.object({
-  contextId: z.string().regex(/^[a-z][a-z0-9-]*$/),
+  contextId: pznSlugSchema,
   displayName: z.string().min(1),
   description: z.string().min(1),
   active: z.boolean(),

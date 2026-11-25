@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SelfServicePznStore } from "../apps/server/self-service-pzn-store";
 import { gatewayFromEnv } from "../apps/server/gateway";
 import type { IncomingHttpHeaders } from "node:http";
 import host from "../fixtures/host.json";
@@ -69,6 +70,24 @@ async function fixture(intercept?: TestInterceptor, opts: {
     },
   };
 }
+
+test("balance chat works with published underscore topic IDs in an existing catalog", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const topicId = "wealth_retirement_planning";
+  const client = await f.restart((dir) => {
+    const catalog = new SelfServicePznStore(dir);
+    try {
+      catalog.upsertContext({ contextId: topicId, displayName: "Retirement planning", description: "Retirement questions", channel: "chat", contextRuleIds: [],
+        attachments: [{ contentId: "beneficiary_reminder_text", rank: 1, ruleIds: [], ruleMatchMode: "all" }] });
+      catalog.publishContext(topicId, "Planner");
+    } finally { catalog.close(); }
+  });
+  const chat = await client.conversation();
+  const { turn, trace } = await client.ask(chat.id, "Compare available and current balances.");
+  assert.ok(trace.catalog?.contexts.some(({ contextId }) => contextId === topicId));
+  assert.ok(turn.experience?.blocks.some(({ component }) => component === "PznComparison"));
+});
 
 test("tool setup previews built-in and configured Treatment Selector responses without a gateway", async (t) => {
   const f = await fixture(undefined, { noGateway: true });

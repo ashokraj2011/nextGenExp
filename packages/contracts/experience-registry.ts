@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { componentNames, type ContentEntry } from "./domain";
+import { componentNames, contextEntrySchema, type ContentEntry } from "./domain";
 
 export const managedIntentInputSchema = z.object({
   intentId: z.string().regex(/^[a-z][a-z0-9_]{1,63}$/, "Use lowercase snake_case (e.g. tax_planning)"),
   label: z.string().trim().min(1, "Label is required").max(80),
-  contextId: z.string().regex(/^[a-z][a-z0-9-]*$/),
+  contextId: contextEntrySchema.shape.contextId,
   task: z.enum(["explain", "compare", "guide", "show"]),
   description: z.string().trim().min(4, "Routing description is required").max(400),
   samplePhrases: z.array(z.string().trim().min(1).max(140)).max(8),
