@@ -2731,3 +2731,54 @@
   font-weight: 600;
   cursor: pointer;
 }
+
+
+/* Composer Document-to-Action Sample Menu */
+.composer-attach-wrap {
+  position: relative;
+}
+
+.composer-sample-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: 230px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--white);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.16);
+  display: grid;
+  gap: 3px;
+}
+
+.composer-sample-divider {
+  padding: 6px 8px 2px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.composer-sample-item {
+  text-align: left;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.composer-sample-item:hover {
+  background: var(--teal-pale);
+  color: var(--teal-dark);
+}
+
+.composer-sample-item.is-primary {
+  font-weight: 700;
+  color: var(--teal-dark);
+}

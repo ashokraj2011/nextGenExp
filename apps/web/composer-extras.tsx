@@ -28,6 +28,40 @@ export function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+export const SAMPLE_UPLOAD_DOCUMENTS: { id: string; label: string; name: string; content: string }[] = [
+  {
+    id: "wire_invoice",
+    label: "Wire Invoice ($18,500)",
+    name: "wire-invoice-18500.txt",
+    content: "INVOICE #INV-2026-441\nRecipient: Horizon Real Estate Escrow LLC\nWire Amount: $18,500\nRail: Domestic Fedwire\nMemo: Closing earnest deposit",
+  },
+  {
+    id: "trade_csv",
+    label: "Equity Order CSV (AAPL)",
+    name: "equity-rebalance-order.csv",
+    content: "symbol,side,percent,notes\nAAPL,sell,40,Rebalance tech overweight and analyze tax-loss harvesting",
+  },
+  {
+    id: "outage_log",
+    label: "P1 Outage Log (5xx)",
+    name: "checkout-api-outage.log",
+    content: "ALERT P1 service: checkout-api release: v4.12.1\n5xx error_rate: 4.9% p95 latency: 448ms\nERROR UpstreamPoolExhausted after v4.12.1 canary promotion",
+  },
+];
+
+export function createSampleAttachment(sampleId: string): ComposerAttachment | null {
+  const found = SAMPLE_UPLOAD_DOCUMENTS.find((s) => s.id === sampleId);
+  if (!found) return null;
+  return {
+    id: crypto.randomUUID(),
+    name: found.name,
+    size: found.content.length,
+    mimeType: "text/plain",
+    kind: "text",
+    excerpt: found.content,
+  };
+}
+
 export async function readAttachmentFile(file: File): Promise<ComposerAttachment> {
   const id = crypto.randomUUID();
   const isImage = file.type.startsWith("image/") || IMAGE_EXTENSIONS.test(file.name);

@@ -26,9 +26,11 @@ export function WorkflowRunnerNode({ node }: WorkflowRunnerNodeProps) {
       const next = { ...prev };
       for (const f of activeStep.fields) {
         if (next[f.id] === undefined) {
-          if (f.type === "checkbox") next[f.id] = Boolean(f.defaultValue);
-          else if (f.type === "select") next[f.id] = String(f.defaultValue ?? f.options?.[0] ?? "");
-          else next[f.id] = f.defaultValue !== undefined ? String(f.defaultValue) : "";
+          const prefilled = nextRun.inputs[f.id];
+          const sourceVal = prefilled !== undefined ? prefilled : f.defaultValue;
+          if (f.type === "checkbox") next[f.id] = Boolean(sourceVal);
+          else if (f.type === "select") next[f.id] = String(sourceVal ?? f.options?.[0] ?? "");
+          else next[f.id] = sourceVal !== undefined ? String(sourceVal) : "";
         }
       }
       return next;

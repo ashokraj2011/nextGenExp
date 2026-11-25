@@ -29,6 +29,7 @@ import type { OmnichannelConfig, OmnichannelDelivery, OmnichannelView } from "..
 import type { ComplianceAuditPacket, EvalRunReport, EvalSuiteView } from "../../packages/contracts/eval-suite";
 import type { McpDiscoveryResult } from "../../packages/contracts/mcp-discovery";
 import type { ProactiveAlert, ProactiveTriggerInput, ProactiveView } from "../../packages/contracts/proactive-events";
+import type { KnowledgeBaseView, KnowledgeDocumentUpsertInput, KnowledgeSearchResult } from "../../packages/contracts/knowledge-base";
 import type { Customer360AdminRecord, Customer360ProfileInput } from "../../packages/contracts/customer-360";
 import type {
   ExperienceRegistryView,
@@ -242,6 +243,10 @@ export const api = {
   proactiveAlerts: () => request<ProactiveView>("/api/proactive/alerts"),
   triggerProactiveEvent: (input: ProactiveTriggerInput) => request<{ alert: ProactiveAlert; view: ProactiveView }>("/api/proactive/trigger", input),
   dismissProactiveAlert: (id: string) => request<ProactiveView>("/api/proactive/" + id + "/dismiss", {}),
+  knowledgeBase: () => request<KnowledgeBaseView>("/api/admin/knowledge-base"),
+  saveKnowledgeDoc: (input: KnowledgeDocumentUpsertInput) => request<KnowledgeBaseView>("/api/admin/knowledge-base", input),
+  deleteKnowledgeDoc: (id: string) => request<KnowledgeBaseView>("/api/admin/knowledge-base-delete", { id }),
+  searchKnowledgeBase: (query: string) => request<KnowledgeSearchResult>("/api/admin/knowledge-search", { query }),
   startWorkflow: (id: string, input: { personaId?: string; actorName?: string; initialInputs?: Record<string, string | number | boolean> } = {}) => (
     request<{ run: WorkflowRun; definition: WorkflowDefinition }>("/api/workflows/" + id + "/start", input)
   ),

@@ -813,3 +813,69 @@
   font-size: 0.75rem;
   color: var(--muted);
 }
+
+
+/* Knowledge Base RAG Studio (/admin/intents -> Knowledge Base) */
+.kb-upload-drop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 12px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  border: 1px dashed var(--teal-border, var(--line-strong));
+  background: var(--teal-pale, var(--paper));
+  color: var(--teal-dark);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.kb-content-editor {
+  width: 100%;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 0.84rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.kb-search-results {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.kb-citation-row {
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: var(--white);
+  border: 1px solid var(--line);
+}
+
+.kb-citation-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+  font-size: 0.8rem;
+}
+
+.kb-citation-top strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.kb-citation-row p {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--soft-ink);
+  line-height: 1.45;
+}

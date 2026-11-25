@@ -44,6 +44,9 @@ import { discoverMcpServer, importMcpToolAsConnector } from "./mcp-discovery";
 import { mcpDiscoverRequestSchema, mcpImportRequestSchema } from "../../packages/contracts/mcp-discovery";
 import { ProactiveEventStore } from "./proactive-engine";
 import { proactiveTriggerInputSchema } from "../../packages/contracts/proactive-events";
+import { KnowledgeBaseStore } from "./knowledge-base";
+import { knowledgeDocumentUpsertSchema } from "../../packages/contracts/knowledge-base";
+import { extractDocumentAction } from "./document-extractor";
 import { OmnichannelStore } from "./omnichannel-store";
 import { omnichannelConfigSchema } from "../../packages/contracts/omnichannel";
 import { EvalRunnerStore } from "./eval-runner";
@@ -256,6 +259,7 @@ export async function startApp(options: Options) {
   const actionFlowStore = new ActionFlowStore(options.dataDir);
   const workflowEngine = new WorkflowEngine(options.dataDir, { approvalStore, connectorStore });
   const proactiveStore = new ProactiveEventStore(options.dataDir);
+  const knowledgeBase = new KnowledgeBaseStore(options.dataDir);
   const evalRunner = new EvalRunnerStore(options.dataDir);
   const tradeStore = new TradeStore(options.dataDir, profileStore);
   setActiveEquityLedger(tradeStore);
@@ -320,7 +324,7 @@ export async function startApp(options: Options) {
     chat: new ChatHarness(offline), close: () => offline.close(),
   }, {
     mode, gateway: options.gateway, dataDir: options.dataDir, customer360, portfolioSnapshots, goalProgressProvider,
-    opsStore, salesStore, connectorStore, approvalStore, tradeStore, actionFlowStore, workflowEngine,
+    opsStore, salesStore, connectorStore, approvalStore, tradeStore, actionFlowStore, workflowEngine, knowledgeBase,
     onTradeSettle: makeTradeSettler,
   });
 
@@ -839,6 +843,21 @@ export async function startApp(options: Options) {
           connectorStore,
         }));
       }
+      if (id === "knowledge-base" && method === "GET") {
+        return json(res, knowledgeBase.view());
+      }
+      if (id === "knowledge-base" && method === "POST") {
+        const input = await body(req, knowledgeDocumentUpsertSchema, 32 * 1024);
+        return json(res, knowledgeBase.upsert(input));
+      }
+      if (id === "knowledge-base-delete" && method === "POST") {
+        const { id: docId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());
+        return json(res, knowledgeBase.deleteOrReset(docId));
+      }
+      if (id === "knowledge-search" && method === "POST") {
+        const { query } = await body(req, z.object({ query: z.string().trim().min(2).max(400) }).strict());
+        return json(res, knowledgeBase.search(query, 4));
+      }
     }
     if (resource === "conversations") {
       if (method === "POST" && !id) {
@@ -1046,6 +1065,19 @@ export async function startApp(options: Options) {
           throw new ApiError(404, "workflow_not_found", err instanceof Error ? err.message : "Workflow not found.");
         }
       }
+    }
+    if (resource === "documents" && id === "extract" && !operation && method === "POST") {
+      const input = await body(req, z.object({
+        fileName: z.string().trim().min(1).max(120),
+        content: z.string().trim().min(5).max(8000),
+      }).strict(), 16 * 1024);
+      const extracted = await extractDocumentAction({
+        fileName: input.fileName,
+        content: input.content,
+        gateway: options.gateway,
+        dataDir: options.dataDir,
+      });
+      return json(res, { extracted });
     }
     if (resource === "proactive") {
       if (id === "alerts" && !operation && method === "GET") {

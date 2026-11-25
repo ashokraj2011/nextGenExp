@@ -4,6 +4,7 @@ import {
 } from "lucide-react";
 import { ActionFlowsPanel } from "./action-flows-panel";
 import { WorkflowStudioPanel } from "./workflow-studio-panel";
+import { KnowledgeBasePanel } from "./knowledge-base-panel";
 import { adminPaths } from "../../packages/contracts/admin-paths";
 import { componentNames, type ComponentName } from "../../packages/contracts/domain";
 import type {
@@ -19,7 +20,7 @@ import type {
 import { api } from "./api";
 import "./experience-registry-admin.css";
 
-type Tab = "intents" | "content" | "nba" | "flows" | "workflows";
+type Tab = "intents" | "content" | "nba" | "flows" | "workflows" | "kb";
 
 const conditionLabels: Record<NbaConditionKind, string> = {
   unfunded_account: "Account is unfunded",
@@ -416,13 +417,18 @@ export function ExperienceRegistryAdmin() {
         <button type="button" role="tab" aria-selected={tab === "workflows"} className={"reg-tab" + (tab === "workflows" ? " is-active" : "")} onClick={() => { setTab("workflows"); setNotice(null); }}>
           <Layers size={15} aria-hidden="true" />Workflows (Multi-Step)
         </button>
+        <button type="button" role="tab" aria-selected={tab === "kb"} className={"reg-tab" + (tab === "kb" ? " is-active" : "")} onClick={() => { setTab("kb"); setNotice(null); }}>
+          <BookOpen size={15} aria-hidden="true" />Knowledge Base (RAG)
+        </button>
       </div>
 
       {notice && (
         <p className={"reg-notice " + (notice.tone === "error" ? "is-error" : "is-ok")} role="status">{notice.text}</p>
       )}
 
-      {tab === "workflows" ? (
+      {tab === "kb" ? (
+        <KnowledgeBasePanel />
+      ) : tab === "workflows" ? (
         <WorkflowStudioPanel />
       ) : tab === "flows" ? (
         <ActionFlowsPanel />

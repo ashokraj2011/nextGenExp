@@ -19,8 +19,9 @@ import { api } from "./api";
 import { AdminNavigation } from "./admin-navigation";
 import { readActiveConversation, readProfileSession, rememberActiveConversation, saveProfileSession } from "./conversation-storage";
 import {
-  AttachmentChipList, composeMessageWithAttachments, computeNextSuggestions, NextSuggestionChips,
-  readAttachmentFile, SpeakButton, useVoiceInput, type ComposerAttachment, type NextSuggestion,
+  AttachmentChipList, composeMessageWithAttachments, computeNextSuggestions, createSampleAttachment,
+  NextSuggestionChips, readAttachmentFile, SAMPLE_UPLOAD_DOCUMENTS, SpeakButton, useVoiceInput,
+  type ComposerAttachment, type NextSuggestion,
 } from "./composer-extras";
 import { DemoProfiles, ProfileAvatar } from "./demo-profiles";
 import { DomainLiveHud, DomainPackSwitcher, DomainWelcomeHome, useDomainPack } from "./domain-pack-ui";
@@ -307,6 +308,7 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [localNotice, setLocalNotice] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  const [sampleMenuOpen, setSampleMenuOpen] = useState(false);
 
   const voice = useVoiceInput({
     onTranscript: (text) => {
@@ -399,22 +401,53 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
               type="file"
               multiple
               className="sr-only"
-              accept=".pdf,.csv,.txt,.json,.md,.png,.jpg,.jpeg,.webp"
+              accept=".pdf,.csv,.txt,.json,.md,.log,.png,.jpg,.jpeg,.webp"
               onChange={(event) => {
                 void addFiles(event.target.files);
                 event.target.value = "";
               }}
             />
-            <button
-              type="button"
-              className="composer-tool-btn"
-              aria-label="Attach file"
-              title="Attach statement, CSV, PDF, or image"
-              disabled={disabled || pending || running}
-              onClick={() => fileInput.current?.click()}
-            >
-              <Paperclip size={16} aria-hidden="true" />
-            </button>
+            <div className="composer-attach-wrap">
+              <button
+                type="button"
+                className="composer-tool-btn"
+                aria-label="Attach file"
+                title="Attach invoice, CSV, log, PDF, or pick a sample document"
+                disabled={disabled || pending || running}
+                onClick={() => setSampleMenuOpen((open) => !open)}
+              >
+                <Paperclip size={16} aria-hidden="true" />
+              </button>
+              {sampleMenuOpen && (
+                <div className="composer-sample-menu" role="menu" aria-label="Document to Action upload">
+                  <button
+                    type="button"
+                    className="composer-sample-item is-primary"
+                    onClick={() => {
+                      setSampleMenuOpen(false);
+                      fileInput.current?.click();
+                    }}
+                  >
+                    Upload file from computer…
+                  </button>
+                  <div className="composer-sample-divider">Or attach sample document:</div>
+                  {SAMPLE_UPLOAD_DOCUMENTS.map((doc) => (
+                    <button
+                      key={doc.id}
+                      type="button"
+                      className="composer-sample-item"
+                      onClick={() => {
+                        const att = createSampleAttachment(doc.id);
+                        if (att) setAttachments((prev) => [...prev.slice(0, 3), att]);
+                        setSampleMenuOpen(false);
+                      }}
+                    >
+                      {doc.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <button
               type="button"
               className={"composer-tool-btn" + (voice.listening ? " is-listening" : "")}
