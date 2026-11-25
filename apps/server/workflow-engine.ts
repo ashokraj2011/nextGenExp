@@ -24,7 +24,7 @@ export function defaultWorkflowDefinitions(nowIso: string): WorkflowDefinition[]
       domain: "wealth",
       version: "1.0.0",
       description: "Multi-step wire transfer workflow with optional OFAC screening, automatic HITL approval gate above $10,000, cancellable clearinghouse timer, and host portal event sync.",
-      triggerPhrases: ["wire transfer", "send a wire", "initiate wire", "run wire workflow", "international wire"],
+      triggerPhrases: ["wire transfer", "send a wire", "initiate wire", "run wire workflow", "international wire", "wire $", "wire money"],
       enabled: true,
       isBuiltIn: true,
       updatedAt: nowIso,

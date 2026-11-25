@@ -40,6 +40,7 @@ import { WorkflowEngine } from "./workflow-engine";
 import { workflowDefinitionUpsertSchema } from "../../packages/contracts/workflow-definition";
 import { OmnichannelStore } from "./omnichannel-store";
 import { omnichannelConfigSchema } from "../../packages/contracts/omnichannel";
+import { EvalRunnerStore } from "./eval-runner";
 import { renderCepEmbedSdkScript, renderHostPortalDemoHtml } from "./embed-sdk";
 import { WriteAuditStore } from "./write-audit";
 import { recommendationArbitrateToolRef } from "../../packages/contracts/recommendation-provider";
@@ -248,6 +249,7 @@ export async function startApp(options: Options) {
   });
   const actionFlowStore = new ActionFlowStore(options.dataDir);
   const workflowEngine = new WorkflowEngine(options.dataDir, { approvalStore, connectorStore });
+  const evalRunner = new EvalRunnerStore(options.dataDir);
   const tradeStore = new TradeStore(options.dataDir, profileStore);
   setActiveEquityLedger(tradeStore);
   const writeAudit = new WriteAuditStore(options.dataDir);
@@ -768,6 +770,31 @@ export async function startApp(options: Options) {
       }
       if (id === "omnichannel-test" && method === "POST") {
         return json(res, await omnichannelStore.sendTestNotification(origin));
+      }
+      if (id === "evals" && method === "GET") {
+        return json(res, evalRunner.view());
+      }
+      if (id === "eval-run" && method === "POST") {
+        const input = await body(req, z.object({ mode: z.enum(["deterministic", "live_llm"]).optional() }).strict());
+        const evalMode = input.mode ?? "deterministic";
+        return json(res, await evalRunner.runSuite({
+          mode: evalMode,
+          gateway: options.gateway,
+          profileStore,
+          tradeStore,
+          approvalStore,
+          connectorStore,
+          workflowEngine,
+        }));
+      }
+      if (id === "compliance-packet" && method === "GET") {
+        return json(res, evalRunner.buildCompliancePacket({
+          approvalStore,
+          writeAudit,
+          omnichannelStore,
+          workflowEngine,
+          baseUrl: origin,
+        }));
       }
     }
     if (resource === "conversations") {

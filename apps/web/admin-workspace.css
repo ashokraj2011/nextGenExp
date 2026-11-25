@@ -570,3 +570,328 @@
   margin-top: 8px;
   max-height: 410px;
 }
+
+
+/* Guardrail Eval Runner & Compliance Audit Export (/admin/logs?source=evals) */
+.eval-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.eval-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.eval-head h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+}
+
+.eval-head p {
+  margin: 0;
+  max-width: 720px;
+  font-size: 0.86rem;
+  color: var(--muted);
+  line-height: 1.48;
+}
+
+.eval-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.eval-mode-select {
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line-strong);
+  background: var(--white);
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.eval-run-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 9px;
+  border: 1px solid var(--teal);
+  background: var(--teal);
+  color: #ffffff;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.eval-run-btn:disabled { opacity: 0.65; cursor: not-allowed; }
+
+.eval-notice {
+  margin: 0;
+  padding: 10px 13px;
+  border-radius: 10px;
+  background: var(--teal-pale);
+  border: 1px solid var(--teal-border);
+  color: var(--teal-dark);
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.eval-gate-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+}
+
+.eval-gate-banner.is-ready_to_publish {
+  background: #ecfdf5;
+  border-color: #86efac;
+  color: #166534;
+}
+
+.eval-gate-banner.is-blocked {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #991b1b;
+}
+
+.eval-gate-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.eval-gate-left strong {
+  display: block;
+  font-size: 0.94rem;
+  letter-spacing: 0.01em;
+}
+
+.eval-gate-left span {
+  font-size: 0.82rem;
+  opacity: 0.92;
+}
+
+.eval-gate-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.eval-digest-chip {
+  font-size: 0.78rem;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+.eval-category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.eval-cat-card {
+  text-align: left;
+  padding: 11px 13px;
+  border-radius: 11px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.eval-cat-card.is-active {
+  border-color: var(--teal);
+  background: var(--teal-pale);
+}
+
+.eval-cat-card.has-fail {
+  border-color: #fca5a5;
+}
+
+.eval-cat-card span { font-size: 0.75rem; color: var(--muted); font-weight: 600; }
+.eval-cat-card strong { font-size: 1.05rem; }
+.eval-cat-card small { font-size: 0.72rem; color: var(--soft-ink); }
+
+.eval-history-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.eval-history-pill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--white);
+  color: var(--ink);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.eval-history-pill.is-active {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #ffffff;
+}
+
+.eval-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.eval-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.eval-table th,
+.eval-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.eval-table th {
+  background: var(--paper);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.eval-table tr:last-child td { border-bottom: 0; }
+
+.eval-pass-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.eval-pass-pill.is-pass { background: #dcfce7; color: #166534; }
+.eval-pass-pill.is-fail { background: #fee2e2; color: #991b1b; }
+
+.eval-sev-pill {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.eval-sev-pill.is-critical { background: #fee2e2; color: #991b1b; }
+.eval-sev-pill.is-high { background: #fef3c7; color: #92400e; }
+.eval-sev-pill.is-medium { background: #e0e7ff; color: #3730a3; }
+
+.eval-case-prompt {
+  font-size: 0.76rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.eval-case-detail {
+  font-size: 0.76rem;
+  color: var(--soft-ink);
+  margin-top: 3px;
+}
+
+.eval-kv {
+  font-size: 0.75rem;
+  margin-bottom: 2px;
+}
+
+.eval-kv span { color: var(--muted); }
+.eval-ms { font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+
+.eval-empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  color: var(--muted);
+}
+
+.eval-empty-state h3 { margin: 8px 0 4px; color: var(--ink); }
+.eval-empty-state p { margin: 0; font-size: 0.85rem; }
+
+.eval-audit-export {
+  margin-top: 6px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.eval-audit-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.eval-audit-head h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 4px;
+  font-size: 0.96rem;
+}
+
+.eval-audit-head p {
+  margin: 0;
+  max-width: 720px;
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.eval-packet-preview {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+
+.eval-packet-meta {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: var(--soft-ink);
+}

@@ -26,6 +26,7 @@ import type {
 import type { ActionFlow, ActionFlowUpsertInput } from "../../packages/contracts/action-flow";
 import type { WorkflowDefinition, WorkflowDefinitionUpsertInput, WorkflowRun, WorkflowsAdminView } from "../../packages/contracts/workflow-definition";
 import type { OmnichannelConfig, OmnichannelDelivery, OmnichannelView } from "../../packages/contracts/omnichannel";
+import type { ComplianceAuditPacket, EvalRunReport, EvalSuiteView } from "../../packages/contracts/eval-suite";
 import type { Customer360AdminRecord, Customer360ProfileInput } from "../../packages/contracts/customer-360";
 import type {
   ExperienceRegistryView,
@@ -209,6 +210,9 @@ export const api = {
   omnichannel: () => request<OmnichannelView>("/api/admin/omnichannel"),
   saveOmnichannel: (config: Partial<OmnichannelConfig>) => request<OmnichannelView>("/api/admin/omnichannel", config),
   testOmnichannel: () => request<{ delivery: OmnichannelDelivery; view: OmnichannelView }>("/api/admin/omnichannel-test", {}),
+  evals: () => request<EvalSuiteView>("/api/admin/evals"),
+  runEvals: (mode: "deterministic" | "live_llm" = "deterministic") => request<{ report: EvalRunReport; runs: EvalRunReport[] }>("/api/admin/eval-run", { mode }),
+  compliancePacket: () => request<ComplianceAuditPacket>("/api/admin/compliance-packet"),
   workflows: () => request<WorkflowsAdminView>("/api/workflows"),
   saveWorkflow: (input: WorkflowDefinitionUpsertInput) => request<WorkflowsAdminView>("/api/workflows", input),
   deleteWorkflow: (id: string) => request<WorkflowsAdminView>("/api/workflows/" + id + "/delete", {}),

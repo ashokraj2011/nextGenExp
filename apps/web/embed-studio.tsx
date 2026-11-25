@@ -18,7 +18,7 @@ export function EmbedStudio() {
   const [mode, setMode] = useState<CepEmbedMode>("inline");
   const [domain, setDomain] = useState<CepEmbedDomain>("wealth");
   const [theme, setTheme] = useState<CepEmbedTheme>("light");
-  const [personaId, setPersonaId] = useState("persona_new_investor");
+  const [personaId, setPersonaId] = useState("demo-learner");
   const [brand, setBrand] = useState("Meridian AI Concierge");
   const [accent, setAccent] = useState("#1d4ed8");
   const [snippetTab, setSnippetTab] = useState<SnippetTab>("web-component");
@@ -238,9 +238,9 @@ export function EmbeddedAdvisor() {
             <label>
               <span>Signed-In Customer Persona</span>
               <select value={personaId} onChange={(e) => setPersonaId(e.target.value)}>
-                <option value="persona_new_investor">Alice Morgan (Active Investor)</option>
-                <option value="persona_retirement_planner">Robert Chen (Retirement)</option>
-                <option value="persona_unfunded_new">Marcus Reed (Unfunded)</option>
+                <option value="demo-learner">Alice Morgan (Active Investor)</option>
+                <option value="demo-returning">Jordan Lee (Returning Investor)</option>
+                <option value="demo-new-account">Marcus Reed (Unfunded)</option>
               </select>
             </label>
             <label>

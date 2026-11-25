@@ -7,6 +7,7 @@ import { pendingActionsContext } from "../../packages/contracts/workspace";
 import { api, toolSetupErrorMessage } from "./api";
 import { diagnosticHref } from "./admin-navigation";
 import { CallLogs, PendingActionLogs } from "./call-logs";
+import { EvalRunnerPanel } from "./eval-runner-panel";
 import { Inspector } from "./inspector";
 import { readActiveConversation, rememberActiveConversation } from "./conversation-storage";
 
@@ -405,6 +406,7 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
   const approvalsView = view === "logs" && query.get("source") === "approvals";
   const writeAuditView = view === "logs" && query.get("source") === "write_audit";
   const analyticsView = view === "logs" && query.get("source") === "analytics";
+  const evalsView = view === "logs" && query.get("source") === "evals";
 
   useEffect(() => {
     let active = true;
@@ -421,13 +423,13 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
   }, [query, selectThread]);
 
   useEffect(() => {
-    if (!selectedId || pendingActionView || approvalsView || writeAuditView || analyticsView) return;
+    if (!selectedId || pendingActionView || approvalsView || writeAuditView || analyticsView || evalsView) return;
     let active = true;
     void api.conversation(selectedId).then((row) => {
       if (active) setConversation(row);
     }, (error: unknown) => { if (active) setNotice(toolSetupErrorMessage(error)); });
     return () => { active = false; };
-  }, [selectedId, refresh, pendingActionView, approvalsView, writeAuditView, analyticsView]);
+  }, [selectedId, refresh, pendingActionView, approvalsView, writeAuditView, analyticsView, evalsView]);
 
   const loaded = conversation?.id === selectedId ? conversation : undefined;
   const requestedTurn = loaded?.id === query.get("thread") ? query.get("turn") ?? undefined : undefined;
@@ -435,13 +437,15 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
   const approvalsQuery = new URLSearchParams({ source: "approvals" });
   const writeAuditQuery = new URLSearchParams({ source: "write_audit" });
   const analyticsQuery = new URLSearchParams({ source: "analytics" });
+  const evalsQuery = new URLSearchParams({ source: "evals" });
   if (selectedId) {
     pendingQuery.set("thread", selectedId);
     approvalsQuery.set("thread", selectedId);
     writeAuditQuery.set("thread", selectedId);
     analyticsQuery.set("thread", selectedId);
+    evalsQuery.set("thread", selectedId);
   }
-  const isChatCallsView = !pendingActionView && !approvalsView && !writeAuditView && !analyticsView;
+  const isChatCallsView = !pendingActionView && !approvalsView && !writeAuditView && !analyticsView && !evalsView;
   return <main className="admin-main admin-diagnostics" aria-labelledby="diagnostics-title">
     <header className="admin-heading"><h1 id="diagnostics-title">{title}</h1></header>
     {view === "logs" && <nav className="log-sources" aria-label="Log sources">
@@ -455,11 +459,14 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
         href={adminPaths.logs + "?" + writeAuditQuery}>Write audit (sfield)</a>
       <a className="rail-link" aria-current={analyticsView ? "page" : undefined}
         href={adminPaths.logs + "?" + analyticsQuery}>Engagement analytics</a>
+      <a className="rail-link" aria-current={evalsView ? "page" : undefined}
+        href={adminPaths.logs + "?" + evalsQuery}>Guardrail Evals &amp; Audit</a>
     </nav>}
     {pendingActionView ? <PendingActionLogs profiles={configuration?.personas ?? []} />
       : approvalsView ? <ApprovalQueuePanel />
       : writeAuditView ? <WriteAuditLogs />
       : analyticsView ? <EngagementAnalyticsPanel />
+      : evalsView ? <EvalRunnerPanel />
       : <section className="admin-card diagnostics-picker">
       <label htmlFor={selectId}>Conversation</label>
       <div>

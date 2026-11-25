@@ -73,7 +73,7 @@ export function deterministicCapabilityRoute(prompt: string): SemanticRouteDecis
       extractedParams: parsed,
     };
   }
-  if (isStockHoldingsPrompt(clean)) {
+  if (isStockHoldingsPrompt(clean) || /\b(?:equity|stock)\s+book\b|\bmy\s+equities\b/i.test(clean)) {
     return {
       capabilityId: "stock_holdings",
       capabilityLabel: capabilityLabelFor("stock_holdings"),
