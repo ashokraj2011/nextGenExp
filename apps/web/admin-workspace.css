@@ -1035,3 +1035,79 @@
 
 .proactive-trigger-btn strong { display: block; font-size: 0.84rem; margin-bottom: 2px; }
 .proactive-trigger-btn small { font-size: 0.75rem; color: var(--muted); }
+
+
+/* Scheduled Autonomous Jobs Card (/admin/embed) */
+.sched-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 12px;
+}
+
+.sched-card {
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sched-card.is-paused {
+  opacity: 0.72;
+}
+
+.sched-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sched-card-top strong {
+  display: block;
+  font-size: 0.88rem;
+  color: var(--ink);
+}
+
+.sched-cadence {
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.sched-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--soft-ink);
+  cursor: pointer;
+}
+
+.sched-last {
+  margin: 0;
+  font-size: 0.79rem;
+  color: var(--soft-ink);
+  line-height: 1.45;
+}
+
+.sched-last.is-muted {
+  color: var(--muted);
+}
+
+.sched-card-foot {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sched-meta {
+  font-size: 0.74rem;
+  color: var(--muted);
+}

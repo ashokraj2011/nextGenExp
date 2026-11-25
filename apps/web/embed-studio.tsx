@@ -4,6 +4,7 @@ import type { OmnichannelChannel, OmnichannelConfig, OmnichannelView } from "../
 import type { CepEmbedDomain, CepEmbedMode, CepEmbedTheme } from "../../packages/embed-sdk";
 import { api } from "./api";
 import { ProactiveEventsCard } from "./proactive-events-card";
+import { ScheduledJobsCard } from "./scheduled-jobs-card";
 
 type SnippetTab = "web-component" | "react" | "javascript" | "events";
 
@@ -443,6 +444,7 @@ export function EmbeddedAdvisor() {
       </section>
 
       <ProactiveEventsCard />
+      <ScheduledJobsCard />
     </div>
   );
 }

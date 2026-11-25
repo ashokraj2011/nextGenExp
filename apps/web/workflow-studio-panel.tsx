@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Code2, Layers, Play, Plus, RotateCcw, Save, Sparkles, Trash2 } from "lucide-react";
+import { Code2, GitBranch, Layers, Play, Plus, RotateCcw, Save, Sparkles, Trash2 } from "lucide-react";
 import type {
   WorkflowDefinition,
   WorkflowDefinitionUpsertInput,
@@ -7,6 +7,7 @@ import type {
   WorkflowStep,
 } from "../../packages/contracts/workflow-definition";
 import { api } from "./api";
+import { WorkflowDagView } from "./workflow-dag";
 
 function makeBlankWorkflow(): WorkflowDefinitionUpsertInput {
   return {
@@ -65,7 +66,8 @@ export function WorkflowStudioPanel() {
   const [recentRuns, setRecentRuns] = useState<WorkflowRun[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [draft, setDraft] = useState<WorkflowDefinitionUpsertInput | null>(null);
-  const [editMode, setEditMode] = useState<"visual" | "json">("visual");
+  const [editMode, setEditMode] = useState<"dag" | "visual" | "json">("dag");
+  const [replayRun, setReplayRun] = useState<WorkflowRun | null>(null);
   const [jsonText, setJsonText] = useState("");
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
@@ -89,6 +91,7 @@ export function WorkflowStudioPanel() {
 
   const pickDefinition = (def: WorkflowDefinition) => {
     setSelectedId(def.id);
+    setReplayRun(null);
     const clean: WorkflowDefinitionUpsertInput = {
       id: def.id,
       name: def.name,
@@ -293,13 +296,24 @@ export function WorkflowStudioPanel() {
           ) : (
             <div className="wf-runs-list">
               {recentRuns.slice(0, 6).map((r) => (
-                <div key={r.runId} className="wf-run-mini">
+                <button
+                  key={r.runId}
+                  type="button"
+                  className={"wf-run-mini is-clickable" + (replayRun?.runId === r.runId ? " is-active" : "")}
+                  title="Click to replay this run on the Visual DAG"
+                  onClick={() => {
+                    const matchedDef = definitions.find((d) => d.id === r.workflowId);
+                    if (matchedDef) pickDefinition(matchedDef);
+                    setReplayRun(r);
+                    setEditMode("dag");
+                  }}
+                >
                   <div>
                     <strong>{r.workflowName}</strong>
-                    <small>{r.runId} · {r.actorName}</small>
+                    <small>{r.runId} · {r.actorName} · Replay DAG</small>
                   </div>
                   <span className={`wf-status-badge is-${r.status}`}>{r.status.replace("_", " ")}</span>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -365,8 +379,11 @@ export function WorkflowStudioPanel() {
               </div>
               <div className="wf-editor-actions">
                 <div className="wf-mode-toggle">
+                  <button type="button" className={editMode === "dag" ? "is-active" : ""} onClick={() => setEditMode("dag")}>
+                    <GitBranch size={14} aria-hidden="true" />DAG Graph
+                  </button>
                   <button type="button" className={editMode === "visual" ? "is-active" : ""} onClick={() => setEditMode("visual")}>
-                    <Layers size={14} aria-hidden="true" />Visual
+                    <Layers size={14} aria-hidden="true" />Editor
                   </button>
                   <button type="button" className={editMode === "json" ? "is-active" : ""} onClick={() => { setJsonText(JSON.stringify(draft, null, 2)); setEditMode("json"); }}>
                     <Code2 size={14} aria-hidden="true" />JSON Spec
@@ -386,7 +403,13 @@ export function WorkflowStudioPanel() {
               </div>
             </div>
 
-            {editMode === "json" ? (
+            {editMode === "dag" ? (
+              <WorkflowDagView
+                definition={draft}
+                replayRun={replayRun?.workflowId === draft.id ? replayRun : null}
+                onClearReplay={() => setReplayRun(null)}
+              />
+            ) : editMode === "json" ? (
               <div className="wf-json-pane">
                 <textarea
                   className="wf-json-editor"

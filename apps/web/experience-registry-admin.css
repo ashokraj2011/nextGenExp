@@ -879,3 +879,203 @@
   color: var(--soft-ink);
   line-height: 1.45;
 }
+
+
+/* Visual Workflow DAG & Live Execution Replay */
+.wf-run-mini.is-clickable {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wf-run-mini.is-clickable:hover,
+.wf-run-mini.is-clickable.is-active {
+  border-color: var(--teal);
+  background: var(--teal-pale);
+}
+
+.wf-dag-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.wf-dag-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  font-size: 0.84rem;
+}
+
+.wf-dag-banner-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--teal-dark);
+}
+
+.wf-dag-canvas {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 18px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: radial-gradient(circle at 1px 1px, var(--line) 1px, transparent 0);
+  background-size: 18px 18px;
+}
+
+.wf-dag-stage {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.wf-dag-connector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 22px;
+}
+
+.wf-dag-line {
+  width: 2px;
+  flex: 1;
+  background: var(--line-strong);
+}
+
+.wf-dag-arrow {
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid var(--line-strong);
+}
+
+.wf-dag-branch-row {
+  width: min(640px, 100%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 7px 12px;
+  margin-bottom: 8px;
+  border-radius: 999px;
+  border: 1px dashed #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 0.74rem;
+}
+
+.wf-dag-branch-row.is-skipped-branch {
+  opacity: 0.85;
+  border-color: #94a3b8;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.wf-dag-diamond {
+  font-weight: 700;
+}
+
+.wf-dag-branch-paths {
+  display: inline-flex;
+  gap: 10px;
+  font-weight: 600;
+}
+
+.wf-branch-true { color: #166534; }
+.wf-branch-false { color: #64748b; }
+
+.wf-dag-node {
+  width: min(640px, 100%);
+  padding: 13px 16px;
+  border-radius: 13px;
+  border: 1.5px solid var(--line-strong);
+  background: var(--white);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wf-dag-node.is-trigger {
+  border-color: var(--teal);
+  background: var(--teal-pale);
+}
+
+.wf-dag-node.is-terminal {
+  border-style: dashed;
+}
+
+.wf-dag-node.is-run-completed {
+  border-color: #16a34a;
+  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.14);
+}
+
+.wf-dag-node.is-run-skipped {
+  border-style: dashed;
+  opacity: 0.68;
+}
+
+.wf-dag-node.is-run-waiting_approval {
+  border-color: #d97706;
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.18);
+}
+
+.wf-dag-node-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wf-dag-step-idx {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.wf-dag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  background: var(--paper);
+  color: var(--soft-ink);
+}
+
+.wf-dag-chip.is-trigger,
+.wf-dag-chip.is-terminal { background: var(--teal); color: #ffffff; }
+.wf-dag-chip.is-collect_input { background: #dbeafe; color: #1e40af; }
+.wf-dag-chip.is-compute { background: #ede9fe; color: #5b21b6; }
+.wf-dag-chip.is-hitl_approval { background: #fef3c7; color: #92400e; }
+.wf-dag-chip.is-connector_call { background: #fce7f3; color: #9d174d; }
+.wf-dag-chip.is-async_job { background: #e0f2fe; color: #075985; }
+.wf-dag-chip.is-emit_host_event { background: #dcfce7; color: #166534; }
+
+.wf-dag-node-meta {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.wf-dag-replay-note {
+  margin-top: 4px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  font-size: 0.78rem;
+  color: var(--ink);
+}

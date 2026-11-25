@@ -46,6 +46,8 @@ import { ProactiveEventStore } from "./proactive-engine";
 import { proactiveTriggerInputSchema } from "../../packages/contracts/proactive-events";
 import { KnowledgeBaseStore } from "./knowledge-base";
 import { knowledgeDocumentUpsertSchema } from "../../packages/contracts/knowledge-base";
+import { ScheduledJobStore } from "./scheduled-jobs";
+import { scheduledJobUpsertSchema } from "../../packages/contracts/scheduled-jobs";
 import { extractDocumentAction } from "./document-extractor";
 import { OmnichannelStore } from "./omnichannel-store";
 import { omnichannelConfigSchema } from "../../packages/contracts/omnichannel";
@@ -262,6 +264,10 @@ export async function startApp(options: Options) {
   const knowledgeBase = new KnowledgeBaseStore(options.dataDir);
   const evalRunner = new EvalRunnerStore(options.dataDir);
   const tradeStore = new TradeStore(options.dataDir, profileStore);
+  const scheduledJobs = new ScheduledJobStore(options.dataDir, {
+    profileStore, tradeStore, opsStore, salesStore, proactiveStore,
+  });
+  if ((options.mode ?? "live") !== "test") scheduledJobs.startTicker();
   setActiveEquityLedger(tradeStore);
   const writeAudit = new WriteAuditStore(options.dataDir);
   store.setDomainBindingContext(() => ({ incident: opsStore.primaryIncident(), deal: salesStore.primaryDeal() }));
@@ -857,6 +863,21 @@ export async function startApp(options: Options) {
       if (id === "knowledge-search" && method === "POST") {
         const { query } = await body(req, z.object({ query: z.string().trim().min(2).max(400) }).strict());
         return json(res, knowledgeBase.search(query, 4));
+      }
+      if (id === "scheduled-jobs" && method === "GET") {
+        return json(res, scheduledJobs.view());
+      }
+      if (id === "scheduled-jobs" && method === "POST") {
+        const input = await body(req, scheduledJobUpsertSchema, 8 * 1024);
+        return json(res, scheduledJobs.upsert(input));
+      }
+      if (id === "scheduled-jobs-run" && method === "POST") {
+        const { id: jobId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());
+        try {
+          return json(res, scheduledJobs.runJob(jobId, "manual"));
+        } catch (err) {
+          throw new ApiError(404, "scheduled_job_not_found", err instanceof Error ? err.message : "Job not found.");
+        }
       }
     }
     if (resource === "conversations") {
@@ -1503,6 +1524,7 @@ export async function startApp(options: Options) {
       await experience.close();
       tradeStore.close();
       workflowEngine.close();
+      scheduledJobs.close();
       if (getActiveCustomerProfileStore() === profileStore) setActiveCustomerProfileStore(null);
       if (getActiveEquityLedger() === tradeStore) setActiveEquityLedger(null);
       if (getActiveExperienceRegistryStore() === experienceRegistry) setActiveExperienceRegistryStore(null);

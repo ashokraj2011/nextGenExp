@@ -30,6 +30,7 @@ import type { ComplianceAuditPacket, EvalRunReport, EvalSuiteView } from "../../
 import type { McpDiscoveryResult } from "../../packages/contracts/mcp-discovery";
 import type { ProactiveAlert, ProactiveTriggerInput, ProactiveView } from "../../packages/contracts/proactive-events";
 import type { KnowledgeBaseView, KnowledgeDocumentUpsertInput, KnowledgeSearchResult } from "../../packages/contracts/knowledge-base";
+import type { ScheduledJobExecution, ScheduledJobsView, ScheduledJobUpsertInput } from "../../packages/contracts/scheduled-jobs";
 import type { Customer360AdminRecord, Customer360ProfileInput } from "../../packages/contracts/customer-360";
 import type {
   ExperienceRegistryView,
@@ -247,6 +248,9 @@ export const api = {
   saveKnowledgeDoc: (input: KnowledgeDocumentUpsertInput) => request<KnowledgeBaseView>("/api/admin/knowledge-base", input),
   deleteKnowledgeDoc: (id: string) => request<KnowledgeBaseView>("/api/admin/knowledge-base-delete", { id }),
   searchKnowledgeBase: (query: string) => request<KnowledgeSearchResult>("/api/admin/knowledge-search", { query }),
+  scheduledJobs: () => request<ScheduledJobsView>("/api/admin/scheduled-jobs"),
+  saveScheduledJob: (input: ScheduledJobUpsertInput) => request<ScheduledJobsView>("/api/admin/scheduled-jobs", input),
+  runScheduledJob: (id: string) => request<{ execution: ScheduledJobExecution; view: ScheduledJobsView }>("/api/admin/scheduled-jobs-run", { id }),
   startWorkflow: (id: string, input: { personaId?: string; actorName?: string; initialInputs?: Record<string, string | number | boolean> } = {}) => (
     request<{ run: WorkflowRun; definition: WorkflowDefinition }>("/api/workflows/" + id + "/start", input)
   ),
