@@ -1,4 +1,5 @@
-export type DomainPackId = "wealth" | "it_ops" | "sales_revops";
+export const domainPackIds = ["wealth", "it_ops", "sales_revops"] as const;
+export type DomainPackId = typeof domainPackIds[number];
 
 export interface DomainTopic {
   id: string;

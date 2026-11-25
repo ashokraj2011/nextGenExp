@@ -1,3 +1,4 @@
+import { serverTenantId } from "./tenant";
 import { ASK_USER, ToolError, type JsonObject, type NeutralModelRequest, type Principal, type RunResult, type SField, type ToolHandlerContext } from "@sfield/core";
 import { z } from "zod";
 import {
@@ -75,7 +76,7 @@ export class ExperienceAgent {
     requireCheck(run?.agentId === experienceAgentId && run.kind === "standalone" && typeof turnId === "string"
       && run.idempotencyKey === turnId + ":experience-agent", "EXPERIENCE_RUN_NOT_BOUND");
     const turn = this.execution.current(turnId);
-    requireCheck(run.tenantId === "pzn-local" && run.subjectId === turn.scope.principalId
+    requireCheck(run.tenantId === serverTenantId && run.subjectId === turn.scope.principalId
       && (!turn.agentRunId || turn.agentRunId === runId)
       && (!principal || (principal.tenantId === run.tenantId && principal.subjectId === run.subjectId)), "EXPERIENCE_SCOPE_MISMATCH");
     return turn;

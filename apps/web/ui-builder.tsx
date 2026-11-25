@@ -6,13 +6,15 @@ import {
 import { dataDictionary, type DataBindingKey } from "../../packages/contracts/data-bindings";
 import type { Customer360AdminRecord } from "../../packages/contracts/customer-360";
 import {
-  layoutComponents, maxLayoutDescription, maxLayoutSlots, maxLayoutTargets, maxLayouts, targetKey,
+  layoutComponents, layoutTargetDomain, maxLayoutDescription, maxLayoutSlots, maxLayoutTargets, maxLayouts, targetKey,
   type BoundWidgetMetric, type CustomFormField, type CustomFormFieldType, type LayoutComponent, type LayoutSlot, type UiDesign, type UiLayoutCatalog, type UiLayoutChange, type UiLayoutRecord,
 } from "../../packages/contracts/ui-layout";
 import type { DisplayExperience } from "../../packages/contracts/surface";
 import type { SavedWidget } from "../../packages/contracts/widget";
 import { api, toolSetupErrorMessage } from "./api";
 import { ExperienceLayoutPreview } from "./surface";
+import { DesignLibrary } from "./design-library";
+import { getDomainPack, type DomainPackId } from "../../packages/contracts/domain-packs";
 import { WidgetStudio } from "./widget-studio";
 import "./ui-builder.css";
 
@@ -52,7 +54,7 @@ const itOpsStarter = (): UiDesign => ({
       ctaPrompt: "Build an IT incident triage dashboard for our active P1 alert",
     },
   ],
-  targets: [],
+  targets: [{ kind: "capability", id: "ops_incident" }],
 });
 
 const salesRevOpsStarter = (): UiDesign => ({
@@ -76,8 +78,10 @@ const salesRevOpsStarter = (): UiDesign => ({
       ctaPrompt: "Build a Q4 deal desk and discount approval dashboard for DEAL-904",
     },
   ],
-  targets: [],
+  targets: [{ kind: "capability", id: "sales_deal_desk" }],
 });
+
+const domainStarters = { wealth: starter, it_ops: itOpsStarter, sales_revops: salesRevOpsStarter };
 
 const componentLabel = (id: LayoutComponent) => layoutComponents.find((component) => component.id === id)!.label;
 const normalized = (design: UiDesign) => JSON.stringify(design);
@@ -227,7 +231,8 @@ function slotMetaSummary(slot: LayoutSlot): string {
   return `${slot.metrics.length} metrics${bound ? ` · ${bound} live` : ""}${slot.progressBinding ? " · progress" : ""}`;
 }
 
-function LayoutPreview({ design, customers, previewPersonaId, onChangePreviewPersona, published }: {
+function LayoutPreview({ domainId, design, customers, previewPersonaId, onChangePreviewPersona, published }: {
+  domainId: DomainPackId;
   design: UiDesign;
   customers: Customer360AdminRecord[];
   previewPersonaId: string;
@@ -244,7 +249,7 @@ function LayoutPreview({ design, customers, previewPersonaId, onChangePreviewPer
     setUpdating(true);
     setError("");
     const timer = window.setTimeout(() => {
-      void api.previewUiLayout({ ...design, name: design.name.trim() || "Untitled layout" }, previewPersonaId || undefined).then((result) => {
+      void api.previewUiLayout({ ...design, name: design.name.trim() || "Untitled layout" }, previewPersonaId || undefined, domainId).then((result) => {
         if (active) {
           setPreview(result);
           setUpdating(false);
@@ -260,7 +265,7 @@ function LayoutPreview({ design, customers, previewPersonaId, onChangePreviewPer
       active = false;
       window.clearTimeout(timer);
     };
-  }, [design, previewPersonaId]);
+  }, [design, previewPersonaId, domainId]);
 
   const activeCustomerName = customers.find((c) => c.personaId === previewPersonaId)?.displayName;
 
@@ -648,16 +653,18 @@ function statusOf(record: UiLayoutRecord, design = record.draft) {
   return normalized(record.published.design) === normalized(design) ? "Published" : "Draft changes";
 }
 
-function UiWorkspace({ initial, initialWidgets, customers }: {
+function UiWorkspace({ initial, customers }: {
   initial: UiLayoutCatalog;
-  initialWidgets: SavedWidget[];
   customers: Customer360AdminRecord[];
 }) {
-  const [showWidgetLibrary, setShowWidgetLibrary] = useState(false);
-  const [widgets, setWidgets] = useState<SavedWidget[]>(initialWidgets);
+  const [view, setView] = useState<"editor" | "widgets" | "designs">(() =>
+    !initial.domains.length || new URLSearchParams(location.search).get("view") === "library" ? "designs" : "editor");
+  const [library, setLibrary] = useState(initial.library);
+  const [newDomain, setNewDomain] = useState<DomainPackId>(initial.domains[0] ?? "wealth");
+  const [widgets, setWidgets] = useState<SavedWidget[]>([]);
   const [records, setRecords] = useState(initial.layouts);
   const [selected, setSelected] = useState(initial.layouts[0]?.id ?? "new");
-  const [edits, setEdits] = useState<Partial<Record<string, UiDesign>>>(() => initial.layouts.length ? {} : { new: starter() });
+  const [edits, setEdits] = useState<Partial<Record<string, UiDesign>>>(() => initial.layouts.length ? {} : { new: domainStarters[newDomain]() });
   const [expandedSlotId, setExpandedSlotId] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -687,11 +694,33 @@ function UiWorkspace({ initial, initialWidgets, customers }: {
   const [aiSource, setAiSource] = useState<"" | "copilot_llm" | "synthesizer">("");
 
   const record = records.find(({ id }) => id === selected);
-  const activeDesign = edits[selected] ?? record?.draft ?? starter();
+  const domainId = record?.domainId ?? newDomain;
+  const activeDesign = edits[selected] ?? record?.draft ?? domainStarters[domainId]();
+  useEffect(() => {
+    if (!initial.domains.includes(domainId)) return;
+    let active = true;
+    setWidgets([]);
+    void api.widgets(domainId).then((result) => {
+      if (active) setWidgets(result.widgets);
+    }, (reason) => { if (active) setError(toolSetupErrorMessage(reason)); });
+    return () => { active = false; };
+  }, [domainId, initial.domains]);
+  useEffect(() => {
+    if (view !== "designs") return;
+    let active = true;
+    void api.uiLayouts().then((result) => {
+      if (active) {
+        setLibrary(result.library);
+        setRecords((prior) => result.layouts.map((latest) => edits[latest.id] ? prior.find(({ id }) => id === latest.id) ?? latest : latest));
+      }
+    }, (reason) => { if (active) setError(toolSetupErrorMessage(reason)); });
+    return () => { active = false; };
+  }, [view]);
   const attached = new Set(activeDesign.targets.map(targetKey));
   const names = new Map(initial.targets.map((option) => [targetKey(option.target), option]));
-  const choices = initial.targets.filter(({ target }) => !attached.has(targetKey(target)));
+  const choices = initial.targets.filter(({ target }) => layoutTargetDomain(target) === domainId && !attached.has(targetKey(target)));
   const canPublish = Boolean(activeDesign.name.trim() && activeDesign.targets.length
+    && activeDesign.targets.every((target) => layoutTargetDomain(target) === domainId)
     && activeDesign.slots.some(({ kind }) => kind === "block" || kind === "form" || kind === "widget")
     && activeDesign.slots.every((slot) => (
       slot.kind === "block"
@@ -718,7 +747,7 @@ function UiWorkspace({ initial, initialWidgets, customers }: {
     setError("");
     setNotice("");
     try {
-      const result = await api.generateUiLayout(text);
+      const result = await api.generateUiLayout(text, domainId);
       setEdits((prev) => ({ ...prev, new: result.design }));
       setSelected("new");
       setExpandedSlotId(null);
@@ -741,6 +770,7 @@ function UiWorkspace({ initial, initialWidgets, customers }: {
   }
 
   function newLayout() {
+    setNewDomain(domainId);
     setEdits((previous) => ({ ...previous, new: blank() }));
     select("new");
     setShowDetails(true);
@@ -783,7 +813,7 @@ function UiWorkspace({ initial, initialWidgets, customers }: {
       ...(widget.ctaLabel ? { ctaLabel: widget.ctaLabel.slice(0, 48), ctaPrompt: widget.prompt.slice(0, 200) } : {}),
     };
     insertSlotAt(slot, atIndex);
-    setShowWidgetLibrary(false);
+    setView("editor");
     setNotice(`Added "${widget.name}" to this layout.`);
   }
 
@@ -831,16 +861,20 @@ function UiWorkspace({ initial, initialWidgets, customers }: {
       };
       const change: UiLayoutChange = operation === "unpublish"
         ? { operation, id: existing!.id, revision: existing!.revision }
-        : existing ? { operation, ...existing, design: designToSave } : { operation, design: designToSave };
+        : { operation, ...existing, domainId, design: designToSave };
       const saved = await api.saveUiLayout(change);
       setRecords((previous) => [saved, ...previous.filter(({ id }) => id !== saved.id)]);
+      setLibrary((previous) => {
+        const others = previous.filter((item) => item.id !== saved.id);
+        return saved.published ? [{ ...saved.published, domainId: saved.domainId }, ...others] : others;
+      });
       setEdits((previous) => {
         const next = { ...previous };
         if (operation !== "unpublish") delete next[selected];
         return next;
       });
       setSelected(saved.id);
-      setNotice(operation === "publish" ? "Layout published to chat." : operation === "unpublish" ? "Layout unpublished." : "Draft saved.");
+      setNotice(operation === "publish" ? "Published to the shared design library." : operation === "unpublish" ? "Layout unpublished." : "Draft saved.");
     } catch (reason) {
       setError(toolSetupErrorMessage(reason));
     } finally {
@@ -853,8 +887,19 @@ function UiWorkspace({ initial, initialWidgets, customers }: {
       <header className="ui-studio-topbar">
         <div className="ui-studio-topbar-left">
           <h1>UI Studio</h1>
-          {!showWidgetLibrary && (
+          {view === "widgets" && <span className="design-scope">{initial.tenantId} / {getDomainPack(domainId).label}</span>}
+          {view === "editor" && (
             <div className="ui-layout-picker-row">
+              <label className="design-scope">{initial.tenantId} <span aria-hidden="true">/</span>
+                <select aria-label="Design domain" disabled={busy || Boolean(record)} value={domainId}
+                  onChange={(event) => {
+                    const next = event.target.value as DomainPackId;
+                    setNewDomain(next);
+                    edit({ ...activeDesign, targets: activeDesign.targets.filter((target) => layoutTargetDomain(target) === next) });
+                  }}>
+                  {initial.domains.map((id) => <option key={id} value={id}>{getDomainPack(id).label}</option>)}
+                </select>
+              </label>
               <select
                 className="ui-layout-picker"
                 aria-label="Select layout"
@@ -890,13 +935,13 @@ function UiWorkspace({ initial, initialWidgets, customers }: {
                 </button>
                 {templatesOpen && (
                   <div className="ui-popover-menu" role="menu">
-                    <button type="button" onClick={() => { setEdits((p) => ({ ...p, new: starter() })); select("new"); setTemplatesOpen(false); }}>
+                    <button type="button" disabled={!initial.domains.includes("wealth")} onClick={() => { setEdits((p) => ({ ...p, new: starter() })); setNewDomain("wealth"); select("new"); setTemplatesOpen(false); }}>
                       Wealth · Balance Comparison
                     </button>
-                    <button type="button" onClick={() => { setEdits((p) => ({ ...p, new: itOpsStarter() })); select("new"); setTemplatesOpen(false); }}>
+                    <button type="button" disabled={!initial.domains.includes("it_ops")} onClick={() => { setEdits((p) => ({ ...p, new: itOpsStarter() })); setNewDomain("it_ops"); select("new"); setTemplatesOpen(false); }}>
                       IT Ops · P1 Incident Card
                     </button>
-                    <button type="button" onClick={() => { setEdits((p) => ({ ...p, new: salesRevOpsStarter() })); select("new"); setTemplatesOpen(false); }}>
+                    <button type="button" disabled={!initial.domains.includes("sales_revops")} onClick={() => { setEdits((p) => ({ ...p, new: salesRevOpsStarter() })); setNewDomain("sales_revops"); select("new"); setTemplatesOpen(false); }}>
                       Sales RevOps · Deal Desk Card
                     </button>
                   </div>
@@ -907,15 +952,17 @@ function UiWorkspace({ initial, initialWidgets, customers }: {
         </div>
 
         <div className="ui-studio-topbar-right">
-          <button
+          <button type="button" className="ui-button ui-button-plain ui-compact-btn" aria-pressed={view === "designs"}
+            onClick={() => setView(view === "designs" && initial.domains.length ? "editor" : "designs")}>Design library</button>
+          {initial.domains.length > 0 && <button
             type="button"
             className="ui-button ui-button-plain ui-compact-btn"
-            onClick={() => setShowWidgetLibrary((v) => !v)}
+            onClick={() => setView(view === "widgets" ? (initial.domains.length ? "editor" : "designs") : "widgets")}
           >
             <LayoutTemplate size={14} aria-hidden="true" />
-            {showWidgetLibrary ? "Back to Studio" : `Widget Library (${widgets.length})`}
-          </button>
-          {!showWidgetLibrary && (
+            {view === "widgets" ? "Back to Studio" : `Widget Library (${widgets.length})`}
+          </button>}
+          {view === "editor" && (
             <>
               <span className={"ui-layout-status" + (record?.published ? " is-published" : "")}>
                 {record?.published && <Check size={12} aria-hidden="true" />}
@@ -942,8 +989,18 @@ function UiWorkspace({ initial, initialWidgets, customers }: {
         </div>
       </header>
 
-      {showWidgetLibrary ? (
-        <WidgetStudio widgets={widgets} onWidgetsChange={setWidgets} onInsertIntoLayout={insertWidgetIntoLayout} />
+      {view !== "editor" && error && <p className="ui-builder-error" role="alert">{error}</p>}
+      {view === "designs" ? (
+        <DesignLibrary tenantId={initial.tenantId} library={library} records={records} targets={initial.targets} canCopy={initial.domains.length > 0}
+          onOpen={(id) => { select(id); setView("editor"); }}
+          onCopy={(item) => {
+            setNewDomain(initial.domains.includes(item.domainId) ? item.domainId : initial.domains[0]);
+            setEdits((prior) => ({ ...prior, new: { ...item.design, name: (item.design.name + " copy").slice(0, 72), targets: [] } }));
+            select("new"); setShowDetails(true); setView("editor");
+            setNotice("Choose the domain and attach an intent or capability for your copy.");
+          }} />
+      ) : view === "widgets" ? (
+        <WidgetStudio key={domainId} domainId={domainId} widgets={widgets} onWidgetsChange={setWidgets} onInsertIntoLayout={insertWidgetIntoLayout} />
       ) : (
         <>
           <section className="ui-copilot-bar" aria-label="Generate data-bound UI with Copilot">
@@ -1199,8 +1256,9 @@ function UiWorkspace({ initial, initialWidgets, customers }: {
             </section>
 
             <LayoutPreview
+              domainId={domainId}
               design={activeDesign}
-              customers={customers}
+              customers={domainId === "wealth" ? customers : []}
               previewPersonaId={previewPersonaId}
               onChangePreviewPersona={setPreviewPersonaId}
               published={Boolean(record?.published)}
@@ -1214,18 +1272,15 @@ function UiWorkspace({ initial, initialWidgets, customers }: {
 
 export function UiBuilder() {
   const [catalog, setCatalog] = useState<UiLayoutCatalog>();
-  const [widgets, setWidgets] = useState<SavedWidget[]>([]);
   const [customers, setCustomers] = useState<Customer360AdminRecord[]>([]);
   const [error, setError] = useState("");
   useEffect(() => {
     let active = true;
     void Promise.all([
       api.uiLayouts(),
-      api.widgets().catch(() => ({ widgets: [] as SavedWidget[] })),
       api.customers().catch(() => ({ customers: [] as Customer360AdminRecord[] })),
-    ]).then(([layoutCatalog, widgetData, customerData]) => {
+    ]).then(([layoutCatalog, customerData]) => {
       if (active) {
-        setWidgets(widgetData.widgets);
         setCustomers(customerData.customers);
         setCatalog(layoutCatalog);
       }
@@ -1234,7 +1289,7 @@ export function UiBuilder() {
   }, []);
   return (
     <div className="ui-builder">
-      {catalog ? <UiWorkspace initial={catalog} initialWidgets={widgets} customers={customers} /> : (
+      {catalog ? <UiWorkspace initial={catalog} customers={customers} /> : (
         <main className="ui-builder-width ui-builder-main">
           <h1>UI Studio</h1>
           {error ? <p className="ui-builder-error" role="alert">{error}</p> : <p role="status">Loading layouts…</p>}

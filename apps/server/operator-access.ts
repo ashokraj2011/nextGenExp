@@ -1,3 +1,4 @@
+import { tenantCookie } from "./tenant";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -22,6 +23,8 @@ export function operatorAccess(dataDir: string, configured?: Record<string, stri
   for (const [name, pass] of users) {
     if (!name.trim() || name.includes(":") || name.length > 80 || typeof pass !== "string" || pass.length < 12) throw new Error("Use named operator accounts and passwords of at least 12 characters");
   }
+  const cookieName = tenantCookie("pzn_operator");
+  const cookiePattern = new RegExp("(?:^|;\\s*)" + cookieName + "=([\\w-]+)\\.([\\w-]+)(?:;|$)");
   const key = randomBytes(32);
   const sign = (s: string) => createHmac("sha256", key).update(s).digest("base64url");
   return (req: IncomingMessage, res: ServerResponse): string | undefined => {
@@ -35,11 +38,11 @@ export function operatorAccess(dataDir: string, configured?: Record<string, stri
       if (split < 1 || !pass || !equal(pass, decoded.slice(split + 1))) return;
       if (!req.url?.startsWith("/api/")) {
         const token = Buffer.from(JSON.stringify([name, Date.now() + 8 * 3600_000])).toString("base64url");
-        res.appendHeader("Set-Cookie", "pzn_operator=" + token + "." + sign(token) + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800");
+        res.appendHeader("Set-Cookie", cookieName + "=" + token + "." + sign(token) + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800");
       }
       return name;
     }
-    const match = req.headers.cookie?.match(/(?:^|;\s*)pzn_operator=([\w-]+)\.([\w-]+)(?:;|$)/);
+    const match = req.headers.cookie?.match(cookiePattern);
     if (!match || !equal(sign(match[1]), match[2])) return;
     const [name, expires] = JSON.parse(Buffer.from(match[1], "base64url").toString());
     if (users.has(name) && expires > Date.now()) return name;

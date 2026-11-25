@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight } from "lucide-react";
-import type { DemoPersona } from "../../packages/contracts/api";
+import type { ProfileChoice } from "../../packages/contracts/api";
 import { api } from "./api";
 import coastalPhoto from "./assets/coastal-planning.jpg";
 import { readProfileSession, saveProfileSession } from "./conversation-storage";
@@ -10,23 +10,29 @@ import { ThemeToggle } from "./theme";
 import "./login.css";
 
 export function Login() {
-  const [profiles, setProfiles] = useState<DemoPersona[]>();
+  const [profiles, setProfiles] = useState<ProfileChoice[]>();
   const [loadFailed, setLoadFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [notice, setNotice] = useState("");
+  const [selecting, setSelecting] = useState(false);
   const chatPath = "/chat" + location.search;
 
   useEffect(() => {
     let mounted = true;
-    void api.bootstrap().then(
-      ({ personas }) => { if (mounted) setProfiles(personas); },
+    void api.profileOptions().then(
+      ({ profiles: choices }) => { if (mounted) setProfiles(choices); },
       () => { if (mounted) setLoadFailed(true); },
     );
     return () => { mounted = false; };
   }, [attempt]);
 
-  function signIn(personaId: string) {
+  async function signIn(personaId: string) {
+    if (selecting) return;
+    setSelecting(true);
+    try { await api.selectProfile(personaId); }
+    catch { setSelecting(false); setNotice("Couldn’t open this profile. Please try again."); return; }
     if (!saveProfileSession(personaId)) {
+      setSelecting(false);
       setNotice("Couldn’t save your profile in this tab. Please try again.");
       return;
     }
@@ -52,13 +58,13 @@ export function Login() {
         <h1 id="login-title">Sign in</h1>
         <p className="login-description">Choose a profile to open your chat.</p>
         {profiles && <ul className="login-profiles" aria-label="Available profiles">
-          {profiles.map(({ personaId, displayName, profile }) => <li key={personaId}>
+          {profiles.map(({ personaId, displayName, fundingStatus }) => <li key={personaId}>
             <button type="button" className="login-profile" aria-label={"Sign in as " + displayName}
-              aria-describedby={"login-account-" + personaId} onClick={() => signIn(personaId)}>
+              aria-describedby={"login-account-" + personaId} disabled={selecting} onClick={() => void signIn(personaId)}>
               <ProfileAvatar name={displayName} />
               <span>
                 <strong>{displayName}</strong>
-                <small id={"login-account-" + personaId}>{profile.accountFundingStatus === "funded" ? "Funded account" : "Awaiting first deposit"}</small>
+                <small id={"login-account-" + personaId}>{fundingStatus ? (fundingStatus === "funded" ? "Funded account" : "Awaiting first deposit") : "Personal account"}</small>
               </span>
               <ArrowRight size={19} aria-hidden="true" />
             </button>

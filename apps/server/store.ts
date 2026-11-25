@@ -1,4 +1,6 @@
-import { maxLayouts, targetKey, type AppliedUiLayout, type UiLayoutChange, type UiLayoutRecord, type UiPublication, type UiTarget } from "../../packages/contracts/ui-layout";
+import { serverTenantId } from "./tenant";
+import type { DomainPackId } from "../../packages/contracts/domain-packs";
+import { layoutTargetDomain, maxLayouts, targetKey, type LibraryDesign, type AppliedUiLayout, type UiLayoutChange, type UiLayoutRecord, type UiPublication, type UiTarget } from "../../packages/contracts/ui-layout";
 import { applyPublishedUi } from "../../packages/experience/ui-layout";
 import { resolveMultiDomainBindings } from "../../packages/customer-profiles/bindings";
 import type { IncidentRecord } from "../../packages/contracts/ops";
@@ -59,6 +61,7 @@ export type TurnTrace = {
 
 export type ConversationRecord = Conversation & {
   principalId: string;
+  legacyTranscript?: boolean;
   sessions: Partial<Record<Stage, string>>;
   customTitle?: boolean;
 };
@@ -123,8 +126,8 @@ function parse<T>(row?: { record: string }): T | undefined {
   return row ? JSON.parse(row.record) as T : undefined;
 }
 export function presentConversation(record: ConversationRecord): Conversation {
-  const { id, title, personaId, scenarioId, updatedAt, archivedAt, audience } = record;
-  return { id, title, personaId, scenarioId, updatedAt, ...(archivedAt === undefined ? {} : { archivedAt }), ...(audience && { audience }) };
+  const { id, title, tenantId, domainId, userId, personaId, scenarioId, updatedAt, archivedAt, audience } = record;
+  return { id, title, tenantId, domainId, userId, personaId, scenarioId, updatedAt, ...(archivedAt === undefined ? {} : { archivedAt }), ...(audience && { audience }) };
 }
 function inaccessible(): never {
   throw new ApiError(404, "not_found", "This item is unavailable.");
@@ -148,6 +151,7 @@ export class Store {
     this.axe = new AgenticStore(this.db);
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS local_sessions (id TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS session_profiles (session_id TEXT PRIMARY KEY REFERENCES local_sessions(id), persona_id TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS workspace_preferences (
         principal_id TEXT NOT NULL, persona_id TEXT NOT NULL, pins TEXT NOT NULL, PRIMARY KEY (principal_id, persona_id)
       );
@@ -157,10 +161,6 @@ export class Store {
       CREATE INDEX IF NOT EXISTS workspace_actions_principal ON workspace_action_logs(principal_id);
       CREATE TABLE IF NOT EXISTS tool_setups (
         principal_id TEXT PRIMARY KEY REFERENCES local_sessions(id), record TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS ui_layouts (
-        principal_id TEXT NOT NULL REFERENCES local_sessions(id), id TEXT NOT NULL, updated_at INTEGER NOT NULL, record TEXT NOT NULL,
-        PRIMARY KEY (principal_id, id)
       );
       CREATE TABLE IF NOT EXISTS gateway_exchanges (
         attempt_id TEXT PRIMARY KEY, record TEXT NOT NULL
@@ -203,6 +203,45 @@ export class Store {
             OR json_extract(record, '$.public.experience.outcome') = 'create_rule'
         );
     `);
+    this.initializeDesignLibrary();
+  }
+
+  private initializeDesignLibrary() {
+    this.db.tx(() => {
+      if (this.db.one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='domain_ui_layouts'")) return;
+      this.db.exec(`
+        CREATE TABLE domain_ui_layouts (
+          tenant_id TEXT NOT NULL, domain_id TEXT NOT NULL, owner_key TEXT NOT NULL,
+          id TEXT NOT NULL, updated_at INTEGER NOT NULL, record TEXT NOT NULL, PRIMARY KEY (tenant_id, id)
+        );
+        CREATE INDEX domain_layout_owner ON domain_ui_layouts(tenant_id, owner_key);
+        CREATE INDEX domain_layout_publication ON domain_ui_layouts(tenant_id, domain_id) WHERE json_type(record, '$.published')='object';
+        UPDATE conversations AS c SET record = json_set(record, '$.domainId', COALESCE((
+            SELECT CASE json_extract(t.record, '$.public.semanticRoute.capabilityId') WHEN 'ops_incident' THEN 'it_ops' ELSE 'sales_revops' END
+            FROM turns t WHERE t.conversation_id=c.id AND json_extract(t.record,'$.public.semanticRoute.capabilityId') IN ('ops_incident','sales_deal_desk')
+            ORDER BY t.ordinal DESC LIMIT 1), 'wealth'), '$.legacyTranscript', json('true'))
+          WHERE json_extract(record,'$.domainId') IS NULL;
+      `);
+      this.db.run("UPDATE conversations SET record=json_set(record,'$.tenantId',?) WHERE json_extract(record,'$.tenantId') IS NULL", serverTenantId);
+      this.db.exec(`UPDATE conversations AS c SET record=json_set(record, '$.userId',
+        COALESCE((SELECT json_extract(t.record,'$.operatorName') FROM turns t WHERE t.conversation_id=c.id
+          AND json_extract(c.record,'$.domainId')!='wealth' AND json_extract(t.record,'$.operatorName') IS NOT NULL
+          ORDER BY t.ordinal DESC LIMIT 1), json_extract(c.record,'$.personaId')))`);
+      if (!this.db.one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ui_layouts'")) return;
+      const used = new Set<string>();
+      const rows = this.db.all<{ principal_id: string; record: string }>("SELECT principal_id, record FROM ui_layouts ORDER BY updated_at DESC, id");
+      for (const row of rows) {
+        const legacy = JSON.parse(row.record) as UiLayoutRecord;
+        const slots = JSON.stringify((legacy.published?.design ?? legacy.draft).slots);
+        const domainId: DomainPackId = /\bincident\./.test(slots) ? "it_ops" : /\bdeal\./.test(slots) ? "sales_revops" : "wealth";
+        const keys = legacy.published?.design.targets.map((target) => domainId + ":" + targetKey(target)) ?? [];
+        const record = { ...legacy, domainId };
+        if (keys.some((key) => used.has(key))) delete record.published;
+        else for (const key of keys) used.add(key);
+        this.db.run("INSERT INTO domain_ui_layouts VALUES (?, ?, ?, ?, ?, ?)",
+          serverTenantId, domainId, "session:" + row.principal_id, record.id, record.updatedAt, JSON.stringify(record));
+      }
+    });
   }
 
   watch(conversation: ConversationRecord, source: WatchSource, value: string) {
@@ -238,6 +277,15 @@ export class Store {
     return { id: sessionId, created: true };
   }
 
+  selectedProfile(sessionId: string) {
+    return this.db.one<{ persona_id: string }>("SELECT persona_id FROM session_profiles WHERE session_id=?", sessionId)?.persona_id;
+  }
+
+  selectProfile(sessionId: string, personaId: string | null) {
+    if (personaId === null) this.db.run("DELETE FROM session_profiles WHERE session_id=?", sessionId);
+    else this.db.run("INSERT INTO session_profiles VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET persona_id=excluded.persona_id", sessionId, personaId);
+  }
+
   toolSetup(principalId: string) {
     return parse<ToolSetup>(this.db.one("SELECT record FROM tool_setups WHERE principal_id = ?", principalId)) ?? defaultToolSetup;
   }
@@ -249,14 +297,23 @@ export class Store {
     `, principalId, JSON.stringify(setup));
   }
 
-  listUiLayouts(principalId: string) {
-    return this.db.all<{ record: string }>("SELECT record FROM ui_layouts WHERE principal_id = ? ORDER BY updated_at DESC, id", principalId)
+  listUiLayouts(principalId: string, operator: string) {
+    return this.db.all<{ record: string }>("SELECT record FROM domain_ui_layouts WHERE tenant_id=? AND owner_key IN (?, ?) ORDER BY updated_at DESC, id",
+      serverTenantId, "operator:" + operator, "session:" + principalId)
       .map((row) => parse<UiLayoutRecord>(row)!);
   }
 
-  changeUiLayout(principalId: string, change: UiLayoutChange, now: number) {
+  publishedUiLayouts(domainId?: DomainPackId): LibraryDesign[] {
+    const sql = `SELECT domain_id, json_extract(record, '$.published') AS publication FROM domain_ui_layouts
+      WHERE tenant_id=? AND json_type(record, '$.published')='object'`;
+    return this.db.all<{ domain_id: DomainPackId; publication: string }>(sql + (domainId ? " AND domain_id=?" : "") + " ORDER BY updated_at DESC, id",
+      serverTenantId, ...(domainId ? [domainId] : []))
+      .map((row) => ({ ...JSON.parse(row.publication) as UiPublication, domainId: row.domain_id }));
+  }
+
+  changeUiLayout(principalId: string, operator: string, allowedDomains: readonly DomainPackId[], change: UiLayoutChange, now: number) {
     return this.db.tx(() => {
-      const layouts = this.listUiLayouts(principalId);
+      const layouts = this.listUiLayouts(principalId, operator);
       const current = "id" in change ? layouts.find(({ id }) => id === change.id) : undefined;
       if ("id" in change) {
         if (!current) return inaccessible();
@@ -266,24 +323,33 @@ export class Store {
       } else if (layouts.length >= maxLayouts) {
         throw new ApiError(409, "ui_layout_limit", "Edit an existing layout to continue.");
       }
+      const domainId = current?.domainId ?? ("domainId" in change ? change.domainId : undefined) ?? "wealth";
+      if (!allowedDomains.includes(domainId)) throw new ApiError(403, "domain_access_denied", "Publishing access is required for this domain.");
+      if ("domainId" in change && change.domainId && change.domainId !== domainId) {
+        throw new ApiError(409, "design_domain_changed", "Make a copy to publish this design in another domain.");
+      }
       const id = current?.id ?? makeId("ui");
       const revision = (current?.revision ?? 0) + 1;
       const draft = change.operation === "unpublish" ? current!.draft : change.design;
       let published = current?.published;
       if (change.operation === "publish") {
+        if (draft.targets.some((target) => layoutTargetDomain(target) !== domainId)) {
+          throw new ApiError(400, "domain_attachment_invalid", "Attach an intent or capability supported by this domain.");
+        }
         const keys = new Set(draft.targets.map(targetKey));
-        const conflict = layouts.find((item) => item.id !== id && item.published?.design.targets.some((target) => keys.has(targetKey(target))));
-        if (conflict?.published) {
-          throw new ApiError(409, "ui_attachment_taken", `An attachment is already in use by “${conflict.published.design.name}”. Unpublish that layout or remove the attachment from it.`);
+        const conflict = this.publishedUiLayouts(domainId).find((item) => item.id !== id && item.design.targets.some((target) => keys.has(targetKey(target))));
+        if (conflict) {
+          throw new ApiError(409, "ui_attachment_taken", `An attachment is already in use by “${conflict.design.name}”. Unpublish that layout or remove the attachment from it.`);
         }
         published = { id, revision, design: draft };
       } else if (change.operation === "unpublish") {
         published = undefined;
       }
-      const record: UiLayoutRecord = { id, revision, updatedAt: now, draft, published };
-      this.db.run(`INSERT INTO ui_layouts VALUES (?, ?, ?, ?)
-        ON CONFLICT(principal_id, id) DO UPDATE SET updated_at=excluded.updated_at, record=excluded.record`,
-        principalId, id, now, JSON.stringify(record));
+      const record: UiLayoutRecord = { id, domainId, revision, updatedAt: now, draft, published };
+      this.db.run(`INSERT INTO domain_ui_layouts VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(tenant_id, id) DO UPDATE SET owner_key=excluded.owner_key, updated_at=excluded.updated_at, record=excluded.record`,
+        serverTenantId, domainId, "operator:" + operator, id, now, JSON.stringify(record));
+
       return record;
     });
   }
@@ -296,9 +362,9 @@ export class Store {
     this.db.run("INSERT OR IGNORE INTO gateway_exchanges (attempt_id, record) VALUES (?, ?)", attemptId, JSON.stringify(exchange));
   }
 
-  createConversation(principalId: string, personaId: string, scenarioId: string, now: number, audience?: Conversation["audience"]) {
+  createConversation(principalId: string, personaId: string, scenarioId: string, now: number, audience?: Conversation["audience"], domainId: DomainPackId = "wealth", userId = personaId) {
     const record: ConversationRecord = {
-      id: makeId("conv"), principalId, personaId, scenarioId, title: "New conversation", updatedAt: now, sessions: {},
+      id: makeId("conv"), tenantId: serverTenantId, domainId, userId, principalId, personaId, scenarioId, title: "New conversation", updatedAt: now, sessions: {},
       ...(audience && { audience }),
     };
     this.db.run("INSERT INTO conversations VALUES (?, ?, ?, ?)", record.id, principalId, now, JSON.stringify(record));
@@ -457,7 +523,7 @@ export class Store {
 
       const id = makeId("turn");
       const setup = this.toolSetup(conversation.principalId);
-      const uiLayouts = this.listUiLayouts(conversation.principalId).flatMap(({ published }) => published ? [published] : []);
+      const uiLayouts = this.publishedUiLayouts(conversation.domainId);
       const workflowDefinition = setup.fundingWorkflow ?? defaultAgentFundingWorkflow;
       const fundingInput = typeof explicitInputs(message).methodId === "string"
         && !/\b(?:compare|balance|portfolio|retire|address|goal|savings)\b/i.test(message);
@@ -476,7 +542,7 @@ export class Store {
           ?? (offered && latest?.public.experience ? { recommendation: offered, sourceExperienceId: latest.public.experience.experienceId } : undefined);
       const record: TurnRecord = {
         public: { id, conversationId: conversation.id, message, createdAt: now, status: "working", progress: "accepted", retryOf: retry?.public.id },
-        scope: { turnId: id, principalId: conversation.principalId, conversationId: conversation.id, personaId: conversation.personaId },
+        scope: { turnId: id, tenantId: serverTenantId, domainId: conversation.domainId, userId: conversation.userId, principalId: conversation.principalId, conversationId: conversation.id, personaId: conversation.personaId },
         ordinal: retry?.ordinal ?? (latest?.ordinal ?? 0) + 1,
         requestId, origin, selectionMode, attempts: {},
         workflow: launch,
@@ -524,6 +590,8 @@ export class Store {
   private applyUiLayout(turn: TurnRecord, result: CompiledExperience) {
     if (!turn.uiLayouts?.length) return result;
     const targets: UiTarget[] = [];
+    const capability = turn.public.semanticRoute?.capabilityId;
+    if (turn.recordId && turn.operatorName && (capability === "ops_incident" || capability === "sales_deal_desk")) targets.push({ kind: "capability", id: capability });
     if (turn.trace.intentId) targets.push({ kind: "intent", id: turn.trace.intentId });
     if (turn.workflow) targets.push({ kind: "capability", id: turn.workflow.recommendation.id });
     const journey = turn.agentJourneyId && this.axe.get("journeys", turn.scope, turn.agentJourneyId);
@@ -536,10 +604,11 @@ export class Store {
     }
     try {
       const extra = turn.recordId && turn.operatorName ? this.domainBindingContext?.(turn.recordId) : undefined;
-      const bindings = resolveMultiDomainBindings(turn.scope.personaId, {
-        effectiveFundingStatus: this.axe.fundingStatus(turn.scope),
-        incident: extra?.incident,
-        deal: extra?.deal,
+      const domain = turn.scope.domainId ?? "wealth";
+      const bindings = resolveMultiDomainBindings(domain === "wealth" ? turn.scope.personaId : undefined, {
+        effectiveFundingStatus: domain === "wealth" ? this.axe.fundingStatus(turn.scope) : undefined,
+        incident: domain === "it_ops" ? extra?.incident : undefined,
+        deal: domain === "sales_revops" ? extra?.deal : undefined,
       });
       const applied = applyPublishedUi(result, turn.uiLayouts, targets, bindings);
       if (applied) {

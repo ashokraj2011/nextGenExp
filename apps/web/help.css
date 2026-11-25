@@ -759,3 +759,17 @@
   .help-cep-pipeline,
   .help-control-plane { grid-template-columns: minmax(0, 1fr); }
 }
+
+.help-ownership {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 12px;
+  padding: 0;
+  list-style: none;
+}
+.help-ownership li {
+  border-inline-start: 3px solid var(--help-accent, #397451);
+  padding-inline: 12px;
+}
+.help-ownership strong, .help-ownership span { display: block; }
+.help-ownership span { margin-top: 4px; color: var(--help-muted); }

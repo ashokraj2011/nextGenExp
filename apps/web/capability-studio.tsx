@@ -105,7 +105,7 @@ function Studio({ initial }: { initial: Setup }) {
       </div>
       <div className="axe-form-actions">
         <button className="secondary-button" type="button" disabled={!message.trim() || !persona} onClick={() => void preview()}>Run capability in chat</button>
-        {profiles.some(({ personaId, profile }) => personaId === persona && profile.accountFundingStatus === "unfunded") && (
+        {profiles.some(({ personaId, profile }) => personaId === persona && profile?.accountFundingStatus === "unfunded") && (
           <button className="secondary-button" type="button" onClick={() => void simulate()}>Simulate first deposit</button>
         )}
       </div>

@@ -1,3 +1,4 @@
+import { serverTenantId } from "./tenant";
 import { ASK_USER, isTerminal, SFieldError } from "@sfield/core";
 import type { CallRecord, JsonObject, NeutralModelRequest, Principal, RunRecord, SField, ToolHandlerContext } from "@sfield/core";
 import { DECISION_TTL, TURN_DEADLINE } from "../../packages/contracts/domain";
@@ -68,7 +69,7 @@ export class FundingAgent {
     const rootId = run?.request.inputs?.turnRef;
     const root = typeof rootId === "string" ? this.store.turn(rootId) : undefined;
     requireCheck(run?.kind === "standalone" && run.agentId === fundingAgentId && root?.workflow
-      && run.idempotencyKey === root.public.id + ":funding" && run.tenantId === "pzn-local"
+      && run.idempotencyKey === root.public.id + ":funding" && run.tenantId === serverTenantId
       && run.subjectId === root.scope.principalId && (!root.fundingRun || root.fundingRun.id === runId), "FUNDING_RUN_SCOPE_MISMATCH");
     const turn = this.store.latestTurn(root.scope.conversationId);
     requireCheck(turn?.public.status === "working" && turn.scope.principalId === root.scope.principalId
@@ -138,7 +139,7 @@ export class FundingAgent {
     const run = await this.sfield().persistence.getRun(ctx.runId);
     if (run?.agentId !== fundingAgentId) return;
     const { root, turn } = await this.scope(ctx.runId, run);
-    requireCheck(ctx.principal.tenantId === "pzn-local"
+    requireCheck(ctx.principal.tenantId === serverTenantId
       && ctx.principal.subjectId === turn.scope.principalId && turnRef === root.public.id, "FUNDING_TURN_SCOPE_MISMATCH");
     return turn;
   }

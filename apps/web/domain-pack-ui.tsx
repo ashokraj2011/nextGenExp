@@ -18,6 +18,10 @@ const DATA_EVENT = "cep-domain-data-updated";
 export function readStoredDomainPack(): DomainPackId {
   const fromPath = typeof window !== "undefined" ? domainPackFromPath(window.location.pathname) : null;
   if (fromPath) return fromPath;
+  if (typeof window !== "undefined" && window.location.pathname === "/embed") {
+    const embedded = new URLSearchParams(window.location.search).get("domain");
+    if (embedded === "it_ops" || embedded === "sales_revops" || embedded === "wealth") return embedded;
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw === "it_ops" || raw === "sales_revops" || raw === "wealth") return raw;

@@ -302,6 +302,17 @@ export function Help() {
           </ol>
         </div>
       </section>
+      <section id="design-ownership" className="help-section" aria-labelledby="ownership-title">
+        <div className="help-section-heading"><h2 id="ownership-title">Who shares a design?</h2></div>
+        <p>A tenant is one organization. Each domain has owners who publish designs and members who use them. A person can belong to more than one domain.</p>
+        <ol className="help-ownership">
+          <li><strong>Tenant</strong><span>Sets up the model and the domains people can access.</span></li>
+          <li><strong>Domain</strong><span>A Wealth owner publishes a balance card in the design library.</span></li>
+          <li><strong>User</strong><span>Alice and Jordan get the same card, each filled with their own balance.</span></li>
+          <li><strong>Session and thread</strong><span>sfield keeps the conversation here so a follow-up uses the right history.</span></li>
+        </ol>
+        <a href={adminPaths.builder + "?view=library"}>Open the shared design library</a>
+      </section>
       <section id="architecture" className="help-section" aria-labelledby="architecture-title">
         <div className="help-section-heading">
           <div>

@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tenantDataDirectory } from "./tenant";
 import { startApp } from "./http";
 import { agenticBudgetFromEnv } from "./agentic-budget";
 import { gatewayFromEnv } from "./gateway";
@@ -16,7 +17,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("PZN_PO
 // The data directory follows the launch environment, so a gateway activated in the admin UI keeps the same data.
 const defaultDataDir = envProfile === "openai" ? ".pzn-data/openai" : envProfile === "copilot_acp" ? ".pzn-data/copilot" : ".pzn-data";
 const dataDir = resolve(projectRoot, process.env.PZN_DATA_DIR ?? defaultDataDir);
-const gatewayConfig = new GatewayConfigStore(dataDir);
+const gatewayConfig = new GatewayConfigStore(tenantDataDirectory(dataDir));
 
 /** A gateway activated in Administration → Model gateway wins over environment variables. */
 function resolveGateway() {

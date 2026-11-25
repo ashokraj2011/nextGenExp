@@ -1,13 +1,15 @@
 import profiles from "../../fixtures/host.json";
 import { findProfileById, listAllProfiles } from "../../packages/customer-profiles";
 import { resolveMultiDomainBindings } from "../../packages/customer-profiles/bindings";
+import type { DomainPackId } from "../../packages/contracts/domain-packs";
 import type { IncidentRecord } from "../../packages/contracts/ops";
 import type { DealRecord } from "../../packages/contracts/sales";
 import { availableFundingOptions, fundingPreviewFrom } from "../../packages/capabilities";
 import { requiredContribution, savingsProjection } from "../../packages/capabilities/calculations";
 import { allRoutingIntents } from "../../packages/contracts/routing-intents";
 import type { DisplayBlock } from "../../packages/contracts/surface";
-import { targetKey, type LayoutComponent, type UiDesign, type UiTargetOption } from "../../packages/contracts/ui-layout";
+import { CEP_CAPABILITIES } from "../../packages/contracts/capabilities-catalog";
+import { recordLayoutCapabilities, targetKey, type LayoutComponent, type UiDesign, type UiTargetOption } from "../../packages/contracts/ui-layout";
 import { conversationalTextAllowed } from "../../packages/experience/chat-policy";
 import { contentCatalog, readDemoBalance } from "../../packages/experience/content";
 import { findEffectiveContentById } from "../../packages/experience-registry/registry";
@@ -21,6 +23,10 @@ export function uiTargetOptions(registry: CapabilityRegistry, principalId: strin
   const latest = new Map(registry.list(principalId).map((manifest) => [manifest.id, manifest]));
   return [
     ...allRoutingIntents().map(({ intentId, label, description }): UiTargetOption => ({ target: { kind: "intent", id: intentId }, label, description })),
+    ...recordLayoutCapabilities.map((id): UiTargetOption => {
+      const { label, description } = CEP_CAPABILITIES.find((c) => c.id === id)!;
+      return { target: { kind: "capability", id }, label, description };
+    }),
     ...[...latest.values()].map(({ id, title, description }): UiTargetOption => ({ target: { kind: "capability", id }, label: title, description })),
   ];
 }
@@ -73,8 +79,11 @@ function sampleDetails(id: string) {
 export async function previewUiLayout(
   design: UiDesign,
   requestedPersonaId?: string,
-  extraContext?: { incident?: IncidentRecord; deal?: DealRecord },
+  extraContext?: { domainId?: DomainPackId; incident?: IncidentRecord; deal?: DealRecord },
 ) {
+  if (extraContext?.domainId && extraContext.domainId !== "wealth") {
+    return compileUiLayoutPreview(design, [], resolveMultiDomainBindings(undefined, extraContext));
+  }
   const activeProfile = (requestedPersonaId ? findProfileById(requestedPersonaId) : undefined)
     ?? listAllProfiles()[0]
     ?? profiles.personas[0];

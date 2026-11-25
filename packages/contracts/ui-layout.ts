@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { domainPackIds, type DomainPackId } from "./domain-packs";
 import { capabilityIdSchema } from "./agentic";
 import { dataBindingKeySchema } from "./data-bindings";
 import type { RoutingIntentId } from "./routing-intents";
@@ -26,12 +27,18 @@ export const maxLayoutDescription = 200;
 export const maxUiIntentHints = 6;
 export const maxUiHintLength = 120;
 const ids = layoutComponents.map(({ id }) => id) as [LayoutComponent, ...LayoutComponent[]];
+export const recordLayoutCapabilities = ["ops_incident", "sales_deal_desk"] as const;
 const intentIdSchema = z.string().regex(/^[a-z][a-z0-9_]{1,63}$/);
 export const uiTargetSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("intent"), id: intentIdSchema }).strict(),
-  z.object({ kind: z.literal("capability"), id: capabilityIdSchema }).strict(),
+  z.object({ kind: z.literal("capability"), id: capabilityIdSchema.or(z.enum(recordLayoutCapabilities)) }).strict(),
 ]);
 export type UiTarget = z.infer<typeof uiTargetSchema>;
+export function layoutTargetDomain(target: UiTarget): DomainPackId {
+  if (target.kind === "capability" && target.id === "ops_incident") return "it_ops";
+  if (target.kind === "capability" && target.id === "sales_deal_desk") return "sales_revops";
+  return "wealth";
+}
 export const targetKey = (target: UiTarget) => target.kind + ":" + target.id;
 
 export const layoutTextSchema = z.object({
@@ -123,22 +130,25 @@ export const uiDesignSchema = z.object({
 }).strict();
 export type UiDesign = z.infer<typeof uiDesignSchema>;
 export type UiPublication = { id: string; revision: number; design: UiDesign };
+export type LibraryDesign = UiPublication & { domainId: DomainPackId };
 export type UiLayoutRecord = {
   id: string;
+  domainId: DomainPackId;
   revision: number;
   updatedAt: number;
   draft: UiDesign;
   published?: UiPublication;
 };
 export type UiTargetOption = { target: UiTarget; label: string; description: string };
-export type UiLayoutCatalog = { layouts: UiLayoutRecord[]; targets: UiTargetOption[] };
+export type UiLayoutCatalog = { tenantId: string; domains: readonly DomainPackId[]; layouts: UiLayoutRecord[]; library: LibraryDesign[]; targets: UiTargetOption[] };
 export type AppliedUiLayout = { id: string; revision: number; name: string; target: UiTarget };
 
 const recordId = z.string().regex(/^ui_[a-f0-9]{32}$/);
 const revision = z.number().int().positive();
+const domainId = z.enum(domainPackIds).optional();
 export const uiLayoutChangeSchema = z.union([
-  z.object({ operation: z.enum(["draft", "publish"]), design: uiDesignSchema }).strict(),
-  z.object({ operation: z.enum(["draft", "publish"]), id: recordId, revision, design: uiDesignSchema }).strict(),
+  z.object({ operation: z.enum(["draft", "publish"]), domainId, design: uiDesignSchema }).strict(),
+  z.object({ operation: z.enum(["draft", "publish"]), id: recordId, revision, domainId, design: uiDesignSchema }).strict(),
   z.object({ operation: z.literal("unpublish"), id: recordId, revision }).strict(),
 ]);
 export type UiLayoutChange = z.infer<typeof uiLayoutChangeSchema>;

@@ -1,3 +1,4 @@
+import { serverTenantId } from "./tenant";
 import { experienceAgentId } from "../../packages/contracts/agentic";
 import { ASK_USER } from "@sfield/core";
 import type { CallRecord, JsonValue, ModelAttemptRecord, RunRecord, SField } from "@sfield/core";
@@ -39,7 +40,7 @@ async function modelPayloads(sf: SField, store: Store, inspection: Inspection, t
   const stageAttempt = turn.attempts[stage];
   if (!stageAttempt?.runId) return null;
   const run = await sf.persistence.getRun(stageAttempt.runId);
-  if (!run || run.tenantId !== "pzn-local" || run.subjectId !== turn.scope.principalId || run.agentId !== stageAgent[stage]
+  if (!run || run.tenantId !== serverTenantId || run.subjectId !== turn.scope.principalId || run.agentId !== stageAgent[stage]
     || run.request.inputs?.turnRef !== turn.public.id || run.request.inputs?.stageAttemptId !== stageAttempt.id) return null;
 
   const recorded = await sf.persistence.listModelAttempts(run.runId);
@@ -86,7 +87,7 @@ async function customerLookupPayload(sf: SField, inspection: Inspection, turn: T
   const read = turn.customerTask;
   if (!read?.sfieldRunId || !read.sfieldCallId) return;
   const run = await sf.persistence.getRun(read.sfieldRunId);
-  if (run?.tenantId !== "pzn-local" || run.subjectId !== turn.scope.principalId) return;
+  if (run?.tenantId !== serverTenantId || run.subjectId !== turn.scope.principalId) return;
   const call = (await sf.persistence.listCalls(run.runId)).find((entry) => entry.callId === read.sfieldCallId);
   return call && registryPayload(inspection, call);
 }
@@ -155,7 +156,7 @@ async function workflowPayloads(sf: SField, store: Store, inspection: Inspection
   if (phase) {
     const run = await sf.persistence.getRun(phase.id);
     const root = store.turn(phase.rootTurnId);
-    if (!run || run.agentId !== fundingAgentId || run.tenantId !== "pzn-local" || run.subjectId !== turn.scope.principalId
+    if (!run || run.agentId !== fundingAgentId || run.tenantId !== serverTenantId || run.subjectId !== turn.scope.principalId
       || run.request.inputs?.turnRef !== phase.rootTurnId || root?.scope.conversationId !== turn.scope.conversationId) return null;
     const [calls, attempts, input] = await Promise.all([
       sf.persistence.listCalls(phase.id),
@@ -194,7 +195,7 @@ async function workflowPayloads(sf: SField, store: Store, inspection: Inspection
 
 async function experiencePayloads(sf: SField, store: Store, inspection: Inspection, turn: TurnRecord): Promise<AgenticPayloads | undefined> {
   const root = turn.agentRunId && await sf.persistence.getRun(turn.agentRunId);
-  if (!root || root.subjectId !== turn.scope.principalId || root.tenantId !== "pzn-local") return;
+  if (!root || root.subjectId !== turn.scope.principalId || root.tenantId !== serverTenantId) return;
   const standalone = root.kind === "standalone" && root.agentId === experienceAgentId && root.request.inputs?.turnRef === turn.public.id;
   const ids = new Set([...(standalone ? [root.runId] : []), ...turn.agentExecutionIds ?? []]);
   const gathered = await Promise.all([...ids].map((id) => sf.persistence.listCalls(id)));

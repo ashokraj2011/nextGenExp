@@ -113,14 +113,14 @@ export function resolveCustomerBindings(
 }
 
 export function resolveMultiDomainBindings(
-  personaId: string,
+  personaId: string | undefined,
   options?: {
     effectiveFundingStatus?: "funded" | "unfunded";
     incident?: IncidentRecord;
     deal?: DealRecord;
   },
 ): DataBindingValues | undefined {
-  const base = resolveCustomerBindings(personaId, options?.effectiveFundingStatus);
+  const base = personaId ? resolveCustomerBindings(personaId, options?.effectiveFundingStatus) : undefined;
   if (!base && !options?.incident && !options?.deal) return undefined;
   const result: DataBindingValues = { ...(base ?? {}) };
 

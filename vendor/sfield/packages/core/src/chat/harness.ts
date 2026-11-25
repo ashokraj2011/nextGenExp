@@ -6,6 +6,8 @@ import { digestJson, nowIso } from "../util/digest.js";
 /** The host supplies these identifiers from its authenticated user, session, and thread. */
 export interface ChatScope {
   tenantId: string;
+  /** Omit only when opening a thread created before domain scoping. */
+  domainId?: string;
   userId: string;
   sessionId: string;
   threadId: string;
@@ -35,11 +37,13 @@ export class ChatHarness {
   constructor(private readonly persistence: Pick<ExecutionPersistence, "createConversation" | "appendMessage" | "listMessages">) {}
 
   async open(scope: ChatScope): Promise<ChatThread> {
-    const { tenantId, userId, sessionId, threadId } = scope;
-    if (![tenantId, userId, sessionId, threadId].every((value) => typeof value === "string" && value.trim())) {
+    const { tenantId, domainId, userId, sessionId, threadId } = scope;
+    const required = [tenantId, userId, sessionId, threadId];
+    if (domainId !== undefined) required.push(domainId);
+    if (!required.every((value) => typeof value === "string" && value.trim())) {
       throw new SFieldError("INVALID_INPUT", "Chat scope requires a tenant, user, session, and thread.");
     }
-    const subjectId = digestJson([chatAgent, userId, sessionId]);
+    const subjectId = digestJson(domainId === undefined ? [chatAgent, userId, sessionId] : [chatAgent, domainId, userId, sessionId]);
     const id = "chat_" + digestJson([tenantId, subjectId, threadId]).slice("sha256:".length);
     const at = nowIso();
     const thread = await this.persistence.createConversation({

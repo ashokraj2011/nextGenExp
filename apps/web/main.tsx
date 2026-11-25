@@ -632,8 +632,8 @@ function buildWealthDomContext(section: WorkspaceSection, profile?: DemoPersona)
   const goal = profile.overview?.homeGoal;
   const savedCents = goal?.history.at(-1)?.savedCents ?? 0;
   const goalPct = goal && goal.targetCents > 0 ? Math.floor((savedCents * 100) / goal.targetCents) : 0;
-  const benMissing = profile.profile.beneficiaryStatus === "missing";
-  const unfunded = profile.profile.accountFundingStatus === "unfunded";
+  const benMissing = profile.profile?.beneficiaryStatus === "missing";
+  const unfunded = profile.profile?.accountFundingStatus === "unfunded";
   const firstName = profile.displayName.split(" ")[0] ?? profile.displayName;
   const addBeneficiary = { label: "Add a beneficiary", prompt: "How do I update my beneficiary designation?" };
 
@@ -777,7 +777,9 @@ function App() {
   const railClose = useRef<HTMLButtonElement>(null);
   const previousPanel = useRef<Panel["kind"] | undefined>(undefined);
   const profilesById = new Map(configuration?.personas.map((persona) => [persona.personaId, persona]));
-  const activeProfile = profilesById.get(conversation?.personaId ?? signedInProfileId ?? configuration?.defaultPersonaId ?? "");
+  const workspaceProfileId = domainPack.id === "wealth" ? signedInProfileId : undefined;
+  const activeProfile = profilesById.get(conversation?.personaId ?? workspaceProfileId ?? configuration?.defaultPersonaId ?? "")
+    ?? (domainPack.id !== "wealth" ? profilesById.get(configuration?.defaultPersonaId ?? "") : undefined);
   const pins = activeProfile?.pins ?? defaultWorkspacePins;
   const activeSection = section === "summary" || pins.includes(section) ? section : "summary";
   const wealthDomContextJson = useMemo(() => {
@@ -786,15 +788,13 @@ function App() {
     return ctx ? JSON.stringify(ctx) : undefined;
   }, [activeSection, activeProfile, domainPack.id]);
 
-  const chat = overviewOpen ? undefined : conversation;
-  const pendingActions = usePendingActions(!adminChat ? activeProfile?.personaId : undefined);
+  const chat = overviewOpen || conversation?.domainId !== domainPack.id ? undefined : conversation;
+  const pendingActions = usePendingActions(!adminChat && domainPack.id === "wealth" ? activeProfile?.personaId : undefined);
   const draftKey = chat?.id ?? "new:" + (conversation?.personaId ?? signedInProfileId ?? "");
   const latest = chat?.turns.at(-1);
   const activeTurnId = latest?.status === "working" ? latest.id : undefined;
-  const scopedPersonaId = adminChat ? null : (signedInProfileId ?? activeProfile?.personaId ?? null);
-  const visibleConversations = scopedPersonaId
-    ? conversations.filter((row) => row.personaId === scopedPersonaId)
-    : conversations;
+  const scopedPersonaId = adminChat ? null : (workspaceProfileId ?? activeProfile?.personaId ?? null);
+  const visibleConversations = conversations.filter((row) => row.domainId === domainPack.id && (!scopedPersonaId || row.personaId === scopedPersonaId));
 
   const recordProgress = useCallback((turnId: string, progress: Progress) => {
     setProgressHistory((prev) => {
@@ -811,25 +811,31 @@ function App() {
     setConversation(row);
     setOverviewOpen(showOverview);
     remember(row);
-    rememberActiveConversation(row.id, adminChat);
+    rememberActiveConversation(row.id, adminChat, row.domainId);
     setRailOpen(false);
   };
 
   useEffect(() => {
     let mounted = true;
-    void (adminChat ? api.adminBootstrap() : api.bootstrap()).then(async (data) => {
+    setConversation(undefined);
+    setConfiguration(undefined);
+    void (adminChat ? api.adminBootstrap(domainPack.id) : api.bootstrap(domainPack.id)).then(async (data) => {
       if (!mounted) return;
-      if (entry.profileId && !data.personas.some(({ personaId }) => personaId === entry.profileId)) {
+      if (data.requiresProfile) {
+        if (!embedMode) { location.replace("/login"); return; }
+        setNotice("Select a profile on the sign-in page to open this workspace.");
+      }
+      if (domainPack.id === "wealth" && entry.profileId && !data.personas.some(({ personaId }) => personaId === entry.profileId)) {
         if (!embedMode) {
           location.replace("/login");
           return;
         }
         setSignedInProfileId(data.defaultPersonaId);
       }
-      const threads = data.conversations.filter(({ audience }) => (audience === "admin") === adminChat);
+      const threads = data.conversations.filter(({ audience, domainId }) => (audience === "admin") === adminChat && domainId === domainPack.id);
       setConversations(threads);
-      const matching = entry.profileId ? threads.filter((row) => row.personaId === entry.profileId) : threads;
-      const preferred = matching.find((row) => row.id === readActiveConversation(adminChat))
+      const matching = domainPack.id === "wealth" && entry.profileId ? threads.filter((row) => row.personaId === entry.profileId) : threads;
+      const preferred = matching.find((row) => row.id === readActiveConversation(adminChat, domainPack.id))
         ?? matching.find(({ archivedAt }) => archivedAt === undefined);
       if (preferred) {
         const restored = await api.conversation(preferred.id);
@@ -845,17 +851,17 @@ function App() {
       setConfiguration(data);
     }).catch((error: unknown) => { if (mounted) setNotice(messageFor(error)); });
     return () => { mounted = false; };
-  }, [entry]);
+  }, [entry, domainPack.id]);
 
   useEffect(() => {
     const onDomainUpdate = () => {
-      void (adminChat ? api.adminBootstrap() : api.bootstrap()).then((fresh) => {
+      void (adminChat ? api.adminBootstrap(domainPack.id) : api.bootstrap(domainPack.id)).then((fresh) => {
         setConfiguration((prev) => (prev ? { ...prev, personas: fresh.personas } : fresh));
       }).catch(() => undefined);
     };
     window.addEventListener("cep-domain-data-updated", onDomainUpdate);
     return () => window.removeEventListener("cep-domain-data-updated", onDomainUpdate);
-  }, []);
+  }, [domainPack.id]);
 
   useEffect(() => {
     if (adminChat) return;
@@ -963,7 +969,7 @@ function App() {
   const send = async (message: string) => {
     if (!configuration) return;
     await exclusive(async () => {
-      const target = chat ?? await createConversation(activeProfile?.personaId ?? configuration.defaultPersonaId, configuration.defaultScenarioId);
+      const target = chat ?? await createConversation(activeProfile?.personaId ?? configuration.defaultPersonaId, configuration.defaultScenarioId, domainPack.id);
       if (!chat) choose(target);
       setSection("summary");
       try {
@@ -979,7 +985,7 @@ function App() {
     if (!configuration || !activeProfile) return;
     void exclusive(async () => {
       const target = chat && !chat.turns.length && chat.scenarioId === configuration.defaultScenarioId
-        ? chat : await createConversation(activeProfile.personaId, configuration.defaultScenarioId);
+        ? chat : await createConversation(activeProfile.personaId, configuration.defaultScenarioId, domainPack.id);
       choose(target);
       setSection("summary");
       accept(await api.previewFunding(target.id, requestId(target.id + ":preview-funding:" + (source ?? "overview")), source));
@@ -991,8 +997,8 @@ function App() {
     if (!adminChat && !row.turns.length) pendingActions.refresh();
   };
   const startConversation = async (personaId: string, scenarioId: string) => exclusive(async () => {
-    const row = await createConversation(personaId, scenarioId);
-    if (signedInProfileId && signedInProfileId !== row.personaId) {
+    const row = await createConversation(personaId, scenarioId, domainPack.id);
+    if (domainPack.id === "wealth" && signedInProfileId && signedInProfileId !== row.personaId) {
       if (!saveProfileSession(row.personaId)) throw new Error("Couldn’t switch profiles in this tab. Please try again.");
       setSignedInProfileId(row.personaId);
     }
@@ -1002,8 +1008,8 @@ function App() {
     const updated = await api.changeConversation(id, change);
     remember(updated);
     setConversation((current) => current?.id === id ? { ...current, ...updated, archivedAt: updated.archivedAt } : current);
-    if (change.operation === "archive" && readActiveConversation(adminChat) === id) {
-      rememberActiveConversation(null, adminChat);
+    if (change.operation === "archive" && readActiveConversation(adminChat, domainPack.id) === id) {
+      rememberActiveConversation(null, adminChat, domainPack.id);
       setOverviewOpen(true);
       setSection("summary");
     }
@@ -1018,7 +1024,9 @@ function App() {
       if (section !== "summary" && !updated.includes(section)) setSection("summary");
     });
   };
-  const signOut = () => {
+  const signOut = async () => {
+    try { await api.selectProfile(null); }
+    catch { setNotice("Couldn’t sign out. Please try again."); return; }
     if (saveProfileSession(null)) location.replace("/login");
     else setNotice("Couldn’t sign out in this tab. Please try again.");
   };
@@ -1379,7 +1387,7 @@ function App() {
         onWriteBack={activeProfile ? async (updates) => {
           const { updatedFields } = await api.applyCustomerBindings(activeProfile.personaId, updates);
           if (updatedFields.length > 0) {
-            void (adminChat ? api.adminBootstrap() : api.bootstrap()).then((fresh) => {
+            void (adminChat ? api.adminBootstrap(domainPack.id) : api.bootstrap(domainPack.id)).then((fresh) => {
               setConfiguration(fresh);
             }).catch(() => undefined);
           }

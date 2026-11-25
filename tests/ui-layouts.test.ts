@@ -12,7 +12,7 @@ import type { DisplayExperience } from "../packages/contracts/surface";
 import type { EvalRunReport } from "../packages/contracts/eval-suite";
 import type { UxProposal } from "../packages/contracts/ux-evolution";
 import type { UiDesign, UiLayoutCatalog, UiLayoutRecord } from "../packages/contracts/ui-layout";
-import { startApp } from "./operator-fixture";
+import { operatorHeader, reviewer, startApp } from "./operator-fixture";
 import { testClient, testProject } from "./client";
 import { startFixtureGateway } from "./gateway-fixture";
 import { startTestPreview } from "./preview";
@@ -66,8 +66,13 @@ test("publishes layouts for scoped chat intents and preserves drafts, snapshots 
   assert.equal(published.published?.revision, published.revision);
   const turn = await client.submit(conversation.id, compare);
   const other = await testClient(app.url);
-  await other.request(settingsPath, { operation: "unpublish", id: published.id, revision: published.revision }, 404);
-  assert.deepEqual((await other.request<UiLayoutCatalog>(settingsPath)).layouts, []);
+  const reviewerAuth = { Authorization: operatorHeader(reviewer) };
+  const sameOwner = await other.request<UiLayoutCatalog>(settingsPath);
+  assert.equal(sameOwner.layouts[0].id, published.id);
+  await other.request(settingsPath, { operation: "unpublish", id: published.id, revision: published.revision }, 404, reviewerAuth);
+  const shared = await other.request<UiLayoutCatalog>(settingsPath, undefined, 200, reviewerAuth);
+  assert.deepEqual(shared.layouts, []);
+  assert.deepEqual(shared.library[0], { ...published.published, domainId: "wealth" });
   await client.request(settingsPath, { operation: "publish", design: { ...design, name: "Conflicting layout" } }, 409);
 
   const nextDesign: UiDesign = {

@@ -57,14 +57,14 @@ test("sfield reloads the transcript and scopes it by user, browser session, and 
   try {
     const chat = new ChatHarness(persistence);
     const scope = {
-      tenantId: "pzn-local", userId: "demo-learner", sessionId: alice.cookie.split("=")[1], threadId: thread.id,
+      tenantId: "pzn-local", domainId: "wealth", userId: "demo-learner", sessionId: alice.cookie.split("=")[1], threadId: thread.id,
     };
     const messages = await (await chat.open(scope)).history();
     assert.deepEqual(messages.map(({ role }) => role), ["user", "assistant"]);
     assert.equal((messages[0].content as { text: string }).text, request);
     assert.equal((messages[1].content as { text: string }).text, first.experience?.intro);
     for (const change of [
-      { userId: "demo-returning" }, { sessionId: otherBrowser.cookie.split("=")[1] }, { threadId: "unopened-thread" },
+      { domainId: "it_ops" }, { tenantId: "another-tenant" }, { userId: "demo-returning" }, { sessionId: otherBrowser.cookie.split("=")[1] }, { threadId: "unopened-thread" },
     ]) {
       const unrelated = await chat.open({ ...scope, ...change });
       assert.deepEqual(await unrelated.history(), []);
@@ -119,10 +119,16 @@ test("the chat harness imports older threads and keeps history available without
     } finally {
       store.close();
     }
+    // Recreate the persisted shape of a chat written before domains were introduced.
+    const oldDb = new DatabaseSync(join(dataDir, "app.sqlite"));
+    oldDb.exec("DROP TABLE domain_ui_layouts");
+    oldDb.prepare("UPDATE conversations SET record=json_remove(record, '$.tenantId', '$.domainId', '$.userId') WHERE id=?").run(conversationId);
+    oldDb.close();
     app = await startApp({ projectRoot, dataDir, gateway: null });
     const client = await testClient(app.url, "pzn_session=" + session);
     const path = "/api/conversations/" + conversationId;
     const history = await client.request<ConversationView>(path);
+    assert.deepEqual([history.tenantId, history.domainId, history.userId], ["pzn-local", "wealth", "demo-learner"]);
     assert.deepEqual(history.turns.map((turn) => [turn.message, turn.experience?.intro]), [
       ["Hello from a saved chat.", "Welcome back."],
     ]);

@@ -46,7 +46,7 @@ import type { CapabilityManifest, CapabilityRef, OutputKind } from "../../packag
 import type { AgenticTrace } from "./decision-trace";
 import type { EvaluationRow } from "../../packages/contracts/evaluation";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
-import type { RecordUpdate, Bootstrap, Conversation, ConversationChange, ConversationView, DomainWriteAuditEntry, EngagementAnalyticsView, TurnAccepted, TurnView } from "../../packages/contracts/api";
+import type { RecordUpdate, Bootstrap, ProfileChoice, Conversation, ConversationChange, ConversationView, DomainWriteAuditEntry, EngagementAnalyticsView, TurnAccepted, TurnView } from "../../packages/contracts/api";
 import { pendingActionsContext, type WorkspaceActionLog, type WorkspaceNextStep, type WorkspacePendingAction, type WorkspacePin } from "../../packages/contracts/workspace";
 import type { TurnPayloads } from "../../packages/contracts/inspector";
 import type { ContextCatalog, PropensityResult, SelectionMode } from "../../packages/contracts/domain";
@@ -96,6 +96,7 @@ async function request<T>(path: string, payload?: unknown) {
 
 type Stage = { state: string; elapsedMs: number; modelCalls: number; totalTokens: number; tokensReported: boolean; errorCode?: string };
 export type Trace = {
+  chatScope?: Pick<Conversation, "tenantId" | "domainId" | "userId"> & { threadId: string };
   agentic?: AgenticTrace;
   uiLayout?: AppliedUiLayout;
   turnId: string;
@@ -131,8 +132,10 @@ export type Trace = {
   failures: { stage: string; code: string }[];
 };
 export const api = {
-  bootstrap: () => request<Bootstrap>("/api/bootstrap"),
-  adminBootstrap: () => request<Bootstrap>("/api/admin/bootstrap"),
+  profileOptions: () => request<{ profiles: ProfileChoice[] }>("/api/profile-options"),
+  selectProfile: (personaId: string | null) => request<{ personaId: string | null }>("/api/profile-session", { personaId }),
+  bootstrap: (domainId: Conversation["domainId"] = "wealth") => request<Bootstrap>("/api/bootstrap?domain=" + domainId),
+  adminBootstrap: (domainId?: Conversation["domainId"]) => request<Bootstrap>("/api/admin/bootstrap" + (domainId ? "?domain=" + domainId : "")),
   evaluation: () => request<{ mode: "live" | "test"; rows: EvaluationRow[] }>("/api/admin/evaluation"),
   capabilities: () => request<{ manifests: CapabilityManifest[]; tools: { ref: string; label: string; output: OutputKind; invariant: string }[] }>("/api/admin/capabilities"),
   publishCapability: (manifest: unknown, validate: boolean) => request<CapabilityManifest>(
@@ -146,29 +149,29 @@ export const api = {
   ),
   uiLayouts: () => request<UiLayoutCatalog>("/api/admin/ui-layouts"),
   saveUiLayout: (change: UiLayoutChange) => request<UiLayoutRecord>("/api/admin/ui-layouts", change),
-  previewUiLayout: (design: UiDesign, personaId?: string) => request<DisplayExperience>(
-    "/api/admin/ui-layout-preview",
+  previewUiLayout: (design: UiDesign, personaId?: string, domainId: Conversation["domainId"] = "wealth") => request<DisplayExperience>(
+    "/api/admin/ui-layout-preview?domain=" + domainId,
     personaId ? { design, personaId } : design,
   ),
-  generateUiLayout: (prompt: string) => request<{
+  generateUiLayout: (prompt: string, domainId: Conversation["domainId"] = "wealth") => request<{
     design: UiDesign;
     generatedBy: "copilot_llm" | "synthesizer";
     boundKeys: string[];
     summary: string;
-  }>("/api/admin/ui-layout-generate", { prompt }),
-  widgets: () => request<{ widgets: SavedWidget[] }>("/api/admin/widgets"),
+  }>("/api/admin/ui-layout-generate?domain=" + domainId, { prompt }),
+  widgets: (domainId: Conversation["domainId"] = "wealth") => request<{ widgets: SavedWidget[] }>("/api/admin/widgets?domain=" + domainId),
   generateWidget: (input: string | {
     prompt?: string;
     imageDataUrl?: string;
     imageName?: string;
     figmaUrl?: string;
     figmaToken?: string;
-  }) => request<{
+  }, domainId: Conversation["domainId"] = "wealth") => request<{
     widget: WidgetDraft;
     source?: "copilot_vision" | "figma_api" | "copilot_llm" | "synthesizer";
     sourceSummary?: string;
-  }>("/api/admin/widget-generate", typeof input === "string" ? { prompt: input } : input),
-  saveWidgetLibrary: (change: WidgetLibraryChange) => request<{ widget?: SavedWidget; widgets: SavedWidget[] }>("/api/admin/widgets", change),
+  }>("/api/admin/widget-generate?domain=" + domainId, typeof input === "string" ? { prompt: input } : input),
+  saveWidgetLibrary: (change: WidgetLibraryChange, domainId: Conversation["domainId"] = "wealth") => request<{ widget?: SavedWidget; widgets: SavedWidget[] }>("/api/admin/widgets?domain=" + domainId, change),
   customers: () => request<{ customers: Customer360AdminRecord[] }>("/api/admin/customers"),
   saveCustomer: (input: Customer360ProfileInput) => request<{ customer?: Customer360AdminRecord; customers: Customer360AdminRecord[] }>("/api/admin/customers", input),
   deleteOrResetCustomer: (personaId: string) => request<{ deleted: boolean; reset: boolean; customers: Customer360AdminRecord[] }>("/api/admin/customer-delete", { personaId }),
@@ -307,8 +310,8 @@ export const api = {
   previewFunding: (conversationId: string, clientRequestId: string, source?: typeof pendingActionsContext) => request<TurnAccepted>(
     "/api/conversations/" + conversationId + "/preview-funding", { clientRequestId, source },
   ),
-  newConversation: (personaId: string, scenarioId: string) => request<ConversationView>("/api/conversations", { personaId, scenarioId }),
-  newAdminConversation: (personaId: string, scenarioId: string) => request<ConversationView>("/api/admin/conversations", { personaId, scenarioId }),
+  newConversation: (personaId: string, scenarioId: string, domainId: Conversation["domainId"] = "wealth") => request<ConversationView>("/api/conversations", domainId === "wealth" ? { personaId, scenarioId, domainId } : { domainId }),
+  newAdminConversation: (personaId: string, scenarioId: string, domainId: Conversation["domainId"] = "wealth") => request<ConversationView>("/api/admin/conversations", domainId === "wealth" ? { personaId, scenarioId, domainId } : { domainId }),
   turn: (id: string) => request<TurnView>("/api/turns/" + id),
   send: (id: string, message: string, clientRequestId: string) => (
     request<TurnAccepted>("/api/conversations/" + id + "/turns", { message, clientRequestId })

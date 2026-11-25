@@ -1,4 +1,4 @@
-import { author as operatorCredentials } from "./operator-fixture";
+import { author as operatorCredentials, reviewer } from "./operator-fixture";
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -37,8 +37,28 @@ try {
   await page.getByRole("button", { name: "Save draft", exact: true }).click();
   await page.getByText("Draft saved.", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await page.getByText("Layout published to chat.", { exact: true }).waitFor();
+  await page.getByText("Published to the shared design library.", { exact: true }).waitFor();
   await preview.getByRole("heading", { name: "Understanding your balances" }).waitFor({ state: "hidden" });
+
+  const colleague = await browser.newPage({ httpCredentials: { ...reviewer, origin: app.url } });
+  await colleague.goto(app.url + "/admin/ui");
+  await colleague.getByRole("button", { name: "Design library", exact: true }).click();
+  const library = colleague.getByRole("region", { name: "Shared design library" });
+  await library.getByRole("heading", { name: "Compare balances layout" }).waitFor();
+  assert.equal(await library.getByRole("button", { name: "Edit my design" }).count(), 0);
+  await library.getByRole("button", { name: "Use as template" }).click();
+  assert.equal(await colleague.getByLabel("Layout name").inputValue(), "Compare balances layout copy");
+  assert.equal(await colleague.getByRole("button", { name: "Publish", exact: true }).isDisabled(), true);
+  await colleague.close();
+
+  const customer = await browser.newPage();
+  await customer.goto(app.url + "/login");
+  await customer.getByRole("button", { name: "Sign in as Jordan Lee", exact: true }).click();
+  const customerInput = customer.getByRole("textbox", { name: "Your question" });
+  await customerInput.fill("Compare available and current balances.");
+  await customerInput.press("Enter");
+  await customer.getByRole("heading", { name: "Read both balances", exact: true }).waitFor();
+  await customer.close();
 
   const screenshots = process.env.PZN_TEST_SCREENSHOTS;
   if (screenshots) {

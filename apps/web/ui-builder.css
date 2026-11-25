@@ -1529,3 +1529,22 @@
   background: var(--builder-green-soft);
   color: var(--builder-green-dark);
 }
+
+.design-scope, .design-library-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.design-scope {
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+  color: var(--builder-muted);
+}
+.design-scope select, .shared-design-library select {
+  max-width: 100%;
+}
+.shared-design-library .widget-library-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

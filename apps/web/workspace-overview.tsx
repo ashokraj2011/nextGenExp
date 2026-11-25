@@ -42,6 +42,7 @@ function SavingsOverview({ goal, disabled, onReview }: {
 
 function AccountOverview({ profile }: { profile: DemoPersona["profile"] }) {
   const title = useId();
+  if (!profile) return null;
   const missing = profile.beneficiaryStatus === "missing";
   const unfunded = profile.accountFundingStatus === "unfunded";
   return <section className="content-card workspace-account" aria-labelledby={title}>
@@ -201,7 +202,7 @@ function PinnedSummary({ activeProfile, pins, onSelect }: {
   const values = {
     portfolio: portfolio && { value: formatPortfolioAmount(portfolio.equityCents + portfolio.fixedIncomeCents), detail: "Invested value" },
     savings: goal && latestSavings && { value: formatPortfolioAmount(latestSavings.savedCents), detail: "Saved toward " + formatPortfolioAmount(goal.targetCents) },
-    account: {
+    account: profile && {
       value: profile.accountFundingStatus === "unfunded" ? "Awaiting deposit" : "Funded",
       detail: profile.beneficiaryStatus === "missing" ? "Beneficiaries missing" : "Beneficiaries on file",
     },

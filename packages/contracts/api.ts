@@ -132,6 +132,9 @@ export type TurnView = {
   feedback?: "helpful" | "unhelpful";
 };
 export type Conversation = {
+  tenantId: string;
+  userId: string;
+  domainId: import("./domain-packs").DomainPackId;
   id: string; title: string; personaId: string; scenarioId: string; updatedAt: number;
   archivedAt?: number;
   audience?: "admin";
@@ -143,7 +146,7 @@ export type DemoPersona = {
   personaId: string;
   displayName: string;
   allowedScenarios: string[];
-  profile: {
+  profile?: {
     beneficiaryStatus: "missing" | "on_file";
     accountFundingStatus: "funded" | "unfunded";
     cashCents: number | null;
@@ -155,7 +158,10 @@ export type DemoPersona = {
   };
   pins?: WorkspacePin[];
 };
+export type ProfileChoice = { personaId: string; displayName: string; fundingStatus?: "funded" | "unfunded" };
 export type Bootstrap = {
+  requiresProfile?: boolean;
+  tenantId: string;
   conversations: Conversation[];
   personas: DemoPersona[];
   scenarios: { scenarioId: string; label: string }[];

@@ -1,3 +1,4 @@
+import { serverTenantId } from "./tenant";
 import type { EvaluationRow } from "../../packages/contracts/evaluation";
 import { axeBudget, experienceAgentId, type ExecutionBudget } from "../../packages/contracts/agentic";
 import { availableFundingOptions, fundingPreviewFrom } from "../../packages/capabilities";
@@ -178,8 +179,8 @@ const registryBoundaries = {
   catalog: "catalogScopeId", propensity: "catalogScopeId", selection: "tsScopeId", glossary: "glossaryScopeId", portfolio: "portfolioScopeId",
   goal: "goalScopeId", fundingOptions: "workflowScopeId", fundingStatus: "workflowScopeId", fundingPreview: "workflowScopeId",
 } as const;
-export function principalFor(id: string): Principal {
-  return { tenantId: "pzn-local", subjectId: id, roles: ["pzn-demo", "pzn-developer"], attributes: {} };
+export function principalFor(id: string, scope?: Pick<Scope, "userId" | "personaId" | "domainId">): Principal {
+  return { tenantId: serverTenantId, subjectId: id, roles: ["pzn-demo", "pzn-developer"], attributes: scope?.domainId ? { domainId: scope.domainId, userId: scope.userId ?? scope.personaId } : {} };
 }
 const actions = new Set<string>([
   ...toolKeys.map((key) => sfieldTools[key].id),
@@ -338,7 +339,7 @@ export class Runtime implements IntegrationTaskRuntime {
             ))
             || action.startsWith("int.")
           );
-          return principal.tenantId === "pzn-local" && principal.roles.includes("pzn-demo") && (readAllowed || writeAllowed)
+          return principal.tenantId === serverTenantId && principal.roles.includes("pzn-demo") && (readAllowed || writeAllowed)
             ? {
               decision: "allow",
               // Deterministic per (run, principal, action, resource, arguments): sfield binds approvals to a prepared
@@ -404,7 +405,7 @@ export class Runtime implements IntegrationTaskRuntime {
       ].filter((id): id is string => Boolean(id)));
       const results = await Promise.all([...ids].map(async (id) => {
         const run = await this.sf.persistence.getRun(id);
-        if (run?.subjectId !== principalId || run.tenantId !== "pzn-local") return;
+        if (run?.subjectId !== principalId || run.tenantId !== serverTenantId) return;
         const calls = await this.sf.persistence.listCalls(id);
         const phases = turn.fundingRun?.id === id ? turn.fundingRun : undefined;
         const modelCalls = phases && phases.through ? phases.through.attempts - phases.after.attempts : run.usage.modelCalls;
@@ -453,7 +454,7 @@ export class Runtime implements IntegrationTaskRuntime {
     requireCheck(typeof ref === "string", "TURN_REF_REQUIRED");
     const turn = this.current(ref);
     const boundary = registryBoundaries[key];
-    requireCheck(turn[boundary] === ctx.runId && ctx.principal.tenantId === "pzn-local"
+    requireCheck(turn[boundary] === ctx.runId && ctx.principal.tenantId === serverTenantId
       && turn.scope.principalId === ctx.principal.subjectId && !ctx.agentId, "REGISTRY_SCOPE_MISMATCH");
     const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
     requireCheck(conversation.personaId === turn.scope.personaId, "PERSONA_MISMATCH");
@@ -1026,7 +1027,7 @@ export class Runtime implements IntegrationTaskRuntime {
     }
     try {
       await this.sf.approvals.decide({
-        approvalId: call.sfieldApprovalId, actor: { tenantId: "pzn-local", subjectId: approver.slice(0, 80) }, decision,
+        approvalId: call.sfieldApprovalId, actor: { tenantId: serverTenantId, subjectId: approver.slice(0, 80) }, decision,
         ...(decision === "deny" ? { comment: "denied in CEP" } : {}),
       });
       if (decision === "deny") return { kind: "denied" as const, resumed };
@@ -1542,7 +1543,7 @@ export class Runtime implements IntegrationTaskRuntime {
     // A persisted successful tool result is the evidence. Handler output alone cannot authorize display.
     const read = calls.find((call) => call.toolRef === toolRefs.balances && call.state === "succeeded"
       && call.result?.status === "succeeded" && call.invocation?.principalIdentity.subjectId === turn.scope.principalId
-      && call.invocation.principalIdentity.tenantId === "pzn-local" && call.invocation.runId === runId);
+      && call.invocation.principalIdentity.tenantId === serverTenantId && call.invocation.runId === runId);
     const reading = metricReadingSchema.safeParse(read?.result?.output);
     const proof: BalanceProof | null = read && reading.success ? {
       ...reading.data, toolId: sfieldTools.balances.id, callId: read.callId, scope: turn.scope,
@@ -1573,7 +1574,7 @@ export class Runtime implements IntegrationTaskRuntime {
     const run = await this.sf.persistence.getRun(runId);
     requireCheck(run && typeof run.request.inputs?.turnRef === "string", "RUN_NOT_ADMITTED");
     const turn = this.current(run.request.inputs.turnRef);
-    requireCheck(principal.subjectId === turn.scope.principalId && principal.tenantId === "pzn-local", "STAGE_SCOPE_MISMATCH");
+    requireCheck(principal.subjectId === turn.scope.principalId && principal.tenantId === serverTenantId, "STAGE_SCOPE_MISMATCH");
     this.bindAttempt(turn, stage, run);
     return this.current(turn.public.id);
   }
@@ -1582,7 +1583,7 @@ export class Runtime implements IntegrationTaskRuntime {
     const attempt = turn.attempts[stage];
     const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
     const decisionRef = stage === "route" ? turn.catalog?.snapshotId : turn.decision?.decisionId;
-    requireCheck(attempt && run.kind === "session" && run.tenantId === "pzn-local"
+    requireCheck(attempt && run.kind === "session" && run.tenantId === serverTenantId
       && run.subjectId === turn.scope.principalId && run.principal.subjectId === turn.scope.principalId
       && conversation.personaId === turn.scope.personaId && conversation.sessions[stage] === attempt.sessionId
       && run.conversationId === attempt.sessionId && run.agentId === stageAgent[stage] && attempt.stage === stage
@@ -1603,7 +1604,7 @@ export class Runtime implements IntegrationTaskRuntime {
   ) {
     signal.throwIfAborted();
     const scope = await this.sf.executions.open({
-      principal: principalFor(turn.scope.principalId), purpose: registryPurposes[boundary],
+      principal: principalFor(turn.scope.principalId, turn.scope), purpose: registryPurposes[boundary],
       preset: "read_only", budget: { maxToolCalls },
     });
     try {
@@ -1621,7 +1622,7 @@ export class Runtime implements IntegrationTaskRuntime {
     stage: Stage, turn: TurnRecord, conversation: ConversationRecord, decisionRef: string, envelope: object,
     signal: AbortSignal, recovering: boolean,
   ): Promise<RunResult> {
-    const principal = principalFor(turn.scope.principalId);
+    const principal = principalFor(turn.scope.principalId, turn.scope);
     let attempt: StageAttempt | undefined = turn.attempts[stage];
     if (attempt && recovering) {
       const stored = attempt.runId ? await this.sf.persistence.getRun(attempt.runId)

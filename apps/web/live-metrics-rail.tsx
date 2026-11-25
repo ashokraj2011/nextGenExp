@@ -34,7 +34,7 @@ export function LiveMetricsHud({
   const fixedPct = totalCents > 0 && portfolio ? Math.round((portfolio.fixedIncomeCents / totalCents) * 100) : 0;
   const cashPct = totalCents > 0 && portfolio ? Math.max(0, 100 - stocksPct - fixedPct) : 0;
 
-  const unfunded = profile.accountFundingStatus === "unfunded";
+  const unfunded = profile?.accountFundingStatus === "unfunded";
   const highCash = cashPct >= 20 && totalCents > 0;
   const latestGoal = goal?.history.at(-1);
   const goalPercent = goal && latestGoal ? Math.min(100, Math.round((latestGoal.savedCents / goal.targetCents) * 100)) : undefined;

@@ -623,7 +623,7 @@ test("portfolio summaries combine the scoped snapshot with the cash treatment on
   const { personas } = await client.request<Bootstrap>("/api/bootstrap");
   assert.doesNotMatch(JSON.stringify(personas), /DEMO-MID/);
   assert.deepEqual(personas.map(({ displayName, profile }) => ({
-    displayName, cashCents: profile.cashCents, beneficiaries: profile.beneficiaryStatus,
+    displayName, cashCents: profile?.cashCents, beneficiaries: profile?.beneficiaryStatus,
   })), [
     { displayName: "Alice Morgan", cashCents: 1_250_000, beneficiaries: "missing" },
     { displayName: "Jordan Lee", cashCents: 1_000_000, beneficiaries: "on_file" },
@@ -688,7 +688,7 @@ test("the address guide can launch the funding workflow only when Treatment Sele
   const guide = "address_update_guide";
   const suggestion = "fund_account";
   const { personas } = await client.request<Bootstrap>("/api/bootstrap");
-  assert.equal(personas.find(({ personaId }) => personaId === "demo-new-account")?.profile.accountFundingStatus, "unfunded");
+  assert.equal(personas.find(({ personaId }) => personaId === "demo-new-account")?.profile?.accountFundingStatus, "unfunded");
 
   for (const [personaId, mid, matched] of [
     ["demo-new-account", "DEMO-MID-1003", true],

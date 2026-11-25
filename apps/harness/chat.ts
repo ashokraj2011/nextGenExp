@@ -1,3 +1,4 @@
+import { tenantDataDirectory } from "../server/tenant";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -20,7 +21,7 @@ const projectRoot = fileURLToPath(new URL("../../", import.meta.url));
 const balanceDemo = ["Compare available and current balance.", "/reopen", "show me the summary"];
 
 async function readTranscript(dataDir: string, scope: ChatScope) {
-  const persistence = new SqlitePersistence({ path: join(dataDir, "sfield.sqlite") });
+  const persistence = new SqlitePersistence({ path: join(tenantDataDirectory(dataDir), "sfield.sqlite") });
   await persistence.init({ namespace: sfieldNamespace, ownerId: newId("owner") });
   try {
     const thread = await new ChatHarness(persistence).open(scope);
@@ -54,7 +55,7 @@ async function runChatLoop(
     const conversation = await client.conversation("normal", profileId);
     const sessionId = cookie.split("=")[1];
     if (!sessionId) throw new Error("The app did not open a browser session.");
-    const scope = { tenantId: "pzn-local", userId: profileId, sessionId, threadId: conversation.id };
+    const scope = { tenantId: conversation.tenantId, domainId: conversation.domainId, userId: conversation.userId, sessionId, threadId: conversation.id };
     const visibleScope = { ...scope, sessionId: "[REDACTED]" };
     const events: Array<
       | { type: "turn"; turn: TurnView; routerInput?: ReturnType<typeof decodeChatInput>; calls: TurnPayloads }

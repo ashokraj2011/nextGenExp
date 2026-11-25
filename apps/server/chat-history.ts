@@ -39,7 +39,8 @@ export class PznChatHistory {
 
   private async sync(conversation: ConversationRecord, turns: TurnRecord[]) {
     const thread = await this.harness.open({
-      tenantId: "pzn-local", userId: conversation.personaId, sessionId: conversation.principalId, threadId: conversation.id,
+      tenantId: conversation.tenantId, domainId: conversation.legacyTranscript ? undefined : conversation.domainId,
+      userId: conversation.legacyTranscript ? conversation.personaId : conversation.userId, sessionId: conversation.principalId, threadId: conversation.id,
     });
     for (const turn of turns) {
       if (turn.historyStatus === turn.public.status) continue;

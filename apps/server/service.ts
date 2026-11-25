@@ -1,3 +1,4 @@
+import { getDomainPack } from "../../packages/contracts/domain-packs";
 import { uiIntentHints } from "../../packages/contracts/ui-layout";
 import { inputValuesSchema, type AgentLaunch } from "../../packages/contracts/agentic";
 import { fieldValueValid } from "./agentic-inputs";
@@ -115,6 +116,8 @@ export class ExperienceService {
     readonly store: Store, private readonly runtime: Runtime | null, readonly selectionMode: SelectionMode, private readonly now: () => number,
     private readonly canCreateRule: boolean, private readonly offlineHistory?: { chat: ChatHarness; close(): Promise<void> },
     private readonly dynamicUi?: {
+      restrictedDomains?: boolean;
+      isTenantAdmin?: (operatorName: string) => boolean;
       mode?: "live" | "test";
       gateway?: GatewaySettings | null;
       dataDir: string;
@@ -130,7 +133,7 @@ export class ExperienceService {
       actionFlowStore?: ActionFlowStore;
       workflowEngine?: WorkflowEngine;
       knowledgeBase?: KnowledgeBaseStore;
-      widgetLibrary?: WidgetLibraryStore;
+      widgetLibraries?: Record<Conversation["domainId"], WidgetLibraryStore>;
       piiFirewall?: PiiFirewallStore;
       onTradeSettle?: (principalId: string) => SettlementCallback;
     },
@@ -140,10 +143,10 @@ export class ExperienceService {
     this.history = new PznChatHistory(store, chat);
   }
 
-  createConversation(principalId: string, personaId: string, scenarioId: string, audience?: Conversation["audience"]) {
-    const persona = findProfileById(personaId);
-    if (!persona?.allowedScenarios.includes(scenarioId)) throw new ApiError(400, "demo_scope_invalid", "Select an available profile and scenario.");
-    return this.store.createConversation(principalId, personaId, scenarioId, this.now(), audience);
+  createConversation(principalId: string, personaId: string, scenarioId: string, audience?: Conversation["audience"], domainId: Conversation["domainId"] = "wealth", operatorName?: string) {
+    const allowed = domainId === "wealth" ? findProfileById(personaId)?.allowedScenarios.includes(scenarioId) : Boolean(operatorName) && scenarioId === demo.defaultScenarioId;
+    if (!allowed) throw new ApiError(400, "demo_scope_invalid", "Select an available profile and scenario.");
+    return this.store.createConversation(principalId, personaId, scenarioId, this.now(), audience, domainId, domainId === "wealth" ? personaId : operatorName);
   }
 
   conversationTurns(conversation: ConversationRecord) {
@@ -181,6 +184,7 @@ export class ExperienceService {
     if (conversation.scenarioId !== demo.defaultScenarioId) {
       throw new ApiError(409, "workspace_scope_invalid", "Open Overview to start a funding preview.");
     }
+    if (conversation.domainId !== "wealth") throw new ApiError(403, "domain_access_denied", "Funding belongs to the Wealth workspace.");
     const origin = source === pendingActionsContext ? pendingActionsFundingOrigin : overviewFundingOrigin;
     return this.submit(conversation, fundingPreviewWorkflow.label, requestId, origin);
   }
@@ -279,7 +283,21 @@ export class ExperienceService {
     const initial = this.store.turn(id);
     if (this.closing || initial?.public.status !== "working") return;
     const workspaceContext = workspaceFundingContext(initial.origin);
-    const goalTurn = !workspaceContext && !initial.workflow && this.runtime?.experiences.shouldHandle(initial);
+    const domain = initial.scope.domainId ?? "wealth";
+    const scoped = Boolean(this.dynamicUi?.restrictedDomains || domain !== "wealth");
+    const tenantTools = Boolean(initial.operatorName && this.dynamicUi?.isTenantAdmin?.(initial.operatorName));
+    const domainTools = !scoped || !this.dynamicUi ? this.dynamicUi : {
+      ...this.dynamicUi,
+      opsStore: domain === "it_ops" ? this.dynamicUi.opsStore : undefined,
+      salesStore: domain === "sales_revops" ? this.dynamicUi.salesStore : undefined,
+      tradeStore: domain === "wealth" ? this.dynamicUi.tradeStore : undefined,
+      connectorStore: tenantTools ? this.dynamicUi.connectorStore : undefined,
+      approvalStore: tenantTools ? this.dynamicUi.approvalStore : undefined,
+      workflowEngine: tenantTools ? this.dynamicUi.workflowEngine : undefined,
+      actionFlowStore: tenantTools ? this.dynamicUi.actionFlowStore : undefined,
+      knowledgeBase: tenantTools ? this.dynamicUi.knowledgeBase : undefined,
+    };
+    const goalTurn = domain === "wealth" && !workspaceContext && !initial.workflow && this.runtime?.experiences.shouldHandle(initial);
     const deadline = initial.public.createdAt + (goalTurn ? this.runtime!.goalBudget.activeSeconds * 1_000 : TURN_DEADLINE);
     const remains = deadline - this.now();
     if (remains <= 0) {
@@ -332,7 +350,7 @@ export class ExperienceService {
         this.store.progress(id, "planning", this.now());
         const conversation = this.store.conversation(initial.scope.conversationId, initial.scope.principalId);
         const recent = await this.history.recent(conversation, initial.ordinal);
-        const result = await runtime.experiences.respond(current(), principalFor(initial.scope.principalId), recent, signal);
+        const result = await runtime.experiences.respond(current(), principalFor(initial.scope.principalId, initial.scope), recent, signal);
         if (result) {
           this.store.update(id, (row) => {
             row.public.actionMode = "verified_experience";
@@ -343,14 +361,14 @@ export class ExperienceService {
         }
         stage = "catalog";
       }
-      if (!initial.workflow && !initial.route && this.dynamicUi) {
+      if (!initial.workflow && !initial.route && domainTools) {
         const conversation = this.store.conversation(initial.scope.conversationId, initial.scope.principalId);
-        const persona = findProfileById(conversation.personaId);
+        const persona = domain === "wealth" ? findProfileById(conversation.personaId) : undefined;
 
         const previous = this.store.previousCompletedTurn(conversation.id, initial.ordinal);
         const message = initial.public.message;
-        const lookup = persona && this.dynamicUi.integrationService && await answerCustomerLookup(
-          this.dynamicUi.integrationService, conversation.principalId, persona.syntheticMid, message, previous?.customerTask,
+        const lookup = persona && domainTools.integrationService && await answerCustomerLookup(
+          domainTools.integrationService, conversation.principalId, persona.syntheticMid, message, previous?.customerTask,
         );
         if (lookup) {
           current();
@@ -366,9 +384,9 @@ export class ExperienceService {
           this.store.finish(id, { type: "completed", result }, this.now());
           return;
         }
-        const scopedPrompt = recordPrompt(message, previous?.recordId, initial.operatorName ? this.dynamicUi.salesStore?.list() ?? [] : [], initial.operatorName ? this.dynamicUi.opsStore?.list() ?? [] : []);
+        const scopedPrompt = recordPrompt(message, previous?.recordId, initial.operatorName ? domainTools.salesStore?.list() ?? [] : [], initial.operatorName ? domainTools.opsStore?.list() ?? [] : []);
         if (watchRequest.test(message) && initial.operatorName && /\bquote\b/i.test(message)) {
-          const matches = matchingDeals(scopedPrompt, this.dynamicUi.salesStore?.list() ?? []);
+          const matches = matchingDeals(scopedPrompt, domainTools.salesStore?.list() ?? []);
           if (matches.length !== 1) {
             const question = "Which deal should I watch? Include its deal ID with your request.";
             this.store.finish(id, { type: "completed", result: compileChatReply(question, "reply", this.now() + DECISION_TTL) }, this.now());
@@ -391,11 +409,11 @@ export class ExperienceService {
         // Run Visual PII Firewall inspection (toggleable ON/OFF in Admin)
         let activePiiTokenMap = new Map<string, string>();
         let scrubbedProfileSummaryOverride: string | undefined;
-        if (this.dynamicUi.piiFirewall && this.dynamicUi.mode !== "test") {
+        if (domainTools.piiFirewall && domainTools.mode !== "test") {
           const contextSeed = persona
             ? `${persona.displayName} (Account ${persona.syntheticMid}, Cash $${((persona.cashCents ?? 0) / 100).toLocaleString("en-US")}, Equities $${((persona.equityCents ?? 0) / 100).toLocaleString("en-US")})`
             : undefined;
-          const piiResult = this.dynamicUi.piiFirewall.inspectAndRecord({
+          const piiResult = domainTools.piiFirewall.inspectAndRecord({
             turnId: id,
             prompt: initial.public.message,
             contextSummary: contextSeed,
@@ -413,20 +431,20 @@ export class ExperienceService {
 
         // 0. Multimodal Document-to-Action interception ([Attached: ...])
         const attachedDoc = hasAttachedDocumentBlock(initial.public.message);
-        if (attachedDoc) {
+        if (attachedDoc && domain === "wealth") {
           const extracted = await extractDocumentAction({
             fileName: attachedDoc.fileName,
             content: attachedDoc.body,
-            gateway: this.dynamicUi.mode === "test" ? null : this.dynamicUi.gateway,
-            dataDir: this.dynamicUi.dataDir,
+            gateway: domainTools.mode === "test" ? null : domainTools.gateway,
+            dataDir: domainTools.dataDir,
             signal,
           });
           if (extracted) {
             stage = "compose";
             this.store.progress(id, "composition", this.now());
             const now = this.now();
-            if (extracted.actionType === "wire_workflow" && initial.operatorName && this.dynamicUi.workflowEngine) {
-              const started = await this.dynamicUi.workflowEngine.startRun("wire_transfer_governed", {
+            if (extracted.actionType === "wire_workflow" && initial.operatorName && domainTools.workflowEngine) {
+              const started = await domainTools.workflowEngine.startRun("wire_transfer_governed", {
                 personaId: conversation.personaId,
                 actorName: persona?.displayName ?? "Customer",
                 conversationId: conversation.id,
@@ -475,20 +493,20 @@ export class ExperienceService {
               this.store.finish(id, { type: "completed", result: dynamicResult }, now);
               return;
             }
-            if (extracted.actionType === "stock_trade" && this.dynamicUi.tradeStore) {
+            if (extracted.actionType === "stock_trade" && domainTools.tradeStore) {
               const syntheticPrompt = `${extracted.extractedFields.side} ${
                 extracted.extractedFields.percent ? `${extracted.extractedFields.percent}%` : `${extracted.extractedFields.shares ?? 10} shares`
               } of ${extracted.extractedFields.symbol}`;
               const generated = await generateDynamicUi({
                 prompt: syntheticPrompt,
-                gateway: this.dynamicUi.gateway,
-                dataDir: this.dynamicUi.dataDir,
-                tradeStore: this.dynamicUi.tradeStore,
-                approvalStore: this.dynamicUi.approvalStore,
+                gateway: domainTools.gateway,
+                dataDir: domainTools.dataDir,
+                tradeStore: domainTools.tradeStore,
+                approvalStore: domainTools.approvalStore,
                 personaId: conversation.personaId,
                 conversationId: conversation.id,
                 principalId: initial.scope.principalId,
-                onTradeSettle: this.dynamicUi.onTradeSettle,
+                onTradeSettle: domainTools.onTradeSettle,
                 requesterName: initial.operatorName ?? persona?.displayName,
                 semanticRoute: {
                   capabilityId: "stock_trade",
@@ -570,8 +588,8 @@ export class ExperienceService {
         }
 
         // 0b. Policy & Knowledge Base RAG interception
-        if (this.dynamicUi.knowledgeBase && !/\b(?:DEAL|INC)-[A-Z0-9]+\b/i.test(scopedPrompt) && isPolicyQuestion(initial.public.message)) {
-          const ragResult = this.dynamicUi.knowledgeBase.search(initial.public.message, 3);
+        if (domainTools.knowledgeBase && !/\b(?:DEAL|INC)-[A-Z0-9]+\b/i.test(scopedPrompt) && isPolicyQuestion(initial.public.message)) {
+          const ragResult = domainTools.knowledgeBase.search(initial.public.message, 3);
           if (ragResult.citations.length > 0) {
             stage = "compose";
             this.store.progress(id, "composition", this.now());
@@ -594,12 +612,12 @@ export class ExperienceService {
           }
         }
 
-        const activeDraft = this.dynamicUi.tradeStore?.getDraft(conversation.id);
-        const matchedWorkflow = initial.operatorName && this.dynamicUi.workflowEngine?.matchPrompt(initial.public.message);
-        const matchedActionFlow = initial.operatorName && this.dynamicUi.actionFlowStore?.matchPrompt(initial.public.message);
+        const activeDraft = domainTools.tradeStore?.getDraft(conversation.id);
+        const matchedWorkflow = initial.operatorName && domainTools.workflowEngine?.matchPrompt(initial.public.message);
+        const matchedActionFlow = initial.operatorName && domainTools.actionFlowStore?.matchPrompt(initial.public.message);
 
         // 1. Conversational continuation for an active stock trade draft in this thread
-        if (activeDraft && this.dynamicUi.tradeStore) {
+        if (activeDraft && domainTools.tradeStore) {
           const msg = initial.public.message.trim();
           const wantsTax = /^(?:yes|yeah|yep|sure|ok|please)\b/i.test(msg)
             || /\b(?:analyze|run|check|do|show)\s+(?:tax|tlh|loss|harvest)/i.test(msg);
@@ -613,18 +631,18 @@ export class ExperienceService {
             this.store.progress(id, "composition", this.now());
             const generated = await generateDynamicUi({
               prompt: msg,
-              gateway: this.dynamicUi.gateway,
-              dataDir: this.dynamicUi.dataDir,
-              opsStore: this.dynamicUi.opsStore,
-              salesStore: this.dynamicUi.salesStore,
-              connectorStore: this.dynamicUi.connectorStore,
-              approvalStore: this.dynamicUi.approvalStore,
-              tradeStore: this.dynamicUi.tradeStore,
-              actionFlowStore: this.dynamicUi.actionFlowStore,
+              gateway: domainTools.gateway,
+              dataDir: domainTools.dataDir,
+              opsStore: domainTools.opsStore,
+              salesStore: domainTools.salesStore,
+              connectorStore: domainTools.connectorStore,
+              approvalStore: domainTools.approvalStore,
+              tradeStore: domainTools.tradeStore,
+              actionFlowStore: domainTools.actionFlowStore,
               personaId: conversation.personaId,
               conversationId: conversation.id,
               principalId: initial.scope.principalId,
-              onTradeSettle: this.dynamicUi.onTradeSettle,
+              onTradeSettle: domainTools.onTradeSettle,
               requesterName: initial.operatorName ?? persona?.displayName,
               tradeContinuation: {
                 draft: activeDraft,
@@ -655,10 +673,10 @@ export class ExperienceService {
         }
 
         // 1b. Declarative Multi-Step Workflow match
-        if (matchedWorkflow && this.dynamicUi.workflowEngine) {
+        if (matchedWorkflow && domainTools.workflowEngine) {
           stage = "compose";
           this.store.progress(id, "composition", this.now());
-          const started = await this.dynamicUi.workflowEngine.startRun(matchedWorkflow.id, {
+          const started = await domainTools.workflowEngine.startRun(matchedWorkflow.id, {
             personaId: conversation.personaId,
             actorName: persona?.displayName ?? "Customer",
             conversationId: conversation.id,
@@ -706,11 +724,11 @@ export class ExperienceService {
           this.store.progress(id, "composition", this.now());
           const generated = await generateDynamicUi({
             prompt: initial.public.message,
-            gateway: this.dynamicUi.gateway,
-            dataDir: this.dynamicUi.dataDir,
-            connectorStore: this.dynamicUi.connectorStore,
-            approvalStore: this.dynamicUi.approvalStore,
-            actionFlowStore: this.dynamicUi.actionFlowStore,
+            gateway: domainTools.gateway,
+            dataDir: domainTools.dataDir,
+            connectorStore: domainTools.connectorStore,
+            approvalStore: domainTools.approvalStore,
+            actionFlowStore: domainTools.actionFlowStore,
             matchedActionFlow,
             personaId: conversation.personaId,
             conversationId: conversation.id,
@@ -736,7 +754,7 @@ export class ExperienceService {
         }
 
         // 2b. Saved Custom Widget Library match (e.g. "Birthday Celebration" widget)
-        const built = !/\b(?:DEAL|INC)-[A-Z0-9]+\b/i.test(scopedPrompt) && this.dynamicUi.widgetLibrary?.renderPublishedWidget(initial.scope.principalId, initial.public.message, persona?.displayName);
+        const built = !/\b(?:DEAL|INC)-[A-Z0-9]+\b/i.test(scopedPrompt) && domainTools.widgetLibraries?.[conversation.domainId].renderPublishedWidget(initial.scope.principalId, initial.public.message, persona?.displayName);
         if (built) {
           const matchedWidget = built.widget;
           stage = "compose";
@@ -764,9 +782,9 @@ export class ExperienceService {
           : undefined;
         const semanticRoute = await routeCapabilityUnified({
           prompt: scopedPrompt,
-          mode: this.dynamicUi.mode ?? "live",
-          gateway: this.dynamicUi.gateway,
-          dataDir: this.dynamicUi.dataDir,
+          mode: domainTools.mode ?? "live",
+          gateway: domainTools.gateway,
+          dataDir: domainTools.dataDir,
           recentSummary,
           signal,
         });
@@ -780,6 +798,16 @@ export class ExperienceService {
             reasoning: semanticRoute.reasoning,
           };
         });
+        if (scoped && (
+          (semanticRoute.capabilityId === "ops_incident" && domain !== "it_ops")
+          || (semanticRoute.capabilityId === "sales_deal_desk" && domain !== "sales_revops")
+          || (["verified_experience", "stock_holdings", "stock_trade"].includes(semanticRoute.capabilityId) && domain !== "wealth")
+          || (["hitl_approvals", "external_connector"].includes(semanticRoute.capabilityId) && !tenantTools)
+        )) {
+          const pack = getDomainPack(domain);
+          this.store.finish(id, { type: "completed", result: compileChatReply(`You're in ${pack.label}. Try asking “${pack.quickPrompts[0].prompt}”.`, "reply", this.now() + DECISION_TTL) }, this.now());
+          return;
+        }
         if (!initial.operatorName && ["hitl_approvals", "external_connector", "ops_incident", "sales_deal_desk"].includes(semanticRoute.capabilityId)) {
           this.store.finish(id, { type: "completed", result: compileChatReply("That workspace requires an operator sign-in.", "reply", this.now() + DECISION_TTL) }, this.now());
           return;
@@ -787,8 +815,8 @@ export class ExperienceService {
         if (semanticRoute.capabilityId !== "verified_experience") {
         stage = "compose";
         this.store.progress(id, "composition", this.now());
-        const lookupInfo = this.dynamicUi.customer360 && persona
-          ? this.dynamicUi.customer360.evaluate({
+        const lookupInfo = domainTools.customer360 && persona
+          ? domainTools.customer360.evaluate({
               principalId: initial.scope.principalId,
               personaId: conversation.personaId,
               fundingStatus: (this.store.axe.fundingStatus(initial.scope) ?? persona.accountFundingStatus) === "funded" ? "funded" : "unfunded",
@@ -801,18 +829,18 @@ export class ExperienceService {
         const generatedRaw = await generateDynamicUi({
           prompt: scopedPrompt,
           profileSummary,
-          gateway: this.dynamicUi.gateway,
-          dataDir: this.dynamicUi.dataDir,
-          opsStore: this.dynamicUi.opsStore,
-          salesStore: this.dynamicUi.salesStore,
-          connectorStore: this.dynamicUi.connectorStore,
-          approvalStore: this.dynamicUi.approvalStore,
-          tradeStore: this.dynamicUi.tradeStore,
-          actionFlowStore: this.dynamicUi.actionFlowStore,
+          gateway: domainTools.gateway,
+          dataDir: domainTools.dataDir,
+          opsStore: domainTools.opsStore,
+          salesStore: domainTools.salesStore,
+          connectorStore: domainTools.connectorStore,
+          approvalStore: domainTools.approvalStore,
+          tradeStore: domainTools.tradeStore,
+          actionFlowStore: domainTools.actionFlowStore,
           personaId: conversation.personaId,
           conversationId: conversation.id,
           principalId: initial.scope.principalId,
-          onTradeSettle: this.dynamicUi.onTradeSettle,
+          onTradeSettle: domainTools.onTradeSettle,
           requesterName: initial.operatorName ?? persona?.displayName,
           semanticRoute,
           signal,
@@ -833,9 +861,9 @@ export class ExperienceService {
             : "wealth";
         let providerArbitration: ProviderArbitrationTrace | undefined;
         try {
-          if (arbDomain === "operations" && this.dynamicUi.opsStore) {
+          if (arbDomain === "operations" && domainTools.opsStore) {
             const opsArb = await new RecommendationArbitrator([
-              createOpsRunbookProvider(() => this.dynamicUi!.opsStore!.list().filter((r) => r.id === generated.canvas.recordId)),
+              createOpsRunbookProvider(() => domainTools!.opsStore!.list().filter((r) => r.id === generated.canvas.recordId)),
             ]).arbitrate({
               principalId: initial.scope.principalId,
               personaId: conversation.personaId,
@@ -857,9 +885,9 @@ export class ExperienceService {
                 { providerId: "sales_deal_desk", providerLabel: "Sales Deal Desk Recommender", status: "skipped", candidateCount: 0, elapsedMs: 0, note: 'Domain "operations" outside sales scope' },
               ],
             };
-          } else if (arbDomain === "sales" && this.dynamicUi.salesStore) {
+          } else if (arbDomain === "sales" && domainTools.salesStore) {
             const salesArb = await new RecommendationArbitrator([
-              createSalesDealDeskProvider(() => this.dynamicUi!.salesStore!.list().filter((r) => r.id === generated.canvas.recordId)),
+              createSalesDealDeskProvider(() => domainTools!.salesStore!.list().filter((r) => r.id === generated.canvas.recordId)),
             ]).arbitrate({
               principalId: initial.scope.principalId,
               personaId: conversation.personaId,
@@ -939,8 +967,8 @@ export class ExperienceService {
           hasActiveHomeGoal: personaForRoute.homeGoalTargetCents > 0,
           ...(personaForRoute.notes ? { notes: personaForRoute.notes } : {}),
         } : undefined;
-        const routeLookup = personaForRoute && this.dynamicUi?.customer360
-          ? this.dynamicUi.customer360.evaluate({
+        const routeLookup = personaForRoute && domainTools?.customer360
+          ? domainTools.customer360.evaluate({
               principalId: turn.scope.principalId,
               personaId: conversation.personaId,
               fundingStatus: effectiveFundingForRoute,
@@ -1017,7 +1045,7 @@ export class ExperienceService {
         }
         if (proposal.status === "reply" || proposal.status === "no_match") {
           const activeTurn = current();
-          if (this.dynamicUi && isDynamicUiRequest(activeTurn.public.message) && (initial.operatorName || (!isSalesDealPrompt(activeTurn.public.message) && !isOpsIncidentPrompt(activeTurn.public.message) && !isApprovalQueuePrompt(activeTurn.public.message) && !isConnectorActionPrompt(activeTurn.public.message)))) {
+          if (domainTools && isDynamicUiRequest(activeTurn.public.message) && (initial.operatorName || (!isSalesDealPrompt(activeTurn.public.message) && !isOpsIncidentPrompt(activeTurn.public.message) && !isApprovalQueuePrompt(activeTurn.public.message) && !isConnectorActionPrompt(activeTurn.public.message)))) {
             this.store.progress(id, "composition", this.now());
             const persona = findProfileById(conversation.personaId);
             const profileSummary = persona
@@ -1026,13 +1054,13 @@ export class ExperienceService {
             const generated = await generateDynamicUi({
               prompt: activeTurn.public.message,
               profileSummary,
-              gateway: this.dynamicUi.gateway,
-              dataDir: this.dynamicUi.dataDir,
-              opsStore: this.dynamicUi.opsStore,
-              salesStore: this.dynamicUi.salesStore,
-              connectorStore: this.dynamicUi.connectorStore,
-              approvalStore: this.dynamicUi.approvalStore,
-              tradeStore: this.dynamicUi.tradeStore,
+              gateway: domainTools.gateway,
+              dataDir: domainTools.dataDir,
+              opsStore: domainTools.opsStore,
+              salesStore: domainTools.salesStore,
+              connectorStore: domainTools.connectorStore,
+              approvalStore: domainTools.approvalStore,
+              tradeStore: domainTools.tradeStore,
               personaId: conversation.personaId,
               requesterName: initial.operatorName ?? persona?.displayName,
               signal,
@@ -1208,13 +1236,13 @@ export class ExperienceService {
       });
       let lookupSummary: typeof latest.public.customerLookup;
       let companionNba: typeof latest.public.nextBestAction;
-      if (this.dynamicUi?.customer360) {
+      if (domainTools?.customer360) {
         const persona = findProfileById(conversation.personaId);
         if (persona) {
           const existingBlockTitles = resultForDisplay.display.blocks.flatMap((block) => (
             "title" in block.props && typeof block.props.title === "string" ? [block.props.title] : []
           ));
-          const evaluated = this.dynamicUi.customer360.evaluate({
+          const evaluated = domainTools.customer360.evaluate({
             principalId: latest.scope.principalId,
             personaId: conversation.personaId,
             fundingStatus: (this.store.axe.fundingStatus(latest.scope) ?? persona.accountFundingStatus) === "funded" ? "funded" : "unfunded",
@@ -1368,7 +1396,7 @@ export class ExperienceService {
       const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
       const recent = await this.history.recent(conversation, turn.ordinal);
       const result = await runtime.funding.execute(
-        turn, definition, principalFor(turn.scope.principalId), recent, expiry, signal,
+        turn, definition, principalFor(turn.scope.principalId, turn.scope), recent, expiry, signal,
       );
       if (result.outcome === "other_topic") return false;
       const now = this.now();

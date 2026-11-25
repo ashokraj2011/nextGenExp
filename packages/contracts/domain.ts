@@ -97,6 +97,9 @@ export const contentEntrySchema = z.object({
 
 export type ContentEntry = z.infer<typeof contentEntrySchema>;
 export type Scope = {
+  userId?: string;
+  tenantId?: string;
+  domainId?: import("./domain-packs").DomainPackId;
   principalId: string;
   personaId: string;
   conversationId: string;

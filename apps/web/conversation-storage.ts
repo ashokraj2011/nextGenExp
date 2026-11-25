@@ -1,13 +1,20 @@
+import type { DomainPackId } from "../../packages/contracts/domain-packs";
+
 const activeConversationKey = "pzn-active-conversation";
 const adminConversationKey = "pzn-active-admin-conversation";
 const profileSessionKey = "pzn-profile-session";
 
-export function readActiveConversation(admin = false) {
-  try { return localStorage.getItem(admin ? adminConversationKey : activeConversationKey); } catch { return null; }
+function threadKey(admin: boolean, domainId: DomainPackId) {
+  const key = admin ? adminConversationKey : activeConversationKey;
+  return domainId === "wealth" ? key : key + ":" + domainId;
 }
 
-export function rememberActiveConversation(id: string | null, admin = false) {
-  const key = admin ? adminConversationKey : activeConversationKey;
+export function readActiveConversation(admin = false, domainId: DomainPackId = "wealth") {
+  try { return localStorage.getItem(threadKey(admin, domainId)); } catch { return null; }
+}
+
+export function rememberActiveConversation(id: string | null, admin = false, domainId: DomainPackId = "wealth") {
+  const key = threadKey(admin, domainId);
   try {
     if (id) localStorage.setItem(key, id);
     else localStorage.removeItem(key);

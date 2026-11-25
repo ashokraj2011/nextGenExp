@@ -1,3 +1,4 @@
+import type { DomainPackId } from "../../packages/contracts/domain-packs";
 import { useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 import {
   ArrowUpRight, BookmarkPlus, Check, Copy, ImagePlus, LayoutGrid, Link2, Pencil, Search, Sparkles, Trash2, Wand2, X,
@@ -267,10 +268,11 @@ function createSampleDesignMockupPng(): string {
 }
 
 export function WidgetStudio({
-  widgets,
+  domainId, widgets,
   onWidgetsChange,
   onInsertIntoLayout,
 }: {
+  domainId: DomainPackId;
   widgets: SavedWidget[];
   onWidgetsChange: (next: SavedWidget[]) => void;
   onInsertIntoLayout: (widget: SavedWidget) => void;
@@ -346,7 +348,7 @@ export function WidgetStudio({
         ...(cleanPrompt ? { prompt: cleanPrompt } : {}),
         ...(activeImage ? { imageDataUrl: activeImage, imageName: activeImageName || "screenshot.png" } : {}),
         ...(cleanFigma ? { figmaUrl: cleanFigma, ...(figmaToken.trim() ? { figmaToken: figmaToken.trim() } : {}) } : {}),
-      });
+      }, domainId);
       if (override?.prompt !== undefined) setPrompt(override.prompt);
       setDraft(result.widget);
       setEditingId(undefined);
@@ -365,7 +367,7 @@ export function WidgetStudio({
     setError("");
     setNotice("");
     try {
-      const result = await api.saveWidgetLibrary({ operation: "save", id: editingId, widget: draft });
+      const result = await api.saveWidgetLibrary({ operation: "save", id: editingId, widget: draft }, domainId);
       onWidgetsChange(result.widgets);
       setEditingId(result.widget?.id);
       setNotice(editingId ? `Updated "${draft.name}" in Widget Library.` : `Added "${draft.name}" to Widget Library.`);
@@ -387,7 +389,7 @@ export function WidgetStudio({
         operation: "set_availability",
         id: item.id,
         availableForConsumption: nextValue,
-      });
+      }, domainId);
       onWidgetsChange(result.widgets);
       if (editingId === item.id && draft) {
         setDraft({ ...draft, availableForConsumption: nextValue });
@@ -410,7 +412,7 @@ export function WidgetStudio({
     setError("");
     setNotice("");
     try {
-      const result = await api.saveWidgetLibrary({ operation: "delete", id });
+      const result = await api.saveWidgetLibrary({ operation: "delete", id }, domainId);
       onWidgetsChange(result.widgets);
       if (editingId === id) setEditingId(undefined);
       setNotice(`Removed "${name}" from Widget Library.`);

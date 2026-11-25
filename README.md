@@ -69,6 +69,31 @@ Copy `.env.example` to `.env` and set `LLM_PROVIDER=gateway`, `LLM_BASE_URL`, `L
 2. **Activate** is enabled only after a passing test of exactly those settings (within 30 minutes). It saves the configuration to `llm-gateway.json` in the data directory (mode 600; a stored key is never sent back to the browser) and restarts the app in place so sfield re-binds the model. Pending approvals resume after the restart.
 3. A saved configuration overrides the launch environment on every start. **Use environment settings instead** removes it. If a saved configuration can't start, the server falls back to the environment settings.
 
+### Tenants, domains and shared designs
+
+A tenant is one organization running the app. Inside it, a user can belong to more than one domain. Wealth, IT Operations and Sales each have a design library at `/admin/ui?view=library`. A domain owner can publish from **Administration → UI Builder** at `/admin/ui`. Choose the domain, attach the design to an intent or capability, and select **Publish**. **Design library** shows the published revision. Another owner with access can choose **Use as template**, select a domain they own and attach the copy to its own intent.
+
+| Scope | What belongs there |
+| --- | --- |
+| Tenant | The app process, model configuration and data directory |
+| Domain | Memberships, published layouts, widgets and their attachments |
+| User | The customer profile in Wealth or the signed-in operator in IT and Sales |
+| Session and thread | Chat messages and follow-up context in sfield |
+
+When Alice and Jordan compare balances, both can receive one Wealth design. The server fills its fields from the profile on each chat. A new draft stays with its author until published. A turn records the published revision it used, so a later edit leaves earlier answers intact.
+
+Set `PZN_TENANT_ID` on the server. A named tenant stores its files under `PZN_DATA_DIR/tenants/<tenant-id>`. Use a separate process and port per tenant. The default `pzn-local` tenant keeps the existing installation path. On upgrade, an original browser session can reclaim its older drafts by saving them under a signed-in owner. If legacy publications overlap, the most recently updated layout keeps the attachment and the others remain drafts.
+
+Set these variables alongside your operator credentials to limit access by domain. Omitted domains are closed when the membership map is present. Operators listed in `PZN_TENANT_ADMINS_JSON` can manage tenant-wide settings and all domain libraries.
+
+```dotenv
+PZN_TENANT_ID=north
+PZN_DOMAIN_MEMBERSHIPS_JSON='{"wealth":{"owners":["wealth-owner"],"users":["demo-learner","demo-returning"]},"it_ops":{"owners":["ops-owner"],"users":["oncall"]}}'
+PZN_TENANT_ADMINS_JSON='["platform-admin"]'
+```
+
+Without a membership map, the local app retains open profile selection and existing operator access. With memberships configured, the Wealth profile picker binds one selected customer to the server session. Switching profiles changes the account and threads that session can access. The picker simulates customer sign-in. A customer deployment needs a verified identity from its sign-in system mapped to a tenant, domain and user before opening a chat.
+
 ### Operator sign-in
 
 Customer chat opens at `/`. The admin, integration, sales and operations workspaces prompt for an operator account. On first start the server saves the local operator username and generated password in `operator-credentials.json` inside the active data directory. For Copilot on port 4180 the default path is `.pzn-data/copilot/operator-credentials.json`. To use separate identities for approvals, set `PZN_OPERATORS_JSON` to a JSON object mapping two or more usernames to passwords of at least 12 characters each. Customer sign-in uses the local profile picker.

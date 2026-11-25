@@ -21,7 +21,8 @@ export function requireCheck(condition: unknown, code: string): asserts conditio
 }
 
 function sameScope(a: Scope, b: Scope): boolean {
-  return a.principalId === b.principalId && a.personaId === b.personaId && a.conversationId === b.conversationId && a.turnId === b.turnId;
+  return a.tenantId === b.tenantId && a.domainId === b.domainId && a.userId === b.userId
+    && a.principalId === b.principalId && a.personaId === b.personaId && a.conversationId === b.conversationId && a.turnId === b.turnId;
 }
 
 export function checkFresh(value: Dated & { scope: Scope }, scope: Scope, now: number) {

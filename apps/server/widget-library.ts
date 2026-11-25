@@ -1,3 +1,4 @@
+import type { DomainPackId } from "../../packages/contracts/domain-packs";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -342,8 +343,8 @@ export class WidgetLibraryStore {
   private readonly filePath: string;
   private cache: Record<string, SavedWidget[]> | null = null;
 
-  constructor(dataDir: string) {
-    this.filePath = resolve(dataDir, "widget-library.json");
+  constructor(dataDir: string, private readonly domainId: DomainPackId = "wealth") {
+    this.filePath = resolve(dataDir, domainId === "wealth" ? "widget-library.json" : `widget-library.${domainId}.json`);
   }
 
   private load(): Record<string, SavedWidget[]> {
@@ -376,10 +377,24 @@ export class WidgetLibraryStore {
     writeFileSync(this.filePath, JSON.stringify(data, null, 2), "utf8");
   }
 
+  authorKey(sessionId: string, operator: string) {
+    const owner = "operator:" + operator;
+    const data = this.load();
+    const legacy = data[sessionId];
+    if (legacy) {
+      const existing = data[owner] ?? [];
+      const ids = new Set(existing.map(({ id }) => id));
+      data[owner] = [...existing, ...legacy.filter(({ id }) => !ids.has(id))];
+      delete data[sessionId];
+      this.persist(data);
+    }
+    return owner;
+  }
+
   list(principalId: string, now: number): SavedWidget[] {
     const data = this.load();
     if (!data[principalId]) {
-      data[principalId] = defaultSeedWidgets(now);
+      data[principalId] = this.domainId === "wealth" ? defaultSeedWidgets(now) : [];
       this.persist(data);
     }
     return data[principalId].slice().sort((a, b) => b.updatedAt - a.updatedAt);
@@ -387,7 +402,7 @@ export class WidgetLibraryStore {
 
   change(principalId: string, input: WidgetLibraryChange, now: number): { widget?: SavedWidget; widgets: SavedWidget[] } {
     const data = this.load();
-    const current = data[principalId] ?? defaultSeedWidgets(now);
+    const current = this.list(principalId, now);
 
     if (input.operation === "delete") {
       const next = current.filter((item) => item.id !== input.id);
@@ -403,18 +418,7 @@ export class WidgetLibraryStore {
         updatedWidget = { ...item, availableForConsumption: input.availableForConsumption, updatedAt: now };
         return updatedWidget;
       });
-      if (!updatedWidget) {
-        for (const [owner, list] of Object.entries(data)) {
-          const found = list.find((item) => item.id === input.id);
-          if (found) {
-            updatedWidget = { ...found, availableForConsumption: input.availableForConsumption, updatedAt: now };
-            data[owner] = list.map((item) => (item.id === input.id ? updatedWidget! : item));
-            break;
-          }
-        }
-      } else {
-        data[principalId] = next;
-      }
+      data[principalId] = next;
       this.persist(data);
       return {
         ...(updatedWidget ? { widget: updatedWidget } : {}),
