@@ -1,8 +1,9 @@
 import type { AppliedUiLayout, UiDesign, UiLayoutCatalog, UiLayoutChange, UiLayoutRecord } from "../../packages/contracts/ui-layout";
 import type { SavedWidget, WidgetDraft, WidgetLibraryChange } from "../../packages/contracts/widget";
-import type { IncidentDecisionInput, IncidentRecord, OpsIncidentsView } from "../../packages/contracts/ops";
-import type { DealDecisionInput, DealRecord, SalesDealsView } from "../../packages/contracts/sales";
+import type { IncidentDecisionInput, IncidentRecord, IncidentUpsertInput, OpsIncidentsView } from "../../packages/contracts/ops";
+import type { DealDecisionInput, DealRecord, DealUpsertInput, SalesDealsView } from "../../packages/contracts/sales";
 import type { RecommendationProviderDescriptor } from "../../packages/contracts/recommendation-provider";
+import type { ConnectorTestResult, ConnectorUpsertInput, ExternalConnector } from "../../packages/contracts/connector";
 import type { Customer360AdminRecord, Customer360ProfileInput } from "../../packages/contracts/customer-360";
 import type {
   ExperienceRegistryView,
@@ -15,7 +16,7 @@ import type { CapabilityManifest, CapabilityRef, OutputKind } from "../../packag
 import type { AgenticTrace } from "./decision-trace";
 import type { EvaluationRow } from "../../packages/contracts/evaluation";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
-import type { Bootstrap, Conversation, ConversationChange, ConversationView, DomainWriteAuditEntry, TurnAccepted, TurnView } from "../../packages/contracts/api";
+import type { Bootstrap, Conversation, ConversationChange, ConversationView, DomainWriteAuditEntry, EngagementAnalyticsView, TurnAccepted, TurnView } from "../../packages/contracts/api";
 import { pendingActionsContext, type WorkspaceActionLog, type WorkspaceNextStep, type WorkspacePendingAction, type WorkspacePin } from "../../packages/contracts/workspace";
 import type { TurnPayloads } from "../../packages/contracts/inspector";
 import type { ContextCatalog, PropensityResult, SelectionMode } from "../../packages/contracts/domain";
@@ -127,17 +128,26 @@ export const api = {
     "/api/workspace/" + personaId + "/apply-bindings", { updates },
   ),
   opsIncidents: () => request<OpsIncidentsView>("/api/ops/incidents"),
+  saveOpsIncident: (input: IncidentUpsertInput) => request<{ incident: IncidentRecord; view: OpsIncidentsView }>("/api/ops/incidents", input),
+  deleteOpsIncident: (incidentId: string) => request<{ deleted: boolean; view: OpsIncidentsView }>("/api/ops-incidents/" + incidentId + "/delete", {}),
   resetOpsIncidents: () => request<OpsIncidentsView>("/api/ops/incidents/reset", {}),
   decideIncident: (incidentId: string, input: IncidentDecisionInput) => request<{ incident: IncidentRecord; view: OpsIncidentsView }>(
     "/api/ops-incidents/" + incidentId + "/decision", input,
   ),
   salesDeals: () => request<SalesDealsView>("/api/sales/deals"),
+  saveSalesDeal: (input: DealUpsertInput) => request<{ deal: DealRecord; view: SalesDealsView }>("/api/sales/deals", input),
+  deleteSalesDeal: (dealId: string) => request<{ deleted: boolean; view: SalesDealsView }>("/api/sales-deals/" + dealId + "/delete", {}),
   resetSalesDeals: () => request<SalesDealsView>("/api/sales/deals/reset", {}),
   decideDeal: (dealId: string, input: DealDecisionInput) => request<{ deal: DealRecord; view: SalesDealsView }>(
     "/api/sales-deals/" + dealId + "/decision", input,
   ),
   recommendationProviders: () => request<{ toolRef: string; writeToolRef?: string; providers: RecommendationProviderDescriptor[] }>("/api/admin/recommendation-providers"),
+  connectors: () => request<{ connectors: ExternalConnector[] }>("/api/admin/connectors"),
+  saveConnector: (input: ConnectorUpsertInput) => request<{ connector: ExternalConnector; connectors: ExternalConnector[] }>("/api/admin/connectors", input),
+  deleteConnector: (id: string) => request<{ deleted: boolean; connectors: ExternalConnector[] }>("/api/admin/connector-delete", { id }),
+  testConnector: (id: string) => request<ConnectorTestResult>("/api/admin/connector-test", { id }),
   writeAudit: () => request<{ toolRef: string; entries: DomainWriteAuditEntry[] }>("/api/admin/write-audit"),
+  engagementAnalytics: () => request<EngagementAnalyticsView>("/api/admin/engagement-analytics"),
   previewFunding: (conversationId: string, clientRequestId: string, source?: typeof pendingActionsContext) => request<TurnAccepted>(
     "/api/conversations/" + conversationId + "/preview-funding", { clientRequestId, source },
   ),

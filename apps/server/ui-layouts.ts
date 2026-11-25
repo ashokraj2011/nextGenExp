@@ -1,6 +1,8 @@
 import profiles from "../../fixtures/host.json";
 import { findProfileById, listAllProfiles } from "../../packages/customer-profiles";
-import { resolveCustomerBindings } from "../../packages/customer-profiles/bindings";
+import { resolveMultiDomainBindings } from "../../packages/customer-profiles/bindings";
+import type { IncidentRecord } from "../../packages/contracts/ops";
+import type { DealRecord } from "../../packages/contracts/sales";
 import { availableFundingOptions, fundingPreviewFrom } from "../../packages/capabilities";
 import { requiredContribution, savingsProjection } from "../../packages/capabilities/calculations";
 import { allRoutingIntents } from "../../packages/contracts/routing-intents";
@@ -68,7 +70,11 @@ function sampleDetails(id: string) {
   return { shared, body, description, steps };
 }
 
-export async function previewUiLayout(design: UiDesign, requestedPersonaId?: string) {
+export async function previewUiLayout(
+  design: UiDesign,
+  requestedPersonaId?: string,
+  extraContext?: { incident?: IncidentRecord; deal?: DealRecord },
+) {
   const activeProfile = (requestedPersonaId ? findProfileById(requestedPersonaId) : undefined)
     ?? listAllProfiles()[0]
     ?? profiles.personas[0];
@@ -81,7 +87,7 @@ export async function previewUiLayout(design: UiDesign, requestedPersonaId?: str
   const goal = goalRaw ?? await fixtureGoalProgressProvider.read(fallbackMid);
   const portfolio = portfolioRaw ?? await fixturePortfolioSnapshotProvider.read(fallbackMid);
   if (!goal || !portfolio) throw new Error("UI preview data is missing.");
-  const bindings = resolveCustomerBindings(personaId);
+  const bindings = resolveMultiDomainBindings(personaId, extraContext);
   const funding = availableFundingOptions(true, 50_000);
   const balance = readDemoBalance(personaId, syntheticMid, Date.parse(portfolio.asOf));
   const education = sampleDetails("balance_education");

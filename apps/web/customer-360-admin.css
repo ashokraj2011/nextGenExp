@@ -6,6 +6,38 @@
   gap: 20px;
 }
 
+.c360-domain-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-self: start;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--white);
+}
+.c360-domain-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 620;
+}
+.c360-domain-tabs button:hover {
+  color: var(--ink);
+}
+.c360-domain-tabs button.is-active {
+  background: var(--teal-pale);
+  border-color: var(--teal-border);
+  color: var(--teal-dark);
+}
+
 .c360-header {
   display: flex;
   flex-wrap: wrap;

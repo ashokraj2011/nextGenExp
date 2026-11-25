@@ -19,9 +19,11 @@ import {
 import { activeContexts } from "../../packages/ts-adapter";
 import { generateWidgetDraftWithLlm } from "./dynamic-ui-generator";
 import { OpsIncidentStore } from "./ops-store";
-import { incidentDecisionInputSchema } from "../../packages/contracts/ops";
+import { incidentDecisionInputSchema, incidentUpsertInputSchema } from "../../packages/contracts/ops";
 import { SalesDealStore } from "./sales-store";
-import { dealDecisionInputSchema } from "../../packages/contracts/sales";
+import { dealDecisionInputSchema, dealUpsertInputSchema } from "../../packages/contracts/sales";
+import { ConnectorStore } from "./connector-store";
+import { connectorUpsertSchema } from "../../packages/contracts/connector";
 import { WriteAuditStore } from "./write-audit";
 import { recommendationArbitrateToolRef } from "../../packages/contracts/recommendation-provider";
 import { domainWriteToolRef, Runtime, sfieldNamespace } from "./runtime";
@@ -217,7 +219,9 @@ export async function startApp(options: Options) {
   const store = new Store(join(options.dataDir, "app.sqlite"));
   const opsStore = new OpsIncidentStore(options.dataDir);
   const salesStore = new SalesDealStore(options.dataDir);
+  const connectorStore = new ConnectorStore(options.dataDir);
   const writeAudit = new WriteAuditStore(options.dataDir);
+  store.setDomainBindingContext(() => ({ incident: opsStore.primaryIncident(), deal: salesStore.primaryDeal() }));
   const registry = new CapabilityRegistry(store);
   const sfieldPath = join(options.dataDir, "sfield.sqlite");
   const offline = options.gateway ? undefined : new SqlitePersistence({ path: sfieldPath });
@@ -225,7 +229,7 @@ export async function startApp(options: Options) {
   try {
     runtime = options.gateway
       ? await Runtime.open(store, sfieldPath, options.gateway, now, inspectorEnabled, portfolioSnapshots, goalProgressProvider, options.goalBudget, {
-          customer360, opsStore, salesStore, profileStore, writeAudit,
+          customer360, opsStore, salesStore, profileStore, writeAudit, connectorStore,
         })
       : null;
     await offline?.init({ namespace: sfieldNamespace, ownerId: newId("owner") });
@@ -383,7 +387,10 @@ export async function startApp(options: Options) {
         const design = "design" in previewBody ? previewBody.design : previewBody;
         const personaId = "design" in previewBody ? previewBody.personaId : undefined;
         validateUiDesign(design, uiTargetOptions(registry, principalId), false);
-        return json(res, await previewUiLayout(design, personaId));
+        return json(res, await previewUiLayout(design, personaId, {
+          incident: opsStore.primaryIncident(),
+          deal: salesStore.primaryDeal(),
+        }));
       }
       if (id === "widgets" && method === "GET") {
         return json(res, { widgets: widgetLibrary.list(principalId, now()) });
@@ -593,17 +600,54 @@ export async function startApp(options: Options) {
         providers: runtime?.recommendationProviderDescriptors() ?? [],
       });
     }
+    if (resource === "admin" && id === "connectors" && !operation && method === "GET" && inspectorEnabled) {
+      return json(res, { connectors: connectorStore.list() });
+    }
+    if (resource === "admin" && id === "connectors" && !operation && method === "POST" && inspectorEnabled) {
+      const data = await body(req, connectorUpsertSchema);
+      return json(res, connectorStore.upsert(data));
+    }
+    if (resource === "admin" && id === "connector-delete" && !operation && method === "POST" && inspectorEnabled) {
+      const { id: connId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());
+      return json(res, connectorStore.remove(connId));
+    }
+    if (resource === "admin" && id === "connector-test" && !operation && method === "POST" && inspectorEnabled) {
+      const { id: connId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());
+      return json(res, await connectorStore.testConnector(connId));
+    }
     if (resource === "admin" && id === "write-audit" && !operation && method === "GET" && inspectorEnabled) {
       return json(res, {
         toolRef: domainWriteToolRef,
         entries: writeAudit.list(),
       });
     }
+    if (resource === "admin" && id === "engagement-analytics" && !operation && method === "GET" && inspectorEnabled) {
+      const base = store.engagementSummary();
+      const writes = writeAudit.list();
+      return json(res, {
+        ...base,
+        nbaDismissals: customer360.totalDismissalCount(),
+        governedWritesTotal: writes.length,
+        writesByDomain: {
+          opsIncident: writes.filter((w) => w.domain === "ops_incident").length,
+          salesDeal: writes.filter((w) => w.domain === "sales_deal").length,
+          customer360: writes.filter((w) => w.domain === "customer360").length,
+        },
+        recentWrites: writes.slice(0, 15),
+      });
+    }
     if (resource === "ops" && id === "incidents" && !operation && method === "GET") {
       return json(res, opsStore.view());
     }
+    if (resource === "ops" && id === "incidents" && !operation && method === "POST") {
+      const data = await body(req, incidentUpsertInputSchema);
+      return json(res, opsStore.upsert(data));
+    }
     if (resource === "ops" && id === "incidents" && operation === "reset" && method === "POST") {
       return json(res, opsStore.reset());
+    }
+    if (resource === "ops-incidents" && id && operation === "delete" && method === "POST") {
+      return json(res, opsStore.remove(id));
     }
     if (resource === "ops-incidents" && id && operation === "decision" && method === "POST") {
       const data = await body(req, incidentDecisionInputSchema);
@@ -636,8 +680,15 @@ export async function startApp(options: Options) {
     if (resource === "sales" && id === "deals" && !operation && method === "GET") {
       return json(res, salesStore.view());
     }
+    if (resource === "sales" && id === "deals" && !operation && method === "POST") {
+      const data = await body(req, dealUpsertInputSchema);
+      return json(res, salesStore.upsert(data));
+    }
     if (resource === "sales" && id === "deals" && operation === "reset" && method === "POST") {
       return json(res, salesStore.reset());
+    }
+    if (resource === "sales-deals" && id && operation === "delete" && method === "POST") {
+      return json(res, salesStore.remove(id));
     }
     if (resource === "sales-deals" && id && operation === "decision" && method === "POST") {
       const data = await body(req, dealDecisionInputSchema);

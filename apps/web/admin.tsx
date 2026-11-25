@@ -1,8 +1,10 @@
 import { CapabilityStudio } from "./capability-studio";
 import "./agentic.css";
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, FlaskConical, Layers, MessageSquare, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, FlaskConical, Layers, MessageSquare, Plug, Plus, Trash2 } from "lucide-react";
 import type { RecommendationProviderDescriptor } from "../../packages/contracts/recommendation-provider";
+import type { ConnectorKind, ConnectorTestResult, ExternalConnector } from "../../packages/contracts/connector";
+import type { RecommendationDomain } from "../../packages/contracts/recommendation-provider";
 import {
   defaultAgentFundingWorkflow, defaultFundingWorkflow, fundingAgentToolLimit, fundingToolKey, fundingToolKeys,
   fundingToolRef, fundingTools, fundingWorkflowIssue,
@@ -369,9 +371,194 @@ function RecommendationProvidersCard() {
   );
 }
 
+function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
+  const [connectors, setConnectors] = useState<ExternalConnector[]>([]);
+  const [draftOpen, setDraftOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [kind, setKind] = useState<ConnectorKind>("rest_recommendation");
+  const [url, setUrl] = useState("");
+  const [domain, setDomain] = useState<RecommendationDomain>("operations");
+  const [description, setDescription] = useState("");
+  const [testResults, setTestResults] = useState<Record<string, ConnectorTestResult>>({});
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void api.connectors().then((res) => { if (active) setConnectors(res.connectors); }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
+  async function toggleEnabled(conn: ExternalConnector) {
+    setBusyId(conn.id);
+    setError("");
+    try {
+      const res = await api.saveConnector({ ...conn, enabled: !conn.enabled });
+      setConnectors(res.connectors);
+      onUpdated();
+    } catch (err) {
+      setError(messageFor(err));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function testConn(id: string) {
+    setBusyId(id);
+    try {
+      const result = await api.testConnector(id);
+      setTestResults((prev) => ({ ...prev, [id]: result }));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function removeConn(id: string) {
+    setBusyId(id);
+    try {
+      const res = await api.deleteConnector(id);
+      setConnectors(res.connectors);
+      onUpdated();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function createConnector(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim() || !url.trim()) {
+      setError("Connector name and valid URL are required.");
+      return;
+    }
+    setBusyId("new");
+    setError("");
+    try {
+      const res = await api.saveConnector({
+        name: name.trim(),
+        kind,
+        url: url.trim(),
+        method: "POST",
+        domains: [domain],
+        enabled: true,
+        timeoutMs: 3000,
+        description: description.trim() || `External ${kind} connector`,
+      });
+      setConnectors(res.connectors);
+      setName("");
+      setUrl("");
+      setDescription("");
+      setDraftOpen(false);
+      onUpdated();
+    } catch (err) {
+      setError(messageFor(err));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <section className="admin-card" aria-labelledby="ext-connectors-title" style={{ marginTop: "18px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+        <div>
+          <h2 id="ext-connectors-title" style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+            <Plug size={18} aria-hidden="true" />
+            External REST &amp; MCP Connector Registry
+          </h2>
+          <p>
+            Plug in external decisioning engines (Pega CDH, Adobe, ServiceNow, PagerDuty, Salesforce, or MCP bridges) with zero code.
+            Enabled connectors mount live into <code>cep.recommendations.arbitrate@1.0.0</code>.
+          </p>
+        </div>
+        <button type="button" className="secondary-button" onClick={() => setDraftOpen((v) => !v)}>
+          <Plus size={15} aria-hidden="true" />{draftOpen ? "Cancel" : "Add connector"}
+        </button>
+      </div>
+      {error && <p className="admin-error" role="alert" style={{ marginTop: "10px" }}>{error}</p>}
+      {draftOpen && (
+        <form className="admin-rule-draft" onSubmit={(e) => void createConnector(e)}>
+          <div className="admin-fields">
+            <div className="setup-field">
+              <label htmlFor="conn-name">Connector name</label>
+              <input id="conn-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g., Salesforce Deal Ranker" required />
+            </div>
+            <div className="setup-field">
+              <label htmlFor="conn-kind">Type</label>
+              <select id="conn-kind" value={kind} onChange={(e) => setKind(e.target.value as ConnectorKind)}>
+                <option value="rest_recommendation">REST Recommendation Provider</option>
+                <option value="mcp_bridge">MCP Bridge</option>
+                <option value="rest_data">REST Data Source</option>
+              </select>
+            </div>
+            <div className="setup-field">
+              <label htmlFor="conn-domain">Domain</label>
+              <select id="conn-domain" value={domain} onChange={(e) => setDomain(e.target.value as RecommendationDomain)}>
+                <option value="wealth">wealth</option>
+                <option value="operations">operations</option>
+                <option value="sales">sales</option>
+                <option value="general">general</option>
+              </select>
+            </div>
+          </div>
+          <div className="setup-field">
+            <label htmlFor="conn-url">Endpoint URL</label>
+            <input id="conn-url" type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://api.example.invalid/v1/recommend" required />
+          </div>
+          <div className="setup-field">
+            <label htmlFor="conn-desc">Description</label>
+            <input id="conn-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What this connector provides" />
+          </div>
+          <div>
+            <button type="submit" className="send-button" disabled={busyId === "new"}>
+              {busyId === "new" ? "Saving…" : "Register connector"}
+            </button>
+          </div>
+        </form>
+      )}
+      <ul className="admin-tools" style={{ marginTop: "12px" }}>
+        {connectors.map((conn) => {
+          const test = testResults[conn.id];
+          return (
+            <li key={conn.id}>
+              <div className="admin-tool" style={{ cursor: "default", alignItems: "flex-start" }}>
+                <span>
+                  <strong>{conn.name}</strong>
+                  <code>{conn.kind} · {conn.method} {conn.url} · domains: {conn.domains.join(", ")}</code>
+                  <small>{conn.description}</small>
+                  {test && (
+                    <small style={{ color: test.ok ? "var(--teal-dark)" : "#b91c1c", fontWeight: 600 }}>
+                      Test ({test.elapsedMs}ms): {test.message}
+                    </small>
+                  )}
+                  <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
+                    <button type="button" className="secondary-button" disabled={busyId === conn.id} onClick={() => void testConn(conn.id)}>
+                      <FlaskConical size={13} aria-hidden="true" />Test connection
+                    </button>
+                    <button type="button" className="secondary-button" disabled={busyId === conn.id} onClick={() => void removeConn(conn.id)}>
+                      <Trash2 size={13} aria-hidden="true" />Remove
+                    </button>
+                  </div>
+                </span>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  aria-label={"Enable " + conn.name}
+                  checked={conn.enabled}
+                  disabled={busyId === conn.id}
+                  onChange={() => void toggleEnabled(conn)}
+                />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 export function AdminPage() {
   const [loaded, setLoaded] = useState<Awaited<ReturnType<typeof api.toolSetup>>>();
   const [error, setError] = useState("");
+  const [providerTick, setProviderTick] = useState(0);
   useEffect(() => {
     let mounted = true;
     void api.toolSetup().then((setup) => { if (mounted) setLoaded(setup); })
@@ -385,7 +572,8 @@ export function AdminPage() {
         <h1>Tool setup</h1>
         {error ? <p role="alert">{error}</p> : <p role="status">Loading tool settings…</p>}
       </div>}
-      {loaded && <RecommendationProvidersCard />}
+      {loaded && <RecommendationProvidersCard key={providerTick} />}
+      {loaded && <ExternalConnectorsCard onUpdated={() => setProviderTick((n) => n + 1)} />}
       {loaded && <CapabilityStudio />}
     </main>
   </div>;

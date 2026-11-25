@@ -40,9 +40,29 @@ export const incidentDecisionInputSchema = z.object({
   note: z.string().trim().max(240).optional(),
 }).strict();
 
+export const incidentUpsertInputSchema = z.object({
+  id: z.string().trim().min(2).max(40).optional(),
+  title: z.string().trim().min(1).max(120),
+  severity: incidentSeveritySchema,
+  status: incidentStatusSchema,
+  service: z.string().trim().min(1).max(80),
+  environment: z.string().trim().min(1).max(60),
+  errorRatePct: z.number().min(0).max(100),
+  baselineErrorRatePct: z.number().min(0).max(100).default(0.2),
+  p95LatencyMs: z.number().min(0),
+  affectedUsers: z.number().int().min(0).default(0),
+  currentRelease: z.string().trim().min(1).max(40),
+  previousRelease: z.string().trim().min(1).max(40),
+  slaMinutes: z.number().int().min(1).default(30),
+  owner: z.string().trim().min(1).max(80),
+  summary: z.string().trim().min(1).max(400),
+  rollbackStatus: rollbackStatusSchema.default("pending"),
+}).strict();
+
 export type IncidentRecord = z.infer<typeof incidentRecordSchema>;
 export type IncidentTimelineEvent = z.infer<typeof incidentTimelineEventSchema>;
 export type IncidentDecisionInput = z.infer<typeof incidentDecisionInputSchema>;
+export type IncidentUpsertInput = z.infer<typeof incidentUpsertInputSchema>;
 
 export interface OpsSummary {
   totalOpen: number;

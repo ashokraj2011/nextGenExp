@@ -1,6 +1,8 @@
 import { maxLayouts, targetKey, type AppliedUiLayout, type UiLayoutChange, type UiLayoutRecord, type UiPublication, type UiTarget } from "../../packages/contracts/ui-layout";
 import { applyPublishedUi } from "../../packages/experience/ui-layout";
-import { resolveCustomerBindings } from "../../packages/customer-profiles/bindings";
+import { resolveMultiDomainBindings } from "../../packages/customer-profiles/bindings";
+import type { IncidentRecord } from "../../packages/contracts/ops";
+import type { DealRecord } from "../../packages/contracts/sales";
 import type { AgentLaunch } from "../../packages/contracts/agentic";
 import { cancelsJourney, explicitInputs } from "./agentic-inputs";
 import { AgenticStore } from "./agentic-store";
@@ -125,6 +127,11 @@ export class Store {
   private readonly db: SqliteDatabase;
   readonly axe: AgenticStore;
   private readonly events = new EventEmitter().setMaxListeners(0);
+  private domainBindingContext?: () => { incident?: IncidentRecord; deal?: DealRecord };
+
+  setDomainBindingContext(provider: () => { incident?: IncidentRecord; deal?: DealRecord }) {
+    this.domainBindingContext = provider;
+  }
   constructor(path: string) {
     this.db = new SqliteDatabase(path);
     this.db.open();
@@ -470,7 +477,12 @@ export class Store {
       }
     }
     try {
-      const bindings = resolveCustomerBindings(turn.scope.personaId, this.axe.fundingStatus(turn.scope));
+      const extra = this.domainBindingContext?.();
+      const bindings = resolveMultiDomainBindings(turn.scope.personaId, {
+        effectiveFundingStatus: this.axe.fundingStatus(turn.scope),
+        incident: extra?.incident,
+        deal: extra?.deal,
+      });
       const applied = applyPublishedUi(result, turn.uiLayouts, targets, bindings);
       if (applied) {
         turn.trace.uiLayout = applied.attachment;
@@ -556,6 +568,39 @@ export class Store {
   subscribe(turnId: string, fn: () => void) {
     this.events.on(turnId, fn);
     return () => this.events.off(turnId, fn);
+  }
+
+  engagementSummary() {
+    const turnRows = this.db.all<{ record: string }>("SELECT record FROM turns");
+    let turnsTotal = 0;
+    let turnsCompleted = 0;
+    let verifiedExperience = 0;
+    let dynamicUi = 0;
+    let plainChat = 0;
+    let clarify = 0;
+    for (const row of turnRows) {
+      try {
+        const parsed = JSON.parse(row.record) as TurnRecord;
+        turnsTotal += 1;
+        if (parsed.public.status === "completed") turnsCompleted += 1;
+        if (parsed.public.actionMode === "verified_experience") verifiedExperience += 1;
+        else if (parsed.public.actionMode === "dynamic_ui") dynamicUi += 1;
+        else if (parsed.public.actionMode === "plain_chat") plainChat += 1;
+        else if (parsed.public.actionMode === "clarify") clarify += 1;
+      } catch { /* ignore malformed row */ }
+    }
+    const eventRows = this.db.all<{ event_type: string; cnt: number }>(
+      "SELECT event_type, COUNT(*) AS cnt FROM analytics GROUP BY event_type",
+    );
+    const counts = Object.fromEntries(eventRows.map((r) => [r.event_type, Number(r.cnt)]));
+    return {
+      turnsTotal,
+      turnsCompleted,
+      modeBreakdown: { verifiedExperience, dynamicUi, plainChat, clarify },
+      surfacesRendered: (counts.rendered ?? 0) + (counts.render_fallback ?? 0),
+      feedbackHelpful: counts.helpful ?? 0,
+      feedbackUnhelpful: counts.unhelpful ?? 0,
+    };
   }
 
   close() {

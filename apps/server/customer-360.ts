@@ -46,6 +46,11 @@ export class Customer360Service {
     return new Set(data[this.key(principalId, personaId)] ?? []);
   }
 
+  totalDismissalCount(): number {
+    const data = this.load();
+    return Object.values(data).reduce((sum, list) => sum + (Array.isArray(list) ? list.length : 0), 0);
+  }
+
   dismiss(principalId: string, personaId: string, nbaId: string): string[] {
     const data = this.load();
     const k = this.key(principalId, personaId);

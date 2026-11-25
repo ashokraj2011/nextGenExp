@@ -2,11 +2,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   incidentRecordSchema,
+  incidentUpsertInputSchema,
   type IncidentDecisionInput,
   type IncidentRecord,
   type OpsIncidentsView,
   type OpsSummary,
 } from "../../packages/contracts/ops";
+import type { z } from "zod";
 
 function defaultIncidents(nowIso: string): IncidentRecord[] {
   return [
@@ -296,5 +298,67 @@ export class OpsIncidentStore {
     const seeded = defaultIncidents(new Date().toISOString());
     this.save(seeded);
     return this.view();
+  }
+
+  upsert(rawInput: z.input<typeof incidentUpsertInputSchema>): { incident: IncidentRecord; view: OpsIncidentsView } {
+    const input = incidentUpsertInputSchema.parse(rawInput);
+    const now = new Date();
+    const clock = formatUtcClock(now);
+    const id = input.id?.trim() || `INC-${Math.floor(4900 + Math.random() * 900)}`;
+    const existingIdx = this.incidents.findIndex((i) => i.id.toLowerCase() === id.toLowerCase());
+    const existing = existingIdx >= 0 ? this.incidents[existingIdx] : undefined;
+    const stepStatus: "done" | "active" = input.status === "resolved" || input.status === "rolled_back" ? "done" : "active";
+    const record: IncidentRecord = {
+      id: existing?.id ?? id,
+      title: input.title,
+      severity: input.severity,
+      status: input.status,
+      service: input.service,
+      environment: input.environment,
+      errorRatePct: input.errorRatePct,
+      baselineErrorRatePct: input.baselineErrorRatePct,
+      p95LatencyMs: input.p95LatencyMs,
+      affectedUsers: input.affectedUsers,
+      currentRelease: input.currentRelease,
+      previousRelease: input.previousRelease,
+      slaMinutes: input.slaMinutes,
+      owner: input.owner,
+      summary: input.summary,
+      rollbackStatus: input.rollbackStatus,
+      ...(existing?.rollbackNote ? { rollbackNote: existing.rollbackNote } : {}),
+      timeline: existing
+        ? [
+            ...existing.timeline,
+            {
+              time: clock,
+              title: "Incident updated via Admin Data Workbench",
+              detail: `Status: ${input.status} · Error rate: ${input.errorRatePct}% · p95: ${input.p95LatencyMs}ms`,
+              owner: input.owner,
+              status: stepStatus,
+            },
+          ].slice(-12)
+        : [
+            {
+              time: clock,
+              title: `${id} created (${input.severity})`,
+              detail: input.summary.slice(0, 160),
+              owner: input.owner,
+              status: "active" as const,
+            },
+          ],
+      updatedAt: now.toISOString(),
+    };
+    const next = existingIdx >= 0
+      ? this.incidents.map((item, idx) => (idx === existingIdx ? record : item))
+      : [record, ...this.incidents];
+    this.save(next);
+    return { incident: record, view: this.view() };
+  }
+
+  remove(id: string): { deleted: boolean; view: OpsIncidentsView } {
+    const next = this.incidents.filter((item) => item.id.toLowerCase() !== id.toLowerCase());
+    if (next.length === this.incidents.length) return { deleted: false, view: this.view() };
+    this.save(next.length > 0 ? next : defaultIncidents(new Date().toISOString()));
+    return { deleted: true, view: this.view() };
   }
 }

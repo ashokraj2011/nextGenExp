@@ -1,4 +1,6 @@
 import type { DataBindingValues } from "../contracts/data-bindings";
+import type { IncidentRecord } from "../contracts/ops";
+import type { DealRecord } from "../contracts/sales";
 import { formatPortfolioAmount } from "../contracts/portfolio";
 import { findProfileById } from "./registry";
 
@@ -105,6 +107,51 @@ export function resolveCustomerBindings(
     } else {
       result[key] = { display: raw || "—", rawInput: raw };
     }
+  }
+
+  return result;
+}
+
+export function resolveMultiDomainBindings(
+  personaId: string,
+  options?: {
+    effectiveFundingStatus?: "funded" | "unfunded";
+    incident?: IncidentRecord;
+    deal?: DealRecord;
+  },
+): DataBindingValues | undefined {
+  const base = resolveCustomerBindings(personaId, options?.effectiveFundingStatus);
+  if (!base && !options?.incident && !options?.deal) return undefined;
+  const result: DataBindingValues = { ...(base ?? {}) };
+
+  if (options?.incident) {
+    const inc = options.incident;
+    result["incident.id"] = { display: inc.id, rawInput: inc.id };
+    result["incident.title"] = { display: inc.title, rawInput: inc.title };
+    result["incident.severity"] = { display: inc.severity, rawInput: inc.severity };
+    result["incident.status"] = { display: inc.status.replace("_", " ").toUpperCase(), rawInput: inc.status };
+    result["incident.service"] = { display: inc.service, rawInput: inc.service };
+    result["incident.environment"] = { display: inc.environment, rawInput: inc.environment };
+    result["incident.errorRate"] = { display: `${inc.errorRatePct}%`, rawInput: String(inc.errorRatePct), percent: Math.min(100, Math.round(inc.errorRatePct)) };
+    result["incident.p95Latency"] = { display: `${inc.p95LatencyMs}ms`, rawInput: String(inc.p95LatencyMs) };
+    result["incident.currentRelease"] = { display: inc.currentRelease, rawInput: inc.currentRelease };
+    result["incident.previousRelease"] = { display: inc.previousRelease, rawInput: inc.previousRelease };
+    result["incident.rollbackStatus"] = { display: inc.rollbackStatus, rawInput: inc.rollbackStatus };
+  }
+
+  if (options?.deal) {
+    const deal = options.deal;
+    const usdFmt = `$${deal.arrUsd.toLocaleString("en-US")}`;
+    result["deal.id"] = { display: deal.id, rawInput: deal.id };
+    result["deal.accountName"] = { display: deal.accountName, rawInput: deal.accountName };
+    result["deal.title"] = { display: deal.title, rawInput: deal.title };
+    result["deal.stage"] = { display: deal.stage, rawInput: deal.stage };
+    result["deal.arr"] = { display: usdFmt, rawInput: String(deal.arrUsd) };
+    result["deal.discountPct"] = { display: `${deal.discountPct}%`, rawInput: String(deal.discountPct), percent: Math.min(100, Math.round(deal.discountPct)) };
+    result["deal.discountStatus"] = { display: deal.discountStatus, rawInput: deal.discountStatus };
+    result["deal.winProbability"] = { display: `${deal.winProbabilityPct}%`, rawInput: String(deal.winProbabilityPct), percent: deal.winProbabilityPct };
+    result["deal.closeDate"] = { display: deal.closeDate, rawInput: deal.closeDate };
+    result["deal.owner"] = { display: deal.owner, rawInput: deal.owner };
   }
 
   return result;

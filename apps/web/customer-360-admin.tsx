@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, Plus, RotateCcw, Save, Sparkles, Trash2, UserCheck, UsersRound } from "lucide-react";
+import { Activity, ArrowUpRight, Briefcase, Plus, RotateCcw, Save, Sparkles, Trash2, UserCheck, UsersRound } from "lucide-react";
+import { OpsIncidentsEditor, SalesDealsEditor } from "./domain-data-editors";
 import type {
   CustomAttribute,
   CustomAttributeType,
@@ -89,6 +90,7 @@ function emptyNewForm(): FormState {
 }
 
 export function Customer360Admin() {
+  const [entityTab, setEntityTab] = useState<"customers" | "incidents" | "deals">("customers");
   const [customers, setCustomers] = useState<Customer360AdminRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string | "new">("");
   const [form, setForm] = useState<FormState>(emptyNewForm);
@@ -245,6 +247,19 @@ export function Customer360Admin() {
 
   return (
     <main className="admin-page c360-page">
+      <div className="c360-domain-tabs" role="tablist" aria-label="Domain data stores">
+        <button type="button" role="tab" aria-selected={entityTab === "customers"} className={entityTab === "customers" ? "is-active" : ""} onClick={() => setEntityTab("customers")}>
+          <UsersRound size={15} aria-hidden="true" />Customer 360
+        </button>
+        <button type="button" role="tab" aria-selected={entityTab === "incidents"} className={entityTab === "incidents" ? "is-active" : ""} onClick={() => setEntityTab("incidents")}>
+          <Activity size={15} aria-hidden="true" />IT Incidents (incidents.json)
+        </button>
+        <button type="button" role="tab" aria-selected={entityTab === "deals"} className={entityTab === "deals" ? "is-active" : ""} onClick={() => setEntityTab("deals")}>
+          <Briefcase size={15} aria-hidden="true" />Sales Deals (deals.json)
+        </button>
+      </div>
+
+      {entityTab === "incidents" ? <OpsIncidentsEditor /> : entityTab === "deals" ? <SalesDealsEditor /> : <>
       <header className="c360-header">
         <div>
           <p className="c360-eyebrow"><UsersRound size={15} aria-hidden="true" />Customer 360 Data Store</p>
@@ -638,6 +653,7 @@ export function Customer360Admin() {
           </section>
         </div>
       )}
+      </>}
     </main>
   );
 }

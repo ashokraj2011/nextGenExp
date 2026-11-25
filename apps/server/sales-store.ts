@@ -2,11 +2,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   dealRecordSchema,
+  dealUpsertInputSchema,
   type DealDecisionInput,
   type DealRecord,
   type SalesDealsView,
   type SalesSummary,
 } from "../../packages/contracts/sales";
+import type { z } from "zod";
 
 function defaultDeals(nowIso: string): DealRecord[] {
   return [
@@ -248,5 +250,63 @@ export class SalesDealStore {
     const seeded = defaultDeals(new Date().toISOString());
     this.save(seeded);
     return this.view();
+  }
+
+  upsert(rawInput: z.input<typeof dealUpsertInputSchema>): { deal: DealRecord; view: SalesDealsView } {
+    const input = dealUpsertInputSchema.parse(rawInput);
+    const now = new Date();
+    const clock = formatUtcClock(now);
+    const id = input.id?.trim() || `DEAL-${Math.floor(920 + Math.random() * 80)}`;
+    const existingIdx = this.deals.findIndex((d) => d.id.toLowerCase() === id.toLowerCase());
+    const existing = existingIdx >= 0 ? this.deals[existingIdx] : undefined;
+    const stepStatus: "done" | "active" = input.stage === "Closed Won" || input.stage === "Commit" ? "done" : "active";
+    const record: DealRecord = {
+      id: existing?.id ?? id,
+      accountName: input.accountName,
+      title: input.title,
+      stage: input.stage,
+      arrUsd: input.arrUsd,
+      discountPct: input.discountPct,
+      discountStatus: input.discountStatus,
+      ...(existing?.discountNote ? { discountNote: existing.discountNote } : {}),
+      winProbabilityPct: input.winProbabilityPct,
+      closeDate: input.closeDate,
+      owner: input.owner,
+      segment: input.segment,
+      summary: input.summary,
+      timeline: existing
+        ? [
+            ...existing.timeline,
+            {
+              time: clock,
+              title: "Deal updated via Admin Data Workbench",
+              detail: `Stage: ${input.stage} · ARR: $${input.arrUsd.toLocaleString("en-US")} · Discount: ${input.discountPct}%`,
+              owner: input.owner,
+              status: stepStatus,
+            },
+          ].slice(-12)
+        : [
+            {
+              time: clock,
+              title: `${id} created for ${input.accountName}`,
+              detail: input.summary.slice(0, 160),
+              owner: input.owner,
+              status: "active" as const,
+            },
+          ],
+      updatedAt: now.toISOString(),
+    };
+    const next = existingIdx >= 0
+      ? this.deals.map((item, idx) => (idx === existingIdx ? record : item))
+      : [record, ...this.deals];
+    this.save(next);
+    return { deal: record, view: this.view() };
+  }
+
+  remove(id: string): { deleted: boolean; view: SalesDealsView } {
+    const next = this.deals.filter((item) => item.id.toLowerCase() !== id.toLowerCase());
+    if (next.length === this.deals.length) return { deleted: false, view: this.view() };
+    this.save(next.length > 0 ? next : defaultDeals(new Date().toISOString()));
+    return { deleted: true, view: this.view() };
   }
 }

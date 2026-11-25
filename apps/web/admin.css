@@ -70,6 +70,39 @@
 .admin-save button { white-space: nowrap; }
 .admin-heading > .admin-error { flex-basis: 100%; }
 .admin-page .admin-error { color: #a4322b; font-size: .87rem; line-height: 1.5; }
+.analytics-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+.analytics-kpi-tile {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+}
+.analytics-kpi-tile dt {
+  font-size: 0.74rem;
+  font-weight: 660;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.analytics-kpi-tile dd {
+  margin: 6px 0 0;
+  display: grid;
+  gap: 3px;
+}
+.analytics-kpi-tile dd strong {
+  font-size: 1.32rem;
+  font-weight: 720;
+  color: var(--ink);
+}
+.analytics-kpi-tile dd span {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
 
 @media (max-width: 790px) {
   .admin-layout { grid-template-columns: minmax(0, 1fr); }

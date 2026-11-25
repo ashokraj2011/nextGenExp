@@ -81,6 +81,27 @@ export type DomainWriteAuditEntry = {
   status: "succeeded" | "denied";
   createdAt: string;
 };
+export type EngagementAnalyticsView = {
+  turnsTotal: number;
+  turnsCompleted: number;
+  modeBreakdown: {
+    verifiedExperience: number;
+    dynamicUi: number;
+    plainChat: number;
+    clarify: number;
+  };
+  surfacesRendered: number;
+  feedbackHelpful: number;
+  feedbackUnhelpful: number;
+  nbaDismissals: number;
+  governedWritesTotal: number;
+  writesByDomain: {
+    opsIncident: number;
+    salesDeal: number;
+    customer360: number;
+  };
+  recentWrites: DomainWriteAuditEntry[];
+};
 export type TurnView = {
   id: string;
   conversationId: string;

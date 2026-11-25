@@ -35,9 +35,25 @@ export const dealDecisionInputSchema = z.object({
   note: z.string().trim().max(240).optional(),
 }).strict();
 
+export const dealUpsertInputSchema = z.object({
+  id: z.string().trim().min(2).max(40).optional(),
+  accountName: z.string().trim().min(1).max(100),
+  title: z.string().trim().min(1).max(120),
+  stage: dealStageSchema,
+  arrUsd: z.number().int().min(0),
+  discountPct: z.number().min(0).max(60),
+  discountStatus: discountStatusSchema.default("pending"),
+  winProbabilityPct: z.number().int().min(0).max(100),
+  closeDate: z.string().trim().min(1).max(32),
+  owner: z.string().trim().min(1).max(80),
+  segment: z.string().trim().min(1).max(48),
+  summary: z.string().trim().min(1).max(400),
+}).strict();
+
 export type DealRecord = z.infer<typeof dealRecordSchema>;
 export type DealTimelineEvent = z.infer<typeof dealTimelineEventSchema>;
 export type DealDecisionInput = z.infer<typeof dealDecisionInputSchema>;
+export type DealUpsertInput = z.infer<typeof dealUpsertInputSchema>;
 
 export interface SalesSummary {
   totalPipelineUsd: number;

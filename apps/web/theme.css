@@ -643,6 +643,10 @@
 /* -------------------------------------------------------------------------- */
 
 :root[data-theme="dark"] .c360-list-panel,
+:root[data-theme="dark"] .c360-domain-tabs,
+:root[data-theme="dark"] .c360-directory,
+:root[data-theme="dark"] .c360-list-item,
+:root[data-theme="dark"] .analytics-kpi-tile,
 :root[data-theme="dark"] .c360-editor-card,
 :root[data-theme="dark"] .c360-card,
 :root[data-theme="dark"] .c360-nba-preview,
