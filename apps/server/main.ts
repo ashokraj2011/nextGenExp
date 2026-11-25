@@ -16,9 +16,11 @@ const defaultDataDir = profile === "openai" ? ".pzn-data/openai" : profile === "
 const app = await startApp({
   projectRoot, dataDir: resolve(projectRoot, process.env.PZN_DATA_DIR ?? defaultDataDir), gateway,
   operators: process.env.PZN_OPERATORS_JSON ? JSON.parse(process.env.PZN_OPERATORS_JSON) : undefined,
+  operatorAuth: process.env.PZN_OPERATOR_AUTH === "off" ? "off" : "on",
   selectionMode: mode, port, goalBudget: agenticBudgetFromEnv(process.env.PZN_AXE_BUDGET_JSON), dev: process.argv.includes("--dev"), inspectorEnabled: process.env.PZN_INSPECTOR !== "off",
 });
 console.log("Financial planning demo  " + app.url);
+if (process.env.PZN_OPERATOR_AUTH === "off") console.log("Operator sign-in is OFF (local demo): admin pages act as local-operator. Remove PZN_OPERATOR_AUTH to require sign-in.");
 if (gateway?.profile === "openai") console.log("OpenAI API model " + gateway.model);
 if (gateway?.profile === "copilot_acp") console.log("Copilot ACP model " + gateway.model);
 if (!gateway) console.log("Gateway setup required. Set LLM_BASE_URL, LLM_MODEL, and LLM_API_KEY or LLM_GATEWAY_HEADERS_JSON in the server environment.");

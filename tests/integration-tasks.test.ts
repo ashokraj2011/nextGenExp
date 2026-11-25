@@ -361,3 +361,22 @@ test("chat authoring: connect an MCP server, import tools, publish, run, and dra
   // 7. Where calls go is fixed once tasks are published.
   await client.request("/api/integrations/integrations", { id: "demo_commerce", name: "Demo Commerce", transport: "mcp", baseUrl: "https://elsewhere.example/mcp" }, 409);
 });
+
+test("operator sign-in can be switched off for local demos; it stays on by default", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "cep-op-auth-"));
+  const gateway = await startFixtureGateway();
+  const on = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: join(dir, "on"), gateway: gateway.settings, mode: "test", inspectorEnabled: true });
+  const off = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: join(dir, "off"), gateway: gateway.settings, mode: "test", inspectorEnabled: true, operatorAuth: "off" });
+  t.after(async () => { await on.close(); await off.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
+
+  assert.equal((await fetch(`${on.url}/api/integrations`)).status, 401, "default: sign-in required");
+  assert.equal((await fetch(`${on.url}/integrations`)).status, 401);
+  assert.equal((await fetch(`${off.url}/api/integrations`)).status, 200, "off: no prompt");
+  assert.equal((await fetch(`${off.url}/integrations`)).status, 200);
+
+  // Actions are attributed to local-operator when nobody signed in.
+  const customer = await testClient(off.url, undefined, "customer");
+  const p1 = await customer.request<{ run: TaskRun; approval: ApprovalRecord }>("/api/integrations/tasks/run",
+    { toolRef: CREATE, input: { title: "Checkout outage", priority: "P1", service: "checkout" } }, 202);
+  assert.equal(p1.approval.requester, "local-operator");
+});

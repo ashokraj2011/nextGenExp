@@ -115,6 +115,11 @@ import { operatorAccess } from "./operator-access";
 
 type Options = {
   operators?: Record<string, string>;
+  /**
+   * "off" skips the operator sign-in prompt for local demos: requests without credentials act as `local-operator`.
+   * The server only answers on 127.0.0.1/localhost, and a signed-in operator still wins (so dual control can be tested).
+   */
+  operatorAuth?: "on" | "off";
   dataDir: string;
   gateway: GatewaySettings | null;
   projectRoot: string;
@@ -205,6 +210,10 @@ export async function startApp(options: Options) {
   const selectionMode = options.selectionMode ?? "semantic_rerank";
   const inspectorEnabled = options.inspectorEnabled ?? true;
   const identifyOperator = operatorAccess(options.dataDir, options.operators);
+  if (options.operatorAuth === "off" && process.env.NODE_ENV === "production") {
+    throw new Error("PZN_OPERATOR_AUTH=off is for local demos only and is refused under NODE_ENV=production.");
+  }
+  const localOperator = options.operatorAuth === "off" ? "local-operator" : undefined;
   const profile = options.gateway?.profile;
   const sessionCookie = profile === "openai" ? "pzn_openai_session" : profile === "copilot_acp" ? "pzn_copilot_session" : "pzn_session";
   const sessionPattern = new RegExp("(?:^|;\\s*)" + sessionCookie + "=(local_[a-f0-9]{32})(?:;|$)");
@@ -592,7 +601,7 @@ export async function startApp(options: Options) {
     const { pathname } = url;
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
-    const operator = inspectorEnabled ? identifyOperator(req, res) : undefined;
+    const operator = inspectorEnabled ? identifyOperator(req, res) ?? localOperator : undefined;
     const requireOperator = () => {
       if (!inspectorEnabled) throw new ApiError(404, "not_found", "This page is unavailable.");
       if (!operator) {
