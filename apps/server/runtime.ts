@@ -55,6 +55,18 @@ import type { OpsIncidentStore } from "./ops-store";
 import type { SalesDealStore } from "./sales-store";
 import type { ConnectorStore } from "./connector-store";
 import type { WriteAuditStore } from "./write-audit";
+import type { SelfServicePznStore } from "./self-service-pzn-store";
+import {
+  pznDataDictionaryToolId,
+  pznDataDictionaryToolInputJsonSchema,
+  pznGenericToolResultJsonSchema,
+  pznRuleMetadataToolId,
+  pznRuleMetadataToolInputJsonSchema,
+  pznSfieldToolRefs,
+  pznSfieldToolVersion,
+  pznTreatmentSelectorToolId,
+  pznTreatmentSelectorToolInputJsonSchema,
+} from "../../packages/contracts/self-service-pzn";
 import type { CustomerProfileStore } from "../../packages/customer-profiles";
 import type { DomainWriteAuditEntry } from "../../packages/contracts/api";
 import { compileComposerInstructions, compileRouterInstructions } from "../../packages/experience/prompt-compiler";
@@ -164,7 +176,11 @@ const registryBoundaries = {
 export function principalFor(id: string): Principal {
   return { tenantId: "pzn-local", subjectId: id, roles: ["pzn-demo", "pzn-developer"], attributes: {} };
 }
-const actions = new Set<string>([...toolKeys.map((key) => sfieldTools[key].id), recommendationArbitrateToolId]);
+const actions = new Set<string>([
+  ...toolKeys.map((key) => sfieldTools[key].id),
+  recommendationArbitrateToolId,
+  pznTreatmentSelectorToolId,
+]);
 export const sfieldNamespace = "pzn-experience-runtime";
 
 function requireToolEnabled(turn: TurnRecord, key: ToolKey) {
@@ -253,6 +269,7 @@ export class Runtime {
     private readonly profileStore?: CustomerProfileStore,
     private readonly writeAudit?: WriteAuditStore,
     private readonly connectorStore?: ConnectorStore,
+    private readonly selfServicePzn?: SelfServicePznStore,
   ) {
     this.funding = new FundingAgent(store, () => this.sf, now);
     const execution = new AgenticExecution(store, () => this.sf, now, (turnId) => this.current(turnId), portfolioSnapshots, goalProgressProvider, goalBudget);
@@ -269,6 +286,7 @@ export class Runtime {
       profileStore?: CustomerProfileStore;
       writeAudit?: WriteAuditStore;
       connectorStore?: ConnectorStore;
+      selfServicePzn?: SelfServicePznStore;
     },
   ) {
     const record = inspectorEnabled ? (id: string, exchange: GatewayExchange) => store.saveGatewayExchange(id, exchange) : undefined;
@@ -279,6 +297,7 @@ export class Runtime {
       store, now, gateway.inspection, portfolioSnapshots, goalProgressProvider, goalBudget,
       extraProviders?.customer360, extraProviders?.opsStore, extraProviders?.salesStore,
       extraProviders?.profileStore, extraProviders?.writeAudit, extraProviders?.connectorStore,
+      extraProviders?.selfServicePzn,
     );
     const agentTools = [...runtime.experiences.tools(), ...runtime.experiences.execution.tools()];
     const agentActions = new Set(agentTools.map(({ ref }) => axeToolAction(ref)));
@@ -293,7 +312,12 @@ export class Runtime {
             actions.has(action) || agentActions.has(action)
             || ((agentId === fundingAgentId || agentId === experienceAgentId) && action === ASK_USER.policy.action)
           );
-          const writeAllowed = effect === "write" && (action === domainWriteToolId || action === connectorInvokeToolId) && !agentId;
+          const writeAllowed = effect === "write" && (
+            action === domainWriteToolId
+            || action === connectorInvokeToolId
+            || action === pznDataDictionaryToolId
+            || action === pznRuleMetadataToolId
+          ) && !agentId;
           return principal.tenantId === "pzn-local" && principal.roles.includes("pzn-demo") && (readAllowed || writeAllowed)
             ? { decision: "allow", evidenceId: makeId("auth"), expiresAt: new Date(now() + axeBudget.activeSeconds * 1000).toISOString() }
             : { decision: "deny", code: "TOOL_DENIED", reason: "The demo permits scoped reads and host-governed domain writes." };
@@ -673,6 +697,53 @@ export class Runtime {
     }
   }
 
+  async executePznTool<T = unknown>(
+    principalId: string,
+    toolRef: string,
+    operation: string,
+    payload?: unknown,
+    signal: AbortSignal = AbortSignal.timeout(10_000),
+  ): Promise<{ data: T; summary: string; sfieldRunId: string; sfieldToolRef: string }> {
+    const isReadOnly = toolRef === pznSfieldToolRefs.treatmentSelector;
+    const scope = await this.sf.executions.open({
+      principal: principalFor(principalId),
+      purpose: `cep-pzn:${operation}`,
+      preset: isReadOnly ? "read_only" : "bounded_auto",
+      budget: { maxToolCalls: 1 },
+    });
+    try {
+      const exec = await scope.registry.execute(
+        toolRef,
+        {
+          operation,
+          ...(payload !== undefined ? { payloadJson: JSON.stringify(payload) } : {}),
+        },
+        { signal },
+      );
+      if (exec.status !== "succeeded" || !exec.output || typeof exec.output !== "object") {
+        const reason = exec.error?.message ?? `sfield tool ${toolRef} (${operation}) failed.`;
+        throw new Error(reason);
+      }
+      const out = exec.output as { ok: boolean; operation: string; summary: string; resultJson: string };
+      const data = JSON.parse(out.resultJson) as T;
+      if (!isReadOnly && operation !== "get_dictionary" && operation !== "get_workspace" && !operation.startsWith("list_") && operation !== "test_rule") {
+        this.writeAudit?.record({
+          sfieldRunId: scope.id,
+          sfieldToolRef: toolRef,
+          domain: "pzn_self_service",
+          recordId: operation,
+          action: operation,
+          actor: principalId,
+          summary: out.summary,
+          status: "succeeded",
+        });
+      }
+      return { data, summary: out.summary, sfieldRunId: scope.id, sfieldToolRef: toolRef };
+    } finally {
+      await scope.close();
+    }
+  }
+
   private tools() {
     const read = (key: ToolKey, definition: Omit<DefineToolInput, "id" | "description" | "version" | "policy">, version: string = toolVersion) => {
       const { id, description } = sfieldTools[key];
@@ -941,6 +1012,187 @@ export class Runtime {
             };
           } catch (err) {
             throw new ToolError("CONNECTOR_EXECUTION_FAILED", err instanceof Error ? err.message : "Connector failed");
+          }
+        },
+      }),
+      defineTool({
+        id: pznDataDictionaryToolId,
+        version: pznSfieldToolVersion,
+        description: "Data Dictionary API registered with sfield: read and author governed namespaces, attributes, business definitions, operators, and live resolver paths.",
+        resource: { type: "pzn_data_dictionary", id: { ref: "inputs.operation" } },
+        inputs: pznDataDictionaryToolInputJsonSchema,
+        outputs: pznGenericToolResultJsonSchema,
+        policy: {
+          action: pznDataDictionaryToolId,
+          effect: "write",
+          requiresApproval: false,
+          maxAttempts: 1,
+          timeoutMs: 5_000,
+          classification: "public",
+          maxOutputBytes: 48_000,
+        },
+        handler: async (raw) => {
+          if (!this.selfServicePzn) throw new ToolError("PZN_STORE_UNAVAILABLE", "Self-service PZN store is not attached.");
+          const inp = raw as { operation: string; payloadJson?: string };
+          const payload = inp.payloadJson ? JSON.parse(inp.payloadJson) as Record<string, unknown> : {};
+          try {
+            switch (inp.operation) {
+              case "get_dictionary": {
+                const dict = this.selfServicePzn.getDictionary();
+                return { ok: true, operation: inp.operation, summary: `Read Data Dictionary (${dict.namespaces.length} namespaces)`, resultJson: JSON.stringify(dict) };
+              }
+              case "upsert_namespace": {
+                const ns = this.selfServicePzn.upsertNamespace(payload);
+                return { ok: true, operation: inp.operation, summary: `Saved namespace "${ns.id}" (${ns.displayName})`, resultJson: JSON.stringify(ns) };
+              }
+              case "delete_namespace": {
+                this.selfServicePzn.deleteNamespace(String(payload.id ?? ""));
+                return { ok: true, operation: inp.operation, summary: `Deleted namespace "${String(payload.id ?? "")}"`, resultJson: JSON.stringify({ deleted: true }) };
+              }
+              case "upsert_attribute": {
+                const attr = this.selfServicePzn.upsertAttribute(payload);
+                return { ok: true, operation: inp.operation, summary: `Saved Data Dictionary attribute "${attr.namespaceId}.${attr.id}"`, resultJson: JSON.stringify(attr) };
+              }
+              case "delete_attribute": {
+                this.selfServicePzn.deleteAttribute(String(payload.namespaceId ?? ""), String(payload.attributeId ?? ""));
+                return { ok: true, operation: inp.operation, summary: `Deleted attribute "${String(payload.namespaceId ?? "")}.${String(payload.attributeId ?? "")}"`, resultJson: JSON.stringify({ deleted: true }) };
+              }
+              default:
+                throw new ToolError("INVALID_OPERATION", `Unsupported Data Dictionary operation: ${inp.operation}`);
+            }
+          } catch (err) {
+            if (err instanceof ToolError) throw err;
+            throw new ToolError("PZN_DICTIONARY_ERROR", err instanceof Error ? err.message : "Data Dictionary tool error");
+          }
+        },
+      }),
+      defineTool({
+        id: pznRuleMetadataToolId,
+        version: pznSfieldToolVersion,
+        description: "Rule Metadata API registered with sfield: create/update/test Data Dictionary rules, text contents, contexts, content-rule attachments, and immutable publish snapshots.",
+        resource: { type: "pzn_rule_metadata", id: { ref: "inputs.operation" } },
+        inputs: pznRuleMetadataToolInputJsonSchema,
+        outputs: pznGenericToolResultJsonSchema,
+        policy: {
+          action: pznRuleMetadataToolId,
+          effect: "write",
+          requiresApproval: false,
+          maxAttempts: 1,
+          timeoutMs: 5_000,
+          classification: "public",
+          maxOutputBytes: 48_000,
+        },
+        handler: async (raw) => {
+          if (!this.selfServicePzn) throw new ToolError("PZN_STORE_UNAVAILABLE", "Self-service PZN store is not attached.");
+          const inp = raw as { operation: string; payloadJson?: string };
+          const payload = inp.payloadJson ? JSON.parse(inp.payloadJson) as Record<string, unknown> : {};
+          try {
+            switch (inp.operation) {
+              case "get_workspace": {
+                const ws = this.selfServicePzn.getWorkspaceState();
+                return { ok: true, operation: inp.operation, summary: `Loaded workspace (${ws.contexts.length} contexts, ${ws.rules.length} rules)`, resultJson: JSON.stringify(ws) };
+              }
+              case "list_rules": {
+                const rules = this.selfServicePzn.listRules();
+                return { ok: true, operation: inp.operation, summary: `Listed ${rules.length} governed rules`, resultJson: JSON.stringify(rules) };
+              }
+              case "upsert_rule": {
+                const rule = this.selfServicePzn.upsertRule(payload);
+                return { ok: true, operation: inp.operation, summary: `Saved rule "${rule.ruleId}" (${rule.name})`, resultJson: JSON.stringify(rule) };
+              }
+              case "delete_rule": {
+                this.selfServicePzn.deleteRule(String(payload.ruleId ?? ""));
+                return { ok: true, operation: inp.operation, summary: `Deleted rule "${String(payload.ruleId ?? "")}"`, resultJson: JSON.stringify({ deleted: true }) };
+              }
+              case "test_rule": {
+                const testRes = this.selfServicePzn.testRule(payload);
+                return { ok: true, operation: inp.operation, summary: `Tested rule on ${testRes.mid} → ${testRes.evaluation.matched ? "TRUE" : "FALSE"}`, resultJson: JSON.stringify(testRes) };
+              }
+              case "list_contents": {
+                const contents = this.selfServicePzn.listContents();
+                return { ok: true, operation: inp.operation, summary: `Listed ${contents.length} text contents`, resultJson: JSON.stringify(contents) };
+              }
+              case "upsert_content": {
+                const content = this.selfServicePzn.upsertContent(payload);
+                return { ok: true, operation: inp.operation, summary: `Saved text content "${content.contentId}" (${content.title})`, resultJson: JSON.stringify(content) };
+              }
+              case "delete_content": {
+                this.selfServicePzn.deleteContent(String(payload.contentId ?? ""));
+                return { ok: true, operation: inp.operation, summary: `Deleted text content "${String(payload.contentId ?? "")}"`, resultJson: JSON.stringify({ deleted: true }) };
+              }
+              case "list_contexts": {
+                const contexts = this.selfServicePzn.listContexts();
+                return { ok: true, operation: inp.operation, summary: `Listed ${contexts.length} contexts`, resultJson: JSON.stringify(contexts) };
+              }
+              case "upsert_context": {
+                const ctx = this.selfServicePzn.upsertContext(payload);
+                return { ok: true, operation: inp.operation, summary: `Saved context "${ctx.contextId}" (${ctx.attachments.length} attachments)`, resultJson: JSON.stringify(ctx) };
+              }
+              case "delete_context": {
+                this.selfServicePzn.deleteContext(String(payload.contextId ?? ""));
+                return { ok: true, operation: inp.operation, summary: `Deleted context "${String(payload.contextId ?? "")}"`, resultJson: JSON.stringify({ deleted: true }) };
+              }
+              case "publish_context": {
+                const pub = this.selfServicePzn.publishContext(
+                  String(payload.contextId ?? ""),
+                  typeof payload.publishedBy === "string" ? payload.publishedBy : "Self-Service Studio",
+                  typeof payload.notes === "string" ? payload.notes : "",
+                );
+                return { ok: true, operation: inp.operation, summary: `Published "${pub.contextId}" v${pub.version} to Treatment Selector`, resultJson: JSON.stringify(pub) };
+              }
+              case "unpublish_context": {
+                const ctx = this.selfServicePzn.unpublishContext(String(payload.contextId ?? ""));
+                return { ok: true, operation: inp.operation, summary: `Unpublished "${ctx.contextId}"`, resultJson: JSON.stringify(ctx) };
+              }
+              default:
+                throw new ToolError("INVALID_OPERATION", `Unsupported Rule Metadata operation: ${inp.operation}`);
+            }
+          } catch (err) {
+            if (err instanceof ToolError) throw err;
+            throw new ToolError("PZN_RULE_METADATA_ERROR", err instanceof Error ? err.message : "Rule Metadata tool error");
+          }
+        },
+      }),
+      defineTool({
+        id: pznTreatmentSelectorToolId,
+        version: pznSfieldToolVersion,
+        description: "Treatment Selector (TS) API registered with sfield: evaluates a Customer MID + published Context, hydrates Data Dictionary attributes, calls the Rule Engine, filters contents, and returns eligible recommendations.",
+        inputs: pznTreatmentSelectorToolInputJsonSchema,
+        outputs: pznGenericToolResultJsonSchema,
+        policy: {
+          action: pznTreatmentSelectorToolId,
+          effect: "read",
+          requiresApproval: false,
+          maxAttempts: 1,
+          timeoutMs: 5_000,
+          classification: "public",
+          maxOutputBytes: 48_000,
+        },
+        handler: async (raw) => {
+          if (!this.selfServicePzn) throw new ToolError("PZN_STORE_UNAVAILABLE", "Self-service PZN store is not attached.");
+          const inp = raw as { operation: string; payloadJson?: string };
+          const payload = inp.payloadJson ? JSON.parse(inp.payloadJson) as Record<string, unknown> : {};
+          try {
+            switch (inp.operation) {
+              case "evaluate": {
+                const evalRes = this.selfServicePzn.evaluateLiveTs(payload as Parameters<SelfServicePznStore["evaluateLiveTs"]>[0]);
+                return {
+                  ok: true,
+                  operation: inp.operation,
+                  summary: `TS(${evalRes.mid}, ${evalRes.contextId}) → ${evalRes.eligibleContents.length} eligible, ${evalRes.filteredOutContents.length} filtered out (${evalRes.durationMs}ms)`,
+                  resultJson: JSON.stringify(evalRes),
+                };
+              }
+              case "list_published_contexts": {
+                const list = this.selfServicePzn.listPublishedContextSummaries();
+                return { ok: true, operation: inp.operation, summary: `Listed ${list.length} published contexts`, resultJson: JSON.stringify(list) };
+              }
+              default:
+                throw new ToolError("INVALID_OPERATION", `Unsupported Treatment Selector operation: ${inp.operation}`);
+            }
+          } catch (err) {
+            if (err instanceof ToolError) throw err;
+            throw new ToolError("PZN_TS_ERROR", err instanceof Error ? err.message : "Treatment Selector tool error");
           }
         },
       }),

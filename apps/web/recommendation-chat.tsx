@@ -604,8 +604,12 @@ export function RecommendationChatExperience({
                           {msg.generatedBy === "copilot_llm" ? "Copilot ACP" : "Self-Service Engine"}
                         </span>
                         {msg.actionsExecuted.map((a, aIdx) => (
-                          <span key={aIdx} className={"pzn-badge " + (a.status === "ok" ? "is-pass" : "is-fail")}>
-                            {a.status === "ok" ? "✓" : "✗"} {a.tool}
+                          <span
+                            key={aIdx}
+                            className={"pzn-badge " + (a.status === "ok" ? "is-pass" : "is-fail")}
+                            title={a.sfieldRunId ? `sfield run ${a.sfieldRunId} · ${a.summary}` : a.summary}
+                          >
+                            {a.status === "ok" ? "✓" : "✗"} {a.sfieldToolRef ?? a.tool}
                           </span>
                         ))}
                       </div>

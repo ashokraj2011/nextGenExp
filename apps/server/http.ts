@@ -68,8 +68,10 @@ import {
   pznContextInputSchema,
   pznCopilotRequestSchema,
   pznNamespaceInputSchema,
+  pznRegisteredSfieldTools,
   pznRuleInputSchema,
   pznRuleTestRequestSchema,
+  pznSfieldToolRefs,
   pznSlugSchema,
   pznTextContentInputSchema,
   pznTsEvaluateRequestSchema,
@@ -299,7 +301,7 @@ export async function startApp(options: Options) {
   try {
     runtime = options.gateway
       ? await Runtime.open(store, sfieldPath, options.gateway, now, inspectorEnabled, portfolioSnapshots, goalProgressProvider, options.goalBudget, {
-          customer360, opsStore, salesStore, profileStore, writeAudit, connectorStore,
+          customer360, opsStore, salesStore, profileStore, writeAudit, connectorStore, selfServicePzn,
         })
       : null;
     await offline?.init({ namespace: sfieldNamespace, ownerId: newId("owner") });
@@ -1556,52 +1558,68 @@ export async function startApp(options: Options) {
       return json(res, { deal: updated, view: salesStore.view(), auditId: audit.auditId });
     }
     if (resource === "pzn" && inspectorEnabled) {
+      const invokePzn = async <T>(toolRef: string, opName: string, payload: unknown, fallback: () => T) => {
+        if (runtime) {
+          return runtime.executePznTool<T>(principalId, toolRef, opName, payload);
+        }
+        return { data: fallback(), summary: opName, sfieldRunId: "offline", sfieldToolRef: toolRef };
+      };
+      if (id === "sfield-tools" && !operation && method === "GET") {
+        return json(res, { tools: pznRegisteredSfieldTools, runtimeConnected: Boolean(runtime) });
+      }
       if (id === "workspace" && !operation && method === "GET") {
-        return json(res, selfServicePzn.getWorkspaceState());
+        const out = await invokePzn(pznSfieldToolRefs.ruleMetadata, "get_workspace", {}, () => selfServicePzn.getWorkspaceState());
+        return json(res, out.data);
       }
       if (id === "namespaces" && !operation && method === "POST") {
         const data = await body(req, pznNamespaceInputSchema, 32 * 1024);
-        return json(res, { namespace: selfServicePzn.upsertNamespace(data), workspace: selfServicePzn.getWorkspaceState() });
+        const out = await invokePzn(pznSfieldToolRefs.dataDictionary, "upsert_namespace", data, () => selfServicePzn.upsertNamespace(data));
+        return json(res, { namespace: out.data, sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
       if (id === "namespaces" && operation === "delete" && method === "POST") {
         const { id: nsId } = await body(req, z.object({ id: pznSlugSchema }).strict());
-        selfServicePzn.deleteNamespace(nsId);
-        return json(res, { workspace: selfServicePzn.getWorkspaceState() });
+        const out = await invokePzn(pznSfieldToolRefs.dataDictionary, "delete_namespace", { id: nsId }, () => { selfServicePzn.deleteNamespace(nsId); return { deleted: true }; });
+        return json(res, { sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
       if (id === "attributes" && !operation && method === "POST") {
         const data = await body(req, pznAttributeInputSchema, 32 * 1024);
-        return json(res, { attribute: selfServicePzn.upsertAttribute(data), workspace: selfServicePzn.getWorkspaceState() });
+        const out = await invokePzn(pznSfieldToolRefs.dataDictionary, "upsert_attribute", data, () => selfServicePzn.upsertAttribute(data));
+        return json(res, { attribute: out.data, sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
       if (id === "attributes" && operation === "delete" && method === "POST") {
         const { namespaceId, attributeId } = await body(req, z.object({ namespaceId: pznSlugSchema, attributeId: pznSlugSchema }).strict());
-        selfServicePzn.deleteAttribute(namespaceId, attributeId);
-        return json(res, { workspace: selfServicePzn.getWorkspaceState() });
+        const out = await invokePzn(pznSfieldToolRefs.dataDictionary, "delete_attribute", { namespaceId, attributeId }, () => { selfServicePzn.deleteAttribute(namespaceId, attributeId); return { deleted: true }; });
+        return json(res, { sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
       if (id === "contents" && !operation && method === "POST") {
         const data = await body(req, pznTextContentInputSchema, 32 * 1024);
-        return json(res, { content: selfServicePzn.upsertContent(data), workspace: selfServicePzn.getWorkspaceState() });
+        const out = await invokePzn(pznSfieldToolRefs.ruleMetadata, "upsert_content", data, () => selfServicePzn.upsertContent(data));
+        return json(res, { content: out.data, sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
       if (id === "contents" && operation === "delete" && method === "POST") {
         const { contentId } = await body(req, z.object({ contentId: pznSlugSchema }).strict());
-        selfServicePzn.deleteContent(contentId);
-        return json(res, { workspace: selfServicePzn.getWorkspaceState() });
+        const out = await invokePzn(pznSfieldToolRefs.ruleMetadata, "delete_content", { contentId }, () => { selfServicePzn.deleteContent(contentId); return { deleted: true }; });
+        return json(res, { sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
       if (id === "rules" && !operation && method === "POST") {
         const data = await body(req, pznRuleInputSchema, 32 * 1024);
-        return json(res, { rule: selfServicePzn.upsertRule(data), workspace: selfServicePzn.getWorkspaceState() });
+        const out = await invokePzn(pznSfieldToolRefs.ruleMetadata, "upsert_rule", data, () => selfServicePzn.upsertRule(data));
+        return json(res, { rule: out.data, sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
       if (id === "rules" && operation === "delete" && method === "POST") {
         const { ruleId } = await body(req, z.object({ ruleId: pznSlugSchema }).strict());
-        selfServicePzn.deleteRule(ruleId);
-        return json(res, { workspace: selfServicePzn.getWorkspaceState() });
+        const out = await invokePzn(pznSfieldToolRefs.ruleMetadata, "delete_rule", { ruleId }, () => { selfServicePzn.deleteRule(ruleId); return { deleted: true }; });
+        return json(res, { sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
       if (id === "rules" && operation === "test" && method === "POST") {
         const data = await body(req, pznRuleTestRequestSchema, 32 * 1024);
-        return json(res, selfServicePzn.testRule(data));
+        const out = await invokePzn(pznSfieldToolRefs.ruleMetadata, "test_rule", data, () => selfServicePzn.testRule(data));
+        return json(res, out.data);
       }
       if (id === "contexts" && !operation && method === "POST") {
         const data = await body(req, pznContextInputSchema, 32 * 1024);
-        return json(res, { context: selfServicePzn.upsertContext(data), workspace: selfServicePzn.getWorkspaceState() });
+        const out = await invokePzn(pznSfieldToolRefs.ruleMetadata, "upsert_context", data, () => selfServicePzn.upsertContext(data));
+        return json(res, { context: out.data, sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
       if (id === "contexts" && operation === "publish" && method === "POST") {
         const data = await body(req, z.object({
@@ -1609,25 +1627,35 @@ export async function startApp(options: Options) {
           publishedBy: z.string().max(80).optional(),
           notes: z.string().max(240).optional(),
         }).strict());
-        const publication = selfServicePzn.publishContext(data.contextId, data.publishedBy, data.notes);
-        return json(res, { publication, workspace: selfServicePzn.getWorkspaceState() });
+        const out = await invokePzn(pznSfieldToolRefs.ruleMetadata, "publish_context", data, () => selfServicePzn.publishContext(data.contextId, data.publishedBy, data.notes));
+        return json(res, { publication: out.data, sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
       if (id === "contexts" && operation === "unpublish" && method === "POST") {
         const { contextId } = await body(req, z.object({ contextId: pznSlugSchema }).strict());
-        return json(res, { context: selfServicePzn.unpublishContext(contextId), workspace: selfServicePzn.getWorkspaceState() });
+        const out = await invokePzn(pznSfieldToolRefs.ruleMetadata, "unpublish_context", { contextId }, () => selfServicePzn.unpublishContext(contextId));
+        return json(res, { context: out.data, sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
       if (id === "contexts" && operation === "delete" && method === "POST") {
         const { contextId } = await body(req, z.object({ contextId: pznSlugSchema }).strict());
-        selfServicePzn.deleteContext(contextId);
-        return json(res, { workspace: selfServicePzn.getWorkspaceState() });
+        const out = await invokePzn(pznSfieldToolRefs.ruleMetadata, "delete_context", { contextId }, () => { selfServicePzn.deleteContext(contextId); return { deleted: true }; });
+        return json(res, { sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
       if (id === "ts" && operation === "evaluate" && method === "POST") {
         const data = await body(req, pznTsEvaluateRequestSchema, 32 * 1024);
-        return json(res, selfServicePzn.evaluateLiveTs(data));
+        const out = await invokePzn(pznSfieldToolRefs.treatmentSelector, "evaluate", data, () => selfServicePzn.evaluateLiveTs(data));
+        return json(res, out.data);
       }
       if (id === "copilot" && !operation && method === "POST") {
         const data = await body(req, pznCopilotRequestSchema, 48 * 1024);
-        return json(res, await runSelfServicePznCopilot(data, selfServicePzn, { gateway: options.gateway, dataDir: options.dataDir }));
+        return json(res, await runSelfServicePznCopilot(data, selfServicePzn, {
+          gateway: options.gateway,
+          dataDir: options.dataDir,
+          ...(runtime ? {
+            executeSfieldTool: <T>(toolRef: string, opName: string, payload?: unknown) => (
+              runtime.executePznTool<T>(principalId, toolRef, opName, payload)
+            ),
+          } : {}),
+        }));
       }
     }
     if (resource === "events" && !id && method === "POST") {

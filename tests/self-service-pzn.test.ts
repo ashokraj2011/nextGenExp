@@ -204,10 +204,27 @@ test("Self-service Copilot chat executes dictionary, authoring, publish, and liv
     assert.ok(createTurn.cards.some((c) => c.kind === "context" && c.context.status === "published"));
 
     // 3. Test live TS across Alice Morgan ($12,500 > $11,000 -> ELIGIBLE) and Jordan Lee ($10,000 <= $11,000 -> RULE_FALSE)
+    const invokedRefs: string[] = [];
     const evalTurn = await runSelfServicePznCopilot(
       { message: "Test chat_treasury_nudge for Alice Morgan and Jordan Lee", activeContextId: "chat_treasury_nudge" },
       env.pzn,
+      {
+        executeSfieldTool: async <T>(toolRef: string, operation: string, payload?: unknown) => {
+          invokedRefs.push(`${toolRef}:${operation}`);
+          if (operation === "evaluate") {
+            const data = env.pzn.evaluateLiveTs(payload as Parameters<SelfServicePznStore["evaluateLiveTs"]>[0]);
+            return { data: data as T, summary: "evaluated via sfield", sfieldRunId: "run_test_ts_1", sfieldToolRef: toolRef };
+          }
+          throw new Error(`Unexpected tool ${toolRef}:${operation}`);
+        },
+      },
     );
+    assert.deepEqual(invokedRefs, [
+      "cep.pzn.treatment_selector@1.0.0:evaluate",
+      "cep.pzn.treatment_selector@1.0.0:evaluate",
+    ]);
+    assert.equal(evalTurn.actionsExecuted[0].sfieldToolRef, "cep.pzn.treatment_selector@1.0.0");
+    assert.equal(evalTurn.actionsExecuted[0].sfieldRunId, "run_test_ts_1");
     const tsCards = evalTurn.cards.filter((c) => c.kind === "ts_evaluation");
     assert.equal(tsCards.length, 2);
     assert.equal(tsCards[0].evaluation.eligibleContents.length, 1);

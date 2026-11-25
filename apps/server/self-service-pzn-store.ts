@@ -7,6 +7,7 @@ import {
   pznAttributeInputSchema,
   pznContextInputSchema,
   pznNamespaceInputSchema,
+  pznRegisteredSfieldTools,
   pznRuleInputSchema,
   pznRuleTestRequestSchema,
   pznTextContentInputSchema,
@@ -1016,6 +1017,7 @@ export class SelfServicePznStore implements ActiveSelfServicePznProvider {
       contexts,
       publicationsByContext,
       customers,
+      registeredSfieldTools: pznRegisteredSfieldTools,
     };
   }
 }

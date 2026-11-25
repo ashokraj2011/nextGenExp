@@ -1,13 +1,28 @@
-import type {
-  PznCopilotActionLog,
-  PznCopilotCard,
-  PznCopilotRequest,
-  PznCopilotResponse,
-  PznDataType,
-  PznOperator,
-  PznRuleValue,
-  PznStudioWorkspaceState,
+import {
+  pznSfieldToolRefs,
+  type PznAttribute,
+  type PznContext,
+  type PznContextPublication,
+  type PznCopilotActionLog,
+  type PznCopilotCard,
+  type PznCopilotRequest,
+  type PznCopilotResponse,
+  type PznDataDictionary,
+  type PznDataType,
+  type PznNamespace,
+  type PznOperator,
+  type PznRule,
+  type PznRuleValue,
+  type PznStudioWorkspaceState,
+  type PznTextContent,
+  type PznTsEvaluationResult,
 } from "../../packages/contracts/self-service-pzn";
+
+export type PznSfieldToolExecutor = <T = unknown>(
+  toolRef: string,
+  operation: string,
+  payload?: unknown,
+) => Promise<{ data: T; summary: string; sfieldRunId: string; sfieldToolRef: string }>;
 import { callConfiguredLlmJson } from "./dynamic-ui-generator";
 import type { GatewaySettings } from "./gateway";
 import type { SelfServicePznStore } from "./self-service-pzn-store";
@@ -467,8 +482,24 @@ function deterministicPlan(message: string, ws: PznStudioWorkspaceState, activeC
 export async function runSelfServicePznCopilot(
   req: PznCopilotRequest,
   store: SelfServicePznStore,
-  options?: { gateway?: GatewaySettings | null; dataDir?: string },
+  options?: {
+    gateway?: GatewaySettings | null;
+    dataDir?: string;
+    executeSfieldTool?: PznSfieldToolExecutor;
+  },
 ): Promise<PznCopilotResponse> {
+  const invokeTool = async <T>(
+    toolRef: string,
+    operation: string,
+    payload: unknown,
+    fallback: () => T,
+  ): Promise<{ data: T; sfieldToolRef: string; sfieldRunId?: string }> => {
+    if (options?.executeSfieldTool) {
+      const res = await options.executeSfieldTool<T>(toolRef, operation, payload);
+      return { data: res.data, sfieldToolRef: res.sfieldToolRef, sfieldRunId: res.sfieldRunId };
+    }
+    return { data: fallback(), sfieldToolRef: toolRef };
+  };
   const initialWs = store.getWorkspaceState();
   let plan: LlmCopilotPlan | null = null;
   let generatedBy: "copilot_llm" | "deterministic" = "deterministic";
@@ -510,21 +541,27 @@ export async function runSelfServicePznCopilot(
     try {
       switch (op.op) {
         case "upsert_namespace": {
-          const saved = store.upsertNamespace({
+          const payload = {
             id: slug(op.id, "custom"),
             displayName: op.displayName,
             businessDefinition: op.businessDefinition,
             owner: op.owner || "Personalization Team",
             sourceSystem: op.sourceSystem || "custom_attribute",
-          });
-          actionsExecuted.push({ tool: "dictionary.upsertNamespace", summary: `Saved namespace "${saved.id}" (${saved.displayName})`, status: "ok" });
+          };
+          const { data: saved, sfieldToolRef, sfieldRunId } = await invokeTool<PznNamespace>(
+            pznSfieldToolRefs.dataDictionary,
+            "upsert_namespace",
+            payload,
+            () => store.upsertNamespace(payload),
+          );
+          actionsExecuted.push({ tool: "dictionary.upsertNamespace", sfieldToolRef, sfieldRunId, summary: `Saved namespace "${saved.id}" (${saved.displayName})`, status: "ok" });
           break;
         }
         case "upsert_attribute": {
           const nsId = slug(op.namespaceId, "customer");
           const attrId = slug(op.id, "custom_attr");
           const dataType = op.dataType || "string";
-          const saved = store.upsertAttribute({
+          const payload = {
             namespaceId: nsId,
             id: attrId,
             displayName: op.displayName,
@@ -536,15 +573,21 @@ export async function runSelfServicePznCopilot(
             sampleValue: op.sampleValue ?? "",
             resolverPath: op.resolverPath || `customAttributes.${attrId}`,
             piiClassification: op.piiClassification ?? "none",
-          });
-          actionsExecuted.push({ tool: "dictionary.upsertAttribute", summary: `Saved Data Dictionary attribute "${saved.namespaceId}.${saved.id}"`, status: "ok" });
+          };
+          const { data: saved, sfieldToolRef, sfieldRunId } = await invokeTool<PznAttribute>(
+            pznSfieldToolRefs.dataDictionary,
+            "upsert_attribute",
+            payload,
+            () => store.upsertAttribute(payload),
+          );
+          actionsExecuted.push({ tool: "dictionary.upsertAttribute", sfieldToolRef, sfieldRunId, summary: `Saved Data Dictionary attribute "${saved.namespaceId}.${saved.id}"`, status: "ok" });
           const dict = store.getDictionary();
           const nsView = dict.namespaces.filter((n) => n.id === saved.namespaceId);
           cards.push({ kind: "dictionary", namespaces: nsView, highlightKey: `${saved.namespaceId}.${saved.id}` });
           break;
         }
         case "upsert_content": {
-          const saved = store.upsertContent({
+          const payload = {
             contentId: slug(op.contentId, "text_offer"),
             title: op.title,
             headline: op.headline ?? "",
@@ -554,21 +597,27 @@ export async function runSelfServicePznCopilot(
             disclosureText: op.disclosureText ?? "",
             tags: op.tags ?? [],
             status: op.status ?? "published",
-          });
-          actionsExecuted.push({ tool: "content.upsert", summary: `Saved text content "${saved.contentId}" (${saved.title})`, status: "ok" });
+          };
+          const { data: saved, sfieldToolRef, sfieldRunId } = await invokeTool<PznTextContent>(
+            pznSfieldToolRefs.ruleMetadata,
+            "upsert_content",
+            payload,
+            () => store.upsertContent(payload),
+          );
+          actionsExecuted.push({ tool: "content.upsert", sfieldToolRef, sfieldRunId, summary: `Saved text content "${saved.contentId}" (${saved.title})`, status: "ok" });
           cards.push({ kind: "content", content: saved });
           break;
         }
         case "upsert_rule": {
-          const saved = store.upsertRule({
+          const payload = {
             ruleId: slug(op.ruleId, "custom_rule"),
             name: op.name,
             businessDescription: op.businessDescription,
             effect: op.effect ?? "include_when_true",
-            status: "published",
+            status: "published" as const,
             rootGroup: {
               id: "grp_root",
-              kind: "group",
+              kind: "group" as const,
               combinator: op.combinator ?? "AND",
               children: (op.clauses ?? []).map((cl, idx) => ({
                 id: `cl_${idx + 1}`,
@@ -579,14 +628,20 @@ export async function runSelfServicePznCopilot(
                 ...(cl.operator === "exists" ? {} : { value: cl.value }),
               })),
             },
-          });
-          actionsExecuted.push({ tool: "rule.upsert", summary: `Validated & saved rule "${saved.ruleId}" (${saved.name})`, status: "ok" });
+          };
+          const { data: saved, sfieldToolRef, sfieldRunId } = await invokeTool<PznRule>(
+            pznSfieldToolRefs.ruleMetadata,
+            "upsert_rule",
+            payload,
+            () => store.upsertRule(payload),
+          );
+          actionsExecuted.push({ tool: "rule.upsert", sfieldToolRef, sfieldRunId, summary: `Validated & saved rule "${saved.ruleId}" (${saved.name})`, status: "ok" });
           cards.push({ kind: "rule", rule: saved });
           break;
         }
         case "upsert_context": {
           const ctxId = slug(op.contextId, "custom_context");
-          const saved = store.upsertContext({
+          const payload = {
             contextId: ctxId,
             displayName: op.displayName,
             description: op.description,
@@ -598,9 +653,15 @@ export async function runSelfServicePznCopilot(
               ruleIds: (att.ruleIds ?? []).map((r) => slug(r)),
               ruleMatchMode: att.ruleMatchMode ?? "all",
             })),
-          });
+          };
+          const { data: saved, sfieldToolRef, sfieldRunId } = await invokeTool<PznContext>(
+            pznSfieldToolRefs.ruleMetadata,
+            "upsert_context",
+            payload,
+            () => store.upsertContext(payload),
+          );
           activeContextId = saved.contextId;
-          actionsExecuted.push({ tool: "context.upsert", summary: `Saved context "${saved.contextId}" with ${saved.attachments.length} attachment(s)`, status: "ok" });
+          actionsExecuted.push({ tool: "context.upsert", sfieldToolRef, sfieldRunId, summary: `Saved context "${saved.contextId}" with ${saved.attachments.length} attachment(s)`, status: "ok" });
           const wsNow = store.getWorkspaceState();
           const latestPublication = wsNow.publicationsByContext[saved.contextId]?.[0];
           cards.push({
@@ -614,10 +675,15 @@ export async function runSelfServicePznCopilot(
         }
         case "publish_context": {
           const ctxId = slug(op.contextId, activeContextId ?? "wealth-next-best-offers");
-          const pub = store.publishContext(ctxId, "Self-Service Copilot", op.notes || "Published via chat");
+          const payload = { contextId: ctxId, publishedBy: "Self-Service Copilot", notes: op.notes || "Published via chat" };
+          const { data: pub, sfieldToolRef, sfieldRunId } = await invokeTool<PznContextPublication>(
+            pznSfieldToolRefs.ruleMetadata,
+            "publish_context",
+            payload,
+            () => store.publishContext(ctxId, payload.publishedBy, payload.notes),
+          );
           activeContextId = pub.contextId;
-          actionsExecuted.push({ tool: "context.publish", summary: `Published "${pub.contextId}" v${pub.version} to Treatment Selector`, status: "ok" });
-          // Replace earlier draft context card for same context if present
+          actionsExecuted.push({ tool: "context.publish", sfieldToolRef, sfieldRunId, summary: `Published "${pub.contextId}" v${pub.version} to Treatment Selector`, status: "ok" });
           const idx = cards.findIndex((c) => c.kind === "context" && c.context.contextId === pub.contextId);
           const wsNow = store.getWorkspaceState();
           const ctxCard: PznCopilotCard = {
@@ -633,9 +699,14 @@ export async function runSelfServicePznCopilot(
         }
         case "unpublish_context": {
           const ctxId = slug(op.contextId, activeContextId ?? "wealth-next-best-offers");
-          const updated = store.unpublishContext(ctxId);
+          const { data: updated, sfieldToolRef, sfieldRunId } = await invokeTool<PznContext>(
+            pznSfieldToolRefs.ruleMetadata,
+            "unpublish_context",
+            { contextId: ctxId },
+            () => store.unpublishContext(ctxId),
+          );
           activeContextId = updated.contextId;
-          actionsExecuted.push({ tool: "context.unpublish", summary: `Unpublished "${updated.contextId}"`, status: "ok" });
+          actionsExecuted.push({ tool: "context.unpublish", sfieldToolRef, sfieldRunId, summary: `Unpublished "${updated.contextId}"`, status: "ok" });
           const wsNow = store.getWorkspaceState();
           cards.push({ kind: "context", context: updated, contents: wsNow.contents, rules: wsNow.rules });
           break;
@@ -647,14 +718,22 @@ export async function runSelfServicePznCopilot(
           const ctxRecord = store.getContext(ctxId);
           const autoDraft = op.useDraft ?? (ctxRecord ? ctxRecord.status !== "published" : false);
           for (const mid of mids) {
-            const evalRes = store.evaluateLiveTs({
+            const payload = {
               mid,
               contextId: ctxId,
               useDraft: autoDraft,
               ...(op.attributeOverrides && Object.keys(op.attributeOverrides).length ? { attributeOverrides: op.attributeOverrides } : {}),
-            });
+            };
+            const { data: evalRes, sfieldToolRef, sfieldRunId } = await invokeTool<PznTsEvaluationResult>(
+              pznSfieldToolRefs.treatmentSelector,
+              "evaluate",
+              payload,
+              () => store.evaluateLiveTs(payload),
+            );
             actionsExecuted.push({
               tool: "ts.evaluate",
+              sfieldToolRef,
+              sfieldRunId,
               summary: `TS(${mid}, ${ctxId}) → ${evalRes.eligibleContents.length} eligible, ${evalRes.filteredOutContents.length} filtered out (${evalRes.durationMs}ms)`,
               status: "ok",
             });
@@ -663,18 +742,28 @@ export async function runSelfServicePznCopilot(
           break;
         }
         case "show_dictionary": {
-          const dict = store.getDictionary();
+          const { data: dict, sfieldToolRef, sfieldRunId } = await invokeTool<PznDataDictionary>(
+            pznSfieldToolRefs.dataDictionary,
+            "get_dictionary",
+            {},
+            () => store.getDictionary(),
+          );
           const filtered = op.namespaceId
             ? dict.namespaces.filter((n) => n.id === slug(op.namespaceId!))
             : dict.namespaces;
           const finalNs = filtered.length ? filtered : dict.namespaces;
-          actionsExecuted.push({ tool: "dictionary.read", summary: `Loaded ${finalNs.length} Data Dictionary namespace(s)`, status: "ok" });
+          actionsExecuted.push({ tool: "dictionary.read", sfieldToolRef, sfieldRunId, summary: `Loaded ${finalNs.length} Data Dictionary namespace(s)`, status: "ok" });
           cards.push({ kind: "dictionary", namespaces: finalNs });
           break;
         }
         case "show_catalog": {
-          const wsNow = store.getWorkspaceState();
-          actionsExecuted.push({ tool: "catalog.summary", summary: `Listed ${wsNow.contexts.length} context(s), ${wsNow.contents.length} content(s), ${wsNow.rules.length} rule(s)`, status: "ok" });
+          const { data: wsNow, sfieldToolRef, sfieldRunId } = await invokeTool<PznStudioWorkspaceState>(
+            pznSfieldToolRefs.ruleMetadata,
+            "get_workspace",
+            {},
+            () => store.getWorkspaceState(),
+          );
+          actionsExecuted.push({ tool: "catalog.summary", sfieldToolRef, sfieldRunId, summary: `Listed ${wsNow.contexts.length} context(s), ${wsNow.contents.length} content(s), ${wsNow.rules.length} rule(s)`, status: "ok" });
           cards.push({
             kind: "catalog_summary",
             contexts: wsNow.contexts,
@@ -685,7 +774,13 @@ export async function runSelfServicePznCopilot(
           break;
         }
         case "show_rule_builder": {
-          actionsExecuted.push({ tool: "widget.ruleBuilder", summary: "Mounted Interactive Rule Builder Widget (Data Dictionary–bound)", status: "ok" });
+          const { sfieldToolRef, sfieldRunId } = await invokeTool<PznDataDictionary>(
+            pznSfieldToolRefs.dataDictionary,
+            "get_dictionary",
+            {},
+            () => store.getDictionary(),
+          );
+          actionsExecuted.push({ tool: "widget.ruleBuilder", sfieldToolRef, sfieldRunId, summary: "Mounted Interactive Rule Builder Widget (Data Dictionary–bound)", status: "ok" });
           cards.push({
             kind: "rule_builder_widget",
             ...(op.initialNamespaceId ? { initialNamespaceId: slug(op.initialNamespaceId) } : {}),
@@ -694,14 +789,24 @@ export async function runSelfServicePznCopilot(
           break;
         }
         case "show_rules": {
-          const wsNow = store.getWorkspaceState();
-          actionsExecuted.push({ tool: "rules.list", summary: `Loaded ${wsNow.rules.length} Data Dictionary rule(s)`, status: "ok" });
-          cards.push({ kind: "rules_catalog_widget", rules: wsNow.rules });
+          const { data: rulesList, sfieldToolRef, sfieldRunId } = await invokeTool<PznRule[]>(
+            pznSfieldToolRefs.ruleMetadata,
+            "list_rules",
+            {},
+            () => store.listRules(),
+          );
+          actionsExecuted.push({ tool: "rules.list", sfieldToolRef, sfieldRunId, summary: `Loaded ${rulesList.length} Data Dictionary rule(s)`, status: "ok" });
+          cards.push({ kind: "rules_catalog_widget", rules: rulesList });
           break;
         }
         case "show_context_matrix": {
-          const wsNow = store.getWorkspaceState();
-          actionsExecuted.push({ tool: "contexts.matrix", summary: `Loaded ${wsNow.contexts.length} context(s) with attached contents & rules`, status: "ok" });
+          const { data: wsNow, sfieldToolRef, sfieldRunId } = await invokeTool<PznStudioWorkspaceState>(
+            pznSfieldToolRefs.ruleMetadata,
+            "get_workspace",
+            {},
+            () => store.getWorkspaceState(),
+          );
+          actionsExecuted.push({ tool: "contexts.matrix", sfieldToolRef, sfieldRunId, summary: `Loaded ${wsNow.contexts.length} context(s) with attached contents & rules`, status: "ok" });
           cards.push({
             kind: "context_matrix_widget",
             contexts: wsNow.contexts,

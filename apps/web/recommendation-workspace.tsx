@@ -564,8 +564,15 @@ export function RecommendationWorkspace() {
                   <div className="rec-overview-banner">
                     <h2>Recommendations Self-Service Workspace</h2>
                     <p>
-                      Author Data Dictionary rules, manage contexts &amp; attached text contents, publish immutable snapshots, and test live Treatment Selector runs for <strong>{activeCustomer?.displayName}</strong> ({activeMid}) — using interactive widgets below or by chatting.
+                      Author Data Dictionary rules, manage contexts &amp; attached text contents, publish immutable snapshots, and test live Treatment Selector runs for <strong>{activeCustomer?.displayName}</strong> ({activeMid}) — powered by registered <code>sfield</code> tools.
                     </p>
+                    <div className="pzn-rule-chips" style={{ marginTop: 10 }}>
+                      {(workspace.registeredSfieldTools ?? []).map((t) => (
+                        <span key={t.ref} className="pzn-badge is-published" title={t.description}>
+                          sfield · {t.ref} ({t.label})
+                        </span>
+                      ))}
+                    </div>
                   </div>
                   <div className="rec-widgets-stack">
                     <ContextMatrixWidget
@@ -677,7 +684,9 @@ export function RecommendationWorkspace() {
                               <ul className="rec-reasoning-list">
                                 {msg.actionsExecuted.map((a, i) => (
                                   <li key={i} className={a.status === "ok" ? "is-ok" : "is-err"}>
-                                    <span className="pzn-code">{a.tool}</span> {a.summary}
+                                    <span className="pzn-code">{a.sfieldToolRef ?? a.tool}</span>
+                                    {a.sfieldRunId && <span className="pzn-badge" style={{ marginLeft: 6 }}>{a.sfieldRunId.slice(0, 14)}</span>}{" "}
+                                    {a.summary}
                                   </li>
                                 ))}
                               </ul>

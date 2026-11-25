@@ -293,6 +293,118 @@ export type PznTsEvaluationResult = {
   };
 };
 
+export const pznDataDictionaryToolId = "cep.pzn.data_dictionary";
+export const pznRuleMetadataToolId = "cep.pzn.rule_metadata";
+export const pznTreatmentSelectorToolId = "cep.pzn.treatment_selector";
+export const pznSfieldToolVersion = "1.0.0";
+
+export const pznSfieldToolRefs = {
+  dataDictionary: `${pznDataDictionaryToolId}@${pznSfieldToolVersion}`,
+  ruleMetadata: `${pznRuleMetadataToolId}@${pznSfieldToolVersion}`,
+  treatmentSelector: `${pznTreatmentSelectorToolId}@${pznSfieldToolVersion}`,
+} as const;
+
+export type PznRegisteredSfieldTool = {
+  id: string;
+  version: string;
+  ref: string;
+  label: string;
+  effect: "read" | "write";
+  description: string;
+};
+
+export const pznRegisteredSfieldTools: readonly PznRegisteredSfieldTool[] = [
+  {
+    id: pznDataDictionaryToolId,
+    version: pznSfieldToolVersion,
+    ref: pznSfieldToolRefs.dataDictionary,
+    label: "Data Dictionary API",
+    effect: "write",
+    description: "Governed sfield tool for reading and authoring namespaces, attributes, business definitions, operators, and live Customer 360 resolver paths.",
+  },
+  {
+    id: pznRuleMetadataToolId,
+    version: pznSfieldToolVersion,
+    ref: pznSfieldToolRefs.ruleMetadata,
+    label: "Rule Metadata API",
+    effect: "write",
+    description: "Governed sfield tool for managing composable rules, text contents, contexts, content-rule attachments, and immutable Draft-to-Publish snapshots.",
+  },
+  {
+    id: pznTreatmentSelectorToolId,
+    version: pznSfieldToolVersion,
+    ref: pznSfieldToolRefs.treatmentSelector,
+    label: "Treatment Selector (TS) API",
+    effect: "read",
+    description: "Governed sfield tool that takes a Customer MID + Context, hydrates Data Dictionary attributes, calls the Rule Engine, filters contents, and returns eligible recommendations to the Experience Layer.",
+  },
+];
+
+export const pznDataDictionaryToolInputJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["operation"],
+  properties: {
+    operation: {
+      type: "string",
+      enum: ["get_dictionary", "upsert_namespace", "delete_namespace", "upsert_attribute", "delete_attribute"],
+    },
+    payloadJson: { type: "string", maxLength: 32000 },
+  },
+} as const;
+
+export const pznRuleMetadataToolInputJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["operation"],
+  properties: {
+    operation: {
+      type: "string",
+      enum: [
+        "get_workspace",
+        "list_rules",
+        "upsert_rule",
+        "delete_rule",
+        "test_rule",
+        "list_contents",
+        "upsert_content",
+        "delete_content",
+        "list_contexts",
+        "upsert_context",
+        "delete_context",
+        "publish_context",
+        "unpublish_context",
+      ],
+    },
+    payloadJson: { type: "string", maxLength: 32000 },
+  },
+} as const;
+
+export const pznTreatmentSelectorToolInputJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["operation"],
+  properties: {
+    operation: {
+      type: "string",
+      enum: ["evaluate", "list_published_contexts"],
+    },
+    payloadJson: { type: "string", maxLength: 16000 },
+  },
+} as const;
+
+export const pznGenericToolResultJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["ok", "operation", "summary", "resultJson"],
+  properties: {
+    ok: { type: "boolean" },
+    operation: { type: "string", minLength: 1, maxLength: 64 },
+    summary: { type: "string", minLength: 1, maxLength: 320 },
+    resultJson: { type: "string", maxLength: 44000 },
+  },
+} as const;
+
 export type PznStudioWorkspaceState = {
   dictionary: PznDataDictionary;
   contents: PznTextContent[];
@@ -305,6 +417,7 @@ export type PznStudioWorkspaceState = {
     displayName: string;
     segment: string;
   }[];
+  registeredSfieldTools: readonly PznRegisteredSfieldTool[];
 };
 
 export const pznCopilotRequestSchema = z.object({
@@ -319,6 +432,8 @@ export type PznCopilotRequest = z.infer<typeof pznCopilotRequestSchema>;
 
 export type PznCopilotActionLog = {
   tool: string;
+  sfieldToolRef?: string;
+  sfieldRunId?: string;
   summary: string;
   status: "ok" | "error";
 };
