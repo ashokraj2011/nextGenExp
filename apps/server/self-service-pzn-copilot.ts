@@ -1,0 +1,673 @@
+import type {
+  PznCopilotActionLog,
+  PznCopilotCard,
+  PznCopilotRequest,
+  PznCopilotResponse,
+  PznDataType,
+  PznOperator,
+  PznRuleValue,
+  PznStudioWorkspaceState,
+} from "../../packages/contracts/self-service-pzn";
+import { callConfiguredLlmJson } from "./dynamic-ui-generator";
+import type { GatewaySettings } from "./gateway";
+import type { SelfServicePznStore } from "./self-service-pzn-store";
+
+type PlannedOp =
+  | {
+      op: "upsert_namespace";
+      id: string;
+      displayName: string;
+      businessDefinition: string;
+      owner?: string;
+      sourceSystem?: "customer_360" | "portfolio_snapshot" | "goal_progress" | "session_context" | "custom_attribute";
+    }
+  | {
+      op: "upsert_attribute";
+      namespaceId: string;
+      id: string;
+      displayName: string;
+      businessDefinition: string;
+      dataType: PznDataType;
+      allowedOperators?: PznOperator[];
+      enumOptions?: { value: string; label: string; definition?: string }[];
+      unit?: string;
+      sampleValue?: string;
+      resolverPath?: string;
+      piiClassification?: "none" | "internal" | "pii";
+    }
+  | {
+      op: "upsert_content";
+      contentId: string;
+      title: string;
+      headline?: string;
+      body: string;
+      ctaLabel?: string;
+      ctaPrompt?: string;
+      disclosureText?: string;
+      tags?: string[];
+      status?: "draft" | "published" | "archived";
+    }
+  | {
+      op: "upsert_rule";
+      ruleId: string;
+      name: string;
+      businessDescription: string;
+      effect?: "include_when_true" | "exclude_when_true";
+      combinator?: "AND" | "OR";
+      clauses: {
+        namespaceId: string;
+        attributeId: string;
+        operator: PznOperator;
+        value?: PznRuleValue;
+      }[];
+    }
+  | {
+      op: "upsert_context";
+      contextId: string;
+      displayName: string;
+      description: string;
+      channel?: "chat" | "web" | "mobile" | "all";
+      contextRuleIds?: string[];
+      attachments: {
+        contentId: string;
+        rank?: number;
+        ruleIds?: string[];
+        ruleMatchMode?: "all" | "any";
+      }[];
+    }
+  | { op: "publish_context"; contextId: string; notes?: string }
+  | { op: "unpublish_context"; contextId: string }
+  | {
+      op: "evaluate_ts";
+      contextId: string;
+      mids: string[];
+      useDraft?: boolean;
+      attributeOverrides?: Record<string, PznRuleValue>;
+    }
+  | { op: "show_dictionary"; namespaceId?: string }
+  | { op: "show_catalog" };
+
+interface LlmCopilotPlan {
+  reply?: string;
+  operations?: PlannedOp[];
+  suggestedPrompts?: string[];
+}
+
+function slug(raw: string, fallback = "item_1"): string {
+  const s = raw.toLowerCase().trim().replace(/[^a-z0-9_-]+/g, "_").replace(/^[^a-z]+/, "").replace(/_+/g, "_");
+  return s.slice(0, 56) || fallback;
+}
+
+function defaultOpsForType(dt: PznDataType): PznOperator[] {
+  if (dt === "enum") return ["eq", "ne", "in", "not_in"];
+  if (dt === "boolean") return ["eq", "ne"];
+  if (dt === "number" || dt === "currency_usd") return ["eq", "ne", "gt", "gte", "lt", "lte"];
+  return ["eq", "ne", "contains", "in", "not_in", "exists"];
+}
+
+function buildSystemPrompt(ws: PznStudioWorkspaceState, activeContextId?: string): string {
+  const dictSummary = ws.dictionary.namespaces.map((ns) => ({
+    namespace: ns.id,
+    displayName: ns.displayName,
+    businessDefinition: ns.businessDefinition,
+    attributes: ns.attributes.map((a) => ({
+      key: `${ns.id}.${a.id}`,
+      displayName: a.displayName,
+      businessDefinition: a.businessDefinition,
+      dataType: a.dataType,
+      allowedOperators: a.allowedOperators,
+      ...(a.enumOptions.length ? { enumOptions: a.enumOptions.map((o) => o.value) } : {}),
+    })),
+  }));
+
+  const ctxSummary = ws.contexts.map((c) => ({
+    contextId: c.contextId,
+    displayName: c.displayName,
+    status: c.status,
+    publishedVersion: c.publishedVersion,
+    attachments: c.attachments,
+  }));
+
+  const contentSummary = ws.contents.map((c) => ({ contentId: c.contentId, title: c.title, status: c.status }));
+  const ruleSummary = ws.rules.map((r) => ({ ruleId: r.ruleId, name: r.name, effect: r.effect }));
+  const customers = ws.customers.map((c) => ({ displayName: c.displayName, mid: c.syntheticMid, segment: c.segment }));
+
+  return `You are the CEP Recommendation Self-Service Copilot.
+Users configure the ENTIRE Recommendation Self-Service Platform by chatting with you:
+1. Define Data Dictionary namespaces & attributes (with business definitions).
+2. Author Text Contents (title, headline, body with optional {{namespace.attribute}} tokens, CTA, disclosure).
+3. Author Rules strictly using valid Data Dictionary attributes & allowed operators.
+4. Create Contexts, attach ranked Text Contents and Rules, and Publish immutable snapshots to Treatment Selector.
+5. Run Live Treatment Selector evaluations for Customer MIDs (including what-if attribute overrides) to inspect Rule Engine verdicts and Experience Layer outputs.
+
+CURRENT WORKSPACE STATE:
+- Active Context ID: ${activeContextId ?? ws.contexts[0]?.contextId ?? "none"}
+- Data Dictionary: ${JSON.stringify(dictSummary)}
+- Customers (MIDs): ${JSON.stringify(customers)}
+- Contexts: ${JSON.stringify(ctxSummary)}
+- Text Contents: ${JSON.stringify(contentSummary)}
+- Rules: ${JSON.stringify(ruleSummary)}
+
+RETURN STRICT JSON ONLY:
+{
+  "reply": "Concise, helpful explanation of what you created, published, or evaluated.",
+  "operations": [
+    // Zero or more ordered operations from:
+    // { "op": "upsert_namespace", "id": "slug", "displayName": "...", "businessDefinition": "...", "owner": "...", "sourceSystem": "custom_attribute" }
+    // { "op": "upsert_attribute", "namespaceId": "slug", "id": "slug", "displayName": "...", "businessDefinition": "...", "dataType": "enum|boolean|number|currency_usd|string|string_list", "allowedOperators": [...], "enumOptions": [{"value":"...","label":"...","definition":"..."}], "unit": "...", "sampleValue": "...", "resolverPath": "customAttributes.<id>" }
+    // { "op": "upsert_content", "contentId": "slug", "title": "...", "headline": "...", "body": "...", "ctaLabel": "...", "ctaPrompt": "...", "disclosureText": "...", "tags": ["..."] }
+    // { "op": "upsert_rule", "ruleId": "slug", "name": "...", "businessDescription": "...", "effect": "include_when_true|exclude_when_true", "combinator": "AND|OR", "clauses": [{"namespaceId":"...","attributeId":"...","operator":"eq|ne|gt|gte|lt|lte|in|not_in|contains|exists","value":...}] }
+    // { "op": "upsert_context", "contextId": "slug", "displayName": "...", "description": "...", "channel": "all|chat|web|mobile", "contextRuleIds": [], "attachments": [{"contentId":"slug","rank":1,"ruleIds":["slug"],"ruleMatchMode":"all|any"}] }
+    // { "op": "publish_context", "contextId": "slug", "notes": "..." }
+    // { "op": "unpublish_context", "contextId": "slug" }
+    // { "op": "evaluate_ts", "contextId": "slug", "mids": ["DEMO-MID-1001"], "useDraft": false, "attributeOverrides": {"portfolio.cash_usd": 5000} }
+    // { "op": "show_dictionary", "namespaceId": "optional_ns" }
+    // { "op": "show_catalog" }
+  ],
+  "suggestedPrompts": ["2 to 4 concise follow-up prompts the user can click next"]
+}
+
+RULES:
+- Every ID (namespace, attribute, contentId, ruleId, contextId) MUST be lowercase slug matching ^[a-z][a-z0-9_-]*$.
+- When creating a complete recommendation flow (content + rule + context), emit operations in dependency order: upsert_namespace -> upsert_attribute -> upsert_content -> upsert_rule -> upsert_context -> (optional publish_context) -> (optional evaluate_ts).
+- If the user asks to test/simulate for multiple customers (e.g. "Alice and Jordan" or "all customers"), include all requested MIDs in evaluate_ts.mids.
+- Always use exact existing Data Dictionary keys & allowedOperators unless you also emit upsert_attribute first.`;
+}
+
+function deterministicPlan(message: string, ws: PznStudioWorkspaceState, activeContextId?: string): LlmCopilotPlan {
+  const lower = message.toLowerCase();
+  const targetCtxId = (() => {
+    for (const c of ws.contexts) {
+      if (lower.includes(c.contextId.toLowerCase()) || lower.includes(c.displayName.toLowerCase())) {
+        return c.contextId;
+      }
+    }
+    return activeContextId ?? ws.contexts[0]?.contextId ?? "wealth-next-best-offers";
+  })();
+
+  // 1. Dictionary inspection
+  if (/(data dictionary|dictionary|namespaces?|attributes?|business def)/i.test(lower) && !/(create|add|new|define)\s+(a\s+)?(namespace|attribute)/i.test(lower)) {
+    const matchedNs = ws.dictionary.namespaces.find((ns) => lower.includes(ns.id) || lower.includes(ns.displayName.toLowerCase()));
+    return {
+      reply: matchedNs
+        ? `Here is the **${matchedNs.displayName}** (\`${matchedNs.id}\`) namespace from the Data Dictionary with business definitions, owners, and live resolvers.`
+        : `Here is the governed **Data Dictionary** (${ws.dictionary.namespaces.length} namespaces, ${ws.dictionary.namespaces.reduce((a, n) => a + n.attributes.length, 0)} attributes) with business definitions and Customer 360 resolver paths.`,
+      operations: [{ op: "show_dictionary", ...(matchedNs ? { namespaceId: matchedNs.id } : {}) }],
+      suggestedPrompts: [
+        "Add a custom attribute loyalty.vip_tier (gold/platinum) to the Data Dictionary",
+        `Run Live Treatment Selector on ${targetCtxId} for Alice Morgan and Jordan Lee`,
+        "Create a high-cash treasury offer, rule for cash > $20,000, attach to a new context, and publish it",
+      ],
+    };
+  }
+
+  // 2. Add namespace / attribute
+  if (/(create|add|new|define)\s+(a\s+)?(custom\s+)?(namespace|attribute|field)/i.test(lower)) {
+    const dotMatch = message.match(/([a-z][a-z0-9_-]*)\.([a-z][a-z0-9_-]*)/i);
+    const nsId = dotMatch ? slug(dotMatch[1], "loyalty") : (lower.includes("loyalty") ? "loyalty" : "customer");
+    const attrId = dotMatch ? slug(dotMatch[2], "vip_tier") : (lower.includes("vip") || lower.includes("tier") ? "vip_tier" : slug(message.slice(0, 24), "custom_attr"));
+    const ops: PlannedOp[] = [];
+    if (!ws.dictionary.namespaces.some((n) => n.id === nsId)) {
+      ops.push({
+        op: "upsert_namespace",
+        id: nsId,
+        displayName: nsId.charAt(0).toUpperCase() + nsId.slice(1),
+        businessDefinition: `Self-service business namespace for ${nsId} eligibility attributes.`,
+        owner: "Personalization Team",
+        sourceSystem: "custom_attribute",
+      });
+    }
+    const isEnum = /(gold|platinum|silver|tier|enum|status)/i.test(lower);
+    const isNum = /(\$|usd|amount|score|age|balance|pct|percent)/i.test(lower);
+    const dataType: PznDataType = isEnum ? "enum" : isNum ? "number" : "string";
+    ops.push({
+      op: "upsert_attribute",
+      namespaceId: nsId,
+      id: attrId,
+      displayName: attrId.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+      businessDefinition: `Business attribute "${nsId}.${attrId}" created from self-service chat for rule eligibility evaluation.`,
+      dataType,
+      allowedOperators: defaultOpsForType(dataType),
+      enumOptions: isEnum
+        ? [
+            { value: "gold", label: "Gold", definition: "Standard loyalty tier" },
+            { value: "platinum", label: "Platinum", definition: "Top advisory VIP tier" },
+          ]
+        : [],
+      sampleValue: isEnum ? "platinum" : isNum ? "100" : "active",
+      resolverPath: `customAttributes.${attrId}`,
+    });
+    ops.push({ op: "show_dictionary", namespaceId: nsId });
+    return {
+      reply: `Added **\`${nsId}.${attrId}\`** to the governed Data Dictionary with its business definition and Customer 360 resolver path.`,
+      operations: ops,
+      suggestedPrompts: [
+        `Create a rule using ${nsId}.${attrId}`,
+        "Show the full Data Dictionary",
+        `Run Live Treatment Selector on ${targetCtxId} for Alice Morgan`,
+      ],
+    };
+  }
+
+  // 3. Publish / Unpublish explicit request
+  if (/^\s*(publish|unpublish)\b/i.test(lower)) {
+    const isUnpublish = /^\s*unpublish\b/i.test(lower);
+    return {
+      reply: isUnpublish
+        ? `Unpublished **\`${targetCtxId}\`** from Treatment Selector.`
+        : `Published an immutable snapshot of **\`${targetCtxId}\`** to Treatment Selector.`,
+      operations: [
+        isUnpublish
+          ? { op: "unpublish_context", contextId: targetCtxId }
+          : { op: "publish_context", contextId: targetCtxId, notes: "Published via Self-Service Copilot" },
+      ],
+      suggestedPrompts: [
+        `Test ${targetCtxId} for Alice Morgan and Jordan Lee`,
+        `Simulate ${targetCtxId} for Alice Morgan with portfolio.cash_usd = 5000`,
+        "Show all contexts in the catalog",
+      ],
+    };
+  }
+
+  // 4. Live TS Evaluation / Test / Simulate for MIDs
+  if (/(test|run|evaluate|simulate|check|what-if|compare|live ts|treatment selector)/i.test(lower)) {
+    const mids: string[] = [];
+    for (const c of ws.customers) {
+      const firstName = c.displayName.split(" ")[0].toLowerCase();
+      if (lower.includes(firstName) || lower.includes(c.syntheticMid.toLowerCase()) || lower.includes(c.displayName.toLowerCase())) {
+        mids.push(c.syntheticMid);
+      }
+    }
+    const midRegex = message.match(/DEMO-MID-\d+/gi);
+    if (midRegex) {
+      for (const m of midRegex) {
+        if (!mids.includes(m.toUpperCase())) mids.push(m.toUpperCase());
+      }
+    }
+    if (mids.length === 0) {
+      if (/(all|compare|both|everyone)/i.test(lower)) {
+        mids.push(...ws.customers.slice(0, 3).map((c) => c.syntheticMid));
+      } else {
+        mids.push(ws.customers[0]?.syntheticMid ?? "DEMO-MID-1001");
+      }
+    }
+
+    const overrides: Record<string, PznRuleValue> = {};
+    const cashOverrideMatch = message.match(/(?:cash(?:_usd)?\s*(?:=|is|to|at)\s*\$?\s*([\d,]+(?:\.\d+)?))/i);
+    if (cashOverrideMatch) {
+      const num = Number(cashOverrideMatch[1].replace(/,/g, ""));
+      if (Number.isFinite(num)) overrides["portfolio.cash_usd"] = num;
+    }
+    const customOverrideMatch = message.match(/([a-z][a-z0-9_-]*\.[a-z][a-z0-9_-]*)\s*=\s*([a-zA-Z0-9_.-]+)/);
+    if (customOverrideMatch) {
+      const valRaw = customOverrideMatch[2];
+      const num = Number(valRaw);
+      overrides[customOverrideMatch[1]] = valRaw === "true" ? true : valRaw === "false" ? false : (Number.isFinite(num) && valRaw !== "" ? num : valRaw);
+    }
+
+    const ctxObj = ws.contexts.find((c) => c.contextId === targetCtxId);
+    const useDraft = ctxObj ? ctxObj.status !== "published" : false;
+    return {
+      reply: `Executed **Live Treatment Selector** for **\`${targetCtxId}\`** across ${mids.length} customer MID${mids.length > 1 ? "s" : ""}${Object.keys(overrides).length ? ` (with what-if override ${Object.entries(overrides).map(([k, v]) => `\`${k} = ${v}\``).join(", ")})` : ""}.`,
+      operations: [{
+        op: "evaluate_ts",
+        contextId: targetCtxId,
+        mids,
+        useDraft,
+        ...(Object.keys(overrides).length ? { attributeOverrides: overrides } : {}),
+      }],
+      suggestedPrompts: [
+        `Compare ${targetCtxId} across Alice Morgan, Jordan Lee, and Marcus Reed`,
+        `Simulate ${targetCtxId} for Alice Morgan with portfolio.cash_usd = 5000`,
+        "Show the Data Dictionary namespaces and business definitions",
+      ],
+    };
+  }
+
+  // 5. End-to-end authoring: create content + rule + context (+ optional publish)
+  if (/(create|build|make|launch|set up|setup|author|new)\b/i.test(lower)) {
+    const cashThresholdMatch = message.match(/\$\s*([\d,]+)/);
+    const threshold = cashThresholdMatch ? Number(cashThresholdMatch[1].replace(/,/g, "")) : 20000;
+    const shouldPublish = /publish/i.test(lower);
+    const explicitCtxMatch = message.match(/context\s+[`"']?([a-z][a-z0-9_-]{2,40})[`"']?/i);
+    const baseTopic = lower.includes("treasury") ? "treasury_ladder"
+      : lower.includes("retirement") ? "retirement_nudge"
+      : lower.includes("mortgage") || lower.includes("home") ? "home_buyer_offer"
+      : lower.includes("tax") ? "tax_harvest_offer"
+      : "custom_cash_offer";
+    const suffix = Date.now().toString(36).slice(-3);
+    const contentId = `${baseTopic}_text_${suffix}`;
+    const ruleId = `${baseTopic}_rule_${suffix}`;
+    const contextId = explicitCtxMatch ? slug(explicitCtxMatch[1], `${baseTopic}_ctx`) : `${baseTopic}_ctx_${suffix}`;
+
+    const isBeneficiary = lower.includes("beneficiary");
+    const isUnfunded = lower.includes("unfunded");
+    const clause = isBeneficiary
+      ? { namespaceId: "customer", attributeId: "beneficiary_status", operator: "eq" as const, value: "missing" }
+      : isUnfunded
+      ? { namespaceId: "account", attributeId: "funding_status", operator: "eq" as const, value: "unfunded" }
+      : { namespaceId: "portfolio", attributeId: "cash_usd", operator: "gt" as const, value: threshold };
+
+    const ruleName = isBeneficiary
+      ? "Beneficiary Missing"
+      : isUnfunded
+      ? "Account Unfunded"
+      : `Portfolio Cash Above $${threshold.toLocaleString("en-US")}`;
+
+    const ops: PlannedOp[] = [
+      {
+        op: "upsert_content",
+        contentId,
+        title: baseTopic.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+        headline: isBeneficiary
+          ? "Protect your account by adding a beneficiary."
+          : `You currently have {{portfolio.cash_usd}} in core cash ({{portfolio.cash_share_pct}} of portfolio).`,
+        body: `Personalized recommendation authored via Self-Service Copilot: ${message.slice(0, 260)}`,
+        ctaLabel: "Explore Recommendation",
+        ctaPrompt: `Tell me more about ${baseTopic.replace(/_/g, " ")}.`,
+        disclosureText: "Governed via CEP Recommendation Self-Service Platform.",
+        tags: [baseTopic.split("_")[0], "self-service"],
+      },
+      {
+        op: "upsert_rule",
+        ruleId,
+        name: ruleName,
+        businessDescription: `Eligibility rule automatically validated against the Data Dictionary for ${ruleName}.`,
+        effect: "include_when_true",
+        combinator: "AND",
+        clauses: [clause],
+      },
+      {
+        op: "upsert_context",
+        contextId,
+        displayName: contextId.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+        description: `Self-service recommendation context for ${baseTopic.replace(/_/g, " ")}.`,
+        channel: "all",
+        contextRuleIds: [],
+        attachments: [{ contentId, rank: 1, ruleIds: [ruleId], ruleMatchMode: "all" }],
+      },
+    ];
+    if (shouldPublish) {
+      ops.push({ op: "publish_context", contextId, notes: "Published via Self-Service Copilot" });
+    }
+    return {
+      reply: shouldPublish
+        ? `Created text content **\`${contentId}\`**, Data Dictionary rule **${ruleName}**, attached both to context **\`${contextId}\`**, and **published v1** live to Treatment Selector.`
+        : `Drafted text content **\`${contentId}\`**, Data Dictionary rule **${ruleName}**, and attached both to context **\`${contextId}\`**. Review the cards below and click **Publish to TS** (or ask me to publish it).`,
+      operations: ops,
+      suggestedPrompts: shouldPublish
+        ? [
+            `Test ${contextId} for Alice Morgan and Jordan Lee`,
+            `Simulate ${contextId} for Alice Morgan with portfolio.cash_usd = 5000`,
+            "Show the Data Dictionary",
+          ]
+        : [
+            `Publish ${contextId}`,
+            `Test ${contextId} for Alice Morgan and Jordan Lee`,
+            "Add another rule condition",
+          ],
+    };
+  }
+
+  // Default: catalog summary
+  return {
+    reply: `Here is your live **Recommendation Self-Service Platform** overview. Tell me what you want to create, edit, publish, or simulate by Customer MID.`,
+    operations: [{ op: "show_catalog" }],
+    suggestedPrompts: [
+      "Create a Treasury Ladder offer for cash > $20,000, attach to context treasury-nudge, and publish it",
+      "Test wealth-next-best-offers for Alice Morgan and Jordan Lee",
+      "Show the Data Dictionary namespaces and business definitions",
+      "Add custom attribute loyalty.vip_tier (gold/platinum) to the Data Dictionary",
+    ],
+  };
+}
+
+export async function runSelfServicePznCopilot(
+  req: PznCopilotRequest,
+  store: SelfServicePznStore,
+  options?: { gateway?: GatewaySettings | null; dataDir?: string },
+): Promise<PznCopilotResponse> {
+  const initialWs = store.getWorkspaceState();
+  let plan: LlmCopilotPlan | null = null;
+  let generatedBy: "copilot_llm" | "deterministic" = "deterministic";
+
+  if (options?.gateway && options.dataDir) {
+    try {
+      const historyText = (req.history ?? []).slice(-6).map((h) => `${h.role.toUpperCase()}: ${h.text}`).join("\n");
+      const userPrompt = historyText ? `RECENT CONVERSATION:\n${historyText}\n\nNEW MESSAGE:\n${req.message}` : req.message;
+      const raw = await callConfiguredLlmJson(
+        options.gateway,
+        options.dataDir,
+        buildSystemPrompt(initialWs, req.activeContextId),
+        userPrompt,
+        AbortSignal.timeout(22_000),
+      );
+      if (raw && typeof raw === "object" && ("operations" in raw || "reply" in raw)) {
+        const candidate = raw as LlmCopilotPlan;
+        if (Array.isArray(candidate.operations) || typeof candidate.reply === "string") {
+          plan = candidate;
+          generatedBy = "copilot_llm";
+        }
+      }
+    } catch {
+      plan = null;
+    }
+  }
+
+  if (!plan) {
+    plan = deterministicPlan(req.message, initialWs, req.activeContextId);
+    generatedBy = "deterministic";
+  }
+
+  const actionsExecuted: PznCopilotActionLog[] = [];
+  const cards: PznCopilotCard[] = [];
+  let activeContextId = req.activeContextId;
+  const operations = Array.isArray(plan.operations) ? plan.operations : [];
+
+  for (const op of operations) {
+    try {
+      switch (op.op) {
+        case "upsert_namespace": {
+          const saved = store.upsertNamespace({
+            id: slug(op.id, "custom"),
+            displayName: op.displayName,
+            businessDefinition: op.businessDefinition,
+            owner: op.owner || "Personalization Team",
+            sourceSystem: op.sourceSystem || "custom_attribute",
+          });
+          actionsExecuted.push({ tool: "dictionary.upsertNamespace", summary: `Saved namespace "${saved.id}" (${saved.displayName})`, status: "ok" });
+          break;
+        }
+        case "upsert_attribute": {
+          const nsId = slug(op.namespaceId, "customer");
+          const attrId = slug(op.id, "custom_attr");
+          const dataType = op.dataType || "string";
+          const saved = store.upsertAttribute({
+            namespaceId: nsId,
+            id: attrId,
+            displayName: op.displayName,
+            businessDefinition: op.businessDefinition,
+            dataType,
+            allowedOperators: op.allowedOperators?.length ? op.allowedOperators : defaultOpsForType(dataType),
+            enumOptions: (op.enumOptions ?? []).map((o) => ({ value: o.value, label: o.label, definition: o.definition ?? "" })),
+            unit: op.unit ?? "",
+            sampleValue: op.sampleValue ?? "",
+            resolverPath: op.resolverPath || `customAttributes.${attrId}`,
+            piiClassification: op.piiClassification ?? "none",
+          });
+          actionsExecuted.push({ tool: "dictionary.upsertAttribute", summary: `Saved Data Dictionary attribute "${saved.namespaceId}.${saved.id}"`, status: "ok" });
+          const dict = store.getDictionary();
+          const nsView = dict.namespaces.filter((n) => n.id === saved.namespaceId);
+          cards.push({ kind: "dictionary", namespaces: nsView, highlightKey: `${saved.namespaceId}.${saved.id}` });
+          break;
+        }
+        case "upsert_content": {
+          const saved = store.upsertContent({
+            contentId: slug(op.contentId, "text_offer"),
+            title: op.title,
+            headline: op.headline ?? "",
+            body: op.body,
+            ctaLabel: op.ctaLabel ?? "",
+            ctaPrompt: op.ctaPrompt ?? "",
+            disclosureText: op.disclosureText ?? "",
+            tags: op.tags ?? [],
+            status: op.status ?? "published",
+          });
+          actionsExecuted.push({ tool: "content.upsert", summary: `Saved text content "${saved.contentId}" (${saved.title})`, status: "ok" });
+          cards.push({ kind: "content", content: saved });
+          break;
+        }
+        case "upsert_rule": {
+          const saved = store.upsertRule({
+            ruleId: slug(op.ruleId, "custom_rule"),
+            name: op.name,
+            businessDescription: op.businessDescription,
+            effect: op.effect ?? "include_when_true",
+            status: "published",
+            rootGroup: {
+              id: "grp_root",
+              kind: "group",
+              combinator: op.combinator ?? "AND",
+              children: (op.clauses ?? []).map((cl, idx) => ({
+                id: `cl_${idx + 1}`,
+                kind: "clause" as const,
+                namespaceId: slug(cl.namespaceId, "portfolio"),
+                attributeId: slug(cl.attributeId, "cash_usd"),
+                operator: cl.operator,
+                ...(cl.operator === "exists" ? {} : { value: cl.value }),
+              })),
+            },
+          });
+          actionsExecuted.push({ tool: "rule.upsert", summary: `Validated & saved rule "${saved.ruleId}" (${saved.name})`, status: "ok" });
+          cards.push({ kind: "rule", rule: saved });
+          break;
+        }
+        case "upsert_context": {
+          const ctxId = slug(op.contextId, "custom_context");
+          const saved = store.upsertContext({
+            contextId: ctxId,
+            displayName: op.displayName,
+            description: op.description,
+            channel: op.channel ?? "all",
+            contextRuleIds: (op.contextRuleIds ?? []).map((r) => slug(r)),
+            attachments: (op.attachments ?? []).map((att, idx) => ({
+              contentId: slug(att.contentId),
+              rank: att.rank ?? idx + 1,
+              ruleIds: (att.ruleIds ?? []).map((r) => slug(r)),
+              ruleMatchMode: att.ruleMatchMode ?? "all",
+            })),
+          });
+          activeContextId = saved.contextId;
+          actionsExecuted.push({ tool: "context.upsert", summary: `Saved context "${saved.contextId}" with ${saved.attachments.length} attachment(s)`, status: "ok" });
+          const wsNow = store.getWorkspaceState();
+          const latestPublication = wsNow.publicationsByContext[saved.contextId]?.[0];
+          cards.push({
+            kind: "context",
+            context: saved,
+            contents: wsNow.contents,
+            rules: wsNow.rules,
+            latestPublication,
+          });
+          break;
+        }
+        case "publish_context": {
+          const ctxId = slug(op.contextId, activeContextId ?? "wealth-next-best-offers");
+          const pub = store.publishContext(ctxId, "Self-Service Copilot", op.notes || "Published via chat");
+          activeContextId = pub.contextId;
+          actionsExecuted.push({ tool: "context.publish", summary: `Published "${pub.contextId}" v${pub.version} to Treatment Selector`, status: "ok" });
+          // Replace earlier draft context card for same context if present
+          const idx = cards.findIndex((c) => c.kind === "context" && c.context.contextId === pub.contextId);
+          const wsNow = store.getWorkspaceState();
+          const ctxCard: PznCopilotCard = {
+            kind: "context",
+            context: pub.context,
+            contents: wsNow.contents,
+            rules: wsNow.rules,
+            latestPublication: pub,
+          };
+          if (idx >= 0) cards[idx] = ctxCard;
+          else cards.push(ctxCard);
+          break;
+        }
+        case "unpublish_context": {
+          const ctxId = slug(op.contextId, activeContextId ?? "wealth-next-best-offers");
+          const updated = store.unpublishContext(ctxId);
+          activeContextId = updated.contextId;
+          actionsExecuted.push({ tool: "context.unpublish", summary: `Unpublished "${updated.contextId}"`, status: "ok" });
+          const wsNow = store.getWorkspaceState();
+          cards.push({ kind: "context", context: updated, contents: wsNow.contents, rules: wsNow.rules });
+          break;
+        }
+        case "evaluate_ts": {
+          const ctxId = slug(op.contextId, activeContextId ?? "wealth-next-best-offers");
+          activeContextId = ctxId;
+          const mids = op.mids?.length ? op.mids.slice(0, 4) : [initialWs.customers[0]?.syntheticMid ?? "DEMO-MID-1001"];
+          const ctxRecord = store.getContext(ctxId);
+          const autoDraft = op.useDraft ?? (ctxRecord ? ctxRecord.status !== "published" : false);
+          for (const mid of mids) {
+            const evalRes = store.evaluateLiveTs({
+              mid,
+              contextId: ctxId,
+              useDraft: autoDraft,
+              ...(op.attributeOverrides && Object.keys(op.attributeOverrides).length ? { attributeOverrides: op.attributeOverrides } : {}),
+            });
+            actionsExecuted.push({
+              tool: "ts.evaluate",
+              summary: `TS(${mid}, ${ctxId}) → ${evalRes.eligibleContents.length} eligible, ${evalRes.filteredOutContents.length} filtered out (${evalRes.durationMs}ms)`,
+              status: "ok",
+            });
+            cards.push({ kind: "ts_evaluation", evaluation: evalRes });
+          }
+          break;
+        }
+        case "show_dictionary": {
+          const dict = store.getDictionary();
+          const filtered = op.namespaceId
+            ? dict.namespaces.filter((n) => n.id === slug(op.namespaceId!))
+            : dict.namespaces;
+          const finalNs = filtered.length ? filtered : dict.namespaces;
+          actionsExecuted.push({ tool: "dictionary.read", summary: `Loaded ${finalNs.length} Data Dictionary namespace(s)`, status: "ok" });
+          cards.push({ kind: "dictionary", namespaces: finalNs });
+          break;
+        }
+        case "show_catalog": {
+          const wsNow = store.getWorkspaceState();
+          actionsExecuted.push({ tool: "catalog.summary", summary: `Listed ${wsNow.contexts.length} context(s), ${wsNow.contents.length} content(s), ${wsNow.rules.length} rule(s)`, status: "ok" });
+          cards.push({
+            kind: "catalog_summary",
+            contexts: wsNow.contexts,
+            contentsCount: wsNow.contents.length,
+            rulesCount: wsNow.rules.length,
+            attrCount: wsNow.dictionary.namespaces.reduce((acc, ns) => acc + ns.attributes.length, 0),
+          });
+          break;
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Operation failed";
+      actionsExecuted.push({ tool: op.op, summary: msg, status: "error" });
+    }
+  }
+
+  const workspace = store.getWorkspaceState();
+  const hasErrors = actionsExecuted.some((a) => a.status === "error");
+  const errorSuffix = hasErrors
+    ? "\n\nSome steps reported validation issues: " + actionsExecuted.filter((a) => a.status === "error").map((a) => `${a.tool}: ${a.summary}`).join("; ")
+    : "";
+
+  return {
+    reply: (plan.reply?.trim() || "Completed your Recommendation Self-Service request.") + errorSuffix,
+    generatedBy,
+    actionsExecuted,
+    cards,
+    suggestedPrompts: Array.isArray(plan.suggestedPrompts) && plan.suggestedPrompts.length > 0
+      ? plan.suggestedPrompts.slice(0, 4)
+      : [
+          `Test ${activeContextId ?? workspace.contexts[0]?.contextId ?? "wealth-next-best-offers"} for Alice Morgan and Jordan Lee`,
+          "Show the Data Dictionary namespaces and business definitions",
+          "Create a new text offer and rule for cash > $25,000 and publish it",
+        ],
+    activeContextId,
+    workspace,
+  };
+}

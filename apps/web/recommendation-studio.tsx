@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   FileText,
   Layers,
+  MessageSquare,
   Play,
   Plus,
   Rocket,
@@ -38,6 +39,7 @@ import {
   type PznTsEvaluationResult,
 } from "../../packages/contracts/self-service-pzn";
 import { api, toolSetupErrorMessage } from "./api";
+import { RecommendationChatExperience } from "./recommendation-chat";
 import "./recommendation-studio.css";
 
 type StudioTab = "contexts" | "contents" | "rules" | "dictionary" | "simulator";
@@ -111,6 +113,7 @@ function blankRule(firstNs = "portfolio", firstAttr = "cash_usd", firstOp: PznOp
 
 export function RecommendationStudio() {
   const [workspace, setWorkspace] = useState<PznStudioWorkspaceState | null>(null);
+  const [studioMode, setStudioMode] = useState<"chat" | "classic">("chat");
   const [tab, setTab] = useState<StudioTab>("contexts");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -345,6 +348,18 @@ export function RecommendationStudio() {
     setSimOverrideVal("");
   }
 
+  if (studioMode === "chat") {
+    return (
+      <div className="pzn-studio pzn-studio-chat-mode">
+        <RecommendationChatExperience
+          workspace={workspace}
+          onWorkspaceChange={(ws) => hydrateSelection(ws)}
+          onOpenClassic={() => setStudioMode("classic")}
+        />
+      </div>
+    );
+  }
+
   return (
     <main className="pzn-studio">
       <header className="pzn-header">
@@ -353,6 +368,16 @@ export function RecommendationStudio() {
           <p className="pzn-subtitle">
             Define contexts, attach text contents, author Data Dictionary rules, publish immutable snapshots, and run live MID Treatment Selector evaluations.
           </p>
+        </div>
+        <div className="pzn-btn-row" style={{ alignItems: "center" }}>
+          <div className="pzn-mode-switch" role="group" aria-label="Studio mode">
+            <button type="button" onClick={() => setStudioMode("chat")} aria-pressed="false">
+              <MessageSquare size={13} /> Chat Studio
+            </button>
+            <button type="button" className="is-active" aria-pressed="true">
+              <Layers size={13} /> Classic Forms
+            </button>
+          </div>
         </div>
         <div className="pzn-kpi-strip">
           <div className="pzn-kpi-pill">

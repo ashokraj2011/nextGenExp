@@ -306,3 +306,49 @@ export type PznStudioWorkspaceState = {
     segment: string;
   }[];
 };
+
+export const pznCopilotRequestSchema = z.object({
+  message: z.string().trim().min(1).max(2000),
+  history: z.array(z.object({
+    role: z.enum(["user", "assistant"]),
+    text: z.string().max(1500),
+  }).strict()).max(16).optional(),
+  activeContextId: pznSlugSchema.optional(),
+}).strict();
+export type PznCopilotRequest = z.infer<typeof pznCopilotRequestSchema>;
+
+export type PznCopilotActionLog = {
+  tool: string;
+  summary: string;
+  status: "ok" | "error";
+};
+
+export type PznCopilotCard =
+  | { kind: "dictionary"; namespaces: PznDictionaryNamespaceView[]; highlightKey?: string }
+  | { kind: "content"; content: PznTextContent }
+  | { kind: "rule"; rule: PznRule }
+  | {
+      kind: "context";
+      context: PznContext;
+      contents: PznTextContent[];
+      rules: PznRule[];
+      latestPublication?: PznContextPublication;
+    }
+  | { kind: "ts_evaluation"; evaluation: PznTsEvaluationResult }
+  | {
+      kind: "catalog_summary";
+      contexts: PznContext[];
+      contentsCount: number;
+      rulesCount: number;
+      attrCount: number;
+    };
+
+export type PznCopilotResponse = {
+  reply: string;
+  generatedBy: "copilot_llm" | "deterministic";
+  actionsExecuted: PznCopilotActionLog[];
+  cards: PznCopilotCard[];
+  suggestedPrompts: string[];
+  activeContextId?: string;
+  workspace: PznStudioWorkspaceState;
+};

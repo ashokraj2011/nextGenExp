@@ -62,9 +62,11 @@ import { recommendationArbitrateToolRef } from "../../packages/contracts/recomme
 import { connectorInvokeToolRef, domainWriteToolRef, Runtime, sfieldNamespace } from "./runtime";
 import { WidgetLibraryStore } from "./widget-library";
 import { SelfServicePznStore } from "./self-service-pzn-store";
+import { runSelfServicePznCopilot } from "./self-service-pzn-copilot";
 import {
   pznAttributeInputSchema,
   pznContextInputSchema,
+  pznCopilotRequestSchema,
   pznNamespaceInputSchema,
   pznRuleInputSchema,
   pznRuleTestRequestSchema,
@@ -1622,6 +1624,10 @@ export async function startApp(options: Options) {
       if (id === "ts" && operation === "evaluate" && method === "POST") {
         const data = await body(req, pznTsEvaluateRequestSchema, 32 * 1024);
         return json(res, selfServicePzn.evaluateLiveTs(data));
+      }
+      if (id === "copilot" && !operation && method === "POST") {
+        const data = await body(req, pznCopilotRequestSchema, 48 * 1024);
+        return json(res, await runSelfServicePznCopilot(data, selfServicePzn, { gateway: options.gateway, dataDir: options.dataDir }));
       }
     }
     if (resource === "events" && !id && method === "POST") {

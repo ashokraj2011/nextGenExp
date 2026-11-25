@@ -57,6 +57,8 @@ import type {
   PznContext,
   PznContextInput,
   PznContextPublication,
+  PznCopilotRequest,
+  PznCopilotResponse,
   PznNamespace,
   PznNamespaceInput,
   PznRule,
@@ -348,4 +350,5 @@ export const api = {
   pznUnpublishContext: (contextId: string) => request<{ context: PznContext; workspace: PznStudioWorkspaceState }>("/api/pzn/contexts/unpublish", { contextId }),
   pznDeleteContext: (contextId: string) => request<{ workspace: PznStudioWorkspaceState }>("/api/pzn/contexts/delete", { contextId }),
   pznEvaluateTs: (input: PznTsEvaluateRequest) => request<PznTsEvaluationResult>("/api/pzn/ts/evaluate", input),
+  pznCopilot: (input: PznCopilotRequest) => request<PznCopilotResponse>("/api/pzn/copilot", input),
 };

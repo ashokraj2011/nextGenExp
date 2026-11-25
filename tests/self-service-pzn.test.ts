@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SelfServicePznStore } from "../apps/server/self-service-pzn-store";
+import { runSelfServicePznCopilot } from "../apps/server/self-service-pzn-copilot";
 import { CustomerProfileStore, setActiveCustomerProfileStore } from "../packages/customer-profiles";
 import { FixtureTsAdapter } from "../packages/ts-adapter";
 import { resolveCandidates, lookupContent } from "../packages/experience/content";
@@ -178,6 +179,40 @@ test("Self-service Data Dictionary, Rule Engine, Draft/Publish isolation, and Li
     assert.equal(candidates.length, 1);
     const entry = lookupContent(candidates[0]);
     assert.equal(entry?.title, "Automate Monthly Investing");
+  } finally {
+    env.cleanup();
+  }
+});
+
+test("Self-service Copilot chat executes dictionary, authoring, publish, and live MID TS evaluation", async () => {
+  const env = setup();
+  try {
+    // 1. Inspect Data Dictionary via chat
+    const dictTurn = await runSelfServicePznCopilot(
+      { message: "Show the Data Dictionary namespaces and business definitions" },
+      env.pzn,
+    );
+    assert.ok(dictTurn.cards.some((c) => c.kind === "dictionary"));
+
+    // 2. Create content + rule + context + publish in one chat turn
+    const createTurn = await runSelfServicePznCopilot(
+      { message: "Create a Treasury Ladder offer for cash over $11,000, attach to context chat_treasury_nudge, and publish it" },
+      env.pzn,
+    );
+    assert.equal(createTurn.activeContextId, "chat_treasury_nudge");
+    assert.ok(createTurn.actionsExecuted.some((a) => a.tool === "context.publish" && a.status === "ok"));
+    assert.ok(createTurn.cards.some((c) => c.kind === "context" && c.context.status === "published"));
+
+    // 3. Test live TS across Alice Morgan ($12,500 > $11,000 -> ELIGIBLE) and Jordan Lee ($10,000 <= $11,000 -> RULE_FALSE)
+    const evalTurn = await runSelfServicePznCopilot(
+      { message: "Test chat_treasury_nudge for Alice Morgan and Jordan Lee", activeContextId: "chat_treasury_nudge" },
+      env.pzn,
+    );
+    const tsCards = evalTurn.cards.filter((c) => c.kind === "ts_evaluation");
+    assert.equal(tsCards.length, 2);
+    assert.equal(tsCards[0].evaluation.eligibleContents.length, 1);
+    assert.equal(tsCards[1].evaluation.eligibleContents.length, 0);
+    assert.equal(tsCards[1].evaluation.filteredOutContents[0].reasonCode, "RULE_FALSE");
   } finally {
     env.cleanup();
   }
