@@ -105,6 +105,13 @@ export type EngagementAnalyticsView = {
   pendingApprovalsCount?: number;
   recentWrites: DomainWriteAuditEntry[];
 };
+export type SemanticRouteTrace = {
+  capabilityId: string;
+  capabilityLabel: string;
+  method: "llm_semantic" | "deterministic";
+  confidence: number;
+  reasoning: string;
+};
 export type TurnView = {
   id: string;
   conversationId: string;
@@ -113,6 +120,7 @@ export type TurnView = {
   status: TurnStatus;
   progress: Progress;
   actionMode?: ActionMode;
+  semanticRoute?: SemanticRouteTrace;
   customerLookup?: CustomerLookupSummary;
   providerArbitration?: ProviderArbitrationTrace;
   nextBestAction?: NextBestActionCard;

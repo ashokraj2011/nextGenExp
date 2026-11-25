@@ -26,6 +26,7 @@ import { compileChatReply, compileDynamicCanvas, compileExperience, compileFundi
 import { verifyContextProposal, verifyRoute, requireCheck, Rejected } from "../../packages/experience/verify";
 import { ApiError, presentConversation, Store, type ConversationRecord, type Stage, type TurnRecord } from "./store";
 import { generateDynamicUi, isDynamicUiRequest, isOpsIncidentPrompt, isSalesDealPrompt } from "./dynamic-ui-generator";
+import { routeCapabilityUnified } from "./semantic-router";
 import { recommendationArbitrateToolRef } from "../../packages/contracts/recommendation-provider";
 import type { ProviderArbitrationTrace } from "../../packages/contracts/api";
 import { createOpsRunbookProvider, createSalesDealDeskProvider, RecommendationArbitrator } from "../../packages/recommendations";
@@ -69,6 +70,7 @@ export class ExperienceService {
     readonly store: Store, private readonly runtime: Runtime | null, readonly selectionMode: SelectionMode, private readonly now: () => number,
     private readonly canCreateRule: boolean, private readonly offlineHistory?: { chat: ChatHarness; close(): Promise<void> },
     private readonly dynamicUi?: {
+      mode?: "live" | "test";
       gateway?: GatewaySettings | null;
       dataDir: string;
       customer360?: Customer360Service;
@@ -286,10 +288,33 @@ export class ExperienceService {
         }
         stage = "catalog";
       }
-      if (!initial.workflow && !initial.route && this.dynamicUi && isDynamicUiRequest(initial.public.message)) {
+      if (!initial.workflow && !initial.route && this.dynamicUi) {
+        const conversation = this.store.conversation(initial.scope.conversationId, initial.scope.principalId);
+        const recentForRoute = await this.history.recent(conversation, initial.ordinal);
+        const recentSummary = recentForRoute.length > 0
+          ? recentForRoute.slice(-2).map((r) => `User: "${r.request}" -> ${r.intentId ?? r.contextId ?? "reply"}`).join(" | ")
+          : undefined;
+        const semanticRoute = await routeCapabilityUnified({
+          prompt: initial.public.message,
+          mode: this.dynamicUi.mode ?? "live",
+          gateway: this.dynamicUi.gateway,
+          dataDir: this.dynamicUi.dataDir,
+          recentSummary,
+          signal,
+        });
+        current();
+        this.store.update(id, (row) => {
+          row.public.semanticRoute = {
+            capabilityId: semanticRoute.capabilityId,
+            capabilityLabel: semanticRoute.capabilityLabel,
+            method: semanticRoute.method,
+            confidence: semanticRoute.confidence,
+            reasoning: semanticRoute.reasoning,
+          };
+        });
+        if (semanticRoute.capabilityId !== "verified_experience") {
         stage = "compose";
         this.store.progress(id, "composition", this.now());
-        const conversation = this.store.conversation(initial.scope.conversationId, initial.scope.principalId);
         const persona = findProfileById(conversation.personaId);
         const lookupInfo = this.dynamicUi.customer360 && persona
           ? this.dynamicUi.customer360.evaluate({
@@ -314,14 +339,15 @@ export class ExperienceService {
           tradeStore: this.dynamicUi.tradeStore,
           personaId: conversation.personaId,
           requesterName: persona?.displayName,
+          semanticRoute,
           signal,
         });
         current();
         const now = this.now();
         const dynamicResult = compileDynamicCanvas(generated.intro, generated.canvas, now + DECISION_TTL);
-        const arbDomain: ProviderArbitrationTrace["domain"] = isOpsIncidentPrompt(initial.public.message)
+        const arbDomain: ProviderArbitrationTrace["domain"] = semanticRoute.capabilityId === "ops_incident"
           ? "operations"
-          : isSalesDealPrompt(initial.public.message)
+          : semanticRoute.capabilityId === "sales_deal_desk"
             ? "sales"
             : "wealth";
         let providerArbitration: ProviderArbitrationTrace | undefined;
@@ -397,6 +423,7 @@ export class ExperienceService {
         });
         this.store.finish(id, { type: "completed", result: dynamicResult }, now);
         return;
+        }
       }
       if (initial.workflow) {
         stage = "workflow";

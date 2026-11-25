@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { CheckCircle2, ChevronDown, ChevronUp, Layers, Loader2, MinusCircle, ShieldCheck, Sparkles, UserCheck } from "lucide-react";
 import {
-  progressLabels, type ActionMode, type CustomerLookupSummary, type Progress, type ProviderArbitrationTrace, type TurnStatus,
+  progressLabels, type ActionMode, type CustomerLookupSummary, type Progress, type ProviderArbitrationTrace, type SemanticRouteTrace, type TurnStatus,
 } from "../../packages/contracts/api";
 import type { DisplayExperience } from "../../packages/contracts/surface";
 
@@ -77,12 +77,13 @@ function verifiedFactsFor(experience?: DisplayExperience): string[] {
   return facts;
 }
 
-export function ReasoningPanel({ status, progress, history, experience, actionMode, customerLookup, providerArbitration }: {
+export function ReasoningPanel({ status, progress, history, experience, actionMode, semanticRoute, customerLookup, providerArbitration }: {
   status: TurnStatus;
   progress: Progress;
   history: Progress[];
   experience?: DisplayExperience;
   actionMode?: ActionMode;
+  semanticRoute?: SemanticRouteTrace;
   customerLookup?: CustomerLookupSummary;
   providerArbitration?: ProviderArbitrationTrace;
 }) {
@@ -92,7 +93,7 @@ export function ReasoningPanel({ status, progress, history, experience, actionMo
   const open = isWorking ? true : expanded;
   const verifiedFacts = !isWorking ? verifiedFactsFor(experience) : [];
   const modeInfo = actionMode ? actionModeMeta[actionMode] : undefined;
-  const totalChecks = steps.length + (verifiedFacts.length > 0 ? 1 : 0) + (customerLookup ? 1 : 0) + (providerArbitration ? 1 : 0);
+  const totalChecks = steps.length + (verifiedFacts.length > 0 ? 1 : 0) + (customerLookup ? 1 : 0) + (providerArbitration ? 1 : 0) + (semanticRoute ? 1 : 0);
 
   return (
     <div className={"reasoning-panel" + (isWorking ? " reasoning-panel-live" : "")}>
@@ -134,8 +135,13 @@ export function ReasoningPanel({ status, progress, history, experience, actionMo
             <li className="reasoning-step-done">
               <Sparkles size={14} className="reasoning-check" aria-hidden="true" />
               <span className="reasoning-step-copy">
-                <strong>2. Action Gate &amp; Intent Routing · {modeInfo.label}</strong>
-                <span>{modeInfo.detail}</span>
+                <strong>
+                  2. Unified Capability Router · {semanticRoute ? semanticRoute.capabilityLabel : modeInfo.label}
+                  {semanticRoute && (
+                    <> ({semanticRoute.method === "llm_semantic" ? "Semantic LLM" : "Fast-Path"} · {Math.round(semanticRoute.confidence * 100)}%)</>
+                  )}
+                </strong>
+                <span>{semanticRoute ? semanticRoute.reasoning : modeInfo.detail}</span>
               </span>
             </li>
           )}

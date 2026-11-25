@@ -234,6 +234,7 @@ function AssistantMessage() {
                   history={steps}
                   experience={experience}
                   actionMode={turn.actionMode}
+                  semanticRoute={turn.semanticRoute}
                   customerLookup={turn.customerLookup}
                   providerArbitration={turn.providerArbitration}
                 />

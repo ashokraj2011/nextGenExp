@@ -15,14 +15,17 @@ import {
 import type { CustomerProfileStore } from "../../packages/customer-profiles";
 import { makeId } from "../../packages/experience/compile";
 
+// Calibrated so default Alice Morgan equity portfolio equals exactly $27,500.00 (2,750,000 cents):
+// 50*228 + 12*425 + 25*140 + 120*22.50 + 15*160 + 96*25 = 11400 + 5100 + 3500 + 2700 + 2400 + 2400 = $27,500.00
+const BASE_EQUITY_CENTS = 2_750_000;
+
 const DEFAULT_HOLDINGS: EquityHolding[] = [
-  { symbol: "AAPL", name: "Apple Inc.", sector: "Technology", shares: 120, avgCostCents: 14850, priceCents: 22840, holdingPeriod: "long_term" },
-  { symbol: "MSFT", name: "Microsoft Corp.", sector: "Technology", shares: 45, avgCostCents: 34200, priceCents: 42680, holdingPeriod: "long_term" },
-  { symbol: "NVDA", name: "NVIDIA Corp.", sector: "Semiconductors", shares: 60, avgCostCents: 9640, priceCents: 13820, holdingPeriod: "short_term" },
-  { symbol: "VOO", name: "Vanguard S&P 500 ETF", sector: "Broad Market ETF", shares: 55, avgCostCents: 46200, priceCents: 54800, holdingPeriod: "long_term" },
-  { symbol: "INTC", name: "Intel Corp.", sector: "Semiconductors", shares: 180, avgCostCents: 3420, priceCents: 2240, holdingPeriod: "long_term" },
-  { symbol: "BA", name: "Boeing Co.", sector: "Aerospace & Defense", shares: 28, avgCostCents: 21400, priceCents: 16250, holdingPeriod: "short_term" },
-  { symbol: "PFE", name: "Pfizer Inc.", sector: "Healthcare", shares: 160, avgCostCents: 3380, priceCents: 2610, holdingPeriod: "long_term" },
+  { symbol: "AAPL", name: "Apple Inc.", sector: "Technology", shares: 50, avgCostCents: 14800, priceCents: 22800, holdingPeriod: "long_term" },
+  { symbol: "MSFT", name: "Microsoft Corp.", sector: "Technology", shares: 12, avgCostCents: 34000, priceCents: 42500, holdingPeriod: "long_term" },
+  { symbol: "NVDA", name: "NVIDIA Corp.", sector: "Semiconductors", shares: 25, avgCostCents: 9600, priceCents: 14000, holdingPeriod: "short_term" },
+  { symbol: "INTC", name: "Intel Corp.", sector: "Semiconductors", shares: 120, avgCostCents: 3450, priceCents: 2250, holdingPeriod: "long_term" },
+  { symbol: "BA", name: "Boeing Co.", sector: "Aerospace & Defense", shares: 15, avgCostCents: 21400, priceCents: 16000, holdingPeriod: "short_term" },
+  { symbol: "PFE", name: "Pfizer Inc.", sector: "Healthcare", shares: 96, avgCostCents: 3350, priceCents: 2500, holdingPeriod: "long_term" },
 ];
 
 const REPLACEMENT_HINTS: Record<string, string> = {
@@ -119,9 +122,31 @@ export class TradeStore {
     writeFileSync(this.filePath, JSON.stringify(this.state, null, 2), "utf8");
   }
 
+  private seedHoldingsForPersona(personaId: string): EquityHolding[] {
+    const profile = this.profileStore.findByPersonaId(personaId);
+    const targetEquity = profile?.equityCents ?? BASE_EQUITY_CENTS;
+    if (targetEquity <= 0) {
+      return DEFAULT_HOLDINGS.map((h) => ({ ...h, shares: 0 }));
+    }
+    if (targetEquity === BASE_EQUITY_CENTS) {
+      return DEFAULT_HOLDINGS.map((h) => ({ ...h }));
+    }
+    const factor = targetEquity / BASE_EQUITY_CENTS;
+    return DEFAULT_HOLDINGS.map((h) => ({
+      ...h,
+      shares: Math.max(1, Math.round(h.shares * factor)),
+    }));
+  }
+
+  equityMarketValueCents(personaId: string): number | null {
+    const existing = this.state.byPersona[personaId];
+    if (!existing) return null;
+    return existing.reduce((sum, h) => sum + h.shares * h.priceCents, 0);
+  }
+
   holdingsFor(personaId: string): EquityHolding[] {
     if (!this.state.byPersona[personaId]) {
-      this.state.byPersona[personaId] = DEFAULT_HOLDINGS.map((h) => ({ ...h }));
+      this.state.byPersona[personaId] = this.seedHoldingsForPersona(personaId);
       this.save();
     }
     return this.state.byPersona[personaId].map((h) => ({ ...h }));
@@ -130,10 +155,10 @@ export class TradeStore {
   snapshotFor(personaId: string): PortfolioBalanceSnapshot {
     const profile = this.profileStore.findByPersonaId(personaId);
     const holdings = this.holdingsFor(personaId);
-    const holdingsEquityCents = holdings.reduce((sum, h) => sum + h.shares * h.priceCents, 0);
-    const cashCents = profile?.cashCents ?? 25_000_00;
-    const equityCents = profile ? Math.max(profile.equityCents, 0) : holdingsEquityCents;
-    const fixedIncomeCents = profile?.fixedIncomeCents ?? 15_000_00;
+    // Single Source of Truth: equities total is always derived directly from live share lots.
+    const equityCents = holdings.reduce((sum, h) => sum + h.shares * h.priceCents, 0);
+    const cashCents = profile?.cashCents ?? 12_500_00;
+    const fixedIncomeCents = profile?.fixedIncomeCents ?? 10_000_00;
     return {
       cashCents,
       equityCents,
@@ -422,10 +447,14 @@ export class TradeStore {
       }
 
       const nextCashCents = Math.max(0, before.cashCents + cashDeltaCents);
-      const nextEquityCents = Math.max(0, before.equityCents + equityDeltaCents);
+      const nextEquityCents = holdings.reduce((sum, h) => sum + h.shares * h.priceCents, 0);
       const summary = receipts
         .map((r) => `${r.side.toUpperCase()} ${r.shares} ${r.symbol} @ $${(r.fillPriceCents / 100).toFixed(2)}${r.reason === "tax_harvest" ? " (TLH)" : ""}`)
         .join(" + ");
+
+      // Persist holdings ledger first so CustomerProfileStore.portfolioSnapshot derives exact live equity.
+      this.state.byPersona[job.personaId] = holdings;
+      this.save();
 
       const settlementResult = await onSettle({
         personaId: job.personaId,
@@ -436,9 +465,6 @@ export class TradeStore {
         nextEquityCents,
         summary,
       });
-
-      this.state.byPersona[job.personaId] = holdings;
-      this.save();
 
       const afterSnapshot = this.snapshotFor(job.personaId);
       job.status = "completed";

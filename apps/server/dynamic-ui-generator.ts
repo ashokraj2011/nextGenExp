@@ -6,6 +6,7 @@ import { runCopilotPrompt } from "./copilot-acp-client";
 import type { GatewaySettings } from "./gateway";
 import type { OpsIncidentStore } from "./ops-store";
 import type { SalesDealStore } from "./sales-store";
+import type { SemanticRouteDecision } from "../../packages/contracts/capabilities-catalog";
 import type { ConnectorStore } from "./connector-store";
 import type { ApprovalStore } from "./approval-store";
 import { parseStockTradePrompt, type TradeStore } from "./trade-store";
@@ -41,6 +42,14 @@ export function isApprovalQueuePrompt(message: string): boolean {
 
 export function isConnectorActionPrompt(message: string): boolean {
   return connectorActionTrigger.test(message);
+}
+
+export function isStockTradePrompt(message: string): boolean {
+  return stockTradeTrigger.test(message);
+}
+
+export function isStockHoldingsPrompt(message: string): boolean {
+  return stockHoldingsTrigger.test(message);
 }
 
 function stripJsonFences(raw: string): string {
@@ -638,8 +647,15 @@ function buildStockTradeCanvas(
   personaId: string,
   requesterName: string | undefined,
   prompt: string,
+  extractedParams?: SemanticRouteDecision["extractedParams"],
 ): { intro: string; canvas: DynamicCanvasProps } {
-  const parsed = parseStockTradePrompt(prompt);
+  const lexical = parseStockTradePrompt(prompt);
+  const parsed = {
+    side: extractedParams?.side ?? lexical.side,
+    symbol: (extractedParams?.symbol ? extractedParams.symbol.toUpperCase() : lexical.symbol),
+    percent: extractedParams?.percent ?? lexical.percent,
+    shares: extractedParams?.shares ?? lexical.shares,
+  };
   const snapshot = tradeStore.snapshotFor(personaId);
   const target = snapshot.holdings.find((h) => h.symbol === parsed.symbol) ?? snapshot.holdings[0];
   const usd = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -783,26 +799,28 @@ export async function generateDynamicUi(input: {
   tradeStore?: TradeStore;
   personaId?: string;
   requesterName?: string;
+  semanticRoute?: SemanticRouteDecision;
   signal?: AbortSignal;
 }): Promise<{ intro: string; canvas: DynamicCanvasProps }> {
-  const { prompt, profileSummary, gateway, dataDir, opsStore, salesStore, connectorStore, approvalStore, tradeStore, personaId, requesterName } = input;
-  if (tradeStore && stockTradeTrigger.test(prompt)) {
-    return buildStockTradeCanvas(tradeStore, personaId || "demo-learner", requesterName, prompt);
+  const { prompt, profileSummary, gateway, dataDir, opsStore, salesStore, connectorStore, approvalStore, tradeStore, personaId, requesterName, semanticRoute } = input;
+  const capId = semanticRoute?.capabilityId;
+  if (tradeStore && (capId === "stock_trade" || (!capId && stockTradeTrigger.test(prompt)))) {
+    return buildStockTradeCanvas(tradeStore, personaId || "demo-learner", requesterName, prompt, semanticRoute?.extractedParams);
   }
-  if (tradeStore && stockHoldingsTrigger.test(prompt)) {
+  if (tradeStore && (capId === "stock_holdings" || (!capId && stockHoldingsTrigger.test(prompt)))) {
     return buildStockHoldingsCanvas(tradeStore, personaId || "demo-learner", prompt);
   }
-  if (approvalStore && isApprovalQueuePrompt(prompt)) {
+  if (approvalStore && (capId === "hitl_approvals" || (!capId && isApprovalQueuePrompt(prompt)))) {
     return buildApprovalQueueCanvas(approvalStore, prompt);
   }
-  if (connectorStore && approvalStore && isConnectorActionPrompt(prompt)) {
+  if (connectorStore && approvalStore && (capId === "external_connector" || (!capId && isConnectorActionPrompt(prompt)))) {
     return buildConnectorActionCanvas(connectorStore, approvalStore, prompt, requesterName);
   }
-  const opsLive = opsStore && isOpsIncidentPrompt(prompt) ? {
+  const opsLive = opsStore && (capId === "ops_incident" || (!capId && isOpsIncidentPrompt(prompt))) ? {
     view: opsStore.view(),
     primary: opsStore.primaryIncident(),
   } : null;
-  const salesLive = !opsLive && salesStore && isSalesDealPrompt(prompt) ? {
+  const salesLive = !opsLive && salesStore && (capId === "sales_deal_desk" || (!capId && isSalesDealPrompt(prompt))) ? {
     view: salesStore.view(),
     primary: salesStore.primaryDeal(),
   } : null;

@@ -10,7 +10,13 @@ import {
   managedNbaRuleInputSchema,
   type ExperienceRegistryView,
 } from "../../packages/contracts/experience-registry";
-import { CustomerProfileStore, getActiveCustomerProfileStore, setActiveCustomerProfileStore } from "../../packages/customer-profiles";
+import {
+  CustomerProfileStore,
+  getActiveCustomerProfileStore,
+  getActiveEquityLedger,
+  setActiveCustomerProfileStore,
+  setActiveEquityLedger,
+} from "../../packages/customer-profiles";
 import {
   ExperienceRegistryStore,
   getActiveExperienceRegistryStore,
@@ -226,6 +232,7 @@ export async function startApp(options: Options) {
   const connectorStore = new ConnectorStore(options.dataDir);
   const approvalStore = new ApprovalStore(options.dataDir);
   const tradeStore = new TradeStore(options.dataDir, profileStore);
+  setActiveEquityLedger(tradeStore);
   const writeAudit = new WriteAuditStore(options.dataDir);
   store.setDomainBindingContext(() => ({ incident: opsStore.primaryIncident(), deal: salesStore.primaryDeal() }));
   const registry = new CapabilityRegistry(store);
@@ -243,9 +250,10 @@ export async function startApp(options: Options) {
     store.close();
     throw error;
   }
+  const mode = options.mode ?? "live";
   const experience = new ExperienceService(store, runtime, selectionMode, now, inspectorEnabled, offline && {
     chat: new ChatHarness(offline), close: () => offline.close(),
-  }, { gateway: options.gateway, dataDir: options.dataDir, customer360, portfolioSnapshots, goalProgressProvider, opsStore, salesStore, connectorStore, approvalStore, tradeStore });
+  }, { mode, gateway: options.gateway, dataDir: options.dataDir, customer360, portfolioSnapshots, goalProgressProvider, opsStore, salesStore, connectorStore, approvalStore, tradeStore });
 
   async function executeApprovedRecord(principalId: string, record: ApprovalRecord) {
     if (record.targetKind === "external_connector") {
@@ -353,7 +361,6 @@ export async function startApp(options: Options) {
     }) ?? record;
     return { approval: finalRecord, execution: { summary, sfieldRunId: "offline", audit } };
   }
-  const mode = options.mode ?? "live";
   let vite: ViteDevServer | undefined;
   const streams = new Set<ServerResponse>();
   const server = createServer((req, res) => {
@@ -1110,6 +1117,7 @@ export async function startApp(options: Options) {
       await experience.close();
       tradeStore.close();
       if (getActiveCustomerProfileStore() === profileStore) setActiveCustomerProfileStore(null);
+      if (getActiveEquityLedger() === tradeStore) setActiveEquityLedger(null);
       if (getActiveExperienceRegistryStore() === experienceRegistry) setActiveExperienceRegistryStore(null);
     },
   };

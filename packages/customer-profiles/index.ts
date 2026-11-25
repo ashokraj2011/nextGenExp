@@ -244,12 +244,14 @@ export class CustomerProfileStore {
   portfolioSnapshot(mid: string): PortfolioSnapshot | null {
     const profile = this.findByMid(mid);
     if (!profile) return null;
+    const ledgerEquity = activeEquityLedger?.equityMarketValueCents(profile.personaId);
+    const equityCents = typeof ledgerEquity === "number" ? ledgerEquity : profile.equityCents;
     return {
       fixtureVersion: rawPortfolioSnapshots.fixtureVersion,
       asOf: rawPortfolioSnapshots.asOf,
       currency: "USD",
       cashCents: profile.cashCents,
-      equityCents: profile.equityCents,
+      equityCents,
       fixedIncomeCents: profile.fixedIncomeCents,
     };
   }
@@ -257,8 +259,10 @@ export class CustomerProfileStore {
   portfolioHistory(mid: string): PortfolioHistoryPoint[] {
     const profile = this.findByMid(mid);
     if (!profile) return [];
-    const totalCents = profile.cashCents + profile.equityCents + profile.fixedIncomeCents;
-    if (!this.isCustomized(profile.personaId) && builtInHistoryMap[mid]) {
+    const ledgerEquity = activeEquityLedger?.equityMarketValueCents(profile.personaId);
+    const equityCents = typeof ledgerEquity === "number" ? ledgerEquity : profile.equityCents;
+    const totalCents = profile.cashCents + equityCents + profile.fixedIncomeCents;
+    if (!this.isCustomized(profile.personaId) && typeof ledgerEquity !== "number" && builtInHistoryMap[mid]) {
       return [...builtInHistoryMap[mid], { date: snapshotDate, totalCents }];
     }
     return synthesizePortfolioHistory(totalCents);
@@ -304,7 +308,12 @@ export class CustomerProfileStore {
   }
 }
 
+export interface EquityLedgerLookup {
+  equityMarketValueCents(personaId: string): number | null;
+}
+
 let activeStore: CustomerProfileStore | null = null;
+let activeEquityLedger: EquityLedgerLookup | null = null;
 
 export function setActiveCustomerProfileStore(store: CustomerProfileStore | null) {
   activeStore = store;
@@ -313,6 +322,14 @@ export function setActiveCustomerProfileStore(store: CustomerProfileStore | null
 
 export function getActiveCustomerProfileStore(): CustomerProfileStore | null {
   return activeStore;
+}
+
+export function setActiveEquityLedger(ledger: EquityLedgerLookup | null) {
+  activeEquityLedger = ledger;
+}
+
+export function getActiveEquityLedger(): EquityLedgerLookup | null {
+  return activeEquityLedger;
 }
 
 export function toPersonaRecord(profile: StoredCustomerProfile): PersonaRecord {
