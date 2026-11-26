@@ -735,6 +735,28 @@ export class Store {
     if (record) this.events.emit(id);
   }
 
+  recordHarnessStage(
+    id: string,
+    stage: NonNullable<TurnView["harnessStages"]>[number],
+    progress?: Progress,
+    now?: number,
+  ) {
+    const record = this.db.tx(() => {
+      const result = this.update(id, (turn) => {
+        const list = turn.public.harnessStages ? [...turn.public.harnessStages] : [];
+        list.push(stage);
+        turn.public.harnessStages = list.slice(-8);
+        if (progress) {
+          turn.public.progress = progress;
+          if (now !== undefined) turn.trace.markers[progress] ??= now;
+        }
+      });
+      if (result) this.addEvent(result, "turn.status", { progress: result.public.progress, harnessStage: stage });
+      return result;
+    });
+    if (record) this.events.emit(id);
+  }
+
   private applyUiLayout(turn: TurnRecord, result: CompiledExperience) {
     if (!turn.uiLayouts?.length) return result;
     const targets: UiTarget[] = [];

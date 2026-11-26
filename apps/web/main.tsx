@@ -226,6 +226,28 @@ function AssistantMessage() {
           {turn.status === "working" ? (
             <>
               <div role="status" aria-live="polite" className={adminChat ? "sr-only" : "customer-progress"}>{progressLabels[turn.progress]}…</div>
+              {!adminChat && turn.harnessStages && turn.harnessStages.length > 0 && (
+                <div className="dyn-harness-trace dyn-harness-live" aria-live="polite">
+                  <div className="dyn-harness-summary-main">
+                    <strong>Thinking</strong>
+                    <span className="dyn-harness-chain">
+                      sfield Harness · {turn.harnessStages.map((s) => s.stage.charAt(0).toUpperCase() + s.stage.slice(1)).join(" → ")}…
+                    </span>
+                  </div>
+                  <ol className="dyn-harness-steps" style={{ marginTop: 6 }}>
+                    {turn.harnessStages.map((step, idx) => (
+                      <li key={idx} className={"is-" + step.status}>
+                        <span className="dyn-harness-stage">{step.stage}</span>
+                        <span>
+                          {step.summary}
+                          {step.thinking && <small className="dyn-harness-step-thought">{step.thinking}</small>}
+                        </span>
+                        {step.durationMs !== undefined && <small>{step.durationMs}ms</small>}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
               {adminChat && <ReasoningPanel status={turn.status} progress={turn.progress} history={steps} />}
             </>
           ) : (
@@ -1070,11 +1092,22 @@ function App() {
       const sequence = Number(event.lastEventId);
       if (sequence <= seen) return;
       seen = sequence;
-      const { progress } = JSON.parse(event.data).payload as { progress: Progress };
-      if (!Object.hasOwn(progressLabels, progress)) return;
-      recordProgress(id, progress);
+      const payload = JSON.parse(event.data).payload as { progress?: Progress; harnessStage?: NonNullable<TurnView["harnessStages"]>[number] };
+      const progress = payload.progress;
+      if (progress && Object.hasOwn(progressLabels, progress)) recordProgress(id, progress);
       setConversation((previous) => previous ? {
-        ...previous, turns: previous.turns.map((turn) => turn.id === id && turn.status === "working" ? { ...turn, progress } : turn),
+        ...previous,
+        turns: previous.turns.map((turn) => {
+          if (turn.id !== id || turn.status !== "working") return turn;
+          const nextStages = payload.harnessStage
+            ? [...(turn.harnessStages ?? []), payload.harnessStage].slice(-8)
+            : turn.harnessStages;
+          return {
+            ...turn,
+            ...(progress && Object.hasOwn(progressLabels, progress) ? { progress } : {}),
+            ...(nextStages ? { harnessStages: nextStages } : {}),
+          };
+        }),
       } : previous);
     });
     for (const type of ["experience.ready", "turn.failed", "turn.cancelled", "gap", "error"]) stream.addEventListener(type, refresh);

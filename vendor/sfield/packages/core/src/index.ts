@@ -47,6 +47,16 @@ export { InMemoryMemoryIndex } from "./memory/index-memory.js";
 export { MemoryService, looksLikeSecret } from "./memory/service.js";
 export { RetrievalService, type RetrievalOutcome } from "./retrieval/service.js";
 export { buildContext, validatePairing, type ContextBuildInput, type ContextBuildOutput } from "./context/builder.js";
+export {
+  ConversationCompactor,
+  ROLLING_SUMMARY_KEY,
+  buildExtractiveSummary,
+  formatRollingSummary,
+  type CompactThreadInput,
+  type CompactThreadResult,
+  type CompactorTurnInput,
+  type RollingThreadSummary,
+} from "./context/compactor.js";
 export { ModelGateway, type DispatchResult } from "./gateway/gateway.js";
 export { AnthropicProvider, ANTHROPIC_API_VERSION, ANTHROPIC_DEFAULT_BASE_URL } from "./gateway/providers/anthropic.js";
 export { OpenAICompatibleProvider } from "./gateway/providers/openai-compatible.js";

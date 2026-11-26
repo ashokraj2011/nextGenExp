@@ -1,11 +1,12 @@
 import { z } from "zod";
-import { runAgenticHarness, type AgenticHarness, type HarnessTrace } from "@sfield/core";
+import { runAgenticHarness, type AgenticHarness, type HarnessStageRecord, type HarnessTrace } from "@sfield/core";
 import {
   dynamicCanvasSchema,
   type DynamicCanvasNode,
   type DynamicCanvasProps,
   type DynamicHarnessTrace,
 } from "../../packages/contracts/dynamic-canvas";
+import { resolveClarificationReply, type PendingClarificationState } from "./chat-history";
 import { principalFor } from "./runtime";
 import type { PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import type { GoalProgressProvider } from "../../packages/goal-progress";
@@ -698,14 +699,26 @@ export async function runDynamicUiHarness(input: {
   personaId?: string;
   principalId?: string;
   recentContext?: string;
+  rollingSummary?: string;
+  userMemorySummary?: string;
+  pendingClarification?: PendingClarificationState | null;
   gateway?: GatewaySettings | null;
   dataDir: string;
   harness?: AgenticHarness;
   portfolioSnapshots?: PortfolioSnapshotProvider;
   goalProgressProvider?: GoalProgressProvider;
   tradeStore?: TradeStore;
+  onStage?: (stage: HarnessStageRecord) => void | Promise<void>;
   signal?: AbortSignal;
 }): Promise<{ intro: string; canvas: DynamicCanvasProps }> {
+  const clarificationHit = resolveClarificationReply(input.prompt, input.pendingClarification);
+  const effectivePrompt = clarificationHit ? clarificationHit.matchedPrompt : input.prompt;
+  const enrichedRecent = [
+    input.rollingSummary?.trim() ? input.rollingSummary.trim() : "",
+    input.userMemorySummary?.trim() ? `USER MEMORY & PREFERENCES:\n${input.userMemorySummary.trim()}` : "",
+    input.recentContext?.trim() ? input.recentContext.trim() : "",
+  ].filter(Boolean).join("\n\n");
+
   const execute = input.harness
     ? input.harness.run.bind(input.harness)
     : runAgenticHarness;
@@ -714,20 +727,26 @@ export async function runDynamicUiHarness(input: {
     kind: "dynamic_ui",
     principal: input.principalId ? principalFor(input.principalId) : undefined,
     signal: input.signal,
+    onStage: input.onStage,
     maxRepairs: 1,
 
     // ── STAGE 1: PLAN ──
     plan: async () => {
-      const detPlan = inferDeterministicPlan(input.prompt, input.recentContext);
-      let plan: DynamicUiPlan = detPlan;
+      const detPlan = inferDeterministicPlan(effectivePrompt, enrichedRecent || undefined);
+      let plan: DynamicUiPlan = clarificationHit
+        ? {
+            ...detPlan,
+            thinking: `Resolved your clarification reply ("${input.prompt.trim()}") to "${clarificationHit.matchedLabel}" and selected ${detPlan.neededSources.join(", ")}.`,
+          }
+        : detPlan;
 
       const shouldUseLlmPlanner = Boolean(input.gateway)
-        && !explicitUnconnectedWord.test(input.prompt)
+        && !explicitUnconnectedWord.test(effectivePrompt)
         && !detPlan.needsClarification;
       if (shouldUseLlmPlanner && input.gateway) {
         const plannerPrompt = [
-          input.recentContext?.trim() ? `RECENT CONVERSATION:\n${input.recentContext.trim().slice(0, 1400)}` : "RECENT CONVERSATION: (none)",
-          `USER MESSAGE: ${input.prompt}`,
+          enrichedRecent ? `THREAD MEMORY & RECENT CONVERSATION:\n${enrichedRecent.slice(0, 2200)}` : "RECENT CONVERSATION: (none)",
+          `USER MESSAGE: ${effectivePrompt}`,
         ].join("\n\n");
         const rawPlan = await callLlmStage(
           input.gateway,
@@ -740,7 +759,7 @@ export async function runDynamicUiHarness(input: {
         );
         const parsedPlan = planSchema.safeParse(rawPlan);
         if (parsedPlan.success) {
-          const mergedVisuals = [...new Set([...parsedPlan.data.requiredVisuals, ...extractRequiredVisuals(input.prompt)])].slice(0, 5);
+          const mergedVisuals = [...new Set([...parsedPlan.data.requiredVisuals, ...extractRequiredVisuals(effectivePrompt)])].slice(0, 5);
           const llmNeedsMissing = parsedPlan.data.neededSources.includes("missing_external_source");
           const detNeedsMissing = detPlan.neededSources.includes("missing_external_source");
           plan = {
@@ -796,7 +815,7 @@ export async function runDynamicUiHarness(input: {
         portfolioSnapshots: input.portfolioSnapshots,
         goalProgressProvider: input.goalProgressProvider,
         tradeStore: input.tradeStore,
-        recentContext: input.recentContext,
+        recentContext: enrichedRecent || input.recentContext,
         signal: input.signal,
       });
       const portfolioNote = fetched.portfolio

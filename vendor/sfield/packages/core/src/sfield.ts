@@ -15,6 +15,7 @@ import type { RunHandle, RunSnapshot, Session } from "./types/runtime.js";
 import type { DefineToolInput, ToolDefinition } from "./types/tool.js";
 import { ConfigErrors, SFieldError } from "./errors.js";
 import { ChatHarness } from "./chat/harness.js";
+import { ConversationCompactor } from "./context/compactor.js";
 import { AgenticHarness } from "./runtime/agentic-harness.js";
 import { loadConfigDocument, loadConfigFile, type LoadedDocument } from "./config/load.js";
 import { compileConfig, GENERIC_PARAMS, PROVIDER_PARAMS, shorthandIdentity, type CompileContext } from "./config/compile.js";
@@ -100,9 +101,11 @@ interface Internals {
 export class SField {
   private closed = false;
   readonly chat: ChatHarness;
+  readonly compactor: ConversationCompactor;
   readonly harness: AgenticHarness;
   private constructor(readonly i: Internals) {
     this.chat = new ChatHarness(i.persistence);
+    this.compactor = new ConversationCompactor(i.memory);
     this.harness = new AgenticHarness({
       persistence: i.persistence,
       resolvePrincipal: (p) => i.runs.resolvePrincipal(p),

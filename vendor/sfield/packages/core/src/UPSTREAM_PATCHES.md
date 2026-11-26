@@ -75,3 +75,19 @@ integration-task version) must restart.
   3. `synthesize` — produce a candidate output from the verified plan and evidence;
   4. `verify` + bounded `repair` (and optional deterministic `fallback`) — validate schema, grounding, and user constraints before returning.
 - Every run gets a `hrn_*` id, honors `AbortSignal` between stages, captures per-stage timings in `HarnessTrace`, and appends an `agentic_harness_completed` audit record to `sfield`'s persistence store.
+
+## 5. `buildContext` summarizer hook wired in `AgentRuntime` + context priority fix
+
+**Symptom:** `buildContext()` implemented bounded per-turn history summarization when `agent.context.summarizer && input.summarize` were set, but `AgentRuntime.modelTurn()` never passed `summarize`, leaving dropped history unsummarized (`cp.counters.summarizations` always `0`). Also `AGENT_DEFAULTS.context.priority` placed `"summary"` last behind `"history"`, allowing verbose raw history to evict compact summaries.
+
+**Fix** ([runtime.ts](runtime/runtime.ts), [defaults.ts](config/defaults.ts)):
+
+- Wired `summarizeDroppedHistory()` in `AgentRuntime.modelTurn()` when `agent.context.summarizer` is configured, using the configured summarizer model binding (or agent default) with a safe extractive fallback, incrementing `cp.counters.summarizations`, and recording a `history_summarized` audit event.
+- Reordered `AGENT_DEFAULTS.context.priority` to `["summary", "preferences", "facts", "history", "retrieval"]`.
+
+## 6. Rolling `ConversationCompactor` (`sfield.compactor`) & live `onStage` streaming
+
+**Fix** ([compactor.ts](context/compactor.ts), [agentic-harness.ts](runtime/agentic-harness.ts), [sfield.ts](sfield.ts)):
+
+- Added `ConversationCompactor` (`sf.compactor`) to fold older turns outside the verbatim window into a structured `RollingThreadSummary` persisted in `sfield.memory` (`kind: "summary"`, `origin: "derived"`, automatic key supersession).
+- Added optional `onStage` observer on `AgenticHarnessSpec` so hosts can stream live stage transitions and thinking progress as each stage finishes.

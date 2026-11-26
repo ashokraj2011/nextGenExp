@@ -387,6 +387,9 @@ export class AgentRuntime {
       memory,
       retrieval: ctx.version.retrieval,
       signal: ctx.controller.signal,
+      summarize: agent.context.summarizer
+        ? (droppedText, budgetTokens) => this.summarizeDroppedHistory(ctx, agent.context.summarizer!, droppedText, budgetTokens)
+        : undefined,
       countTokens: capabilities.tokenCounting === "provider" ? (req) => this.deps.gateway.countTokens(req) : undefined,
     });
     this.deps.telemetry?.metric?.("sfield.context.build_ms", Date.now() - ctxStart, { agent: agent.id });
@@ -467,6 +470,46 @@ export class AgentRuntime {
     }
     if (stopReason === "end_turn" && message.parts.some((pt) => pt.type === "tool_call")) stopReason = "tool_use";
     return { message, stopReason };
+  }
+
+  private async summarizeDroppedHistory(ctx: RunContext, summarizerId: string, droppedText: string, budgetTokens: number): Promise<string | null> {
+    const { cp, principal, run } = ctx;
+    const binding = ctx.version.modelBindings[summarizerId] ?? ctx.version.modelBindings[ctx.agent.model];
+    const maxChars = Math.max(400, budgetTokens * 4);
+    const trimmedInput = droppedText.slice(0, 12_000);
+    let summaryText: string | null = null;
+
+    if (binding) {
+      try {
+        const res = await this.deps.gateway.dispatch({
+          binding,
+          instructions: ["You are a concise conversation compactor. Summarize the omitted conversation history into compact factual bullet points preserving exact dollar amounts, percentages, entity IDs, user preferences, and open questions. Do not invent facts."],
+          messages: [{ role: "user", parts: [{ type: "text", text: `Summarize in <= ${budgetTokens} tokens:\n\n${trimmedInput}` }] }],
+          tools: [],
+          params: { maxOutputTokens: Math.min(budgetTokens, binding.limits.maxOutputTokens, 600), temperature: 0.1 },
+          toolChoice: "none",
+        }, {
+          runId: run.runId,
+          signal: ctx.controller.signal,
+          beginAttempt: async () => ({ attemptId: `sum_${newId("att").slice(4, 12)}` }),
+          onAttempt: async () => undefined,
+        });
+        const text = textOf(res.message).trim();
+        if (text) summaryText = text.slice(0, maxChars);
+      } catch {
+        // Fall through to bounded extractive summary below so summarization never fails a turn.
+      }
+    }
+
+    if (!summaryText) {
+      const lines = trimmedInput.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(0, 8);
+      if (lines.length === 0) return null;
+      summaryText = `Earlier context summary:\n${lines.map((l) => `- ${l.slice(0, 160)}`).join("\n")}`.slice(0, maxChars);
+    }
+
+    cp.counters.summarizations++;
+    await this.audit(ctx, "history_summarized", { summarizerId, budgetTokens, outputChars: summaryText.length });
+    return summaryText;
   }
 
   private async loadMemory(ctx: RunContext): Promise<{ preferences: MemoryItem[]; facts: MemoryItem[]; summaries: MemoryItem[] }> {

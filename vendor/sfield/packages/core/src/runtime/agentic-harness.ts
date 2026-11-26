@@ -105,6 +105,8 @@ export interface AgenticHarnessSpec<TPlan, TEvidence, TOutput, TCandidate = unkn
   principal?: Principal;
   /** Optional cancellation signal checked between every stage. */
   signal?: AbortSignal;
+  /** Optional live stage observer invoked as each stage completes (for SSE / UI thinking progress). */
+  onStage?: (stage: HarnessStageRecord) => void | Promise<void>;
   /** Maximum LLM repair attempts when verification fails. Defaults to 1. */
   maxRepairs?: number;
   /** Stage 1: Clarify user intent, resolve follow-ups, identify needed sources or ambiguity. */
@@ -182,6 +184,16 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
   const ctx: HarnessContext = { harnessRunId, signal: spec.signal };
   const stages: HarnessStageRecord[] = [];
   const maxRepairs = Math.max(0, spec.maxRepairs ?? 1);
+  const recordStage = async (entry: HarnessStageRecord): Promise<void> => {
+    stages.push(entry);
+    if (spec.onStage) {
+      try {
+        await spec.onStage(entry);
+      } catch {
+        // Observer failures never break harness execution.
+      }
+    }
+  };
 
   const emitAudit = async (status: string, trace: HarnessTrace, extra?: JsonObject): Promise<void> => {
     if (!deps?.persistence) return;
@@ -227,7 +239,7 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
   const planOutcome = await spec.plan(ctx);
   const targets = planOutcome.targets ?? [];
   const topThinking = planOutcome.thinking?.trim().slice(0, 360);
-  stages.push({
+  await recordStage({
     stage: "plan",
     status: planOutcome.status === "ready" ? "ok" : planOutcome.status,
     summary: planOutcome.summary.slice(0, 200),
@@ -236,7 +248,7 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
   });
 
   if (planOutcome.status === "needs_clarification") {
-    stages.push({
+    await recordStage({
       stage: "clarify",
       status: "needs_clarification",
       summary: planOutcome.question.slice(0, 200),
@@ -264,7 +276,7 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
   }
 
   if (planOutcome.status === "needs_data") {
-    stages.push({
+    await recordStage({
       stage: "fetch",
       status: "needs_data",
       summary: "No connected provider supplies those records — stopped without fabricating data.",
@@ -294,7 +306,7 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
   const gatherStart = Date.now();
   const gathered = await spec.gather(planOutcome.plan, ctx);
   if (gathered.status === "needs_data") {
-    stages.push({
+    await recordStage({
       stage: "fetch",
       status: "needs_data",
       summary: gathered.summary.slice(0, 200),
@@ -320,7 +332,7 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
     };
   }
 
-  stages.push({
+  await recordStage({
     stage: "fetch",
     status: "ok",
     summary: gathered.summary.slice(0, 200),
@@ -334,7 +346,7 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
   const synth = await spec.synthesize(planOutcome.plan, gathered.evidence, ctx);
   const firstCheck = await spec.verify(synth.candidate, planOutcome.plan, gathered.evidence, ctx);
 
-  stages.push({
+  await recordStage({
     stage: "compose",
     status: firstCheck.ok ? "ok" : "repaired",
     summary: (firstCheck.ok
@@ -346,7 +358,7 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
 
   // ── STAGE 4: VERIFY & BOUNDED REPAIR ───────────────────────────────────────
   if (firstCheck.ok) {
-    stages.push({
+    await recordStage({
       stage: "verify",
       status: "ok",
       summary: (firstCheck.summary ?? "Verified schema and grounding constraints").slice(0, 200),
@@ -382,7 +394,7 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
       const repairedSynth = await spec.repair(planOutcome.plan, gathered.evidence, lastViolations, lastCandidate, attempt, ctx);
       const check = await spec.verify(repairedSynth.candidate, planOutcome.plan, gathered.evidence, ctx);
       if (check.ok) {
-        stages.push({
+        await recordStage({
           stage: "repair",
           status: "repaired",
           summary: (repairedSynth.summary ?? `Auto-repaired output on attempt ${attempt}`).slice(0, 200),
@@ -410,7 +422,7 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
       }
       lastCandidate = repairedSynth.candidate;
       lastViolations = check.violations;
-      stages.push({
+      await recordStage({
         stage: "repair",
         status: "repaired",
         summary: `Repair attempt ${attempt} still had violation: ${check.violations[0] ?? "invalid"}`.slice(0, 200),
@@ -423,7 +435,7 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
     checkAborted(spec.signal);
     const fallbackStart = Date.now();
     const output = await spec.fallback(planOutcome.plan, gathered.evidence, lastViolations, ctx);
-    stages.push({
+    await recordStage({
       stage: "repair",
       status: "repaired",
       summary: "Applied deterministic grounded fallback after repair check",

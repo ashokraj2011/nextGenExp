@@ -35,6 +35,50 @@ function transcriptMessage(
   return { text, data: data && typeof data === "object" && !Array.isArray(data) ? data : {} };
 }
 
+export type PendingClarificationState = {
+  turnId: string;
+  originalPrompt: string;
+  question: string;
+  choices: Array<{ id: string; label: string; prompt?: string }>;
+};
+
+export function resolveClarificationReply(
+  reply: string,
+  pending: PendingClarificationState | null | undefined,
+): { matchedPrompt: string; matchedLabel: string } | null {
+  if (!pending || !pending.choices.length) return null;
+  const clean = reply.trim().toLowerCase().replace(/[.!?]+$/, "");
+  if (!clean || clean.length > 90) return null;
+
+  const ordinalWords: Record<string, number> = {
+    "1": 0, "first": 0, "first one": 0, "1st": 0, "option 1": 0, "the first": 0, "the first one": 0, "yes": 0,
+    "2": 1, "second": 1, "second one": 1, "2nd": 1, "option 2": 1, "the second": 1, "the second one": 1,
+    "3": 2, "third": 2, "third one": 2, "3rd": 2, "option 3": 2, "the third": 2, "the third one": 2,
+    "4": 3, "fourth": 3, "fourth one": 3, "4th": 3, "option 4": 3, "the fourth": 3, "the fourth one": 3,
+  };
+  if (clean in ordinalWords) {
+    const choice = pending.choices[ordinalWords[clean]!];
+    if (choice) return { matchedPrompt: choice.prompt ?? choice.label, matchedLabel: choice.label };
+  }
+
+  // Match concise keyword reply against one of the offered choices (e.g. "stocks", "pie chart", "home goal", "table")
+  const tokens = clean.split(/\s+/).filter((t) => t.length >= 3 && !["the", "show", "just", "only", "please", "want", "one", "that", "this", "for", "with"].includes(t));
+  if (tokens.length === 0 || tokens.length > 5) return null;
+  let best: { choice: PendingClarificationState["choices"][number]; score: number } | null = null;
+  for (const choice of pending.choices) {
+    const hay = `${choice.label} ${choice.prompt ?? ""} ${choice.id}`.toLowerCase();
+    const score = tokens.reduce((acc, tok) => {
+      const stem = tok.length >= 4 && tok.endsWith("s") ? tok.slice(0, -1) : tok;
+      return acc + (hay.includes(tok) || hay.includes(stem) ? 1 : 0);
+    }, 0);
+    if (score > 0 && (!best || score > best.score)) best = { choice, score };
+  }
+  if (best && best.score >= Math.min(tokens.length, 1) && best.score / tokens.length >= 0.5) {
+    return { matchedPrompt: best.choice.prompt ?? best.choice.label, matchedLabel: best.choice.label };
+  }
+  return null;
+}
+
 /** Maps PZN's authenticated profile and browser session onto a durable sfield thread. */
 export class PznChatHistory {
   constructor(private readonly store: Store, private readonly harness: ChatHarness) {}
@@ -135,6 +179,45 @@ export class PznChatHistory {
           clarificationQuestion,
           assistantReply: clarificationQuestion ? undefined : text.slice(0, ROUTING_HISTORY_REPLY_LENGTH),
           displayedContent: context.length ? context : undefined,
+        };
+      });
+  }
+
+  async pendingClarification(conversation: ConversationRecord, beforeOrdinal: number): Promise<PendingClarificationState | null> {
+    const turns = this.store.conversationTurns(conversation.id)
+      .filter(({ public: turn, ordinal }) => turn.status === "completed" && turn.experience && ordinal < beforeOrdinal);
+    const prev = turns[turns.length - 1];
+    if (!prev?.public.experience) return null;
+    const canvasBlock = prev.public.experience.blocks.find((b) => b.component === "PznDynamicCanvas");
+    if (!canvasBlock || canvasBlock.component !== "PznDynamicCanvas") return null;
+    const choices = canvasBlock.props.choices;
+    if (!choices?.length || !choices.some((c) => Boolean(c.prompt))) return null;
+    return {
+      turnId: prev.public.id,
+      originalPrompt: prev.public.message,
+      question: prev.public.experience.intro,
+      choices,
+    };
+  }
+
+  async allCompletedForCompaction(conversation: ConversationRecord, upToOrdinal?: number) {
+    const { turns, messages } = await this.read(conversation);
+    return turns
+      .filter(({ public: turn, ordinal }) => turn.status === "completed" && turn.experience && (upToOrdinal === undefined || ordinal <= upToOrdinal))
+      .map(({ public: turn, ordinal }) => {
+        const request = transcriptMessage(messages, turn.id, "user");
+        const { text, data } = transcriptMessage(messages, turn.id, "assistant");
+        const displayedContent = Array.isArray(data.displayedContent) ? data.displayedContent.filter(
+          (title): title is string => typeof title === "string",
+        ) : undefined;
+        return {
+          ordinal,
+          turnId: turn.id,
+          userMessage: request.text,
+          assistantReply: text,
+          intentId: typeof data.intentId === "string" ? data.intentId : null,
+          displayedContent,
+          clarificationQuestion: typeof data.question === "string" ? text : null,
         };
       });
   }

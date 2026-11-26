@@ -4,7 +4,7 @@ import { getDomainPack } from "../../packages/contracts/domain-packs";
 import { uiIntentHints } from "../../packages/contracts/ui-layout";
 import { capabilityRef, inputValuesSchema, type AgentLaunch } from "../../packages/contracts/agentic";
 import { fieldValueValid } from "./agentic-inputs";
-import { digestJson, type ChatHarness, type RunResult } from "@sfield/core";
+import { digestJson, formatRollingSummary, type ChatHarness, type HarnessStageRecord, type RunResult } from "@sfield/core";
 import demo from "../../fixtures/host.json";
 import { type Conversation, type FailureCode, type TurnAccepted } from "../../packages/contracts/api";
 import { findProfileById } from "../../packages/customer-profiles";
@@ -59,7 +59,7 @@ import { beneficiaryReviewWorkflow } from "../../packages/contracts/customer-wor
 import { workflowOfferSource, offeredWorkflows, nextStepRecommendation } from "./funding-offer";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import { principalFor, type Runtime } from "./runtime";
-import { PznChatHistory } from "./chat-history";
+import { PznChatHistory, resolveClarificationReply } from "./chat-history";
 
 class TurnFailure extends Error {
   constructor(readonly code: FailureCode) { super(code); }
@@ -818,20 +818,38 @@ export class ExperienceService {
         }
 
         const recentForRoute = await this.history.recent(conversation, initial.ordinal);
-        const recentSummary = recentForRoute.slice(-2).map((turn) => JSON.stringify({
+        const pendingClarification = await this.history.pendingClarification(conversation, initial.ordinal);
+        const clarificationMatch = resolveClarificationReply(scopedPrompt, pendingClarification);
+        const activePrincipal = principalFor(initial.scope.principalId, initial.scope);
+        const rollingSummaryObj = await runtime.compactor.getSummary(activePrincipal, conversation.id).catch(() => null);
+        const rollingSummaryText = rollingSummaryObj ? formatRollingSummary(rollingSummaryObj) : undefined;
+        const userMemoryItems = await runtime.listMemory(initial.scope.principalId).catch(() => []);
+        const userMemorySummary = userMemoryItems.length
+          ? userMemoryItems.slice(0, 6).map((m) => `- [${m.kind}] ${m.content}`).join("\n")
+          : undefined;
+        const recentTurnsJson = recentForRoute.slice(-3).map((turn) => JSON.stringify({
           message: turn.request, intent: turn.intentId ?? turn.contextId,
           reply: turn.clarificationQuestion ?? turn.assistantReply,
           displayed: turn.displayedContent,
         })).join("\n");
-        const semanticRoute = await routeCapabilityUnified({
-          capabilities,
-          prompt: scopedPrompt,
-          gateway: domainTools.gateway,
-          onExchange: (operation, request, response) => runtime.captureTurnExchange(id, "flowRouting", operation, request, response),
-          dataDir: domainTools.dataDir,
-          recentSummary,
-          signal,
-        });
+        const recentSummary = [rollingSummaryText, recentTurnsJson].filter(Boolean).join("\n\n");
+        const semanticRoute = clarificationMatch
+          ? {
+              capabilityId: "custom_dynamic_ui" as const,
+              capabilityLabel: "Dynamic UI Composer",
+              method: "deterministic" as const,
+              confidence: 0.96,
+              reasoning: `Resolved clarification reply "${scopedPrompt.trim()}" to "${clarificationMatch.matchedLabel}".`,
+            }
+          : await routeCapabilityUnified({
+              capabilities,
+              prompt: scopedPrompt,
+              gateway: domainTools.gateway,
+              onExchange: (operation, request, response) => runtime.captureTurnExchange(id, "flowRouting", operation, request, response),
+              dataDir: domainTools.dataDir,
+              recentSummary,
+              signal,
+            });
         current();
         if (!allows(semanticRoute.capabilityId)) {
           if (semanticRoute.capabilityId === "verified_experience" && showSavedWidget()) return;
@@ -868,13 +886,23 @@ export class ExperienceService {
         const profileSummary = scrubbedProfileSummaryOverride ?? (lookupInfo
           ? `${lookupInfo.lookup.personaName} (${lookupInfo.lookup.highlights.join(", ")})`
           : undefined);
+        const harnessStageProgress = (st: HarnessStageRecord["stage"]) => (
+          st === "plan" || st === "clarify" ? "planning"
+            : st === "fetch" ? "portfolio"
+            : st === "compose" ? "composition"
+            : "verifying"
+        );
         const generatedRaw = await generateDynamicUi({
           prompt: scopedPrompt,
           profileSummary,
-          recentContext: recentSummary,
+          recentContext: recentTurnsJson,
+          rollingSummary: rollingSummaryText,
+          userMemorySummary,
+          pendingClarification,
           gateway: domainTools.gateway,
           dataDir: domainTools.dataDir,
           harness: runtime.harness,
+          onStage: (entry) => this.store.recordHarnessStage(id, entry, harnessStageProgress(entry.stage), this.now()),
           portfolioSnapshots: domainTools.portfolioSnapshots,
           goalProgressProvider: domainTools.goalProgressProvider,
           opsStore: domainTools.opsStore,
@@ -1459,7 +1487,59 @@ export class ExperienceService {
     } finally {
       clearTimeout(timer);
       this.controllers.delete(id);
+      const finished = this.store.turn(id);
+      if (finished?.public.status === "completed") {
+        const conv = this.store.conversation(initial.scope.conversationId, initial.scope.principalId);
+        if (conv) void this.maybeCompactThread(runtime, conv, initial.scope.principalId, initial.scope);
+      }
     }
+  }
+
+  private async maybeCompactThread(
+    runtime: Runtime,
+    conversation: ConversationRecord,
+    principalId: string,
+    scope: TurnRecord["scope"],
+  ) {
+    try {
+      const allCompleted = await this.history.allCompletedForCompaction(conversation);
+      if (allCompleted.length < 5) return;
+      await runtime.compactor.compactIfNeeded({
+        principal: principalFor(principalId, scope),
+        conversationId: conversation.id,
+        turns: allCompleted,
+        verbatimWindow: 4,
+        compactEveryTurns: 3,
+      });
+    } catch {
+      // Compaction is best-effort and never affects turn delivery.
+    }
+  }
+
+  async conversationContext(conversation: ConversationRecord, principalId: string) {
+    const runtime = this.runtime;
+    const turns = this.store.conversationTurns(conversation.id);
+    const completedTurns = turns.filter((t) => t.public.status === "completed" && t.public.experience);
+    const nextOrdinal = (turns[turns.length - 1]?.ordinal ?? 0) + 1;
+    const pendingClarification = await this.history.pendingClarification(conversation, nextOrdinal).catch(() => null);
+    const activePrincipal = principalFor(principalId, {
+      userId: conversation.userId,
+      personaId: conversation.personaId,
+      domainId: conversation.domainId,
+    });
+    const rollingSummary = runtime
+      ? await runtime.compactor.getSummary(activePrincipal, conversation.id).catch(() => null)
+      : null;
+    const memoryItems = runtime
+      ? await runtime.listMemory(principalId).catch(() => [])
+      : [];
+    return {
+      conversationId: conversation.id,
+      completedTurnCount: completedTurns.length,
+      rollingSummary,
+      pendingClarification,
+      memoryCount: memoryItems.length,
+    };
   }
 
   private async authorizeWorkspaceFunding(runtime: Runtime, turn: TurnRecord, contextId: string, signal: AbortSignal): Promise<WorkflowLaunch | undefined> {

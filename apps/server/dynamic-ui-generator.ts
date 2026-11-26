@@ -19,7 +19,8 @@ import { parseStockTradePrompt, type SettlementCallback, type TradeStore } from 
 import { connectorInvokeToolRef, domainWriteToolRef } from "./runtime";
 import { generateWidgetFromText } from "./widget-library";
 import { runDynamicUiHarness } from "./dynamic-ui-harness";
-import type { AgenticHarness } from "@sfield/core";
+import type { AgenticHarness, HarnessStageRecord } from "@sfield/core";
+import type { PendingClarificationState } from "./chat-history";
 import type { PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import type { GoalProgressProvider } from "../../packages/goal-progress";
 
@@ -1220,9 +1221,13 @@ export async function generateDynamicUi(input: {
   prompt: string;
   profileSummary?: string;
   recentContext?: string;
+  rollingSummary?: string;
+  userMemorySummary?: string;
+  pendingClarification?: PendingClarificationState | null;
   gateway?: GatewaySettings | null;
   dataDir: string;
   harness?: AgenticHarness;
+  onStage?: (stage: HarnessStageRecord) => void | Promise<void>;
   portfolioSnapshots?: PortfolioSnapshotProvider;
   goalProgressProvider?: GoalProgressProvider;
   opsStore?: OpsIncidentStore;
@@ -1248,7 +1253,7 @@ export async function generateDynamicUi(input: {
   signal?: AbortSignal;
 }): Promise<{ intro: string; canvas: DynamicCanvasProps }> {
   const {
-    prompt, profileSummary, recentContext, gateway, dataDir, harness, portfolioSnapshots, goalProgressProvider, opsStore, salesStore, connectorStore, approvalStore,
+    prompt, profileSummary, recentContext, rollingSummary, userMemorySummary, pendingClarification, gateway, dataDir, harness, onStage, portfolioSnapshots, goalProgressProvider, opsStore, salesStore, connectorStore, approvalStore,
     tradeStore, matchedActionFlow, personaId, conversationId, principalId, onTradeSettle, requesterName, semanticRoute, tradeContinuation, signal,
   } = input;
 
@@ -1391,9 +1396,13 @@ export async function generateDynamicUi(input: {
       personaId,
       principalId,
       recentContext,
+      rollingSummary,
+      userMemorySummary,
+      pendingClarification,
       gateway,
       dataDir,
       harness,
+      onStage,
       portfolioSnapshots,
       goalProgressProvider,
       tradeStore,

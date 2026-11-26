@@ -485,6 +485,10 @@ export class Runtime implements IntegrationTaskRuntime {
     return this.sf.chat;
   }
 
+  get compactor() {
+    return this.sf.compactor;
+  }
+
   get harness() {
     return this.sf.harness;
   }

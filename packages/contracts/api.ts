@@ -115,6 +115,13 @@ export type SemanticRouteTrace = {
   confidence: number;
   reasoning: string;
 };
+export type LiveHarnessStage = {
+  stage: string;
+  status: string;
+  summary: string;
+  thinking?: string;
+  durationMs?: number;
+};
 export type TurnView = {
   id: string;
   conversationId: string;
@@ -122,6 +129,7 @@ export type TurnView = {
   createdAt: number;
   status: TurnStatus;
   progress: Progress;
+  harnessStages?: LiveHarnessStage[];
   actionMode?: ActionMode;
   semanticRoute?: SemanticRouteTrace;
   customerLookup?: CustomerLookupSummary;

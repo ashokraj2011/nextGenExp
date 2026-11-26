@@ -1750,6 +1750,7 @@ export async function startApp(options: Options) {
         requireThread(conversation);
         if (conversation.audience === "admin" || (!operator && store.hasOperatorContent(id))) requireOperator();
         if (method === "GET" && operation === "updates") return json(res, await experience.recordUpdates(conversation, Boolean(operator)));
+        if (method === "GET" && operation === "context") return json(res, await experience.conversationContext(conversation, conversation.principalId));
         if (method === "GET" && !operation) {
           const turns = await experience.conversationTurns(conversation);
           return json(res, { ...presentConversation(conversation), turns: turns.map((turn) => visibleTurn(turn, operator)) });

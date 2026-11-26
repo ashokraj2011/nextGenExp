@@ -15,7 +15,7 @@ export const AGENT_DEFAULTS = Object.freeze({
     output_reserve_tokens: 2000,
     max_tools: 24,
     sources: [] as JsonValue[],
-    priority: ["history", "preferences", "facts", "retrieval", "summary"] as const,
+    priority: ["summary", "preferences", "facts", "history", "retrieval"] as const,
   },
   policy: { preset: "supervised" as const },
   budget: {
