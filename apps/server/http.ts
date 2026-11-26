@@ -930,6 +930,22 @@ export async function startApp(options: Options) {
       }
       throw new ApiError(404, "not_found", "This item is unavailable.");
     }
+    if (resource === "knowledge-search" && !id && method === "POST") {
+      const { query } = await body(req, z.object({ query: z.string().trim().min(2).max(400) }).strict());
+      return json(res, knowledgeBase.search(query, 3));
+    }
+    if (resource === "handoffs" && id && !operation && method === "GET") {
+      const ticket = handoffStore.findById(id);
+      if (!ticket) throw new ApiError(404, "handoff_not_found", "Handoff ticket not found.");
+      return json(res, { ticket });
+    }
+    if (resource === "handoffs" && id && operation === "reply" && method === "POST") {
+      const { text } = await body(req, z.object({ text: z.string().trim().min(1).max(2000) }).strict());
+      const existing = handoffStore.findById(id);
+      if (!existing) throw new ApiError(404, "handoff_not_found", "Handoff ticket not found.");
+      const ticket = handoffStore.addReply(id, existing.customerName, text, "customer");
+      return json(res, { ticket });
+    }
     if (resource === "handoffs" && !id && method === "POST") {
       const input = await body(req, createHandoffInputSchema, 16 * 1024);
       const profile = profileStore.findByPersonaId(input.personaId);

@@ -603,4 +603,8 @@ export function ExperienceLayoutPreview({ data }: { data: DisplayExperience }) {
   return <ExperiencePart data={data} preview />;
 }
 
+export function ExperienceCanvasView({ data }: { data: DisplayExperience }) {
+  return <ExperiencePart data={data} />;
+}
+
 export const ExperienceDataUI = makeAssistantDataUI<DisplayExperience>({ name: "experience-surface", render: ExperiencePart });

@@ -202,17 +202,16 @@ export function NextSuggestionChips({ suggestions, disabled, onPick }: {
 }) {
   if (!suggestions.length) return null;
   return (
-    <details className="starter-disclosure">
-      <summary>Explore suggested questions</summary>
-      <div className="next-suggestions" role="group" aria-label="Suggested next questions">
+    <div className="next-suggestions-bar" role="group" aria-label="Suggested next questions">
+      <span className="next-suggestions-label"><Sparkles size={11} aria-hidden="true" />Next</span>
+      <div className="next-suggestions">
         {suggestions.map(({ label, prompt }) => (
           <button key={prompt} type="button" className="next-suggestion-pill" disabled={disabled} onClick={() => onPick(prompt)}>
-            <Sparkles size={12} aria-hidden="true" />
             <span>{label}</span>
           </button>
         ))}
       </div>
-    </details>
+    </div>
   );
 }
 

@@ -147,6 +147,32 @@ test("2.6: Live Human Agent Warm Handoff escalation, advisor claim, reply, and r
   });
   assert.ok(replied.ticket.notes.some((n) => n.role === "agent" && n.text.includes("beneficiary update")));
 
+  // Customer polls handoff status & sends a live follow-up reply directly from chat.
+  const statusRes = await fetch(`${app.url}/api/handoffs/${ticket.handoffId}`);
+  assert.equal(statusRes.status, 200);
+  const statusBody = (await statusRes.json()) as { ticket: HandoffTicket };
+  assert.equal(statusBody.ticket.status, "claimed");
+
+  const custReplyRes = await fetch(`${app.url}/api/handoffs/${ticket.handoffId}/reply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: "Thanks! Please add my spouse as primary beneficiary." }),
+  });
+  assert.equal(custReplyRes.status, 200);
+  const custReplyBody = (await custReplyRes.json()) as { ticket: HandoffTicket };
+  assert.ok(custReplyBody.ticket.notes.some((n) => n.role === "customer" && n.text.includes("primary beneficiary")));
+
+  // Customer-safe hybrid policy citations lookup works without operator auth.
+  const pubKbRes = await fetch(`${app.url}/api/knowledge-search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "wash sales tax harvesting" }),
+  });
+  assert.equal(pubKbRes.status, 200);
+  const pubKb = (await pubKbRes.json()) as KnowledgeSearchResult;
+  assert.equal(pubKb.retrievalMode, "hybrid_bm25_vector");
+  assert.ok(pubKb.citations.length > 0);
+
   const resolved = await client.request<{ ticket: HandoffTicket; view: HandoffInboxView }>("/api/admin/handoffs/resolve", {
     handoffId: ticket.handoffId,
     resolutionNote: "Completed beneficiary review with customer.",

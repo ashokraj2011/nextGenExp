@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useAui, useAuiState, useExternalStoreRuntime, type ThreadMessageLike } from "@assistant-ui/react";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import {
-  ArrowLeft, ArrowUp, ArrowUpRight, BookOpenText, ChevronDown, ChevronRight, Columns2, Eye, GraduationCap, House, LayoutDashboard,
+  ArrowLeft, ArrowUp, ArrowUpRight, BookOpenText, Brain, ChevronDown, ChevronRight, Columns2, Eye, GraduationCap, Headphones, House, LayoutDashboard,
   ListChecks, LogIn, LogOut, MapPin, MessageSquare, Mic, MicOff, PanelLeft, PanelLeftClose, Paperclip, Plus, RotateCcw, Sparkles,
   Square, ThumbsDown, ThumbsUp, X,
 } from "lucide-react";
@@ -36,6 +36,11 @@ import type { ProactiveAlert } from "../../packages/contracts/proactive-events";
 import { usePendingActions, WorkspaceHome, WorkspaceOverview, type PendingActions } from "./workspace-overview";
 import { WorkspaceCustomization, WorkspaceMenu, type WorkspaceSection } from "./workspace-menu";
 import { ThreadList, ThreadSettings } from "./thread-list";
+import type { HandoffTicket } from "../../packages/contracts/handoff";
+import {
+  CitationsStrip, isHandoffPhrase, LiveCanvasPane, LiveHandoffCard, matchSlashCommands,
+  MemoryDrawer, SlashCommandMenu, TurnRichActions, type MemoryEntry, type SlashCommand,
+} from "./chat-rich-ux";
 import "./customer-workbench.css";
 
 const homeGoalPrompt = "Show my home-buying goal and savings progress.";
@@ -78,6 +83,8 @@ type ConversationOperations = {
   pending: boolean;
   activeProfile?: DemoPersona;
   progressHistory: Record<string, Progress[]>;
+  pinnedTurnId?: string;
+  pinCanvas: (turn: TurnView) => void;
   retry: (id: string) => void;
   anchorTurn: (id: string, message: HTMLElement) => void;
   feedback: (turnId: string, experienceId: string, value: "helpful" | "unhelpful") => void;
@@ -88,6 +95,7 @@ type ConversationOperations = {
 const ConversationControls = createContext<ConversationOperations>({
   pending: false,
   progressHistory: {},
+  pinCanvas: () => undefined,
   retry: () => undefined,
   feedback: () => undefined,
   anchorTurn: () => undefined,
@@ -190,7 +198,7 @@ function NbaCompanionCard({ nba, personaId, disabled, onRunPrompt, onPreviewFund
 
 function AssistantMessage() {
   const turn = useAuiState((state) => state.message.metadata.custom?.turn as TurnView | undefined);
-  const { latest, pending, activeProfile, progressHistory, retry, feedback, anchorTurn, runPrompt, previewFunding } = useContext(ConversationControls);
+  const { latest, pending, activeProfile, progressHistory, pinnedTurnId, pinCanvas, retry, feedback, anchorTurn, runPrompt, previewFunding } = useContext(ConversationControls);
   const element = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (element.current && turn && latest?.id === turn.id) anchorTurn(turn.id, element.current);
@@ -249,14 +257,24 @@ function AssistantMessage() {
             </button>
           )}
           {experience?.status === "ready" && experience.outcome !== "create_rule" && (
-            <footer className="feedback-controls" aria-label="Response feedback">
-              <SpeakButton text={experience.question ?? experience.intro} />
-              <span>Was this helpful?</span>
-              <button className="icon-button" type="button" aria-label="Helpful" aria-pressed={turn.feedback === "helpful"}
-                onClick={() => feedback(turn.id, experience.experienceId, "helpful")}><ThumbsUp size={15} /></button>
-              <button className="icon-button" type="button" aria-label="Unhelpful" aria-pressed={turn.feedback === "unhelpful"}
-                onClick={() => feedback(turn.id, experience.experienceId, "unhelpful")}><ThumbsDown size={15} /></button>
-            </footer>
+            <>
+              <CitationsStrip experience={experience} userMessage={turn.message} />
+              <TurnRichActions
+                turn={turn}
+                pending={pending}
+                pinnedInCanvas={pinnedTurnId === turn.id}
+                onPinCanvas={pinCanvas}
+                onReframe={runPrompt}
+              />
+              <footer className="feedback-controls" aria-label="Response feedback">
+                <SpeakButton text={experience.question ?? experience.intro} />
+                <span>Was this helpful?</span>
+                <button className="icon-button" type="button" aria-label="Helpful" aria-pressed={turn.feedback === "helpful"}
+                  onClick={() => feedback(turn.id, experience.experienceId, "helpful")}><ThumbsUp size={15} /></button>
+                <button className="icon-button" type="button" aria-label="Unhelpful" aria-pressed={turn.feedback === "unhelpful"}
+                  onClick={() => feedback(turn.id, experience.experienceId, "unhelpful")}><ThumbsDown size={15} /></button>
+              </footer>
+            </>
           )}
         </div>
       </div>
@@ -264,13 +282,15 @@ function AssistantMessage() {
   );
 }
 
-function Composer({ draft, onDraft, running, pending, disabled, notice, input, showStarters, hero, nextSuggestions, domainPack }: {
+function Composer({ draft, onDraft, running, pending, disabled, notice, input, showStarters, hero, nextSuggestions, domainPack, onOpenAdvisor, onOpenMemory }: {
   draft: string; onDraft: (value: string) => void; running: boolean; pending: boolean; disabled: boolean; notice: string;
   input: React.RefObject<HTMLTextAreaElement | null>;
   showStarters: boolean;
   hero?: boolean;
   nextSuggestions: NextSuggestion[];
   domainPack?: DomainPack;
+  onOpenAdvisor?: () => void;
+  onOpenMemory?: () => void;
 }) {
   const aui = useAui();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -278,6 +298,22 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
   const [localNotice, setLocalNotice] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [sampleMenuOpen, setSampleMenuOpen] = useState(false);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const slashCommands = useMemo(() => matchSlashCommands(draft), [draft]);
+  useEffect(() => { setSlashIndex(0); }, [slashCommands.length, draft]);
+
+  const runSlashCommand = (cmd: SlashCommand) => {
+    onDraft("");
+    if (cmd.action === "prompt" && cmd.prompt) {
+      aui.thread().append(cmd.prompt);
+    } else if (cmd.action === "advisor") {
+      onOpenAdvisor?.();
+    } else if (cmd.action === "memory") {
+      onOpenMemory?.();
+    } else if (cmd.action === "upload") {
+      fileInput.current?.click();
+    }
+  };
 
   const voice = useVoiceInput({
     onTranscript: (text) => {
@@ -324,6 +360,29 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
   };
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (slashCommands.length > 0) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setSlashIndex((i) => (i + 1) % slashCommands.length);
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setSlashIndex((i) => (i - 1 + slashCommands.length) % slashCommands.length);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onDraft("");
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+        event.preventDefault();
+        const picked = slashCommands[slashIndex] ?? slashCommands[0];
+        if (picked) runSlashCommand(picked);
+        return;
+      }
+    }
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       send();
@@ -344,6 +403,8 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
       )}
       {activeNotice && <div className="request-notice" role="status">{activeNotice}</div>}
       {pending && !running && !activeNotice && <div className="submit-status" role="status">Sending your request…</div>}
+      <div className="composer-slash-wrap">
+      <SlashCommandMenu commands={slashCommands} activeIndex={slashIndex} onPick={runSlashCommand} />
       <form
         className={"composer" + (dragOver ? " is-drag-over" : "") + (attachments.length ? " has-attachments" : "")}
         onSubmit={(event) => { event.preventDefault(); send(); }}
@@ -361,7 +422,7 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
           <div className="composer-field">
             <label className="sr-only" htmlFor="composer-input">Your question</label>
             <textarea id="composer-input" ref={input} rows={hero ? 2 : 1} value={draft} maxLength={MAX_MESSAGE_LENGTH}
-              placeholder={voice.listening ? "Listening… speak your question" : (domainPack?.composerPlaceholder ?? "Ask a question…")}
+              placeholder={voice.listening ? "Listening… speak your question" : (domainPack?.composerPlaceholder ? `${domainPack.composerPlaceholder} (or type / for commands)` : "Ask a question or type / for quick commands…")}
               onChange={(event) => onDraft(event.target.value)} onKeyDown={onKeyDown} />
           </div>
           <div className="composer-tools">
@@ -436,6 +497,7 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
           </div>
         </div>
       </form>
+      </div>
       <div className="composer-footer-row">
         <span className="composer-guardrail">
           {voice.listening
@@ -482,6 +544,10 @@ type ChatProps = {
   onRetry: (id: string) => void;
   onFollowUp: (id: string, envelope: ActionMessage) => void;
   onFeedback: ConversationOperations["feedback"];
+  activeHandoff: HandoffTicket | null;
+  onStartHandoff: (reason?: string) => void;
+  onDismissHandoff: () => void;
+  onOpenMemory: () => void;
 };
 
 const noTurns: TurnView[] = [];
@@ -489,10 +555,17 @@ const noTurns: TurnView[] = [];
 function Chat({
   conversation, configuration, activeProfile, pendingActions, pending, draft, onDraft, onSend, onStop, onRetry, onFollowUp, onFeedback, notice,
   section, pins, progressHistory, domainPack, onSelect, onPreviewFunding, onRestore, onWriteBack,
+  activeHandoff, onStartHandoff, onDismissHandoff, onOpenMemory,
 }: ChatProps) {
   const turns = conversation?.turns ?? noTurns;
   const latest = turns.at(-1);
   const running = latest?.status === "working";
+  const [pinnedTurnId, setPinnedTurnId] = useState<string | undefined>(undefined);
+  useEffect(() => { setPinnedTurnId(undefined); }, [conversation?.id]);
+  const pinnedTurn = useMemo(() => turns.find((t) => t.id === pinnedTurnId && t.experience), [turns, pinnedTurnId]);
+  const pinCanvas = useCallback((turn: TurnView) => {
+    setPinnedTurnId((curr) => (curr === turn.id ? undefined : turn.id));
+  }, []);
   const [updates, setUpdates] = useState<Awaited<ReturnType<typeof api.recordUpdates>>>([]);
   useEffect(() => {
     setUpdates([]);
@@ -558,7 +631,7 @@ function Chat({
     <button className="secondary-button" type="button" disabled={pending} onClick={onRestore}>Restore conversation</button>
   </div> : <Composer draft={draft} onDraft={onDraft} running={running} pending={pending} disabled={!configuration} input={input}
     notice={notice} showStarters={turns.length === 0 && domainPack.id === "wealth"} hero={useHeroComposer}
-    nextSuggestions={nextSuggestions} domainPack={domainPack} />;
+    nextSuggestions={nextSuggestions} domainPack={domainPack} onOpenAdvisor={() => onStartHandoff()} onOpenMemory={onOpenMemory} />;
 
   return <AssistantRuntimeProvider runtime={runtime}>
     <ExperienceControls.Provider value={{
@@ -571,11 +644,12 @@ function Chat({
       rendered,
     }}>
       <ConversationControls.Provider value={{
-        latest, pending, activeProfile, progressHistory, retry: onRetry, feedback: onFeedback, anchorTurn,
+        latest, pending, activeProfile, progressHistory, pinnedTurnId, pinCanvas, retry: onRetry, feedback: onFeedback, anchorTurn,
         runPrompt: (prompt) => void onSend(prompt),
         previewFunding: () => onPreviewFunding(pendingActionsContext),
       }}>
         <ExperienceDataUI />
+        <div className="chat-split-shell">
         <ThreadPrimitive.Root className={adminChat ? "thread" : "thread customer-workbench editorial-thread"}>
           <ThreadPrimitive.Viewport className="thread-scroll" ref={viewport}
             autoScroll={false} scrollToBottomOnInitialize={false} scrollToBottomOnRunStart={false} scrollToBottomOnThreadSwitch={false}
@@ -607,9 +681,12 @@ function Chat({
             {turns.length > 0 && <div className="messages">
               <ThreadPrimitive.Messages>{({ message }) => message.role === "user" ? <UserMessage /> : <AssistantMessage />}</ThreadPrimitive.Messages>
             </div>}
+            {activeHandoff && <LiveHandoffCard ticket={activeHandoff} onDismiss={onDismissHandoff} />}
           </ThreadPrimitive.Viewport>
           {!useHeroComposer && composerEl}
         </ThreadPrimitive.Root>
+        {pinnedTurn && <LiveCanvasPane turn={pinnedTurn} onClose={() => setPinnedTurnId(undefined)} />}
+        </div>
       </ConversationControls.Provider>
     </ExperienceControls.Provider>
   </AssistantRuntimeProvider>;
@@ -769,6 +846,11 @@ function App() {
   const [railOpen, setRailOpen] = useState(false);
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [panel, setPanel] = useState<Panel | undefined>(entry.showProfiles ? { kind: "profiles" } : undefined);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [memoryItems, setMemoryItems] = useState<MemoryEntry[]>([]);
+  const [memoryLoading, setMemoryLoading] = useState(false);
+  const [memoryError, setMemoryError] = useState("");
+  const [activeHandoff, setActiveHandoff] = useState<HandoffTicket | null>(null);
   const inFlight = useRef(false);
   const previousAttempt = useRef<{ fingerprint: string; id: string } | null>(null);
   const profilesTrigger = useRef<HTMLButtonElement>(null);
@@ -968,8 +1050,48 @@ function App() {
     setConversation((current) => current?.id === row.id ? { ...current, ...row } : current);
   };
 
+  const startHandoff = useCallback(async (reason?: string) => {
+    const convId = chat?.id ?? `conv_${crypto.randomUUID().slice(0, 10)}`;
+    const personaId = activeProfile?.personaId ?? configuration?.defaultPersonaId ?? "demo-learner";
+    const domain = domainPack.id === "it_ops" ? "operations" : domainPack.id === "sales_revops" ? "sales" : "wealth";
+    try {
+      const res = await api.createHandoff({
+        conversationId: convId,
+        personaId,
+        domain,
+        reason: (reason?.trim() || "Customer requested a live specialist from chat.").slice(0, 400),
+      });
+      setActiveHandoff(res.ticket);
+      setOverviewOpen(false);
+      setSection("summary");
+    } catch (error) {
+      setNotice(messageFor(error));
+    }
+  }, [activeProfile?.personaId, chat?.id, configuration?.defaultPersonaId, domainPack.id]);
+
+  const loadMemory = useCallback(async () => {
+    if (!configuration?.gatewayConfigured) return;
+    setMemoryLoading(true);
+    setMemoryError("");
+    try {
+      const res = await api.memoryList();
+      setMemoryItems(res.items);
+    } catch (error) {
+      setMemoryError(messageFor(error));
+    } finally {
+      setMemoryLoading(false);
+    }
+  }, [configuration?.gatewayConfigured]);
+
+  useEffect(() => {
+    if (configuration?.gatewayConfigured) void loadMemory();
+  }, [configuration?.gatewayConfigured, loadMemory]);
+
   const send = async (message: string) => {
     if (!configuration) return;
+    if (!adminChat && isHandoffPhrase(message)) {
+      void startHandoff(message);
+    }
     await exclusive(async () => {
       const target = chat ?? await createConversation(activeProfile?.personaId ?? configuration.defaultPersonaId, configuration.defaultScenarioId, domainPack.id);
       if (!chat) choose(target);
@@ -1283,6 +1405,29 @@ function App() {
             </div>
           )}
           <div className="topbar-actions">
+            {!adminChat && configuration?.gatewayConfigured && (
+              <button
+                type="button"
+                className={"topbar-rich-btn" + (memoryOpen ? " is-active" : "")}
+                title="View or manage what CEP remembers for you"
+                onClick={() => { setMemoryOpen(true); void loadMemory(); }}
+              >
+                <Brain size={14} aria-hidden="true" />
+                <span>Memory</span>
+                {memoryItems.length > 0 && <span className="topbar-rich-count">{memoryItems.length}</span>}
+              </button>
+            )}
+            {!adminChat && (
+              <button
+                type="button"
+                className={"topbar-rich-btn" + (activeHandoff ? " is-active" : "")}
+                title="Escalate to a live human specialist with your conversation brief"
+                onClick={() => void startHandoff()}
+              >
+                <Headphones size={14} aria-hidden="true" />
+                <span>{activeHandoff ? "Specialist active" : "Talk to advisor"}</span>
+              </button>
+            )}
             <ThemeToggle compact />
             {adminChat && configuration && (
               <span className="model-status" data-connected={configuration.gatewayConfigured}>
@@ -1408,8 +1553,27 @@ function App() {
         }}
         onFeedback={(turnId, expId, value) => {
           void api.event(expId, value).then(() => api.turn(turnId)).then(upsert).catch((error) => setNotice(messageFor(error)));
-        }} />
+        }}
+        activeHandoff={activeHandoff}
+        onStartHandoff={(reason) => void startHandoff(reason)}
+        onDismissHandoff={() => setActiveHandoff(null)}
+        onOpenMemory={() => { setMemoryOpen(true); void loadMemory(); }} />
     </main>
+    <MemoryDrawer
+      open={memoryOpen}
+      items={memoryItems}
+      loading={memoryLoading}
+      error={memoryError}
+      onClose={() => setMemoryOpen(false)}
+      onSave={async (kind, content) => {
+        const res = await api.memorySave({ kind, content });
+        setMemoryItems(res.items);
+      }}
+      onForget={async (id) => {
+        const res = await api.memoryForget(id);
+        setMemoryItems(res.items);
+      }}
+    />
     {configuration && activeProfile && panel?.kind === "profiles" && <DemoProfiles personas={configuration.personas}
       activePersonaId={activeProfile.personaId} pending={pending} close={closePanel}
       startChat={(personaId) => startConversation(personaId, configuration.defaultScenarioId)} />}
