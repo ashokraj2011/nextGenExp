@@ -383,4 +383,8 @@ export const api = {
   activateGateway: (config: unknown) => request<{ activated: boolean; restarting: boolean; view: import("./gateway-admin").GatewayView }>("/api/admin/gateway/activate", { config }),
   resetGateway: () => request<{ reset: boolean; restarting: boolean; view: import("./gateway-admin").GatewayView }>("/api/admin/gateway/reset", {}),
   discoverIntegrationMcp: (integrationId: string) => request<{ integrationId: string; candidates: McpImportCandidate[] }>("/api/integrations/mcp/discover", { integrationId }),
+  migrateLegacyConnectors: (connectorId?: string) => request<{ results: Array<{ connectorId: string; integrationId: string; toolRef: string; status: "migrated" | "already_migrated" | "skipped"; route?: string; reason?: string }>; view: IntegrationTasksView }>("/api/integrations/migrate-connectors", connectorId ? { connectorId } : {}),
+  telemetry: () => request<import("../../packages/contracts/telemetry").TelemetryView>("/api/admin/telemetry"),
+  exportOtlpTelemetry: () => request<Record<string, unknown>>("/api/admin/telemetry/export"),
+  resetTelemetry: () => request<import("../../packages/contracts/telemetry").TelemetryView>("/api/admin/telemetry/reset", {}),
 };

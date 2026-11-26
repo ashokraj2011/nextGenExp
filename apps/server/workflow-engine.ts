@@ -15,6 +15,8 @@ import {
 import { makeId } from "../../packages/experience/compile";
 import type { ApprovalStore } from "./approval-store";
 import type { ConnectorStore } from "./connector-store";
+import type { IntegrationTaskService } from "./integration-tasks";
+import type { TaskRun } from "../../packages/contracts/integration-task";
 
 export function defaultWorkflowDefinitions(nowIso: string): WorkflowDefinition[] {
   return [
@@ -279,6 +281,7 @@ export class WorkflowEngine {
     private readonly deps: {
       approvalStore: ApprovalStore;
       connectorStore: ConnectorStore;
+      integrationService?: IntegrationTaskService;
     },
   ) {
     this.defsPath = join(dataDir, "workflows.json");
@@ -361,6 +364,10 @@ export class WorkflowEngine {
   getDefinition(id: string): WorkflowDefinition | undefined {
     const found = this.definitions.find((d) => d.id === id);
     return found ? structuredClone(found) : undefined;
+  }
+
+  setIntegrationService(service: IntegrationTaskService): void {
+    this.deps.integrationService = service;
   }
 
   view(): WorkflowsAdminView {
@@ -540,6 +547,75 @@ export class WorkflowEngine {
     return this.advance(run.runId);
   }
 
+  /** Called when an integration_task approval spawned by a workflow step is approved or denied. */
+  async resumeAfterTaskApproval(
+    approvalId: string,
+    taskRun: TaskRun | undefined,
+    approved: boolean,
+    actor: string,
+    note?: string,
+  ): Promise<WorkflowRun | undefined> {
+    const run = this.runs.find((r) => r.status === "waiting_approval" && r.steps.some((s) => s.approvalId === approvalId && s.type === "integration_task"));
+    if (!run) return undefined;
+    const stepIdx = run.steps.findIndex((s) => s.approvalId === approvalId);
+    if (stepIdx < 0) return run;
+    const def = this.getDefinition(run.workflowId);
+    const stepDef = def?.steps[stepIdx];
+
+    if (!approved || !taskRun) {
+      run.steps[stepIdx] = {
+        ...run.steps[stepIdx],
+        status: "failed",
+        summary: `Rejected by ${actor}${note ? ` — ${note}` : ""}`,
+        finishedAt: new Date().toISOString(),
+      };
+      run.status = "failed";
+      run.errorMessage = `Task approval ${approvalId} rejected by ${actor}.`;
+      return this.persistRun(run);
+    }
+
+    const ok = taskRun.state === "succeeded" || taskRun.state === "succeeded_unverified_output";
+    if (!ok) {
+      const msg = taskRun.state === "outcome_unknown"
+        ? `Outcome unknown for ${taskRun.toolRef} (${taskRun.runId}) — reconcile before retrying.`
+        : (taskRun.error?.message ?? `Task ${taskRun.toolRef} ended as ${taskRun.state}`);
+      run.steps[stepIdx] = {
+        ...run.steps[stepIdx],
+        status: "failed",
+        summary: msg,
+        taskRunId: taskRun.runId,
+        outcomeCode: taskRun.outcome?.code,
+        sfieldRunId: taskRun.sfieldRunId,
+        finishedAt: new Date().toISOString(),
+      };
+      run.status = "failed";
+      run.errorMessage = msg;
+      return this.persistRun(run);
+    }
+
+    if (stepDef?.type === "integration_task" && taskRun.output && typeof taskRun.output === "object" && !Array.isArray(taskRun.output)) {
+      const prefix = stepDef.outputPrefix ? `${stepDef.outputPrefix}_` : "";
+      for (const [k, v] of Object.entries(taskRun.output as Record<string, unknown>)) {
+        if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+          run.computed[`${prefix}${k}`] = v;
+        }
+      }
+    }
+
+    run.steps[stepIdx] = {
+      ...run.steps[stepIdx],
+      status: "completed",
+      summary: `Approved by ${actor} · ${taskRun.toolRef} → ${taskRun.outcome?.code ?? taskRun.state}`,
+      taskRunId: taskRun.runId,
+      outcomeCode: taskRun.outcome?.code,
+      sfieldRunId: taskRun.sfieldRunId,
+      finishedAt: new Date().toISOString(),
+    };
+    run.currentStepIndex = stepIdx + 1;
+    this.persistRun(run);
+    return this.advance(run.runId);
+  }
+
   cancelRun(runId: string): WorkflowRun {
     const run = this.getRun(runId);
     if (!run) throw new Error(`Workflow run "${runId}" not found.`);
@@ -691,6 +767,108 @@ export class WorkflowEngine {
             ...run.steps[idx],
             status: "failed",
             summary: err instanceof Error ? err.message : "Connector call failed.",
+            startedAt: nowIso,
+            finishedAt: new Date().toISOString(),
+          };
+          run.status = "failed";
+          run.errorMessage = run.steps[idx].summary;
+          return this.persistRun(run);
+        }
+        run.currentStepIndex += 1;
+        this.persistRun(run);
+        continue;
+      }
+
+      if (step.type === "integration_task") {
+        const svc = this.deps.integrationService;
+        if (!svc) {
+          run.steps[idx] = { ...run.steps[idx], status: "failed", toolRef: step.toolRef, summary: "IntegrationTaskService is not wired into WorkflowEngine.", startedAt: nowIso, finishedAt: new Date().toISOString() };
+          run.status = "failed";
+          run.errorMessage = run.steps[idx].summary;
+          return this.persistRun(run);
+        }
+        const contract = svc.view().contracts.find((c) => c.ref === step.toolRef);
+        const props = ((contract?.inputSchema as { properties?: Record<string, { type?: string | string[] }> } | undefined)?.properties) ?? {};
+        const input: Record<string, unknown> = {};
+        for (const [field, tmpl] of Object.entries(step.inputMapping ?? {})) {
+          const rawVal = interpolate(tmpl, run);
+          const propType = Array.isArray(props[field]?.type) ? props[field]!.type[0] : props[field]?.type;
+          if (propType === "number" || propType === "integer") {
+            const num = Number(rawVal);
+            input[field] = Number.isFinite(num) ? (propType === "integer" ? Math.round(num) : num) : rawVal;
+          } else if (propType === "boolean") {
+            input[field] = rawVal === "true";
+          } else {
+            input[field] = rawVal;
+          }
+        }
+        try {
+          const out = await svc.run(run.personaId || "workflow-engine", {
+            toolRef: step.toolRef,
+            input,
+            requestedBy: run.actorName,
+          });
+          if (out.approval) {
+            run.steps[idx] = {
+              ...run.steps[idx],
+              status: "waiting_approval",
+              summary: `Held by sfield for approval (${out.approval.id}) before running ${step.toolRef}`,
+              approvalId: out.approval.id,
+              payloadDigest: out.approval.payloadDigest,
+              dualControl: out.approval.dualControl,
+              taskRunId: out.run.runId,
+              toolRef: step.toolRef,
+              sfieldRunId: out.run.sfieldRunId,
+              startedAt: nowIso,
+            };
+            run.status = "waiting_approval";
+            return this.persistRun(run);
+          }
+          const ok = out.run.state === "succeeded" || out.run.state === "succeeded_unverified_output";
+          if (!ok) {
+            const msg = out.run.state === "outcome_unknown"
+              ? `Outcome unknown for ${step.toolRef} (${out.run.runId}) — reconcile before retrying.`
+              : (out.run.error?.message ?? `Task ${step.toolRef} ended as ${out.run.state}`);
+            run.steps[idx] = {
+              ...run.steps[idx],
+              status: "failed",
+              summary: msg,
+              taskRunId: out.run.runId,
+              toolRef: step.toolRef,
+              outcomeCode: out.run.outcome?.code,
+              sfieldRunId: out.run.sfieldRunId,
+              startedAt: nowIso,
+              finishedAt: new Date().toISOString(),
+            };
+            run.status = "failed";
+            run.errorMessage = msg;
+            return this.persistRun(run);
+          }
+          if (out.run.output && typeof out.run.output === "object" && !Array.isArray(out.run.output)) {
+            const prefix = step.outputPrefix ? `${step.outputPrefix}_` : "";
+            for (const [k, v] of Object.entries(out.run.output as Record<string, unknown>)) {
+              if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+                run.computed[`${prefix}${k}`] = v;
+              }
+            }
+          }
+          run.steps[idx] = {
+            ...run.steps[idx],
+            status: "completed",
+            summary: `${step.toolRef} → ${out.run.outcome?.code ?? out.run.state} (sfield ${out.run.sfieldRunId ?? "ok"})`,
+            taskRunId: out.run.runId,
+            toolRef: step.toolRef,
+            outcomeCode: out.run.outcome?.code,
+            sfieldRunId: out.run.sfieldRunId,
+            startedAt: nowIso,
+            finishedAt: new Date().toISOString(),
+          };
+        } catch (err) {
+          run.steps[idx] = {
+            ...run.steps[idx],
+            status: "failed",
+            toolRef: step.toolRef,
+            summary: err instanceof Error ? err.message : `Task ${step.toolRef} failed.`,
             startedAt: nowIso,
             finishedAt: new Date().toISOString(),
           };

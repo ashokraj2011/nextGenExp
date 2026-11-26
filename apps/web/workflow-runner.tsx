@@ -202,6 +202,13 @@ export function WorkflowRunnerNode({ node }: WorkflowRunnerNodeProps) {
                   <span className="wf-step-type">{step.type.replace("_", " ")}</span>
                 </div>
                 {step.summary && <p className="wf-step-summary">{step.summary}</p>}
+                {step.type === "integration_task" && (step.toolRef || step.outcomeCode || step.taskRunId) && (
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", fontSize: "0.75rem", opacity: 0.85, marginTop: "4px" }}>
+                    {step.toolRef && <code>{step.toolRef}</code>}
+                    {step.outcomeCode && <span>Outcome: <strong>{step.outcomeCode}</strong></span>}
+                    {step.taskRunId && <code>{step.taskRunId}</code>}
+                  </div>
+                )}
 
                 {/* Interactive Form for collect_input */}
                 {isCurrent && step.status === "waiting_input" && stepDef?.type === "collect_input" && (
@@ -254,7 +261,7 @@ export function WorkflowRunnerNode({ node }: WorkflowRunnerNodeProps) {
                 )}
 
                 {/* Inline SHA-256 HITL Approval Gate */}
-                {isCurrent && step.status === "waiting_approval" && step.approvalId && stepDef?.type === "hitl_approval" && (
+                {isCurrent && step.status === "waiting_approval" && step.approvalId && (stepDef?.type === "hitl_approval" || stepDef?.type === "integration_task") && (
                   <div className="wf-approval-box">
                     <div className="wf-approval-meta">
                       <span>SHA-256 Digest: <code>{step.payloadDigest?.slice(0, 16)}…</code></span>
@@ -268,7 +275,7 @@ export function WorkflowRunnerNode({ node }: WorkflowRunnerNodeProps) {
                         disabled={busy}
                         onClick={() => void decideApproval(step.approvalId!, "approve")}
                       >
-                        {stepDef.approveLabel}
+                        {stepDef.type === "hitl_approval" ? stepDef.approveLabel : "Approve & Run Task"}
                       </button>
                       <button
                         type="button"
@@ -276,7 +283,7 @@ export function WorkflowRunnerNode({ node }: WorkflowRunnerNodeProps) {
                         disabled={busy}
                         onClick={() => void decideApproval(step.approvalId!, "deny")}
                       >
-                        {stepDef.rejectLabel}
+                        {stepDef.type === "hitl_approval" ? stepDef.rejectLabel : "Deny & Abort"}
                       </button>
                     </div>
                   </div>

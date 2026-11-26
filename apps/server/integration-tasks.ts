@@ -19,6 +19,7 @@ import {
 } from "../../packages/contracts/integration-task";
 import type { ApprovalRecord } from "../../packages/contracts/approval";
 import type { ApprovalStore } from "./approval-store";
+import type { ConnectorStore } from "./connector-store";
 import { callMcpTool, discoverMcpTools, McpTransportError } from "./integration-mcp";
 
 /* ============================================================================
@@ -237,16 +238,29 @@ function readPath(value: unknown, path: string): unknown {
 
 export class TaskCallExecutor {
   private readonly sandbox;
-  constructor(orders?: ReturnType<typeof orderSource>) { this.sandbox = createSandboxHandlers(orders); }
+  constructor(orders?: ReturnType<typeof orderSource>, private readonly connectorStore?: ConnectorStore) { this.sandbox = createSandboxHandlers(orders); }
 
   async execute(integration: Integration, contract: TaskContract, input: Record<string, unknown>, signal: AbortSignal): Promise<TaskCallResult> {
     const writes = contract.effect !== "read";
     let response: TransportResponse;
     try {
       if (integration.transport === "sandbox") {
-        const handler = this.sandbox[contract.binding.target];
-        if (!handler) return { state: "failed", error: { kind: "transport", retryable: false, message: `No sandbox handler "${contract.binding.target}"` } };
-        response = await handler(input);
+        if (contract.binding.target.startsWith("legacy_connector:") && this.connectorStore) {
+          const connectorId = contract.binding.target.slice("legacy_connector:".length);
+          const exec = await this.connectorStore.invokeConnector(connectorId, {
+            action: String(input.action ?? contract.taskId),
+            actor: "integration_task",
+            payload: input,
+          }, signal);
+          response = {
+            status: exec.statusCode,
+            body: { summary: exec.summary, statusCode: exec.statusCode, connectorId: exec.connectorId, sandboxMode: exec.sandbox },
+          };
+        } else {
+          const handler = this.sandbox[contract.binding.target];
+          if (!handler) return { state: "failed", error: { kind: "transport", retryable: false, message: `No sandbox handler "${contract.binding.target}"` } };
+          response = await handler(input);
+        }
       } else if (integration.transport === "mcp") {
         try {
           response = await callMcpTool(integration, contract, input, signal);

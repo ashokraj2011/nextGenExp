@@ -153,6 +153,14 @@ export function WorkflowStudioPanel() {
         action: "workflow_dispatch",
         noteTemplate: "Triggered from workflow",
       };
+    } else if (type === "integration_task") {
+      nextStep = {
+        id: stepId,
+        type: "integration_task",
+        title: "Run Governed Integration Task",
+        toolRef: "int.itsm_sandbox.create_ticket@1.0.0",
+        inputMapping: { title: "{{inputs.title}}", priority: "P3", service: "platform" },
+      };
     } else if (type === "async_job") {
       nextStep = {
         id: stepId,
@@ -465,7 +473,7 @@ export function WorkflowStudioPanel() {
                 <div className="wf-steps-header">
                   <h3>Workflow Steps ({draft.steps.length})</h3>
                   <div className="wf-add-step-bar">
-                    {(["collect_input", "compute", "hitl_approval", "connector_call", "async_job", "emit_host_event"] as const).map((st) => (
+                    {(["collect_input", "compute", "hitl_approval", "connector_call", "integration_task", "async_job", "emit_host_event"] as const).map((st) => (
                       <button key={st} type="button" className="reg-mini-btn" onClick={() => addStep(st)}>
                         + {st.replace("_", " ")}
                       </button>
@@ -505,6 +513,9 @@ export function WorkflowStudioPanel() {
                         )}
                         {step.type === "hitl_approval" && (
                           <span>Risk: <strong>{step.riskLevel}</strong> · {step.dualControl ? "4-Eyes Dual Control" : "Inline Approval"} · {step.approvalTitleTemplate}</span>
+                        )}
+                        {step.type === "integration_task" && (
+                          <span>Governed Task: <code>{step.toolRef}</code>{step.outputPrefix ? ` · output prefix: ${step.outputPrefix}` : ""}</span>
                         )}
                         {step.type === "connector_call" && (
                           <span>Connector: <code>{step.connectorId}</code> · Action: <code>{step.action}</code></span>

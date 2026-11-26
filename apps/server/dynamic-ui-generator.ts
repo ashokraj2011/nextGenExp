@@ -4,6 +4,7 @@ import { matchingDeals, matchingIncidents } from "./record-context";
 import { type DynamicCanvasNode, type DynamicCanvasProps } from "../../packages/contracts/dynamic-canvas";
 import { widgetDraftSchema, type WidgetDraft } from "../../packages/contracts/widget";
 import { runCopilotPrompt } from "./copilot-acp-client";
+import { getLlmEgressContext, rehydrateObjectStrings, scrubJsonSafeText, type LlmEgressContext } from "./pii-firewall";
 import type { GatewaySettings } from "./gateway";
 import type { OpsIncidentStore } from "./ops-store";
 import type { SalesDealStore } from "./sales-store";
@@ -75,63 +76,127 @@ export async function callConfiguredLlmJson(
   userPrompt: string,
   signal: AbortSignal,
   image?: { base64: string; mimeType: string },
+  egressOverride?: LlmEgressContext & { operation?: string },
 ): Promise<unknown | null> {
-  if (gateway.profile === "copilot_acp") {
-    const cliHome = resolve(dataDir, "copilot-cli");
-    mkdirSync(cliHome, { recursive: true, mode: 0o700 });
-    const fullText = `${systemPrompt}\n\nUSER REQUEST:\n${userPrompt}\n\nReturn ONLY one valid JSON object matching the schema. No markdown fences, no commentary.`;
-    if (image) {
-      try {
-        const reply = await runCopilotPrompt(
-          gateway,
-          cliHome,
-          [
-            { type: "image", data: image.base64, mimeType: image.mimeType },
-            { type: "text", text: fullText },
-          ],
-          signal,
-          () => undefined,
-        );
-        return JSON.parse(stripJsonFences(reply.text));
-      } catch {
-        // If this Copilot CLI model does not support inline ACP image blocks, retry text-only below.
-      }
+  const egress = egressOverride ?? getLlmEgressContext(dataDir);
+  const piiFirewall = egress?.piiFirewall;
+  const telemetry = egress?.telemetry;
+  const operation = egressOverride?.operation ?? "llm_json";
+  const startedAt = Date.now();
+  const provider = gateway.profile === "copilot_acp" ? "copilot_acp" : gateway.profile === "openai" ? "openai" : "openai_compatible";
+
+  // Single egress PII firewall enforcement: scrub outbound user prompt before it leaves the server.
+  let outboundUserPrompt = userPrompt;
+  let tokenMap = new Map<string, string>();
+  let redactedCount = 0;
+  if (piiFirewall && piiFirewall.getConfig().enabled) {
+    const knownNames = egress?.getKnownNames?.() ?? [];
+    const scrubbed = scrubJsonSafeText(userPrompt, knownNames, piiFirewall.getConfig());
+    outboundUserPrompt = scrubbed.scrubbed;
+    tokenMap = scrubbed.tokenMap;
+    redactedCount = scrubbed.tokens.length;
+    if (redactedCount > 0) {
+      piiFirewall.recordEgressEvent({
+        personaName: `egress:${operation}`,
+        tokens: scrubbed.tokens,
+        scrubbedPreview: outboundUserPrompt.slice(0, 140),
+      });
+      telemetry?.recordPiiRedaction(redactedCount, operation);
     }
-    const reply = await runCopilotPrompt(gateway, cliHome, [{ type: "text", text: fullText }], signal, () => undefined);
-    return JSON.parse(stripJsonFences(reply.text));
   }
 
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(gateway.apiKey ? { Authorization: `Bearer ${gateway.apiKey}` } : {}),
-    ...(gateway.headers ?? {}),
-  };
-  const userContent = image
-    ? [
-        { type: "text", text: userPrompt },
-        { type: "image_url", image_url: { url: `data:${image.mimeType};base64,${image.base64}` } },
-      ]
-    : userPrompt;
-  const response = await fetch(`${gateway.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-    method: "POST",
-    headers,
-    signal,
-    body: JSON.stringify({
-      ...(gateway.bodyFields ?? {}),
-      model: gateway.model,
-      max_tokens: Math.min(gateway.maxOutputTokens, 1400),
-      temperature: 0.3,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent },
-      ],
-    }),
-  });
-  if (!response.ok) return null;
-  const payload = await response.json() as { choices?: { message?: { content?: string } }[] };
-  const text = payload.choices?.[0]?.message?.content;
-  if (!text) return null;
-  return JSON.parse(stripJsonFences(text));
+  const approxInTokens = Math.ceil((systemPrompt.length + outboundUserPrompt.length) / 4);
+
+  try {
+    if (gateway.profile === "copilot_acp") {
+      const cliHome = resolve(dataDir, "copilot-cli");
+      mkdirSync(cliHome, { recursive: true, mode: 0o700 });
+      const fullText = `${systemPrompt}\n\nUSER REQUEST:\n${outboundUserPrompt}\n\nReturn ONLY one valid JSON object matching the schema. No markdown fences, no commentary.`;
+      let rawText: string | undefined;
+      if (image) {
+        try {
+          const reply = await runCopilotPrompt(
+            gateway,
+            cliHome,
+            [
+              { type: "image", data: image.base64, mimeType: image.mimeType },
+              { type: "text", text: fullText },
+            ],
+            signal,
+            () => undefined,
+          );
+          rawText = reply.text;
+        } catch {
+          // If this Copilot CLI model does not support inline ACP image blocks, retry text-only below.
+        }
+      }
+      if (rawText === undefined) {
+        const reply = await runCopilotPrompt(gateway, cliHome, [{ type: "text", text: fullText }], signal, () => undefined);
+        rawText = reply.text;
+      }
+      const parsed = JSON.parse(stripJsonFences(rawText));
+      telemetry?.recordModelCall({
+        operation, provider, model: gateway.model, durationMs: Date.now() - startedAt, status: "ok",
+        inputTokens: approxInTokens, outputTokens: Math.ceil(rawText.length / 4), piiRedactedCount: redactedCount,
+      });
+      return rehydrateObjectStrings(parsed, tokenMap);
+    }
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(gateway.apiKey ? { Authorization: `Bearer ${gateway.apiKey}` } : {}),
+      ...(gateway.headers ?? {}),
+    };
+    const userContent = image
+      ? [
+          { type: "text", text: outboundUserPrompt },
+          { type: "image_url", image_url: { url: `data:${image.mimeType};base64,${image.base64}` } },
+        ]
+      : outboundUserPrompt;
+    const response = await fetch(`${gateway.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers,
+      signal,
+      body: JSON.stringify({
+        ...(gateway.bodyFields ?? {}),
+        model: gateway.model,
+        max_tokens: Math.min(gateway.maxOutputTokens, 1400),
+        temperature: 0.3,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userContent },
+        ],
+      }),
+    });
+    if (!response.ok) {
+      telemetry?.recordModelCall({
+        operation, provider, model: gateway.model, durationMs: Date.now() - startedAt, status: "error",
+        inputTokens: approxInTokens, outputTokens: 0, piiRedactedCount: redactedCount, errorMessage: `HTTP ${response.status}`,
+      });
+      return null;
+    }
+    const payload = await response.json() as {
+      choices?: { message?: { content?: string } }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    };
+    const text = payload.choices?.[0]?.message?.content;
+    if (!text) return null;
+    const parsed = JSON.parse(stripJsonFences(text));
+    telemetry?.recordModelCall({
+      operation, provider, model: gateway.model, durationMs: Date.now() - startedAt, status: "ok",
+      inputTokens: payload.usage?.prompt_tokens ?? approxInTokens,
+      outputTokens: payload.usage?.completion_tokens ?? Math.ceil(text.length / 4),
+      piiRedactedCount: redactedCount,
+    });
+    return rehydrateObjectStrings(parsed, tokenMap);
+  } catch (err) {
+    telemetry?.recordModelCall({
+      operation, provider, model: gateway.model, durationMs: Date.now() - startedAt, status: "error",
+      inputTokens: approxInTokens, outputTokens: 0, piiRedactedCount: redactedCount,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
 }
 
 function recordChoices(prompt: string, title: string, source: string, choices: { id: string; label: string }[]) {

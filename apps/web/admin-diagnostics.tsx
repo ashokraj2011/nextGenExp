@@ -10,6 +10,7 @@ import { CallLogs, PendingActionLogs } from "./call-logs";
 import { EvalRunnerPanel } from "./eval-runner-panel";
 import { PiiFirewallPanel } from "./pii-firewall-panel";
 import { UxEvolutionPanel } from "./ux-evolution-panel";
+import { TelemetryPanel } from "./telemetry-panel";
 import { Inspector } from "./inspector";
 import { readActiveConversation, rememberActiveConversation } from "./conversation-storage";
 
@@ -411,6 +412,7 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
   const evalsView = view === "logs" && query.get("source") === "evals";
   const piiView = view === "logs" && query.get("source") === "pii";
   const uxEvolutionView = view === "logs" && query.get("source") === "ux-evolution";
+  const telemetryView = view === "logs" && query.get("source") === "telemetry";
 
   useEffect(() => {
     let active = true;
@@ -427,13 +429,13 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
   }, [query, selectThread]);
 
   useEffect(() => {
-    if (!selectedId || pendingActionView || approvalsView || writeAuditView || analyticsView || evalsView || piiView || uxEvolutionView) return;
+    if (!selectedId || pendingActionView || approvalsView || writeAuditView || analyticsView || evalsView || piiView || uxEvolutionView || telemetryView) return;
     let active = true;
     void api.conversation(selectedId).then((row) => {
       if (active) setConversation(row);
     }, (error: unknown) => { if (active) setNotice(toolSetupErrorMessage(error)); });
     return () => { active = false; };
-  }, [selectedId, refresh, pendingActionView, approvalsView, writeAuditView, analyticsView, evalsView, piiView, uxEvolutionView]);
+  }, [selectedId, refresh, pendingActionView, approvalsView, writeAuditView, analyticsView, evalsView, piiView, uxEvolutionView, telemetryView]);
 
   const loaded = conversation?.id === selectedId ? conversation : undefined;
   const requestedTurn = loaded?.id === query.get("thread") ? query.get("turn") ?? undefined : undefined;
@@ -444,6 +446,7 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
   const evalsQuery = new URLSearchParams({ source: "evals" });
   const piiQuery = new URLSearchParams({ source: "pii" });
   const uxEvolutionQuery = new URLSearchParams({ source: "ux-evolution" });
+  const telemetryQuery = new URLSearchParams({ source: "telemetry" });
   if (selectedId) {
     pendingQuery.set("thread", selectedId);
     approvalsQuery.set("thread", selectedId);
@@ -452,8 +455,9 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
     evalsQuery.set("thread", selectedId);
     piiQuery.set("thread", selectedId);
     uxEvolutionQuery.set("thread", selectedId);
+    telemetryQuery.set("thread", selectedId);
   }
-  const isChatCallsView = !pendingActionView && !approvalsView && !writeAuditView && !analyticsView && !evalsView && !piiView && !uxEvolutionView;
+  const isChatCallsView = !pendingActionView && !approvalsView && !writeAuditView && !analyticsView && !evalsView && !piiView && !uxEvolutionView && !telemetryView;
   return <main className="admin-main admin-diagnostics" aria-labelledby="diagnostics-title">
     <header className="admin-heading"><h1 id="diagnostics-title">{title}</h1></header>
     {view === "logs" && <nav className="log-sources" aria-label="Log sources">
@@ -473,6 +477,8 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
         href={adminPaths.logs + "?" + piiQuery}>PII Firewall &amp; X-Ray</a>
       <a className="rail-link" aria-current={uxEvolutionView ? "page" : undefined}
         href={adminPaths.logs + "?" + uxEvolutionQuery}>Self-Evolving UX</a>
+      <a className="rail-link" aria-current={telemetryView ? "page" : undefined}
+        href={adminPaths.logs + "?" + telemetryQuery}>OTel Telemetry &amp; Cost</a>
     </nav>}
     {pendingActionView ? <PendingActionLogs profiles={configuration?.personas ?? []} />
       : approvalsView ? <ApprovalQueuePanel />
@@ -481,6 +487,7 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
       : evalsView ? <EvalRunnerPanel />
       : piiView ? <PiiFirewallPanel />
       : uxEvolutionView ? <UxEvolutionPanel />
+      : telemetryView ? <TelemetryPanel />
       : <section className="admin-card diagnostics-picker">
       <label htmlFor={selectId}>Conversation</label>
       <div>

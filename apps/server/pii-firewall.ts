@@ -283,6 +283,32 @@ export class PiiFirewallStore {
     return result;
   }
 
+  recordEgressEvent(input: {
+    turnId?: string;
+    personaName?: string;
+    tokens: PiiTokenEntry[];
+    scrubbedPreview: string;
+  }) {
+    this.state.stats.totalTurnsInspected += 1;
+    if (this.state.config.enabled && input.tokens.length > 0) {
+      this.state.stats.totalTurnsProtected += 1;
+      this.state.stats.totalTokensRedacted += input.tokens.length;
+    }
+    const categories = [...new Set(input.tokens.map((t) => t.category))];
+    const evt: PiiAuditEvent = {
+      id: `pii_${randomUUID().slice(0, 8)}`,
+      ...(input.turnId ? { turnId: input.turnId } : {}),
+      ...(input.personaName ? { personaName: input.personaName } : {}),
+      firewallEnabled: this.state.config.enabled,
+      redactedCount: input.tokens.length,
+      categories,
+      scrubbedPreview: input.scrubbedPreview.slice(0, 140),
+      timestamp: new Date().toISOString(),
+    };
+    this.state.recentEvents = [evt, ...this.state.recentEvents].slice(0, 30);
+    this.save();
+  }
+
   view(): PiiFirewallView {
     return {
       config: { ...this.state.config },
@@ -290,4 +316,142 @@ export class PiiFirewallStore {
       recentEvents: this.state.recentEvents.slice(0, 20),
     };
   }
+}
+
+import type { NeutralModelRequest } from "@sfield/core";
+import type { CepTelemetry } from "./telemetry";
+
+/** Keys in structured JSON envelopes that carry schema/protocol IDs and must stay verbatim. */
+const STRUCTURAL_KEYS = new Set([
+  "inputType", "contextId", "intentId", "component", "toolRef", "ref", "catalogSnapshotId", "catalogVersion",
+  "type", "role", "id", "runId", "callId", "turnId", "conversationId", "scenarioId", "personaId", "domain",
+  "status", "effect", "action", "contractDigest", "bindingDigest", "version", "method", "target", "blockId",
+  "candidateId", "candidateIds", "contentId", "introKey", "variant", "followUpIds", "selectedContextId",
+  "selectedIntentId", "summaryFollowUpIntentId", "requestId", "idempotencyKey", "approvalId", "workflowId",
+]);
+
+/**
+ * Scrubs a string that may be either plain text or a JSON envelope.
+ * For JSON envelopes, only non-structural string leaf values are scrubbed so JSON syntax and protocol IDs stay intact.
+ */
+export function scrubJsonSafeText(
+  text: string,
+  knownNames: string[],
+  config: PiiFirewallConfig,
+): { scrubbed: string; tokenMap: Map<string, string>; tokens: PiiTokenEntry[] } {
+  const tokenMap = new Map<string, string>();
+  const tokens: PiiTokenEntry[] = [];
+  if (!config.enabled || !text) return { scrubbed: text, tokenMap, tokens };
+
+  const seenTokens = new Set<string>();
+  const recordTokens = (subMap: Map<string, string>, subTokens: PiiTokenEntry[]) => {
+    for (const [k, v] of subMap.entries()) tokenMap.set(k, v);
+    for (const t of subTokens) {
+      if (!seenTokens.has(t.token)) {
+        seenTokens.add(t.token);
+        tokens.push(t);
+      }
+    }
+  };
+
+  const trimmed = text.trim();
+  if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      const walk = (node: unknown, key?: string): unknown => {
+        if (typeof node === "string") {
+          if (key && STRUCTURAL_KEYS.has(key)) return node;
+          const res = scrubWithPiiFirewall({ prompt: node, knownNames, config });
+          recordTokens(res.tokenMap, res.trace.tokens);
+          return res.scrubbedPrompt;
+        }
+        if (Array.isArray(node)) return node.map((item) => walk(item, key));
+        if (node && typeof node === "object") {
+          const out: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+            out[k] = walk(v, k);
+          }
+          return out;
+        }
+        return node;
+      };
+      return { scrubbed: JSON.stringify(walk(parsed)), tokenMap, tokens };
+    } catch {
+      // Not valid JSON — scrub as plain text below.
+    }
+  }
+
+  const res = scrubWithPiiFirewall({ prompt: text, knownNames, config });
+  recordTokens(res.tokenMap, res.trace.tokens);
+  return { scrubbed: res.scrubbedPrompt, tokenMap, tokens };
+}
+
+/**
+ * Enforces PII redaction inside sfield's `beforeModelDispatch` hook on every outbound model message.
+ */
+export function scrubNeutralModelRequest(
+  request: NeutralModelRequest,
+  knownNames: string[],
+  store: PiiFirewallStore,
+  runId: string,
+): { request: NeutralModelRequest; tokenMap: Map<string, string>; redactedCount: number } {
+  const config = store.getConfig();
+  const combinedMap = new Map<string, string>();
+  const allTokens: PiiTokenEntry[] = [];
+  if (!config.enabled) return { request, tokenMap: combinedMap, redactedCount: 0 };
+
+  let changed = false;
+  let samplePreview = "";
+  const nextMessages = request.messages.map((msg) => {
+    if (msg.role === "tool_results") return msg;
+    const nextParts = msg.parts.map((part) => {
+      if (part.type !== "text" || !part.text) return part;
+      const res = scrubJsonSafeText(part.text, knownNames, config);
+      if (res.tokens.length > 0) {
+        changed = true;
+        if (!samplePreview) samplePreview = res.scrubbed.slice(0, 140);
+        for (const [k, v] of res.tokenMap.entries()) combinedMap.set(k, v);
+        allTokens.push(...res.tokens);
+        return { ...part, text: res.scrubbed };
+      }
+      return part;
+    });
+    return { ...msg, parts: nextParts };
+  });
+
+  if (allTokens.length > 0) {
+    store.recordEgressEvent({
+      turnId: runId,
+      personaName: "sfield:beforeModelDispatch",
+      tokens: allTokens,
+      scrubbedPreview: samplePreview,
+    });
+  }
+
+  return {
+    request: changed ? { ...request, messages: nextMessages } : request,
+    tokenMap: combinedMap,
+    redactedCount: allTokens.length,
+  };
+}
+
+/** Process-local registry keyed by dataDir so every callConfiguredLlmJson() shares the server's PII firewall & telemetry. */
+export interface LlmEgressContext {
+  piiFirewall?: PiiFirewallStore;
+  telemetry?: CepTelemetry;
+  getKnownNames?: () => string[];
+}
+
+const egressByDataDir = new Map<string, LlmEgressContext>();
+
+export function registerLlmEgressContext(dataDir: string, ctx: LlmEgressContext) {
+  egressByDataDir.set(dataDir, ctx);
+}
+
+export function getLlmEgressContext(dataDir: string): LlmEgressContext | undefined {
+  return egressByDataDir.get(dataDir);
+}
+
+export function unregisterLlmEgressContext(dataDir: string) {
+  egressByDataDir.delete(dataDir);
 }

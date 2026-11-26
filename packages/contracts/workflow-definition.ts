@@ -62,6 +62,17 @@ export const connectorCallStepSchema = z.object({
   noteTemplate: z.string().trim().max(240).optional(),
 }).strict();
 
+export const integrationTaskStepSchema = z.object({
+  ...baseStep,
+  type: z.literal("integration_task"),
+  /** Published Integration Task tool ref, e.g. int.itsm_sandbox.create_ticket@1.0.0 */
+  toolRef: z.string().trim().min(3).max(120),
+  /** Maps contract input field names to template strings ({{inputs.foo}}, {{computed.bar}}) or literals. */
+  inputMapping: z.record(z.string(), z.string().max(240)).default({}),
+  /** Optional prefix when copying scalar task output fields into run.computed for downstream steps. */
+  outputPrefix: z.string().trim().regex(/^[a-zA-Z][a-zA-Z0-9_]{0,31}$/).optional(),
+}).strict();
+
 export const asyncJobStepSchema = z.object({
   ...baseStep,
   type: z.literal("async_job"),
@@ -83,6 +94,7 @@ export const workflowStepSchema = z.discriminatedUnion("type", [
   computeStepSchema,
   hitlApprovalStepSchema,
   connectorCallStepSchema,
+  integrationTaskStepSchema,
   asyncJobStepSchema,
   emitHostEventStepSchema,
 ]);
@@ -124,10 +136,14 @@ export type WorkflowStepRunStatus = z.infer<typeof workflowStepRunStatusSchema>;
 export const workflowStepRunSchema = z.object({
   stepId: z.string(),
   title: z.string(),
-  type: z.enum(["collect_input", "compute", "hitl_approval", "connector_call", "async_job", "emit_host_event"]),
+  type: z.enum(["collect_input", "compute", "hitl_approval", "connector_call", "integration_task", "async_job", "emit_host_event"]),
   status: workflowStepRunStatusSchema,
   summary: z.string().optional(),
   approvalId: z.string().optional(),
+  taskRunId: z.string().optional(),
+  toolRef: z.string().optional(),
+  outcomeCode: z.string().optional(),
+  sfieldRunId: z.string().optional(),
   payloadDigest: z.string().optional(),
   dualControl: z.boolean().optional(),
   jobStartedAt: z.string().optional(),

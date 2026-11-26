@@ -61,6 +61,8 @@ import type { ConnectorStore } from "./connector-store";
 import type { WriteAuditStore } from "./write-audit";
 import type { SelfServicePznStore } from "./self-service-pzn-store";
 import { canonicalJson, type ApprovalStore } from "./approval-store";
+import { rehydrateObjectStrings, scrubNeutralModelRequest, type PiiFirewallStore } from "./pii-firewall";
+import type { CepTelemetry } from "./telemetry";
 import { PznApprovalError, splitApprovalId, verifyPznApproval } from "./pzn-approvals";
 import { needsApproval, TaskCallExecutor, taskToolId, type IntegrationTaskRuntime, type IntegrationTaskStore } from "./integration-tasks";
 import { taskEnvelopeJsonSchema, type TaskContract } from "../../packages/contracts/integration-task";
@@ -291,8 +293,11 @@ export class Runtime implements IntegrationTaskRuntime {
     private readonly selfServicePzn?: SelfServicePznStore,
     private readonly approvalStore?: ApprovalStore,
     private readonly integrationTasks?: IntegrationTaskStore,
+    private readonly piiFirewall?: PiiFirewallStore,
+    private readonly telemetry?: CepTelemetry,
+    private readonly modelMeta?: { provider: string; model: string },
   ) {
-    this.integrationExecutor = new TaskCallExecutor(integrationTasks?.orders);
+    this.integrationExecutor = new TaskCallExecutor(integrationTasks?.orders, connectorStore);
     this.funding = new FundingAgent(store, () => this.sf, now);
     const execution = new AgenticExecution(store, () => this.sf, now, (turnId) => this.current(turnId), portfolioSnapshots, goalProgressProvider, goalBudget);
     this.experiences = new ExperienceAgent(execution, () => this.sf);
@@ -311,6 +316,8 @@ export class Runtime implements IntegrationTaskRuntime {
       selfServicePzn?: SelfServicePznStore;
       approvalStore?: ApprovalStore;
       integrationTasks?: IntegrationTaskStore;
+      piiFirewall?: PiiFirewallStore;
+      telemetry?: CepTelemetry;
     },
   ) {
     const record = inspectorEnabled ? (id: string, exchange: GatewayExchange) => store.saveGatewayExchange(id, exchange) : undefined;
@@ -324,6 +331,9 @@ export class Runtime implements IntegrationTaskRuntime {
       extraProviders?.selfServicePzn,
       extraProviders?.approvalStore,
       extraProviders?.integrationTasks,
+      extraProviders?.piiFirewall,
+      extraProviders?.telemetry,
+      { provider: settings.profile === "copilot_acp" ? "copilot_acp" : settings.profile === "openai" ? "openai" : "openai_compatible", model: settings.model },
     );
     const agentTools = [...runtime.experiences.tools(), ...runtime.experiences.execution.tools()];
     const agentActions = new Set(agentTools.map(({ ref }) => axeToolAction(ref)));
@@ -331,6 +341,7 @@ export class Runtime implements IntegrationTaskRuntime {
       deployment: "durable_single", config: runtimeConfig(settings, gateway.model, goalBudget),
       persistence: new SqlitePersistence({ path }),
       namespace: sfieldNamespace,
+      ...(extraProviders?.telemetry ? { telemetry: extraProviders.telemetry } : {}),
       ...gateway.options,
       authorizer: {
         async authorize({ principal, action, effect, agentId, resource, argumentsDigest, runId }) {
@@ -364,6 +375,20 @@ export class Runtime implements IntegrationTaskRuntime {
           seesProtectedContent: false, buildIdentity: "pzn-funding-tools-v1",
           async beforeModelDispatch({ request, runId }) {
             return { request: await runtime.experiences.narrow(request, runId) ?? await runtime.funding.narrow(request, runId) };
+          },
+        },
+        {
+          id: "cep-pii-egress-firewall", point: "beforeModelDispatch", timeoutMs: 1_000, onFailure: "fail",
+          seesProtectedContent: true, buildIdentity: "cep-pii-firewall-v1",
+          async beforeModelDispatch({ request, runId }) {
+            if (!runtime.piiFirewall || !runtime.piiFirewall.getConfig().enabled) return;
+            const knownNames = runtime.profileStore?.list().map((p) => p.displayName) ?? [];
+            const scrubbed = scrubNeutralModelRequest(request, knownNames, runtime.piiFirewall, runId);
+            if (scrubbed.redactedCount > 0) {
+              runtime.rememberRunPiiTokens(runId, scrubbed.tokenMap);
+              runtime.telemetry?.recordPiiRedaction(scrubbed.redactedCount, "sfield:beforeModelDispatch", runId);
+              return { request: scrubbed.request };
+            }
           },
         },
         {
@@ -805,6 +830,26 @@ export class Runtime implements IntegrationTaskRuntime {
   /* ---------------- Integration tasks: dedicated tool per task version + dispatcher tools ---------------- */
 
   private readonly integrationExecutor: TaskCallExecutor;
+  private readonly piiRunTokens = new Map<string, Map<string, string>>();
+
+  private rememberRunPiiTokens(runId: string, tokenMap: Map<string, string>) {
+    if (tokenMap.size === 0) return;
+    const existing = this.piiRunTokens.get(runId) ?? new Map<string, string>();
+    for (const [k, v] of tokenMap.entries()) existing.set(k, v);
+    this.piiRunTokens.set(runId, existing);
+    if (this.piiRunTokens.size > 100) {
+      const oldest = this.piiRunTokens.keys().next().value;
+      if (oldest) this.piiRunTokens.delete(oldest);
+    }
+  }
+
+  private rehydrateRunResult(res: RunResult): RunResult {
+    const tokenMap = this.piiRunTokens.get(res.runId);
+    if (!tokenMap) return res;
+    this.piiRunTokens.delete(res.runId);
+    if (res.output === undefined) return res;
+    return { ...res, output: rehydrateObjectStrings(res.output, tokenMap) };
+  }
   private readonly registeredIntegrationRefs = new Set<string>();
   private readonly pendingIntegrationCalls = new Map<string, {
     scope: ExecutionScope; callId: string; sfieldToolRef: string; toolInputs: JsonObject; timer: NodeJS.Timeout;
@@ -1718,7 +1763,22 @@ export class Runtime implements IntegrationTaskRuntime {
             this.bindAttempt(this.current(turn.public.id), stage, run);
           }
         }
-        return await handle.result();
+        const result = this.rehydrateRunResult(await handle.result());
+        if (this.telemetry && this.modelMeta) {
+          this.telemetry.recordModelCall({
+            operation: `sfield:${stage}`,
+            provider: this.modelMeta.provider,
+            model: this.modelMeta.model,
+            durationMs: result.usage.elapsedMs || result.usage.activeMs,
+            status: result.state === "completed" ? "ok" : "error",
+            inputTokens: result.usage.inputTokens,
+            outputTokens: result.usage.outputTokens,
+            costMicroUsd: result.usage.costMicroUsd,
+            runId: result.runId,
+            ...(result.error ? { errorMessage: result.error.message } : {}),
+          });
+        }
+        return result;
       } finally {
         signal.removeEventListener("abort", abort);
       }

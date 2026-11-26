@@ -53,7 +53,9 @@ import { knowledgeDocumentUpsertSchema } from "../../packages/contracts/knowledg
 import { ScheduledJobStore } from "./scheduled-jobs";
 import { scheduledJobUpsertSchema } from "../../packages/contracts/scheduled-jobs";
 import { VerticalPackStore } from "./vertical-factory";
-import { PiiFirewallStore, scrubWithPiiFirewall } from "./pii-firewall";
+import { PiiFirewallStore, registerLlmEgressContext, scrubWithPiiFirewall, unregisterLlmEgressContext } from "./pii-firewall";
+import { CepTelemetry } from "./telemetry";
+import { migrateLegacyConnectors } from "./connector-migration";
 import { piiFirewallConfigSchema } from "../../packages/contracts/pii-firewall";
 import { UxEvolutionStore } from "./ux-evolution";
 import { extractDocumentAction } from "./document-extractor";
@@ -329,6 +331,12 @@ export async function startApp(options: Options) {
   const knowledgeBase = new KnowledgeBaseStore(options.dataDir);
   const verticalFactory = new VerticalPackStore(options.dataDir);
   const piiFirewall = new PiiFirewallStore(options.dataDir, options.piiEnabledByDefault);
+  const telemetry = new CepTelemetry(options.dataDir);
+  registerLlmEgressContext(options.dataDir, {
+    piiFirewall,
+    telemetry,
+    getKnownNames: () => profileStore.list().map((p) => p.displayName),
+  });
   const uxEvolution = new UxEvolutionStore(options.dataDir);
   const evalRunner = new EvalRunnerStore(options.dataDir);
   const tradeStore = new TradeStore(options.dataDir, profileStore);
@@ -346,7 +354,7 @@ export async function startApp(options: Options) {
   try {
     runtime = options.gateway
       ? await Runtime.open(store, sfieldPath, options.gateway, now, inspectorEnabled, portfolioSnapshots, goalProgressProvider, options.goalBudget, {
-          customer360, opsStore, salesStore, profileStore, writeAudit, connectorStore, selfServicePzn, approvalStore, integrationTasks,
+          customer360, opsStore, salesStore, profileStore, writeAudit, connectorStore, selfServicePzn, approvalStore, integrationTasks, piiFirewall, telemetry,
         })
       : null;
     await offline?.init({ namespace: sfieldNamespace, ownerId: newId("owner") });
@@ -394,6 +402,7 @@ export async function startApp(options: Options) {
   tradeStore.reconcilePendingJobs(makeTradeSettler("system-reconcile"));
 
   const integrationService = new IntegrationTaskService(integrationTasks, approvalStore, () => runtime);
+  workflowEngine.setIntegrationService(integrationService);
   const experience = new ExperienceService(store, runtime, selectionMode, now, inspectorEnabled, offline && {
     chat: new ChatHarness(offline), close: () => offline.close(),
   }, {
@@ -409,6 +418,7 @@ export async function startApp(options: Options) {
     if (record.targetKind === "integration_task") {
       try {
         const out = await integrationService.resume(record, principalId);
+        await workflowEngine.resumeAfterTaskApproval(record.id, out.run, true, record.decidedBy ?? record.requester);
         return { approval: out.approval, execution: out.execution, taskRun: out.run };
       } catch (err) {
         const code = err instanceof IntegrationTaskError ? err.code : "integration_task_failed";
@@ -843,6 +853,13 @@ export async function startApp(options: Options) {
         });
         return json(res, { updatedFields: applied.updatedFields, auditId: audit.auditId });
       }
+    }
+    if (resource === "admin" && id === "telemetry" && inspectorEnabled) {
+      requireOperator();
+      if (!operation && method === "GET") return json(res, telemetry.view());
+      if (operation === "export" && method === "GET") return json(res, telemetry.toOtlpExport());
+      if (operation === "reset" && method === "POST") return json(res, telemetry.reset());
+      throw new ApiError(404, "not_found", "This item is unavailable.");
     }
     if (resource === "admin" && id === "gateway" && inspectorEnabled) {
       const actor = requireOperator();
@@ -1707,6 +1724,7 @@ export async function startApp(options: Options) {
       if (outcome.record.status === "denied") {
         if (outcome.record.targetKind === "integration_task") {
           await integrationService.deny(outcome.record, principalId);
+          await workflowEngine.resumeAfterTaskApproval(outcome.record.id, undefined, false, decisionInput.actor, decisionInput.comment);
         }
         if (outcome.record.targetKind === "workflow_step") {
           const runId = typeof outcome.record.payload.runId === "string" ? outcome.record.payload.runId : outcome.record.recordId;
@@ -1950,6 +1968,12 @@ export async function startApp(options: Options) {
         const { runId } = await body(req, z.object({ runId: z.string().min(3).max(64) }).strict());
         return json(res, await guard(() => integrationService.reconcile(principalId, runId)));
       }
+      if (id === "migrate-connectors" && !operation && method === "POST") {
+        requireOperator();
+        const data = await body(req, z.object({ connectorId: z.string().min(1).max(64).optional() }).strict());
+        const results = await guard(() => migrateLegacyConnectors(connectorStore, integrationTasks, integrationService, data.connectorId));
+        return json(res, { results, view: integrationService.view() });
+      }
     }
     if (resource === "pzn" && inspectorEnabled) {
       const invokePzn = async <T>(toolRef: string, opName: string, payload: unknown, fallback: () => T) => {
@@ -2143,7 +2167,7 @@ export async function startApp(options: Options) {
   return {
     url: "http://127.0.0.1:" + (server.address() as AddressInfo).port,
     /** For tests: direct access to the sfield runtime and approval store (e.g. to call tools with forged approvals). */
-    internals: { runtime, approvalStore },
+    internals: { runtime, approvalStore, telemetry, piiFirewall, workflowEngine, connectorStore, integrationService },
     async close() {
       for (const stream of streams) stream.end();
       await vite?.close();
@@ -2153,6 +2177,7 @@ export async function startApp(options: Options) {
       workflowEngine.close();
       scheduledJobs.close();
       selfServicePzn.close();
+      unregisterLlmEgressContext(options.dataDir);
       if (getActiveCustomerProfileStore() === profileStore) setActiveCustomerProfileStore(null);
       if (getActiveEquityLedger() === tradeStore) setActiveEquityLedger(null);
       if (getActiveExperienceRegistryStore() === experienceRegistry) setActiveExperienceRegistryStore(null);

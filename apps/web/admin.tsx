@@ -391,6 +391,7 @@ function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
   const [invokeResults, setInvokeResults] = useState<Record<string, { ok: boolean; text: string; approvalId?: string }>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [migrateNotice, setMigrateNotice] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -523,10 +524,26 @@ function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
             <code>cep.connector.invoke@1.0.0</code> with server-side secret resolution, HITL approval gating, and immutable Write Audit logging.
           </p>
         </div>
-        <button type="button" className="secondary-button" onClick={() => setDraftOpen((v) => !v)}>
-          <Plus size={15} aria-hidden="true" />{draftOpen ? "Cancel" : "Add connector"}
-        </button>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <button type="button" className="secondary-button" disabled={busyId === "migrate"} onClick={async () => {
+            setBusyId("migrate"); setError(""); setMigrateNotice("");
+            try {
+              const res = await api.migrateLegacyConnectors();
+              const migrated = res.results.filter((r) => r.status === "migrated").length;
+              const already = res.results.filter((r) => r.status === "already_migrated").length;
+              const skipped = res.results.filter((r) => r.status === "skipped").length;
+              setMigrateNotice(`Unified into governed Integration Tasks: ${migrated} migrated, ${already} already governed${skipped ? `, ${skipped} skipped` : ""}.`);
+            } catch (e) { setError(messageFor(e)); } finally { setBusyId(null); }
+          }}>
+            <Plug size={14} aria-hidden="true" />{busyId === "migrate" ? "Migrating…" : "Migrate to Governed Tasks"}
+          </button>
+          <a className="secondary-button" href="/integrations" style={{ textDecoration: "none" }}>Open /integrations</a>
+          <button type="button" className="secondary-button" onClick={() => setDraftOpen((v) => !v)}>
+            <Plus size={15} aria-hidden="true" />{draftOpen ? "Cancel" : "Add connector"}
+          </button>
+        </div>
       </div>
+      {migrateNotice && <p role="status" style={{ marginTop: "10px", color: "var(--teal-dark)", fontWeight: 600 }}>{migrateNotice} <a href="/integrations" style={{ textDecoration: "underline" }}>Manage in /integrations</a></p>}
       {error && <p className="admin-error" role="alert" style={{ marginTop: "10px" }}>{error}</p>}
       {draftOpen && (
         <form className="admin-rule-draft" onSubmit={(e) => void createConnector(e)}>

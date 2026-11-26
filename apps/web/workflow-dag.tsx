@@ -8,6 +8,7 @@ function stepKindLabel(type: DagStep["type"]) {
   if (type === "compute") return "Deterministic Compute";
   if (type === "hitl_approval") return "SHA-256 HITL Gate";
   if (type === "connector_call") return "External Connector";
+  if (type === "integration_task") return "Governed Task (sfield)";
   if (type === "async_job") return "Async Settlement Timer";
   return "Emit Host Portal Event";
 }
@@ -17,6 +18,7 @@ function stepMetaText(step: DagStep): string {
   if (step.type === "compute") return `Evaluator: ${step.evaluator}`;
   if (step.type === "hitl_approval") return `${(step.riskLevel ?? "high").toUpperCase()} risk · ${step.dualControl ? "4-Eyes Dual Control" : "Inline Sign-Off"}`;
   if (step.type === "connector_call") return `Connector: ${step.connectorId} (${step.action})`;
+  if (step.type === "integration_task") return `Task: ${step.toolRef}`;
   if (step.type === "async_job") return `${step.durationSeconds ?? 4}s timer · ${step.cancellable !== false ? "Cancellable" : "Locked"}`;
   return `postMessage event: ${step.eventName ?? "cep:workflow_completed"}`;
 }
