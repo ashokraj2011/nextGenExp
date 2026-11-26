@@ -3,8 +3,8 @@ import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useAui, useAuiState, useExternalStoreRuntime, type ThreadMessageLike } from "@assistant-ui/react";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import {
-  ArrowLeft, ArrowUp, ArrowUpRight, BookOpenText, ChevronDown, ChevronRight, Columns2, Eye, GraduationCap, House, LayoutDashboard,
-  ListChecks, LogIn, LogOut, MapPin, MessageSquare, Mic, MicOff, PanelLeft, PanelLeftClose, Paperclip, Plus, RotateCcw, Sparkles,
+  ArrowLeft, ArrowUpRight, BookOpenText, ChevronDown, ChevronRight, Columns2, Eye, GraduationCap, House, LayoutDashboard,
+  ListChecks, LogIn, LogOut, MapPin, MessageSquare, Mic, MicOff, PanelLeft, PanelLeftClose, Paperclip, Play, Plus, RotateCcw, Sparkles,
   Square, ThumbsDown, ThumbsUp, X,
 } from "lucide-react";
 import {
@@ -536,12 +536,25 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
               {voice.listening ? <MicOff size={16} aria-hidden="true" /> : <Mic size={16} aria-hidden="true" />}
             </button>
             {running && (
-              <button className="send-button stop-button" type="button" disabled={pending} onClick={() => aui.thread().cancelRun()} title="Stop running task">
-                <Square size={12} aria-hidden="true" />Stop
+              <button
+                className="send-button stop-button"
+                type="button"
+                disabled={pending}
+                aria-label="End running task"
+                title="End running task"
+                onClick={() => aui.thread().cancelRun()}
+              >
+                <Square size={12} fill="currentColor" aria-hidden="true" />
               </button>
             )}
-            <button className="send-button" type="submit" disabled={!canSubmit}>
-              Send <ArrowUp size={15} aria-hidden="true" />
+            <button
+              className="send-button play-button"
+              type="submit"
+              disabled={!canSubmit}
+              aria-label="Send message"
+              title="Send message"
+            >
+              <Play size={14} fill="currentColor" aria-hidden="true" />
             </button>
           </div>
         </div>

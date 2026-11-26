@@ -313,15 +313,17 @@ button { color: inherit; }
 }
 .composer textarea::placeholder { color: #637685; }
 .send-button {
-  display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px;
-  border: 1px solid var(--teal); border-radius: 999px; color: white; background: var(--teal);
-  padding: 0 18px; font-size: .88rem; font-weight: 700; letter-spacing: 0;
-  transition: background-color .15s ease, border-color .15s ease;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; min-height: 36px; flex-shrink: 0;
+  border: 1px solid var(--teal); border-radius: 50%; color: white; background: var(--teal);
+  padding: 0;
+  transition: background-color .15s ease, border-color .15s ease, transform .1s ease;
 }
+.send-button.play-button svg { transform: translateX(1px); }
 .send-button:hover:not(:disabled) { background: var(--teal-dark); border-color: var(--teal-dark); }
 .send-button:disabled { background: #e6e4e1; border-color: #e6e4e1; color: #757472; }
-.stop-button { background: #141414; border-color: #141414; }
-.stop-button:hover:not(:disabled) { background: #363534; border-color: #363534; }
+.stop-button { background: #141414; border-color: #141414; color: #fff; }
+.stop-button:hover:not(:disabled) { background: #dc2626; border-color: #dc2626; }
 .composer-hint { margin: 7px 2px 0; color: var(--muted); font-size: .76rem; line-height: 1.4; }
 .composer-hint span { margin: 0 3px; }
 .request-notice, .submit-status { margin: 0 0 8px; color: var(--muted); font-size: .85rem; line-height: 1.5; }
