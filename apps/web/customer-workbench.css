@@ -442,22 +442,23 @@
 .editorial-hero-stage .composer-hero .composer {
   flex-direction: column;
   align-items: stretch;
-  padding: 12px 12px 12px 18px;
-  border-radius: 24px;
+  padding: 10px 10px 10px 18px;
+  border-radius: 28px;
   border: 1px solid var(--line-strong);
   background: #ffffff;
   box-shadow: 0 6px 22px rgba(20, 20, 20, .06);
 }
 .editorial-hero-stage .composer-hero .composer-input-row {
-  align-items: flex-end;
+  align-items: center;
 }
 .editorial-hero-stage .composer-hero .composer textarea {
   font-size: 1rem;
-  line-height: 1.55;
-  min-height: 44px;
+  line-height: 1.5;
+  min-height: 24px;
+  padding: 6px 0;
 }
 .editorial-hero-stage .composer-hero .composer-icon {
-  margin-bottom: 10px;
+  margin-bottom: 0;
 }
 .workspace-section-picker { display: none; }
 @media (max-width: 540px) {

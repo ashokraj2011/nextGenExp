@@ -439,8 +439,8 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
           <MessageSquare size={18} className="composer-icon" aria-hidden="true" />
           <div className="composer-field">
             <label className="sr-only" htmlFor="composer-input">Your question</label>
-            <textarea id="composer-input" ref={input} rows={hero ? 2 : 1} value={draft} maxLength={MAX_MESSAGE_LENGTH}
-              placeholder={voice.listening ? "Listening… speak your question" : (domainPack?.composerPlaceholder ? `${domainPack.composerPlaceholder} (or type / for commands)` : "Ask a question or type / for quick commands…")}
+            <textarea id="composer-input" ref={input} rows={1} value={draft} maxLength={MAX_MESSAGE_LENGTH}
+              placeholder={voice.listening ? "Listening… speak your question" : (domainPack?.composerPlaceholder ?? "Ask a question…")}
               onChange={(event) => onDraft(event.target.value)} onKeyDown={onKeyDown} />
           </div>
           <div className="composer-tools">
@@ -524,7 +524,7 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
         </span>
         <div className="composer-footer-right">
           {nearLimit && <span className="composer-count">{draft.length}/{MAX_MESSAGE_LENGTH}</span>}
-          <p className="composer-hint">Enter to send <span aria-hidden="true">·</span> Shift+Enter for a new line</p>
+          <p className="composer-hint">Type / for commands <span aria-hidden="true">·</span> Enter to send <span aria-hidden="true">·</span> Shift+Enter for a new line</p>
         </div>
       </div>
       {hero && showStarters && <StarterPrompts disabled={disabled || pending} />}
