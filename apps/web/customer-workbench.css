@@ -176,6 +176,8 @@
   flex: 0 1 auto;
 }
 .topbar-center .workspace-menu {
+  min-width: 0;
+  max-width: 100%;
   padding: 0;
   border-bottom: 0;
   background: transparent;
@@ -234,7 +236,10 @@
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  max-width: 100%;
+  overflow-x: auto;
 }
+.topbar-actions > * { flex-shrink: 0; }
 .model-status {
   border-color: var(--line);
   background: var(--paper);
