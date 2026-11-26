@@ -7,7 +7,10 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
+  coBrowseSlidersSchema,
   handoffTicketSchema,
+  type AdvisorProposal,
+  type CoBrowseSliders,
   type HandoffInboxView,
   type HandoffPriority,
   type HandoffTicket,
@@ -23,10 +26,30 @@ export function isHandoffRequest(message: string): boolean {
 export class HandoffStore {
   private readonly filePath: string;
   private tickets: HandoffTicket[];
+  private readonly listeners = new Map<string, Set<(ticket: HandoffTicket) => void>>();
 
   constructor(dataDir: string) {
     this.filePath = join(dataDir, "handoffs.json");
     this.tickets = this.load();
+  }
+
+  subscribe(handoffId: string, listener: (ticket: HandoffTicket) => void): () => void {
+    let set = this.listeners.get(handoffId);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(handoffId, set);
+    }
+    set.add(listener);
+    return () => {
+      set!.delete(listener);
+      if (set!.size === 0) this.listeners.delete(handoffId);
+    };
+  }
+
+  private emit(ticket: HandoffTicket) {
+    for (const cb of this.listeners.get(ticket.handoffId) ?? []) {
+      try { cb(ticket); } catch { /* ignore subscriber error */ }
+    }
   }
 
   private load(): HandoffTicket[] {
@@ -127,6 +150,7 @@ export class HandoffStore {
       ],
     };
     this.save(this.tickets.map((t) => (t.handoffId === handoffId ? updated : t)));
+    this.emit(updated);
     return updated;
   }
 
@@ -146,6 +170,7 @@ export class HandoffStore {
       ],
     };
     this.save(this.tickets.map((t) => (t.handoffId === handoffId ? updated : t)));
+    this.emit(updated);
     return updated;
   }
 
@@ -171,6 +196,123 @@ export class HandoffStore {
       ],
     };
     this.save(this.tickets.map((t) => (t.handoffId === handoffId ? updated : t)));
+    this.emit(updated);
+    return updated;
+  }
+
+  /** Multiplayer Live Glass Co-Browse: syncs shared planning sliders in real time across advisor & customer. */
+  updateCoBrowse(
+    handoffId: string,
+    updatedBy: "advisor" | "customer",
+    patch: { active?: boolean; title?: string; sliders?: Partial<CoBrowseSliders> },
+  ): HandoffTicket | undefined {
+    const existing = this.findById(handoffId);
+    if (!existing) return undefined;
+    const now = new Date().toISOString();
+    const prev = existing.coBrowse ?? {
+      active: true,
+      title: "Shared Planning Canvas",
+      updatedBy,
+      updatedAt: now,
+      sliders: coBrowseSlidersSchema.parse({}),
+    };
+    const nextSliders = coBrowseSlidersSchema.parse({ ...prev.sliders, ...(patch.sliders ?? {}) });
+    const updated: HandoffTicket = {
+      ...existing,
+      updatedAt: now,
+      coBrowse: {
+        ...prev,
+        active: patch.active ?? true,
+        title: patch.title ?? prev.title,
+        updatedBy,
+        updatedAt: now,
+        sliders: nextSliders,
+      },
+    };
+    this.save(this.tickets.map((t) => (t.handoffId === handoffId ? updated : t)));
+    this.emit(updated);
+    return updated;
+  }
+
+  /** Advisor pushes an Advisor-Proposed action card into the customer's Live Glass canvas for 1-click Review & Sign. */
+  pushProposal(
+    handoffId: string,
+    proposedBy: string,
+    input: { title: string; summary: string; actionLabel?: string; updates: Record<string, string> },
+  ): HandoffTicket | undefined {
+    const existing = this.findById(handoffId);
+    if (!existing) return undefined;
+    const now = new Date().toISOString();
+    const proposal: AdvisorProposal = {
+      id: `prop_${randomUUID().replaceAll("-", "").slice(0, 10)}`,
+      title: input.title.trim().slice(0, 120),
+      summary: input.summary.trim().slice(0, 400),
+      actionLabel: input.actionLabel?.trim().slice(0, 60) || "Review & Sign",
+      updates: input.updates,
+      proposedBy: proposedBy.slice(0, 80),
+      status: "pending",
+      createdAt: now,
+    };
+    const prev = existing.coBrowse ?? {
+      active: true,
+      title: "Shared Planning Canvas",
+      updatedBy: "advisor" as const,
+      updatedAt: now,
+      sliders: coBrowseSlidersSchema.parse({}),
+    };
+    const updated: HandoffTicket = {
+      ...existing,
+      status: existing.status === "queued" ? "claimed" : existing.status,
+      assignedAgent: existing.assignedAgent ?? proposedBy.slice(0, 80),
+      claimedAt: existing.claimedAt ?? now,
+      updatedAt: now,
+      coBrowse: { ...prev, active: true, updatedBy: "advisor", updatedAt: now, proposal },
+      notes: [
+        ...existing.notes,
+        {
+          id: `hn_${randomUUID().slice(0, 8)}`,
+          author: proposedBy.slice(0, 80),
+          role: "system",
+          text: `Pushed Advisor-Proposed card "${proposal.title}" to shared Live Glass for customer signature.`,
+          createdAt: now,
+        },
+      ],
+    };
+    this.save(this.tickets.map((t) => (t.handoffId === handoffId ? updated : t)));
+    this.emit(updated);
+    return updated;
+  }
+
+  /** Customer accepts or declines the live Advisor-Proposed card. */
+  decideProposal(handoffId: string, decision: "accepted" | "declined", auditId?: string): HandoffTicket | undefined {
+    const existing = this.findById(handoffId);
+    if (!existing?.coBrowse?.proposal) return undefined;
+    const now = new Date().toISOString();
+    const proposal: AdvisorProposal = {
+      ...existing.coBrowse.proposal,
+      status: decision,
+      decidedAt: now,
+      ...(auditId ? { auditId } : {}),
+    };
+    const updated: HandoffTicket = {
+      ...existing,
+      updatedAt: now,
+      coBrowse: { ...existing.coBrowse, updatedBy: "customer", updatedAt: now, proposal },
+      notes: [
+        ...existing.notes,
+        {
+          id: `hn_${randomUUID().slice(0, 8)}`,
+          author: existing.customerName,
+          role: "system",
+          text: decision === "accepted"
+            ? `Customer signed & committed Advisor-Proposed card "${proposal.title}"${auditId ? ` (audit ${auditId})` : ""}.`
+            : `Customer declined Advisor-Proposed card "${proposal.title}".`,
+          createdAt: now,
+        },
+      ],
+    };
+    this.save(this.tickets.map((t) => (t.handoffId === handoffId ? updated : t)));
+    this.emit(updated);
     return updated;
   }
 

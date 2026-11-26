@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useAui, useAuiState, useExternalStoreRuntime, type ThreadMessageLike } from "@assistant-ui/react";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import {
-  ArrowLeft, ArrowUp, ArrowUpRight, BookOpenText, Brain, ChevronDown, ChevronRight, Columns2, Eye, GraduationCap, Headphones, House, LayoutDashboard,
+  ArrowLeft, ArrowUp, ArrowUpRight, Bell, BookOpenText, Bot, Brain, ChevronDown, ChevronRight, Columns2, Eye, GitCompare, GraduationCap, Headphones, House, LayoutDashboard,
   ListChecks, LogIn, LogOut, MapPin, MessageSquare, Mic, MicOff, PanelLeft, PanelLeftClose, Paperclip, Plus, RotateCcw, Sparkles,
   Square, ThumbsDown, ThumbsUp, X,
 } from "lucide-react";
@@ -41,6 +41,10 @@ import {
   CitationsStrip, isHandoffPhrase, LiveCanvasPane, LiveHandoffCard, matchSlashCommands,
   MemoryDrawer, SlashCommandMenu, TurnRichActions, type MemoryEntry, type SlashCommand,
 } from "./chat-rich-ux";
+import type { ExpertiseMode, Watchcard } from "../../packages/contracts/nextgen-chat";
+import {
+  ConsumerA2aDrawer, ExpertiseMorphDial, ExpertiseTurnBanner, LivingWatchcardsStrip, ParallelFuturesPane,
+} from "./nextgen-chat-features";
 import "./customer-workbench.css";
 
 const homeGoalPrompt = "Show my home-buying goal and savings progress.";
@@ -83,6 +87,7 @@ type ConversationOperations = {
   pending: boolean;
   activeProfile?: DemoPersona;
   progressHistory: Record<string, Progress[]>;
+  expertiseMode: ExpertiseMode;
   pinnedTurnId?: string;
   pinCanvas: (turn: TurnView) => void;
   retry: (id: string) => void;
@@ -95,6 +100,7 @@ type ConversationOperations = {
 const ConversationControls = createContext<ConversationOperations>({
   pending: false,
   progressHistory: {},
+  expertiseMode: "standard",
   pinCanvas: () => undefined,
   retry: () => undefined,
   feedback: () => undefined,
@@ -198,7 +204,7 @@ function NbaCompanionCard({ nba, personaId, disabled, onRunPrompt, onPreviewFund
 
 function AssistantMessage() {
   const turn = useAuiState((state) => state.message.metadata.custom?.turn as TurnView | undefined);
-  const { latest, pending, activeProfile, progressHistory, pinnedTurnId, pinCanvas, retry, feedback, anchorTurn, runPrompt, previewFunding } = useContext(ConversationControls);
+  const { latest, pending, activeProfile, progressHistory, expertiseMode, pinnedTurnId, pinCanvas, retry, feedback, anchorTurn, runPrompt, previewFunding } = useContext(ConversationControls);
   const element = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (element.current && turn && latest?.id === turn.id) anchorTurn(turn.id, element.current);
@@ -236,6 +242,9 @@ function AssistantMessage() {
                   providerArbitration={turn.providerArbitration}
                   piiRedaction={turn.piiRedaction}
                 />
+              )}
+              {!adminChat && turn.status === "completed" && (
+                <ExpertiseTurnBanner mode={expertiseMode} turn={turn} />
               )}
               <MessagePrimitive.Parts />
               {!adminChat && turn.nextBestAction && (
@@ -282,7 +291,7 @@ function AssistantMessage() {
   );
 }
 
-function Composer({ draft, onDraft, running, pending, disabled, notice, input, showStarters, hero, nextSuggestions, domainPack, onOpenAdvisor, onOpenMemory }: {
+function Composer({ draft, onDraft, running, pending, disabled, notice, input, showStarters, hero, nextSuggestions, domainPack, onOpenAdvisor, onOpenMemory, onOpenFutures, onOpenWatch, onOpenDelegate }: {
   draft: string; onDraft: (value: string) => void; running: boolean; pending: boolean; disabled: boolean; notice: string;
   input: React.RefObject<HTMLTextAreaElement | null>;
   showStarters: boolean;
@@ -291,6 +300,9 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
   domainPack?: DomainPack;
   onOpenAdvisor?: () => void;
   onOpenMemory?: () => void;
+  onOpenFutures?: () => void;
+  onOpenWatch?: () => void;
+  onOpenDelegate?: () => void;
 }) {
   const aui = useAui();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -310,6 +322,12 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
       onOpenAdvisor?.();
     } else if (cmd.action === "memory") {
       onOpenMemory?.();
+    } else if (cmd.action === "futures") {
+      onOpenFutures?.();
+    } else if (cmd.action === "watch") {
+      onOpenWatch?.();
+    } else if (cmd.action === "delegate") {
+      onOpenDelegate?.();
     } else if (cmd.action === "upload") {
       fileInput.current?.click();
     }
@@ -548,6 +566,14 @@ type ChatProps = {
   onStartHandoff: (reason?: string) => void;
   onDismissHandoff: () => void;
   onOpenMemory: () => void;
+  expertiseMode: ExpertiseMode;
+  futuresOpen: boolean;
+  onToggleFutures: (open?: boolean) => void;
+  watchcards: Watchcard[];
+  onWatchcardsChange: (next: Watchcard[]) => void;
+  watchCreatorOpen: boolean;
+  onToggleWatchCreator: (open?: boolean) => void;
+  onOpenDelegate: () => void;
 };
 
 const noTurns: TurnView[] = [];
@@ -556,6 +582,7 @@ function Chat({
   conversation, configuration, activeProfile, pendingActions, pending, draft, onDraft, onSend, onStop, onRetry, onFollowUp, onFeedback, notice,
   section, pins, progressHistory, domainPack, onSelect, onPreviewFunding, onRestore, onWriteBack,
   activeHandoff, onStartHandoff, onDismissHandoff, onOpenMemory,
+  expertiseMode, futuresOpen, onToggleFutures, watchcards, onWatchcardsChange, watchCreatorOpen, onToggleWatchCreator, onOpenDelegate,
 }: ChatProps) {
   const turns = conversation?.turns ?? noTurns;
   const latest = turns.at(-1);
@@ -631,7 +658,9 @@ function Chat({
     <button className="secondary-button" type="button" disabled={pending} onClick={onRestore}>Restore conversation</button>
   </div> : <Composer draft={draft} onDraft={onDraft} running={running} pending={pending} disabled={!configuration} input={input}
     notice={notice} showStarters={turns.length === 0 && domainPack.id === "wealth"} hero={useHeroComposer}
-    nextSuggestions={nextSuggestions} domainPack={domainPack} onOpenAdvisor={() => onStartHandoff()} onOpenMemory={onOpenMemory} />;
+    nextSuggestions={nextSuggestions} domainPack={domainPack}
+    onOpenAdvisor={() => onStartHandoff()} onOpenMemory={onOpenMemory}
+    onOpenFutures={() => onToggleFutures(true)} onOpenWatch={() => onToggleWatchCreator(true)} onOpenDelegate={onOpenDelegate} />;
 
   return <AssistantRuntimeProvider runtime={runtime}>
     <ExperienceControls.Provider value={{
@@ -644,7 +673,7 @@ function Chat({
       rendered,
     }}>
       <ConversationControls.Provider value={{
-        latest, pending, activeProfile, progressHistory, pinnedTurnId, pinCanvas, retry: onRetry, feedback: onFeedback, anchorTurn,
+        latest, pending, activeProfile, progressHistory, expertiseMode, pinnedTurnId, pinCanvas: (t) => { onToggleFutures(false); pinCanvas(t); }, retry: onRetry, feedback: onFeedback, anchorTurn,
         runPrompt: (prompt) => void onSend(prompt),
         previewFunding: () => onPreviewFunding(pendingActionsContext),
       }}>
@@ -654,6 +683,16 @@ function Chat({
           <ThreadPrimitive.Viewport className="thread-scroll" ref={viewport}
             autoScroll={false} scrollToBottomOnInitialize={false} scrollToBottomOnRunStart={false} scrollToBottomOnThreadSwitch={false}
             aria-label="Conversation">
+            {!adminChat && (
+              <LivingWatchcardsStrip
+                personaId={activeProfile?.personaId ?? configuration?.defaultPersonaId ?? "demo-learner"}
+                conversationId={conversation?.id ?? "default"}
+                watchcards={watchcards}
+                onChange={onWatchcardsChange}
+                showCreator={watchCreatorOpen}
+                onCloseCreator={() => onToggleWatchCreator(false)}
+              />
+            )}
             {!adminChat && section === "summary" && domainPack.id !== "wealth" && (
               <DomainLiveHud
                 domainId={domainPack.id}
@@ -685,7 +724,14 @@ function Chat({
           </ThreadPrimitive.Viewport>
           {!useHeroComposer && composerEl}
         </ThreadPrimitive.Root>
-        {pinnedTurn && <LiveCanvasPane turn={pinnedTurn} onClose={() => setPinnedTurnId(undefined)} />}
+        {futuresOpen ? (
+          <ParallelFuturesPane
+            persona={activeProfile}
+            onClose={() => onToggleFutures(false)}
+          />
+        ) : (
+          pinnedTurn && <LiveCanvasPane turn={pinnedTurn} onClose={() => setPinnedTurnId(undefined)} />
+        )}
         </div>
       </ConversationControls.Provider>
     </ExperienceControls.Provider>
@@ -851,6 +897,16 @@ function App() {
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [memoryError, setMemoryError] = useState("");
   const [activeHandoff, setActiveHandoff] = useState<HandoffTicket | null>(null);
+  const [expertiseMode, setExpertiseMode] = useState<ExpertiseMode>(() => {
+    try {
+      const saved = localStorage.getItem("cep_expertise_mode");
+      return saved === "guided" || saved === "pro" ? saved : "standard";
+    } catch { return "standard"; }
+  });
+  const [futuresOpen, setFuturesOpen] = useState(false);
+  const [watchcards, setWatchcards] = useState<Watchcard[]>([]);
+  const [watchCreatorOpen, setWatchCreatorOpen] = useState(false);
+  const [delegateOpen, setDelegateOpen] = useState(false);
   const inFlight = useRef(false);
   const previousAttempt = useRef<{ fingerprint: string; id: string } | null>(null);
   const profilesTrigger = useRef<HTMLButtonElement>(null);
@@ -1086,6 +1142,37 @@ function App() {
   useEffect(() => {
     if (configuration?.gatewayConfigured) void loadMemory();
   }, [configuration?.gatewayConfigured, loadMemory]);
+
+  const changeExpertiseMode = useCallback((next: ExpertiseMode) => {
+    setExpertiseMode(next);
+    try { localStorage.setItem("cep_expertise_mode", next); } catch { /* ignore */ }
+    if (configuration?.gatewayConfigured) {
+      void api.memorySave({ kind: "preference", key: "ui_expertise_mode", content: `Preferred chat complexity dial: ${next}` })
+        .then((res) => setMemoryItems(res.items))
+        .catch(() => undefined);
+    }
+  }, [configuration?.gatewayConfigured]);
+
+  useEffect(() => {
+    if (adminChat || !activeProfile) return;
+    let alive = true;
+    void api.listWatchcards(activeProfile.personaId).then((res) => {
+      if (alive) setWatchcards(res.watchcards);
+    }).catch(() => undefined);
+    const stream = new EventSource("/api/watchcards/stream?personaId=" + encodeURIComponent(activeProfile.personaId));
+    stream.addEventListener("watchcard.update", (evt) => {
+      if (!alive) return;
+      try {
+        const updated = JSON.parse((evt as MessageEvent).data) as Watchcard;
+        setWatchcards((prev) => {
+          if (updated.status === "dismissed") return prev.filter((c) => c.id !== updated.id);
+          const exists = prev.some((c) => c.id === updated.id);
+          return exists ? prev.map((c) => (c.id === updated.id ? updated : c)) : [updated, ...prev];
+        });
+      } catch { /* ignore */ }
+    });
+    return () => { alive = false; stream.close(); };
+  }, [activeProfile?.personaId, adminChat]);
 
   const send = async (message: string) => {
     if (!configuration) return;
@@ -1364,6 +1451,7 @@ function App() {
     <main
       className="workspace"
       inert={railOpen}
+      data-expertise={expertiseMode}
       data-cep-active={wealthDomContextJson ? "true" : undefined}
       data-cep-context={wealthDomContextJson}
     >
@@ -1405,6 +1493,41 @@ function App() {
             </div>
           )}
           <div className="topbar-actions">
+            {!adminChat && <ExpertiseMorphDial mode={expertiseMode} onChange={changeExpertiseMode} />}
+            {!adminChat && (
+              <button
+                type="button"
+                className={"topbar-rich-btn" + (futuresOpen ? " is-active" : "")}
+                title="Compare two parallel financial futures side-by-side & commit"
+                onClick={() => setFuturesOpen((v) => !v)}
+              >
+                <GitCompare size={14} aria-hidden="true" />
+                <span>Futures</span>
+              </button>
+            )}
+            {!adminChat && (
+              <button
+                type="button"
+                className={"topbar-rich-btn" + (watchCreatorOpen || watchcards.some((w) => w.status === "triggered") ? " is-active" : "")}
+                title="Living Threads: create autonomous watchcards that wake up when reality changes"
+                onClick={() => setWatchCreatorOpen((v) => !v)}
+              >
+                <Bell size={14} aria-hidden="true" />
+                <span>Watch</span>
+                {watchcards.length > 0 && <span className="topbar-rich-count">{watchcards.length}</span>}
+              </button>
+            )}
+            {!adminChat && (
+              <button
+                type="button"
+                className={"topbar-rich-btn" + (delegateOpen ? " is-active" : "")}
+                title="Delegate a scoped A2A pass to your personal AI agent"
+                onClick={() => setDelegateOpen(true)}
+              >
+                <Bot size={14} aria-hidden="true" />
+                <span>Personal AI</span>
+              </button>
+            )}
             {!adminChat && configuration?.gatewayConfigured && (
               <button
                 type="button"
@@ -1421,11 +1544,11 @@ function App() {
               <button
                 type="button"
                 className={"topbar-rich-btn" + (activeHandoff ? " is-active" : "")}
-                title="Escalate to a live human specialist with your conversation brief"
+                title="Escalate to a live human specialist with Multiplayer Live Glass co-browsing"
                 onClick={() => void startHandoff()}
               >
                 <Headphones size={14} aria-hidden="true" />
-                <span>{activeHandoff ? "Specialist active" : "Talk to advisor"}</span>
+                <span>{activeHandoff ? "Live Glass" : "Advisor"}</span>
               </button>
             )}
             <ThemeToggle compact />
@@ -1557,8 +1680,21 @@ function App() {
         activeHandoff={activeHandoff}
         onStartHandoff={(reason) => void startHandoff(reason)}
         onDismissHandoff={() => setActiveHandoff(null)}
-        onOpenMemory={() => { setMemoryOpen(true); void loadMemory(); }} />
+        onOpenMemory={() => { setMemoryOpen(true); void loadMemory(); }}
+        expertiseMode={expertiseMode}
+        futuresOpen={futuresOpen}
+        onToggleFutures={(open) => setFuturesOpen((v) => (open === undefined ? !v : open))}
+        watchcards={watchcards}
+        onWatchcardsChange={setWatchcards}
+        watchCreatorOpen={watchCreatorOpen}
+        onToggleWatchCreator={(open) => setWatchCreatorOpen((v) => (open === undefined ? !v : open))}
+        onOpenDelegate={() => setDelegateOpen(true)} />
     </main>
+    <ConsumerA2aDrawer
+      open={delegateOpen}
+      personaId={activeProfile?.personaId ?? configuration?.defaultPersonaId ?? "demo-learner"}
+      onClose={() => setDelegateOpen(false)}
+    />
     <MemoryDrawer
       open={memoryOpen}
       items={memoryItems}

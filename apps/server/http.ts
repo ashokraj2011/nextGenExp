@@ -57,9 +57,17 @@ import { PiiFirewallStore, registerLlmEgressContext, scrubWithPiiFirewall, unreg
 import { CepTelemetry } from "./telemetry";
 import { migrateLegacyConnectors } from "./connector-migration";
 import { HandoffStore } from "./handoff-store";
-import { createHandoffInputSchema } from "../../packages/contracts/handoff";
+import { coBrowseSlidersSchema, createHandoffInputSchema } from "../../packages/contracts/handoff";
 import { buildA2aAgentCard, handleCepMcpRequest } from "./cep-mcp-server";
 import { agUiRunInputSchema, streamAgUiRun } from "./ag-ui";
+import { WatchcardStore } from "./watchcard-store";
+import { AgentDelegationStore } from "./agent-delegation";
+import {
+  createDelegationPassInputSchema,
+  createWatchcardInputSchema,
+  runNegotiationInputSchema,
+  scenarioPlanInputSchema,
+} from "../../packages/contracts/nextgen-chat";
 import { piiFirewallConfigSchema } from "../../packages/contracts/pii-firewall";
 import { UxEvolutionStore } from "./ux-evolution";
 import { extractDocumentAction } from "./document-extractor";
@@ -344,6 +352,8 @@ export async function startApp(options: Options) {
   const uxEvolution = new UxEvolutionStore(options.dataDir);
   const evalRunner = new EvalRunnerStore(options.dataDir);
   const handoffStore = new HandoffStore(options.dataDir);
+  const watchcardStore = new WatchcardStore(options.dataDir);
+  const agentDelegation = new AgentDelegationStore(options.dataDir);
   const tradeStore = new TradeStore(options.dataDir, profileStore);
   const scheduledJobs = new ScheduledJobStore(options.dataDir, {
     profileStore, tradeStore, opsStore, salesStore, proactiveStore,
@@ -928,7 +938,183 @@ export async function startApp(options: Options) {
         if (!ticket) throw new ApiError(404, "handoff_not_found", "Handoff ticket not found.");
         return json(res, { ticket, view: handoffStore.view() });
       }
+      if (operation === "propose" && method === "POST") {
+        const input = await body(req, z.object({
+          handoffId: z.string().min(3).max(64),
+          title: z.string().trim().min(2).max(120),
+          summary: z.string().trim().min(2).max(400),
+          actionLabel: z.string().trim().min(2).max(60).optional(),
+          updates: z.record(z.string(), z.string()),
+        }).strict(), 16 * 1024);
+        const ticket = handoffStore.pushProposal(input.handoffId, actor, input);
+        if (!ticket) throw new ApiError(404, "handoff_not_found", "Handoff ticket not found.");
+        return json(res, { ticket, view: handoffStore.view() });
+      }
       throw new ApiError(404, "not_found", "This item is unavailable.");
+    }
+    if (resource === "chat" && id === "commit-scenario" && !operation && method === "POST") {
+      const plan = await body(req, scenarioPlanInputSchema, 16 * 1024);
+      const profile = profileStore.findByPersonaId(plan.personaId);
+      const actor = operator ?? profile?.displayName ?? plan.personaId;
+      const updates: Record<string, string> = { "goal.target": String(Math.round(plan.targetGoalUsd)) };
+      const summary = `Committed "${plan.scenarioName}": $${plan.monthlyDepositUsd.toLocaleString("en-US")}/mo for ${plan.horizonMonths} mo (${plan.equityAllocationPct}% equity, ${plan.expectedReturnPct}% est. return → projected $${Math.round(plan.projectedEndingUsd).toLocaleString("en-US")}).`;
+      const approval = approvalStore.createPending({
+        targetKind: "domain_write",
+        sfieldToolRef: domainWriteToolRef,
+        domain: "customer360",
+        recordId: plan.personaId,
+        action: "commit_parallel_future",
+        title: `Parallel Future Commit · ${plan.scenarioName}`,
+        summary,
+        riskLevel: plan.monthlyDepositUsd >= 5000 ? "high" : "low",
+        payload: { updates, plan },
+        details: [
+          { label: "Scenario", value: plan.scenarioName },
+          { label: "Monthly Contribution", value: `$${plan.monthlyDepositUsd.toLocaleString("en-US")}/mo` },
+          { label: "Horizon & Return", value: `${plan.horizonMonths} mo @ ${plan.expectedReturnPct}%` },
+          { label: "Projected Ending Value", value: `$${Math.round(plan.projectedEndingUsd).toLocaleString("en-US")}` },
+        ],
+        requester: actor,
+        dualControl: false,
+      });
+      if (profile) profileStore.applyBindings(plan.personaId, updates, now());
+      approvalStore.decide(approval.id, { decision: "approve", actor, comment: "Committed directly from Parallel Futures simulator" });
+      const audit = writeAudit.record({
+        sfieldRunId: `sim_${approval.id.slice(0, 12)}`,
+        sfieldToolRef: domainWriteToolRef,
+        domain: "customer360",
+        recordId: plan.personaId,
+        action: "commit_parallel_future",
+        actor,
+        summary,
+        status: "succeeded",
+        approvalId: approval.id,
+      });
+      approvalStore.markExecuted(approval.id, { summary, sfieldRunId: audit.sfieldRunId, auditId: audit.auditId });
+      return json(res, { committed: true, summary, approvalId: approval.id, auditId: audit.auditId, payloadDigest: approval.payloadDigest }, 201);
+    }
+    if (resource === "watchcards") {
+      if (!id && method === "GET") {
+        const personaId = url.searchParams.get("personaId") ?? undefined;
+        return json(res, { watchcards: watchcardStore.list(personaId) });
+      }
+      if (id === "stream" && !operation && method === "GET") {
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        });
+        streams.add(res);
+        res.write(`event: watchcard.connected\ndata: ${JSON.stringify({ ok: true })}\n\n`);
+        const personaId = url.searchParams.get("personaId");
+        const unsub = watchcardStore.subscribe((card) => {
+          if ((!personaId || card.personaId === personaId) && !res.writableEnded) {
+            res.write(`event: watchcard.update\ndata: ${JSON.stringify(card)}\n\n`);
+          }
+        });
+        const hb = setInterval(() => { if (!res.writableEnded) res.write(": keepalive\n\n"); }, 15_000);
+        hb.unref();
+        res.once("close", () => { unsub(); clearInterval(hb); streams.delete(res); });
+        return;
+      }
+      if (!id && method === "POST") {
+        const input = await body(req, createWatchcardInputSchema, 16 * 1024);
+        const watchcard = watchcardStore.create(input, profileStore);
+        return json(res, { watchcard, watchcards: watchcardStore.list(watchcard.personaId) }, 201);
+      }
+      if (id && operation === "simulate" && method === "POST") {
+        const card = watchcardStore.findById(id);
+        if (!card) throw new ApiError(404, "watchcard_not_found", "Watchcard not found.");
+        const observed = card.operator === "gte" ? Math.max(card.thresholdUsd, card.currentValueUsd) + 250 : Math.max(0, Math.min(card.thresholdUsd, card.currentValueUsd) - 250);
+        const approval = approvalStore.createPending({
+          targetKind: "domain_write",
+          sfieldToolRef: domainWriteToolRef,
+          domain: "customer360",
+          recordId: card.personaId,
+          action: "watchcard_triggered_action",
+          title: `Living Watchcard Triggered · ${card.title}`,
+          summary: `${card.metric.replaceAll("_", " ")} crossed $${card.thresholdUsd.toLocaleString("en-US")} (observed $${observed.toLocaleString("en-US")}). Ready to execute: ${card.actionSummary}`,
+          riskLevel: "medium",
+          payload: { watchcardId: card.id, metric: card.metric, observedUsd: observed, actionSummary: card.actionSummary },
+          details: [
+            { label: "Watchcard", value: card.title },
+            { label: "Condition", value: `${card.metric} ${card.operator === "gte" ? ">=" : "<="} $${card.thresholdUsd.toLocaleString("en-US")}` },
+            { label: "Observed Value", value: `$${observed.toLocaleString("en-US")}` },
+            { label: "Staged Action", value: card.actionSummary },
+          ],
+          requester: "cep:living-watchcard",
+          dualControl: false,
+        });
+        const updated = watchcardStore.markTriggered(card.id, observed, approval.id)!;
+        return json(res, { watchcard: updated, approval, watchcards: watchcardStore.list(updated.personaId) });
+      }
+      if (id && operation === "execute" && method === "POST") {
+        const card = watchcardStore.findById(id);
+        if (!card) throw new ApiError(404, "watchcard_not_found", "Watchcard not found.");
+        if (card.status !== "triggered") throw new ApiError(409, "watchcard_not_triggered", "Watchcard must be triggered before execution.");
+        const actor = operator ?? profileStore.findByPersonaId(card.personaId)?.displayName ?? card.personaId;
+        if (card.approvalId) {
+          approvalStore.decide(card.approvalId, { decision: "approve", actor, comment: "1-tap sign-off from Living Watchcard" });
+          approvalStore.markExecuted(card.approvalId, { summary: `Executed Living Watchcard: ${card.actionSummary}`, sfieldRunId: `wch_${card.id}` });
+        }
+        const audit = writeAudit.record({
+          sfieldRunId: `wch_${card.id}`,
+          sfieldToolRef: domainWriteToolRef,
+          domain: "customer360",
+          recordId: card.personaId,
+          action: "watchcard_executed",
+          actor,
+          summary: `Living Watchcard "${card.title}" executed: ${card.actionSummary}`,
+          status: "succeeded",
+          ...(card.approvalId ? { approvalId: card.approvalId } : {}),
+        });
+        const updated = watchcardStore.markExecuted(card.id, audit.auditId)!;
+        return json(res, { watchcard: updated, auditId: audit.auditId, watchcards: watchcardStore.list(updated.personaId) });
+      }
+      if (id && operation === "dismiss" && method === "POST") {
+        const updated = watchcardStore.dismiss(id);
+        if (!updated) throw new ApiError(404, "watchcard_not_found", "Watchcard not found.");
+        return json(res, { watchcard: updated, watchcards: watchcardStore.list(updated.personaId) });
+      }
+    }
+    if (resource === "agent-delegation") {
+      if (!id && method === "GET") {
+        const personaId = url.searchParams.get("personaId") ?? undefined;
+        return json(res, agentDelegation.view(personaId));
+      }
+      if (id === "pass" && !operation && method === "POST") {
+        const input = await body(req, createDelegationPassInputSchema, 8 * 1024);
+        const pass = agentDelegation.mintPass(input);
+        return json(res, { pass, view: agentDelegation.view(pass.personaId) }, 201);
+      }
+      if (id === "revoke" && !operation && method === "POST") {
+        const { passId } = await body(req, z.object({ passId: z.string().min(3).max(80) }).strict());
+        const pass = agentDelegation.revokePass(passId);
+        if (!pass) throw new ApiError(404, "pass_not_found", "Delegation pass not found.");
+        return json(res, { pass, view: agentDelegation.view(pass.personaId) });
+      }
+      if (id === "negotiate" && !operation && method === "POST") {
+        const input = await body(req, runNegotiationInputSchema, 16 * 1024);
+        const session = await agentDelegation.runNegotiation(input, {
+          origin,
+          principalId,
+          profileStore,
+          integrationService,
+          knowledgeBase,
+          approvalStore,
+          writeAudit,
+        });
+        return json(res, { session, view: agentDelegation.view(session.personaId) }, session.status === "paused_for_approval" ? 202 : 200);
+      }
+      if (id === "approve" && !operation && method === "POST") {
+        const { sessionId } = await body(req, z.object({ sessionId: z.string().min(3).max(80) }).strict());
+        const existing = agentDelegation.view().negotiations.find((n) => n.sessionId === sessionId);
+        if (!existing) throw new ApiError(404, "negotiation_not_found", "Negotiation session not found.");
+        const actor = operator ?? profileStore.findByPersonaId(existing.personaId)?.displayName ?? existing.personaId;
+        const session = agentDelegation.approveNegotiation(sessionId, actor, approvalStore, writeAudit)!;
+        return json(res, { session, view: agentDelegation.view(session.personaId) });
+      }
     }
     if (resource === "knowledge-search" && !id && method === "POST") {
       const { query } = await body(req, z.object({ query: z.string().trim().min(2).max(400) }).strict());
@@ -938,6 +1124,63 @@ export async function startApp(options: Options) {
       const ticket = handoffStore.findById(id);
       if (!ticket) throw new ApiError(404, "handoff_not_found", "Handoff ticket not found.");
       return json(res, { ticket });
+    }
+    if (resource === "handoffs" && id && operation === "stream" && method === "GET") {
+      const existing = handoffStore.findById(id);
+      if (!existing) throw new ApiError(404, "handoff_not_found", "Handoff ticket not found.");
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+      streams.add(res);
+      res.write(`event: handoff.update\ndata: ${JSON.stringify(existing)}\n\n`);
+      const unsub = handoffStore.subscribe(id, (next) => {
+        if (!res.writableEnded) res.write(`event: handoff.update\ndata: ${JSON.stringify(next)}\n\n`);
+      });
+      const hb = setInterval(() => { if (!res.writableEnded) res.write(": keepalive\n\n"); }, 15_000);
+      hb.unref();
+      res.once("close", () => { unsub(); clearInterval(hb); streams.delete(res); });
+      return;
+    }
+    if (resource === "handoffs" && id && operation === "cobrowse" && method === "POST") {
+      const input = await body(req, z.object({
+        updatedBy: z.enum(["advisor", "customer"]).optional(),
+        active: z.boolean().optional(),
+        title: z.string().trim().min(1).max(120).optional(),
+        sliders: coBrowseSlidersSchema.partial().optional(),
+      }).strict(), 16 * 1024);
+      const role = input.updatedBy ?? (operator ? "advisor" : "customer");
+      const ticket = handoffStore.updateCoBrowse(id, role, input);
+      if (!ticket) throw new ApiError(404, "handoff_not_found", "Handoff ticket not found.");
+      return json(res, { ticket });
+    }
+    if (resource === "handoffs" && id && operation === "proposal" && method === "POST") {
+      const { decision } = await body(req, z.object({ decision: z.enum(["accepted", "declined"]) }).strict());
+      const existing = handoffStore.findById(id);
+      if (!existing?.coBrowse?.proposal) throw new ApiError(404, "proposal_not_found", "No pending advisor proposal.");
+      let auditId: string | undefined;
+      if (decision === "accepted") {
+        const proposal = existing.coBrowse.proposal;
+        const updates = proposal.updates;
+        if (Object.keys(updates).length > 0) {
+          profileStore.applyBindings(existing.personaId, updates, now());
+        }
+        const audit = writeAudit.record({
+          sfieldRunId: `cobrowse_${proposal.id}`,
+          sfieldToolRef: domainWriteToolRef,
+          domain: "customer360",
+          recordId: existing.personaId,
+          action: "cobrowse_proposal_signed",
+          actor: existing.customerName,
+          summary: `Customer signed Advisor-Proposed card "${proposal.title}" by ${proposal.proposedBy}: ${JSON.stringify(updates)}`,
+          status: "succeeded",
+        });
+        auditId = audit.auditId;
+      }
+      const ticket = handoffStore.decideProposal(id, decision, auditId);
+      return json(res, { ticket, ...(auditId ? { auditId } : {}) });
     }
     if (resource === "handoffs" && id && operation === "reply" && method === "POST") {
       const { text } = await body(req, z.object({ text: z.string().trim().min(1).max(2000) }).strict());

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, Headphones, MessageSquare, RotateCw, Send, UserCheck } from "lucide-react";
-import type { HandoffInboxView } from "../../packages/contracts/handoff";
+import type { HandoffInboxView, HandoffTicket } from "../../packages/contracts/handoff";
 import { api, toolSetupErrorMessage } from "./api";
+import { MultiplayerCoBrowseCard } from "./nextgen-chat-features";
 
 export function HandoffInboxPanel() {
   const [data, setData] = useState<HandoffInboxView>();
@@ -123,6 +124,19 @@ export function HandoffInboxPanel() {
                     </span>
                   ))}
                 </div>
+              )}
+
+              {t.status !== "resolved" && (
+                <MultiplayerCoBrowseCard
+                  ticket={t}
+                  role="advisor"
+                  onTicketUpdated={(nextTicket: HandoffTicket) => {
+                    setData((prev) => prev ? {
+                      ...prev,
+                      tickets: prev.tickets.map((x) => (x.handoffId === nextTicket.handoffId ? nextTicket : x)),
+                    } : prev);
+                  }}
+                />
               )}
 
               {t.notes.length > 0 && (

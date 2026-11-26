@@ -8,6 +8,7 @@ import type { HandoffTicket } from "../../packages/contracts/handoff";
 import type { KnowledgeCitation } from "../../packages/contracts/knowledge-base";
 import type { DisplayExperience } from "../../packages/contracts/surface";
 import { api, toolSetupErrorMessage } from "./api";
+import { MultiplayerCoBrowseCard } from "./nextgen-chat-features";
 import { ExperienceCanvasView } from "./surface";
 import "./chat-rich-ux.css";
 
@@ -19,7 +20,7 @@ export type SlashCommand = {
   command: string;
   label: string;
   hint: string;
-  action: "prompt" | "advisor" | "memory" | "upload";
+  action: "prompt" | "advisor" | "memory" | "upload" | "futures" | "watch" | "delegate";
   prompt?: string;
 };
 
@@ -29,7 +30,10 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { command: "/plan", label: "2-year savings plan", hint: "Interactive contribution simulator", action: "prompt", prompt: "I want to buy a house in two years. Show me how close I am and help me explore a savings plan." },
   { command: "/retirement", label: "Retirement accounts", hint: "Review accounts & beneficiary status", action: "prompt", prompt: "Show my retirement accounts." },
   { command: "/compare", label: "Compare balances", hint: "Available vs. current balance side by side", action: "prompt", prompt: "Compare available and current balance." },
-  { command: "/advisor", label: "Talk to a live advisor", hint: "Warm handoff with AI brief & account snapshot", action: "advisor" },
+  { command: "/futures", label: "Parallel Futures simulator", hint: "Compare Scenario A vs B side-by-side & commit", action: "futures" },
+  { command: "/watch", label: "Create Living Watchcard", hint: "Autonomous sentinel that wakes up when reality changes", action: "watch" },
+  { command: "/delegate", label: "Personal AI (A2A) Delegation", hint: "Mint a scoped pass for your personal AI to negotiate", action: "delegate" },
+  { command: "/advisor", label: "Talk to a live advisor", hint: "Multiplayer Live Glass handoff with AI brief", action: "advisor" },
   { command: "/memory", label: "Manage personal memory", hint: "View, save, or forget your preferences", action: "memory" },
   { command: "/upload", label: "Attach document", hint: "Upload invoice, CSV, log, or image", action: "upload" },
 ];
@@ -197,16 +201,18 @@ export function LiveHandoffCard({ ticket: initialTicket, onDismiss }: {
 
   useEffect(() => { setTicket(initialTicket); }, [initialTicket]);
 
-  // Poll live status & specialist messages every 3s while active.
+  // Subscribe to real-time SSE updates (instant live co-browse sliders, advisor proposals, and specialist replies).
   useEffect(() => {
     if (ticket.status === "resolved") return;
     let alive = true;
-    const timer = setInterval(() => {
-      void api.handoffStatus(ticket.handoffId).then((res) => {
-        if (alive && res.ticket) setTicket(res.ticket);
-      }).catch(() => undefined);
-    }, 3000);
-    return () => { alive = false; clearInterval(timer); };
+    const stream = new EventSource(`/api/handoffs/${encodeURIComponent(ticket.handoffId)}/stream`);
+    stream.addEventListener("handoff.update", (evt) => {
+      if (!alive) return;
+      try {
+        setTicket(JSON.parse((evt as MessageEvent).data) as HandoffTicket);
+      } catch { /* ignore */ }
+    });
+    return () => { alive = false; stream.close(); };
   }, [ticket.handoffId, ticket.status]);
 
   async function sendReply(e: React.FormEvent) {
@@ -256,6 +262,10 @@ export function LiveHandoffCard({ ticket: initialTicket, onDismiss }: {
             <span key={k}>{k}: <strong>{v}</strong></span>
           ))}
         </div>
+      )}
+
+      {ticket.status !== "resolved" && (
+        <MultiplayerCoBrowseCard ticket={ticket} role="customer" onTicketUpdated={setTicket} />
       )}
 
       {ticket.notes.length > 0 && (

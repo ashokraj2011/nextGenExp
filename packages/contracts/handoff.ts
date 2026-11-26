@@ -16,6 +16,38 @@ export const handoffNoteSchema = z.object({
 }).strict();
 export type HandoffNote = z.infer<typeof handoffNoteSchema>;
 
+export const coBrowseSlidersSchema = z.object({
+  monthlyContributionUsd: z.number().min(0).max(50_000).default(1500),
+  horizonMonths: z.number().int().min(6).max(360).default(24),
+  expectedReturnPct: z.number().min(0).max(15).default(6.5),
+  equityAllocationPct: z.number().int().min(0).max(100).default(65),
+}).strict();
+export type CoBrowseSliders = z.infer<typeof coBrowseSlidersSchema>;
+
+export const advisorProposalSchema = z.object({
+  id: z.string(),
+  title: z.string().trim().min(2).max(120),
+  summary: z.string().trim().min(2).max(400),
+  actionLabel: z.string().trim().min(2).max(60).default("Review & Sign"),
+  updates: z.record(z.string(), z.string()),
+  proposedBy: z.string().trim().min(1).max(80),
+  status: z.enum(["pending", "accepted", "declined"]),
+  auditId: z.string().optional(),
+  createdAt: z.string(),
+  decidedAt: z.string().optional(),
+}).strict();
+export type AdvisorProposal = z.infer<typeof advisorProposalSchema>;
+
+export const coBrowseStateSchema = z.object({
+  active: z.boolean().default(true),
+  title: z.string().trim().min(1).max(120).default("Shared Planning Canvas"),
+  updatedBy: z.enum(["advisor", "customer"]).default("advisor"),
+  updatedAt: z.string(),
+  sliders: coBrowseSlidersSchema,
+  proposal: advisorProposalSchema.optional(),
+}).strict();
+export type CoBrowseState = z.infer<typeof coBrowseStateSchema>;
+
 export const handoffTicketSchema = z.object({
   handoffId: z.string(),
   conversationId: z.string(),
@@ -30,6 +62,7 @@ export const handoffTicketSchema = z.object({
   customerSnapshot: z.record(z.string(), z.string()),
   recentTranscript: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string() }).strict()).max(12),
   notes: z.array(handoffNoteSchema).default([]),
+  coBrowse: coBrowseStateSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   claimedAt: z.string().optional(),

@@ -1,0 +1,506 @@
+/* ============================================================================
+ * Out-of-the-Box Next-Gen Chat Features (#1, #2, #3, #4, #6)
+ * ========================================================================== */
+
+/* #1 Multiplayer Live Glass Co-Browse */
+.cobrowse-glass {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--teal-border, rgba(13, 148, 136, 0.35));
+  background: color-mix(in srgb, var(--teal-pale, rgba(13, 148, 136, 0.08)) 55%, var(--surface, #fff));
+  display: grid;
+  gap: 10px;
+}
+.cobrowse-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cobrowse-live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--teal, #0d9488);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.cobrowse-head small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.cobrowse-projection {
+  display: grid;
+  gap: 6px;
+}
+.cobrowse-projection span {
+  display: block;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+.cobrowse-projection strong {
+  font-size: 1.45rem;
+  font-variant-numeric: tabular-nums;
+}
+.cobrowse-mix-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  gap: 2px;
+}
+.cobrowse-mix-bar .is-eq { background: #2f855a; }
+.cobrowse-mix-bar .is-fi { background: #4b6584; }
+.cobrowse-sliders {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+}
+.cobrowse-sliders label {
+  display: grid;
+  gap: 3px;
+  font-size: 0.76rem;
+}
+.cobrowse-sliders input[type="range"] {
+  width: 100%;
+  accent-color: var(--teal, #0d9488);
+}
+.cobrowse-advisor-push {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line-strong);
+}
+.cobrowse-push-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) 120px;
+  gap: 8px;
+}
+.cobrowse-push-fields input {
+  padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface, #fff);
+  color: var(--ink);
+  font-size: 0.78rem;
+}
+.cobrowse-proposal {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface, #fff);
+  display: grid;
+  gap: 6px;
+}
+.cobrowse-proposal h4 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+.cobrowse-proposal p {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.cobrowse-proposal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.advisor-provenance-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+.cobrowse-proposal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.cobrowse-signed-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--teal-dark, #0f766e);
+  font-weight: 600;
+  font-size: 0.75rem;
+}
+
+/* #2 Parallel Futures Simulator */
+.futures-pane {
+  flex: 0 0 min(52%, 640px);
+}
+.futures-delta-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--teal-pale, rgba(13, 148, 136, 0.1));
+  border: 1px solid var(--teal-border, rgba(13, 148, 136, 0.3));
+  font-size: 0.8rem;
+  margin-bottom: 12px;
+}
+.futures-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.futures-col {
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+.futures-col.is-b {
+  border-color: var(--teal-border, rgba(13, 148, 136, 0.45));
+}
+.futures-col-head {
+  display: grid;
+  gap: 4px;
+  font-size: 0.84rem;
+}
+.futures-gap-pill {
+  display: inline-block;
+  width: fit-content;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+.futures-gap-pill.is-surplus { background: rgba(16, 185, 129, 0.14); color: #047857; }
+.futures-gap-pill.is-gap { background: rgba(245, 158, 11, 0.16); color: #b45309; }
+.futures-big-num {
+  display: grid;
+  gap: 4px;
+}
+.futures-big-num span { font-size: 0.72rem; color: var(--muted); }
+.futures-big-num strong { font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.futures-big-num small { font-size: 0.72rem; color: var(--muted); }
+.futures-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+.futures-bar span {
+  display: block;
+  height: 100%;
+  background: var(--teal, #0d9488);
+}
+.futures-sliders {
+  display: grid;
+  gap: 7px;
+}
+.futures-sliders label {
+  display: grid;
+  gap: 2px;
+  font-size: 0.74rem;
+}
+.futures-sliders input[type="range"] {
+  width: 100%;
+  accent-color: var(--teal, #0d9488);
+}
+.futures-receipt {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 0.78rem;
+}
+.futures-receipt small { display: block; color: var(--muted); margin-top: 2px; }
+
+/* #3 Living Threads — Autonomous Watchcards */
+.living-watchcards-wrap {
+  width: min(calc(100% - 40px), calc(var(--thread-width, 820px) - 40px));
+  margin: 12px auto 0;
+  display: grid;
+  gap: 10px;
+}
+.watchcard-creator {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface, #fff);
+  display: grid;
+  gap: 10px;
+}
+.watchcard-creator-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.watchcard-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.watchcard-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.watchcard-form input,
+.watchcard-form select {
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.8rem;
+}
+.watchcard-form .is-wide {
+  grid-column: 1 / -1;
+}
+.watchcard-list {
+  display: grid;
+  gap: 8px;
+}
+.watchcard-item {
+  padding: 11px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface, #fff);
+  display: grid;
+  gap: 6px;
+}
+.watchcard-item.is-triggered {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.16);
+}
+.watchcard-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.watchcard-item-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.86rem;
+}
+.watchcard-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--teal, #0d9488);
+}
+.watchcard-dot.is-triggered { background: #f59e0b; }
+.watchcard-dot.is-executed { background: #10b981; }
+.watchcard-meta {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.watchcard-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* #4 Expertise Morph Dial */
+.expertise-dial {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-subtle, rgba(127, 127, 127, 0.08));
+}
+.expertise-dial-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.73rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.expertise-dial-btn.is-active {
+  background: var(--surface, #fff);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.expertise-guided-card {
+  margin: 8px 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--teal-pale, rgba(13, 148, 136, 0.09));
+  border-left: 3px solid var(--teal, #0d9488);
+  display: grid;
+  gap: 4px;
+}
+.expertise-guided-card p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.expertise-pro-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.06);
+  font-size: 0.7rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted);
+}
+.expertise-pro-strip span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 700;
+  color: var(--teal-dark, #0f766e);
+}
+.workspace[data-expertise="pro"] .content-card {
+  padding: 12px 14px;
+  font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
+}
+.workspace[data-expertise="guided"] .citations-strip,
+.workspace[data-expertise="guided"] .rich-action-chip.is-subtle {
+  display: none;
+}
+
+/* #6 Consumer A2A Drawer */
+.a2a-drawer {
+  width: min(100vw, 480px);
+}
+.a2a-mint-form,
+.a2a-run-box {
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  display: grid;
+  gap: 9px;
+}
+.a2a-mint-row,
+.a2a-run-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 130px;
+  gap: 8px;
+  align-items: end;
+}
+.a2a-mint-row label,
+.a2a-run-row label {
+  display: grid;
+  gap: 3px;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+.a2a-mint-form input,
+.a2a-run-box input {
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.8rem;
+}
+.a2a-scopes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 0.76rem;
+}
+.a2a-scope-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.a2a-passes,
+.a2a-feed {
+  display: grid;
+  gap: 8px;
+}
+.a2a-pass-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  font-size: 0.78rem;
+}
+.a2a-pass-card small { display: block; color: var(--muted); font-size: 0.72rem; }
+.a2a-session {
+  padding: 11px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  display: grid;
+  gap: 8px;
+}
+.a2a-session-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.82rem;
+}
+.a2a-transcript {
+  display: grid;
+  gap: 6px;
+}
+.a2a-msg {
+  padding: 7px 10px;
+  border-radius: 9px;
+  background: var(--surface-subtle, rgba(127, 127, 127, 0.08));
+  font-size: 0.76rem;
+}
+.a2a-msg.is-sfield_guard {
+  background: rgba(245, 158, 11, 0.12);
+  border-left: 3px solid #f59e0b;
+}
+.a2a-msg.is-cep_agent {
+  background: var(--teal-pale, rgba(13, 148, 136, 0.09));
+}
+.a2a-msg-top {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.71rem;
+  margin-bottom: 3px;
+}
+.a2a-msg p { margin: 0; line-height: 1.4; }
+.a2a-approve-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+[data-theme="dark"] .cobrowse-proposal,
+[data-theme="dark"] .watchcard-creator,
+[data-theme="dark"] .watchcard-item,
+[data-theme="dark"] .expertise-dial-btn.is-active {
+  background: #141922;
+}
+
+@media (max-width: 900px) {
+  .futures-grid,
+  .cobrowse-sliders {
+    grid-template-columns: 1fr;
+  }
+}
