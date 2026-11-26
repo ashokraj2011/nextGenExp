@@ -706,9 +706,6 @@ export function buildGroundedFallbackCanvas(
       prompt: prompt.slice(0, 600),
       nodes: nodes.slice(0, 5),
       disclaimer: "Figures reflect live Customer 360 and Portfolio Snapshot balances.",
-      suggestedFollowUp: visuals.has("piechart")
-        ? "Show this breakdown as a comparison table"
-        : "Show my portfolio as a pie chart",
     },
   };
 }

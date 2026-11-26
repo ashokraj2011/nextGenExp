@@ -272,6 +272,8 @@ export const dynamicCanvasSchema = z.object({
     prompt: z.string().trim().min(1).max(240).optional(),
   }).strict()).max(12).optional(),
   suggestedFollowUp: z.string().trim().max(160).optional(),
+  recommendationLabel: z.string().trim().max(80).optional(),
+  recommendationSource: z.string().trim().max(80).optional(),
   harnessTrace: harnessTraceSchema.optional(),
 }).strict();
 

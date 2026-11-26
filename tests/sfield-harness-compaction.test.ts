@@ -426,3 +426,23 @@ test("Chat Workspace & Folder Superpowers: shared folder instructions, cross-thr
   assert.match(JSON.stringify(briefCard.props.nodes), /\$700k/);
   assert.match(JSON.stringify(briefCard.props.nodes), /What-if Pie Branch/);
 });
+
+test("All Dynamic Canvas recommendations come strictly from Recommendation Providers (never hardcoded sell Apple)", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "cep-rec-provider-only-"));
+  const gateway = await startFixtureGateway();
+  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: gateway.settings });
+  t.after(async () => { await app.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
+  const client = await testClient(app.url);
+  const chat = await client.conversation();
+
+  // Ask to view stock holdings -> must NOT show hardcoded "I want to sell 40% of my Apple shares"
+  const holdingsTurn = (await client.ask(chat.id, "Show all my stocks")).turn;
+  assert.equal(holdingsTurn.status, "completed");
+  const card = holdingsTurn.experience?.blocks.find((b) => b.component === "PznDynamicCanvas");
+  assert.ok(card && card.component === "PznDynamicCanvas");
+  assert.doesNotMatch(card.props.suggestedFollowUp ?? "", /sell 40% of my Apple/i, "must never hardcode selling Apple");
+  if (card.props.suggestedFollowUp) {
+    assert.ok(card.props.recommendationSource, "any recommendation CTA must carry recommendationSource from a provider");
+    assert.ok(holdingsTurn.providerArbitration?.providers.length, "provider arbitration trace must be recorded");
+  }
+});

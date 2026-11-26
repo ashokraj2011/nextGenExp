@@ -828,8 +828,8 @@ function buildWealthDomContext(section: WorkspaceSection, profile?: DemoPersona)
         { label: "Cash", value: cashLabel },
       ],
       suggestedActions: [
-        { label: "Sell some Apple shares, tax-smart", prompt: "I want to sell 40% of my Apple shares" },
         { label: "What stocks do I own?", prompt: "whats in my equity book right now?" },
+        { label: "View holdings as a bubble chart", prompt: "Show my stock holdings as a bubble chart" },
         { label: "How do wash-sale rules work?", prompt: "What is our policy on tax-loss harvesting and wash-sale rules?" },
       ],
     };
@@ -908,7 +908,7 @@ function buildWealthDomContext(section: WorkspaceSection, profile?: DemoPersona)
     suggestedActions: [
       { label: "Review my portfolio", prompt: portfolioPrompt },
       ...(benMissing ? [addBeneficiary] : []),
-      { label: "Sell some Apple shares, tax-smart", prompt: "I want to sell 40% of my Apple shares" },
+      { label: "What stocks do I own?", prompt: "whats in my equity book right now?" },
       { label: "Send a wire transfer", prompt: "I want to initiate a wire transfer" },
     ].slice(0, 4),
   };

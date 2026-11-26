@@ -354,7 +354,6 @@ export async function runThreadStatusHarness(input: {
             prompt: input.prompt.slice(0, 600),
             nodes,
             disclaimer: "Status reflects live in-memory and SQLite turn state scoped strictly to your signed-in session.",
-            suggestedFollowUp: "Check status of my other threads again",
           },
         },
         summary: `Composed thread monitor table (${targetThreads.length} thread row(s))`,

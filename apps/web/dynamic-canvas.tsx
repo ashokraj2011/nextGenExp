@@ -1113,10 +1113,16 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
 
       <footer className="dyn-canvas-footer">
         <p className="disclosure">{props.disclaimer}</p>
-        {props.suggestedFollowUp && props.onFollowUp && (
-          <button type="button" className="secondary-button" onClick={() => props.onFollowUp!(props.suggestedFollowUp!)}>
-            {props.suggestedFollowUp} <ArrowUpRight size={14} aria-hidden="true" />
-          </button>
+        {props.suggestedFollowUp && props.recommendationSource && props.onFollowUp && (
+          <div className="dyn-provider-rec">
+            <span className="dyn-provider-rec-badge">
+              <Sparkles size={11} aria-hidden="true" />
+              {props.recommendationSource}
+            </span>
+            <button type="button" className="secondary-button" onClick={() => props.onFollowUp!(props.suggestedFollowUp!)}>
+              {props.recommendationLabel || props.suggestedFollowUp} <ArrowUpRight size={14} aria-hidden="true" />
+            </button>
+          </div>
         )}
       </footer>
     </section>

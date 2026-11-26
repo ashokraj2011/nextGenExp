@@ -916,7 +916,6 @@ export class ExperienceService {
               },
             ],
             disclaimer: "New goals persist via sfield governed writes and immediately appear in your portfolio & goals tracking.",
-            suggestedFollowUp: "Show my portfolio allocation as a bubble chart",
             harnessTrace: {
               resolvedGoal: suggested.suggestedName
                 ? `Open interactive goal creator pre-filled for ${suggested.suggestedName}`
@@ -1031,7 +1030,6 @@ export class ExperienceService {
               prompt: scopedPrompt.slice(0, 600),
               nodes,
               disclaimer: "Synthesized directly from your persisted threads and folder instructions.",
-              suggestedFollowUp: "What is the status of my other threads?",
               harnessTrace: {
                 resolvedGoal: `Synthesize all threads and instructions in folder "${matchedFolder.name}"`,
                 thinking: `Loaded ${threadSummaries.length} thread(s) and ${totalCompleted} completed turn(s) from folder "${matchedFolder.name}"${matchedFolder.instructions ? " along with shared folder instructions" : ""}.`,
@@ -1177,17 +1175,42 @@ export class ExperienceService {
           : generatedRaw;
         current();
         const now = this.now();
-        const dynamicResult = compileDynamicCanvas(generated.intro, generated.canvas, now + DECISION_TTL);
         const arbDomain: ProviderArbitrationTrace["domain"] = semanticRoute.capabilityId === "ops_incident"
           ? "operations"
           : semanticRoute.capabilityId === "sales_deal_desk"
             ? "sales"
             : "wealth";
         let providerArbitration: ProviderArbitrationTrace | undefined;
+        let governedWinner: { providerLabel: string; title: string; ctaLabel?: string; ctaPrompt?: string } | undefined;
+        const recentBuys = domainTools.tradeStore?.recentlyBoughtSymbols(conversation.personaId) ?? new Set<string>();
+        const symbolNames: Record<string, RegExp> = {
+          AAPL: /\b(aapl|apple)\b/i,
+          MSFT: /\b(msft|microsoft)\b/i,
+          NVDA: /\b(nvda|nvidia)\b/i,
+          INTC: /\b(intc|intel)\b/i,
+          BA: /\b(ba|boeing)\b/i,
+          PFE: /\b(pfe|pfizer)\b/i,
+        };
+        const contradictsRecentBuy = (text: string) => {
+          if (!/\b(sell|trim|liquidate|harvest)\b/i.test(text)) return false;
+          for (const sym of recentBuys) {
+            const rx = symbolNames[sym] ?? new RegExp(`\\b${sym}\\b`, "i");
+            if (rx.test(text)) return true;
+          }
+          return false;
+        };
+        const pickEligibleRecommendation = (
+          items: Array<{ providerLabel: string; title: string; ctaLabel?: string; ctaPrompt?: string }>,
+        ) => items.find((item) => {
+          if (!item.ctaPrompt?.trim()) return false;
+          const combined = `${item.title} ${item.ctaLabel ?? ""} ${item.ctaPrompt}`;
+          if (contradictsRecentBuy(combined)) return false;
+          return true;
+        });
         try {
           if (arbDomain === "operations" && domainTools.opsStore) {
             const opsArb = await new RecommendationArbitrator([
-              createOpsRunbookProvider(() => domainTools!.opsStore!.list().filter((r) => r.id === generated.canvas.recordId)),
+              createOpsRunbookProvider(() => domainTools!.opsStore!.list().filter((r) => !generated.canvas.recordId || r.id === generated.canvas.recordId)),
             ]).arbitrate({
               principalId: initial.scope.principalId,
               personaId: conversation.personaId,
@@ -1197,11 +1220,12 @@ export class ExperienceService {
               fundingStatus: "funded",
               excludePromotions: false,
             }, signal);
+            governedWinner = pickEligibleRecommendation(opsArb.recommendations);
             providerArbitration = {
               toolRef: recommendationArbitrateToolRef,
               domain: "operations",
               decisionId: opsArb.decisionId,
-              winnerTitle: opsArb.topNba?.title,
+              winnerTitle: governedWinner?.title ?? opsArb.topNba?.title,
               providers: [
                 ...opsArb.providers,
                 { providerId: "treatment_selector", providerLabel: "Treatment Selector (TS + CCRE)", status: "skipped", candidateCount: 0, elapsedMs: 0, note: 'Domain "operations" outside wealth scope' },
@@ -1211,7 +1235,7 @@ export class ExperienceService {
             };
           } else if (arbDomain === "sales" && domainTools.salesStore) {
             const salesArb = await new RecommendationArbitrator([
-              createSalesDealDeskProvider(() => domainTools!.salesStore!.list().filter((r) => r.id === generated.canvas.recordId)),
+              createSalesDealDeskProvider(() => domainTools!.salesStore!.list().filter((r) => !generated.canvas.recordId || r.id === generated.canvas.recordId)),
             ]).arbitrate({
               principalId: initial.scope.principalId,
               personaId: conversation.personaId,
@@ -1221,11 +1245,12 @@ export class ExperienceService {
               fundingStatus: "funded",
               excludePromotions: false,
             }, signal);
+            governedWinner = pickEligibleRecommendation(salesArb.recommendations);
             providerArbitration = {
               toolRef: recommendationArbitrateToolRef,
               domain: "sales",
               decisionId: salesArb.decisionId,
-              winnerTitle: salesArb.topNba?.title,
+              winnerTitle: governedWinner?.title ?? salesArb.topNba?.title,
               providers: [
                 ...salesArb.providers,
                 { providerId: "treatment_selector", providerLabel: "Treatment Selector (TS + CCRE)", status: "skipped", candidateCount: 0, elapsedMs: 0, note: 'Domain "sales" outside wealth scope' },
@@ -1234,20 +1259,46 @@ export class ExperienceService {
               ],
             };
           } else {
-            providerArbitration = {
-              toolRef: recommendationArbitrateToolRef,
+            const wealthContext = semanticRoute.capabilityId === "stock_holdings" || semanticRoute.capabilityId === "stock_trade"
+              ? "portfolio"
+              : "goals";
+            const wealthArb = await runtime.arbitrateRecommendations(current(), {
+              contextId: wealthContext,
               domain: "wealth",
-              decisionId: makeId("rec_arb"),
-              winnerTitle: lookupInfo?.nba?.title,
-              providers: [
-                { providerId: "customer360_nba", providerLabel: "Customer 360 NBA Engine", status: "ok", candidateCount: lookupInfo?.nba ? 1 : 0, elapsedMs: 1 },
-                { providerId: "treatment_selector", providerLabel: "Treatment Selector (TS + CCRE)", status: "skipped", candidateCount: 0, elapsedMs: 0, note: "Bypassed for Stage 0 Dynamic UI Canvas" },
-                { providerId: "ops_runbook", providerLabel: "IT Ops Runbook Recommender", status: "skipped", candidateCount: 0, elapsedMs: 0, note: 'Domain "wealth" outside operations scope' },
-                { providerId: "sales_deal_desk", providerLabel: "Sales Deal Desk Recommender", status: "skipped", candidateCount: 0, elapsedMs: 0, note: 'Domain "wealth" outside sales scope' },
-              ],
+              existingBlockTitles: [generated.canvas.title],
+            }, signal);
+            governedWinner = pickEligibleRecommendation(wealthArb.recommendations);
+            providerArbitration = {
+              toolRef: wealthArb.toolRef,
+              domain: "wealth",
+              decisionId: wealthArb.decisionId,
+              winnerTitle: governedWinner?.title ?? wealthArb.topNba?.title,
+              providers: wealthArb.providers,
             };
           }
-        } catch { /* Telemetry trace must never fail turn completion. */ }
+        } catch {
+          // Fallback to Customer 360 NBA provider result if arbitrator call is skipped
+          if (lookupInfo?.nba?.prompt && !contradictsRecentBuy(`${lookupInfo.nba.title} ${lookupInfo.nba.prompt}`)) {
+            governedWinner = {
+              providerLabel: "Customer 360 NBA Engine",
+              title: lookupInfo.nba.title,
+              ctaLabel: lookupInfo.nba.ctaLabel,
+              ctaPrompt: lookupInfo.nba.prompt,
+            };
+          }
+        }
+        // Enforce single recommendation authority: strip any ad-hoc generator/LLM suggestedFollowUp
+        // and attach ONLY the governed Recommendation Provider winner (with provenance).
+        const governedCanvas: import("../../packages/contracts/dynamic-canvas").DynamicCanvasProps = { ...generated.canvas };
+        delete governedCanvas.suggestedFollowUp;
+        delete governedCanvas.recommendationLabel;
+        delete governedCanvas.recommendationSource;
+        if (governedWinner?.ctaPrompt) {
+          governedCanvas.suggestedFollowUp = governedWinner.ctaPrompt.slice(0, 160);
+          governedCanvas.recommendationLabel = (governedWinner.ctaLabel || governedWinner.title).slice(0, 80);
+          governedCanvas.recommendationSource = governedWinner.providerLabel.slice(0, 80);
+        }
+        const dynamicResult = compileDynamicCanvas(generated.intro, governedCanvas, now + DECISION_TTL);
         this.store.update(id, (row) => {
           row.public.actionMode = "dynamic_ui";
           if (lookupInfo) row.public.customerLookup = lookupInfo.lookup;

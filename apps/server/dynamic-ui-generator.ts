@@ -1202,20 +1202,12 @@ function buildStockHoldingsCanvas(
   }
 
   const recentBuys = tradeStore.recentlyBoughtSymbols(personaId);
-  const eligibleTlh = activeHoldings
-    .filter((h) => h.priceCents < h.avgCostCents && !recentBuys.has(h.symbol.toUpperCase()))
-    .sort((a, b) => ((a.priceCents - a.avgCostCents) * a.shares) - ((b.priceCents - b.avgCostCents) * b.shares));
-  const suggestedFollowUp = recentBuys.size > 0
-    ? "Show my stock holdings as a bubble chart"
-    : eligibleTlh.length > 0
-      ? `Show my portfolio allocation as a pie chart`
-      : "Show my portfolio allocation as a pie chart";
   const recentBuyNote = recentBuys.size > 0
     ? ` Recent purchase${recentBuys.size === 1 ? "" : "s"} (${[...recentBuys].join(", ")}) are reflected above.`
     : "";
 
   return {
-    intro: `Here are all **${activeHoldings.length} active stock positions** in your live portfolio (${usd(marketTotalCents)} total equity holdings, ${usd(snapshot.cashCents)} cash, ${tlhCount} tax-loss harvesting candidate${tlhCount === 1 ? "" : "s"}).${recentBuyNote} Ask to visualize your holdings (for example, *"Show my stock holdings as a bubble chart"*) or trade any ticker.`,
+    intro: `Here are all **${activeHoldings.length} active stock positions** in your live portfolio (${usd(marketTotalCents)} total equity holdings, ${usd(snapshot.cashCents)} cash, ${tlhCount} tax-loss harvesting candidate${tlhCount === 1 ? "" : "s"}).${recentBuyNote}`,
     canvas: {
       title: "Live Stock Holdings & Tax-Lot Positions",
       badge: "Live Equity Holdings",
@@ -1225,7 +1217,6 @@ function buildStockHoldingsCanvas(
       prompt,
       nodes,
       disclaimer: "Holdings reflect live simulated trades settled through sfield cep.domain.execute_write@1.0.0. Highlighted rows indicate unrealized losses eligible for Tax-Loss Harvesting.",
-      suggestedFollowUp,
     },
   };
 }
