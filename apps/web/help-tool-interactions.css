@@ -1,0 +1,313 @@
+.ti-section {
+  scroll-margin-top: 76px;
+}
+
+.ti-figure {
+  margin: 0;
+  overflow: hidden;
+  color: #193d31;
+  background: #fcfdfb;
+  border: 1px solid #c6d6cb;
+  border-radius: 16px;
+}
+
+.ti-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 14px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #dae4dc;
+  background: #ffffff;
+}
+
+.ti-mode-tabs {
+  flex-wrap: wrap;
+}
+
+.ti-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 11px 16px;
+  background: #f5f9f6;
+  border-bottom: 1px solid #dce6de;
+}
+
+.ti-summary-pill {
+  display: grid;
+  gap: 2px;
+  padding: 8px 11px;
+  border-radius: 9px;
+  background: #ffffff;
+  border: 1px solid #d5e2d9;
+}
+
+.ti-summary-pill.is-safe {
+  border-color: #b7d7c2;
+  background: #f2fbf5;
+}
+
+.ti-summary-pill span {
+  font-size: 0.74rem;
+  color: #4a6357;
+  font-weight: 560;
+}
+
+.ti-summary-pill strong {
+  font-size: 0.84rem;
+  color: #163b2f;
+  font-weight: 680;
+}
+
+.ti-summary-pill code {
+  font-size: 0.77rem;
+}
+
+.ti-drawing {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.ti-svg {
+  display: block;
+  width: 100%;
+  min-width: 720px;
+  height: auto;
+}
+
+.ti-figure figcaption {
+  border-top: 1px solid #dbe4dc;
+  padding: 12px 17px;
+  font-size: 0.89rem;
+  line-height: 1.52;
+  color: #385247;
+}
+
+.ti-detail {
+  margin-top: 12px;
+  padding: 16px 18px;
+  color: #193e30;
+  background: #ffffff;
+  border: 1px solid #cbdacf;
+  border-inline-start: 4px solid #234e3e;
+  border-radius: 10px;
+  display: grid;
+  gap: 14px;
+}
+
+.ti-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+
+.ti-detail-kicker {
+  display: block;
+  font-size: 0.74rem;
+  font-weight: 680;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #3c6957;
+  margin-bottom: 2px;
+}
+
+.ti-detail-head h3 {
+  margin: 0;
+  font-size: 1.04rem;
+  color: #173b2f;
+}
+
+.ti-stepper {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.ti-stepper button,
+.ti-reset-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border: 1px solid #bdd0c3;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #1d4a3a;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ti-stepper button:hover:not(:disabled),
+.ti-reset-step:hover {
+  background: #edf5f0;
+}
+
+.ti-stepper button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ti-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 18px;
+}
+
+.ti-detail-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ti-detail-grid h4 {
+  margin: 0 0 4px;
+  font-size: 0.8rem;
+  font-weight: 680;
+  color: #214a3b;
+}
+
+.ti-detail-grid p {
+  margin: 0;
+  font-size: 0.87rem;
+  line-height: 1.5;
+  color: #425a4e;
+  overflow-wrap: anywhere;
+}
+
+.ti-contract-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e1eae3;
+}
+
+.ti-contract-box {
+  padding: 11px 13px;
+  border-radius: 9px;
+  background: #f6faf7;
+  border: 1px solid #d9e5dc;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.ti-contract-box h4 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 680;
+  color: #1d4637;
+}
+
+.ti-contract-box pre {
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 7px;
+  background: #142821;
+  color: #ddf3e6;
+  font-size: 0.75rem;
+  line-height: 1.48;
+  overflow-x: auto;
+}
+
+.ti-exposure-lists {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ti-exposure-label {
+  display: inline-block;
+  font-size: 0.71rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  margin-bottom: 6px;
+}
+
+.ti-exposure-label.is-open {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.ti-exposure-label.is-blocked {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.ti-exposure-lists ul {
+  margin: 0;
+  padding-inline-start: 16px;
+  display: grid;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: #385146;
+}
+
+@media (max-width: 820px) {
+  .ti-summary-strip,
+  .ti-detail-grid,
+  .ti-detail-grid-2,
+  .ti-contract-split,
+  .ti-exposure-lists {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Dark theme support */
+:root[data-theme="dark"] .ti-figure,
+:root[data-theme="dark"] .ti-detail {
+  background: var(--white);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .ti-toolbar {
+  background: var(--white);
+  border-color: var(--line);
+}
+
+:root[data-theme="dark"] .ti-summary-strip,
+:root[data-theme="dark"] .ti-contract-box {
+  background: #141b16;
+  border-color: var(--line);
+}
+
+:root[data-theme="dark"] .ti-summary-pill,
+:root[data-theme="dark"] .ti-stepper button,
+:root[data-theme="dark"] .ti-reset-step {
+  background: var(--white);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .ti-summary-pill.is-safe {
+  background: var(--teal-pale);
+  border-color: var(--teal-border);
+}
+
+:root[data-theme="dark"] .ti-summary-pill span,
+:root[data-theme="dark"] .ti-figure figcaption,
+:root[data-theme="dark"] .ti-detail-grid p,
+:root[data-theme="dark"] .ti-exposure-lists ul {
+  color: var(--soft-ink);
+}
+
+:root[data-theme="dark"] .ti-summary-pill strong,
+:root[data-theme="dark"] .ti-detail-head h3,
+:root[data-theme="dark"] .ti-detail-grid h4,
+:root[data-theme="dark"] .ti-contract-box h4 {
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .ti-detail-kicker {
+  color: var(--teal-dark);
+}

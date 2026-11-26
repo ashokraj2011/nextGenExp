@@ -11,6 +11,7 @@ import { contractList, helpContracts, type ContractFile } from "./help-contracts
 import { addressUpdateExample, helpFlows, treatmentDecisionExamples, type FlowStep, type HandoffExample, type PayloadExample } from "./help-flow";
 import { RecordedEvidence, useMarcusRun, type MarcusRun } from "./help-run-evidence";
 import { SystemArchitecture } from "./help-system-architecture";
+import { ToolInteractionDiagram } from "./help-tool-interactions";
 import { InteractionMap } from "./help-interactions";
 import { SfieldHelp } from "./help-sfield";
 import "./help.css";
@@ -224,6 +225,7 @@ export function Help() {
         <nav aria-label="Help sections">
           <a href="#interactions">Interaction map</a>
           <a href="#system-architecture">System architecture</a>
+          <a href="#tool-interactions">Tools &amp; LLM</a>
           <a href="#architecture">Chat sequence</a>
           <a href="#proposal">Treatment Selector’s role</a>
           <a href="#demo-playbook">5-Min Demo</a>
@@ -244,6 +246,7 @@ export function Help() {
       <InteractionMap run={run} />
       <div id="cep-blueprint">
         <SystemArchitecture run={run} selectContract={setContractId} />
+        <ToolInteractionDiagram />
         <details className="sa-configuration">
           <summary>Routing options and administration</summary>
           <p>The diagram follows an account-help request. A goal with several tasks can use the <a href="#goal-planning">multi-step planning flow</a>. Domains can also ask sfield to <a href="#providers">combine recommendations from several sources</a>, or use the <a href="#interaction-render">custom UI flow</a> for an interactive view.</p>
