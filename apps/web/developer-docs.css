@@ -1,0 +1,44 @@
+.developer-docs {
+  width: min(100%, 920px);
+  margin-inline: auto;
+  padding: clamp(20px, 4vw, 52px) clamp(14px, 3vw, 32px);
+  color: var(--ink);
+}
+.developer-docs h1 { font-size: clamp(1.8rem, 4vw, 2.75rem); line-height: 1.1; letter-spacing: -.045em; }
+.developer-docs-nav { display: flex; flex-wrap: wrap; gap: 6px; margin: 18px 0; }
+.developer-docs-nav a {
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--soft-ink);
+  text-decoration: none;
+  font-size: .9rem;
+}
+.developer-docs-nav a[aria-current="page"], .developer-docs-nav a:hover {
+  border-color: var(--teal-border);
+  background: var(--teal-pale);
+  color: var(--teal-dark);
+}
+.developer-article {
+  padding: clamp(16px, 3.4vw, 38px);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--white);
+  overflow-wrap: anywhere;
+}
+.developer-prose { color: var(--soft-ink); font-size: .96rem; line-height: 1.65; }
+.developer-prose h2, .developer-prose h3 { color: var(--ink); line-height: 1.25; }
+.developer-prose h2 { margin: 0 0 12px; font-size: clamp(1.35rem, 2.4vw, 1.7rem); }
+.developer-prose h3 { margin: 28px 0 8px; font-size: 1.1rem; }
+.developer-prose p, .developer-prose ol, .developer-prose ul { margin: 10px 0; }
+.developer-prose ol, .developer-prose ul { padding-left: 1.5rem; }
+.developer-prose li + li { margin-top: 6px; }
+.developer-prose code { font-size: .9em; }
+.developer-prose :not(pre) > code { padding: 1px 4px; border-radius: 4px; background: var(--paper); color: var(--ink); }
+.developer-prose pre { margin: 14px 0; padding: 14px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
+.developer-prose pre code { white-space: pre; }
+.developer-prose table { width: 100%; border-collapse: collapse; font-size: .89rem; }
+.developer-prose th, .developer-prose td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.developer-prose th { background: var(--teal-pale); color: var(--ink); }
+.developer-article footer { display: flex; flex-wrap: wrap; gap: 10px 22px; margin-top: 24px; border-top: 1px solid var(--line); padding-top: 14px; }
+.developer-article footer a { display: inline-flex; align-items: center; gap: 4px; color: var(--teal-dark); text-underline-offset: 3px; }

@@ -4,6 +4,7 @@ import { ArrowUpRight, BookOpenText, Braces, Database, Download, GitBranch, Hous
 import { recommendationArbitrateToolRef } from "../../packages/contracts/recommendation-provider";
 import { adminPaths } from "../../packages/contracts/admin-paths";
 import { pendingActionsContext } from "../../packages/contracts/workspace";
+import { developerGuideHref } from "./admin-navigation";
 import { DeveloperDrawer } from "./developer-drawer";
 import { ExchangePath, InteractionDiagram, TreatmentEvolutionDiagram, TreatmentHandoffDiagram, type DiagramExchange } from "./help-architecture";
 import { contractList, helpContracts, type ContractFile } from "./help-contracts";
@@ -231,6 +232,7 @@ export function Help() {
           <a href="#sfield">sfield</a>
           <a href="#walkthroughs">Walkthroughs</a>
           <a href="#contracts">Contracts</a>
+          <a href={developerGuideHref()}>Developer docs</a>
         </nav>
       </div>
     </header>

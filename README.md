@@ -10,6 +10,19 @@ When Marcus Reed asks **“What’s next?”**, TS recommends **Preview funding*
 
 > Follow the five-minute [investment customer walkthrough](./DEMO_SCRIPT.md), also available in Help at `/admin/help#demo-playbook`.
 
+## Developer documentation
+
+The guides are available in the checkout and under **Administration → Developer docs** at `/admin/help?guide=start`.
+
+| Guide | What you can build or verify |
+| --- | --- |
+| [Getting started](./docs/developers/getting-started.md) | Install with npm, configure the model, trace a balance comparison and reopen it with the chat harness. |
+| [Create a chat UI](./docs/developers/chat-ui.md) | Preview and publish a domain layout, bind data, use generated controls or add a new A2UI component. |
+| [sfield and tools](./docs/developers/sfield-and-tools.md) | Inspect model input, replace a data provider, register a tool and run the [standalone read example](./docs/developers/examples/read-tool.mjs). |
+| [Rules and workflows](./docs/developers/rules-and-workflows.md) | Attach a versioned workflow to a TS rule and verify Marcus’s funding preview from chat through Logs. |
+
+Edit the Markdown under `docs/developers/` to update both versions. Vite renders those files for Admin Help when you run `npm run dev` or `npm run build`.
+
 ---
 
 ## Platform Highlights

@@ -1,0 +1,72 @@
+## Work with sfield and tools
+
+sfield runs inside the app server. The host opens model sessions and tool runs, binds them to a chat turn and checks the results. The vendored SDK and SQLite adapter are under `vendor/sfield/packages/`. Most domain changes belong in the app or a provider package.
+
+### Follow a model request
+
+The app first chooses a flow from those enabled for the tenant, domain and audience. For the account-help flow, `apps/server/service.ts` then builds a `PznContextRoutingInput`. It includes the current message, recent turns, supported intents, a topic snapshot, optional member scores and customer signals. A follow-up can include a hint derived by the host, such as `summaryFollowUpIntentId`. Logs distinguish the model proposal from the verified route.
+
+`compileRouterInstructions` and `compileComposerInstructions` in `packages/experience/prompt-compiler.ts` supply the agent instructions. `Runtime.model` in `apps/server/runtime.ts` opens an sfield session and sends a JSON-encoded envelope. Inspect the field definitions in `packages/contracts/model-inputs.ts`. The router has an empty tool list. The host obtains topics and scores before invoking it. The composer receives verified intent and eligible candidates and can request the registered balance read. The host verifies the result before compiling cards.
+
+### Run a tool before connecting it to chat
+
+From the repository root, run the checked-in example. It registers `savings.target.read@1.0.0` with `defineTool` and executes it through a read-only sfield scope using local data.
+
+```sh
+npm run build:sfield
+node docs/developers/examples/read-tool.mjs
+```
+
+The first result has `status: "succeeded"` and `output.targetCents: 6000000`. The second requests an unknown goal and returns `status: "failed"` with `error.code: "GOAL_NOT_FOUND"`. Both include a call ID. Read `docs/developers/examples/read-tool.mjs` for the complete registration, input and output schemas, handler and cleanup. This local SDK exercise runs independently of the app and model gateway.
+
+### Replace the source behind a registered read
+
+Consider `goal.progress.read@1.0.0`. The host passes `turnRef` and `routeDecisionId`. The handler checks the run, customer, goal route and eligibility before obtaining the MID from the bound profile. The provider receives that MID and an abort signal. Its output supplies the savings graph.
+
+```ts
+interface GoalProgressProvider {
+  read(mid: string, signal?: AbortSignal): Promise<GoalProgress | null>;
+}
+```
+
+Implement this interface from `packages/goal-progress/index.ts` to change the source. Return `null` for an absent goal. Validate a successful payload with `goalProgressSchema` from `packages/contracts/goal-progress.ts`. An example payload is shown below.
+
+```json
+{
+  "fixtureVersion": "goal-service-v1",
+  "goalId": "home_down_payment",
+  "currency": "USD",
+  "targetCents": 6000000,
+  "history": [
+    { "month": "2026-05", "savedCents": 2000000 },
+    { "month": "2026-06", "savedCents": 2200000 }
+  ]
+}
+```
+
+Pass the provider as `goalProgressProvider` when calling `startApp` in `apps/server/http.ts`. For example, a service embedding the host can call `startApp({ projectRoot, dataDir, gateway, goalProgressProvider })`. The existing tool ID, client UI and workflow callers can keep their contracts.
+
+### Register a host-owned read tool
+
+1. Give the tool a stable ID, version and input/output JSON Schemas. The goal example uses `sfieldTools.goal` in `packages/contracts/tool-setup.ts` and `goalProgressInputSchema` / `goalProgressResultSchema` in `packages/contracts/model-schemas.ts`. The SDK builds the versioned reference from the ID and version.
+2. In `Runtime.tools()`, register the handler using the existing `read(...)` helper around `defineTool`. Resolve the current customer from `scopedRegistryTurn`, validate the route required for the read, pass `ctx.signal` to the provider, and validate its output. The runtime enforces the declared effect, timeout, attempt limit and output size.
+3. Add the versioned reference to `toolRefs` and map the handler to the intended run in `registryBoundaries`. For a new execution scope, also add its purpose in `registryPurposes` and its ID to `TurnRecord` in `apps/server/store.ts`. Update the default enabled settings and the Tool setup description when operators should be able to toggle it.
+4. Call the tool from the relevant branch in `apps/server/service.ts`. `Runtime.registry` opens a read-only execution for the current principal with a tool-call budget and closes it after use. The goal controller makes the following call.
+
+```ts
+const result = await runtime.registry(turn, "goalScopeId", 1, signal, call =>
+  call("goal", { turnRef: turn.public.id, routeDecisionId: route.routeDecisionId })
+);
+```
+
+Check `result.status` before consuming `result.output`. Open the turn in Logs to see its `toolRef`, `callId`, inputs and result. Agent-invoked tools also need the versioned reference in that agent's tool list and a handler that accepts that agent's scope. For a write, follow the registered `cep.domain.execute_write@1.0.0` path with its resource, confirmation and audit handling.
+
+### Connect an existing service
+
+For a configurable external read, author a task in the **Integrations** workspace at `/integrations`. Declare its effect, input/output fields and transport binding, then publish it. For customer record lookups, configure **Customer chat** with the record ID, member ID and visible fields. `Runtime.registerPublishedTask` attempts a dedicated registration and can fall back to the integration dispatcher. Check the published task's execution route there. `packages/contracts/integration-task.ts` defines the contract and `apps/server/integration-tasks.ts` runs the transport.
+
+### Reopen a thread and inspect what persists
+
+`PznChatHistory` in `apps/server/chat-history.ts` binds tenant, domain, user, session and thread to the sfield chat harness. Customer messages and assistant replies are stored in `sfield.sqlite`. Assistant records include the verified intent and displayed choice IDs so “the second one” can refer to a previous card. The host stores turn state and issued actions in `app.sqlite`. Both files live in the active tenant data directory.
+
+Use the balance harness from Getting started to compare the stored transcript with the router's `recent` array after `/reopen`. `tests/chat-history.test.ts` exercises restart and thread scoping. `tests/host.test.ts` covers allowed and failed tool reads.

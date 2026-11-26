@@ -77,6 +77,28 @@ try {
   assert.equal(new URL(page.url()).pathname, "/wealth");
   await openAdmin(page, "help");
   await page.getByRole("heading", { name: "How CEP works", exact: true, level: 1 }).waitFor();
+  await page.getByRole("navigation", { name: "Help sections" }).getByRole("link", { name: "Developer docs" }).click();
+  await page.getByRole("heading", { name: "Run the app and trace a chat turn" }).waitFor();
+  const guides = page.getByRole("navigation", { name: "Developer guides" });
+  await guides.getByRole("link", { name: "Create a chat UI" }).click();
+  await page.getByRole("heading", { name: "Preview a design through the API" }).waitFor();
+  assert.match(await page.locator(".developer-prose pre").innerText(), /\/api\/admin\/ui-layout-preview/);
+  await guides.getByRole("link", { name: "sfield and tools" }).click();
+  const example = page.getByRole("link", { name: "Download tool example" });
+  const downloadEvent = page.waitForEvent("download");
+  await example.click();
+  const toolDownload = await downloadEvent;
+  assert.equal(toolDownload.suggestedFilename(), "read-tool.mjs");
+  assert.deepEqual(await readFile((await toolDownload.path())!), await readFile("docs/developers/examples/read-tool.mjs"));
+  await guides.getByRole("link", { name: "Rules and workflows" }).click();
+  await page.reload();
+  await page.getByRole("heading", { name: "Read the TS decision" }).waitFor();
+  assert.equal(await guides.getByRole("link", { name: "Rules and workflows" }).getAttribute("aria-current"), "page");
+  const fundingExample = new FixtureTsAdapter({ scenarioId: "normal", ordinal: 1 });
+  const marcusDecision = await fundingExample.selectEligibleContent({ mid: "DEMO-MID-1003", context: "address-update" });
+  const documentedDecision = page.getByRole("article", { name: "Rules and workflows" }).locator("code.language-json").first();
+  assert.deepEqual(JSON.parse(await documentedDecision.innerText()), marcusDecision.decision);
+  await openAdmin(page, "help");
   const journeyMap = page.getByRole("region", { name: "Customer interaction map", exact: true });
   const journeyNav = journeyMap.getByRole("navigation", { name: "Customer journey stages" });
   for (const label of ["Sign in", "Find the intent", "Check eligibility", "Build the reply", "Follow up", "Return later"]) {

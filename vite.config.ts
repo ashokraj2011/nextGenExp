@@ -1,6 +1,17 @@
-import { defineConfig } from "vite";
+import MarkdownIt from "markdown-it";
+import { defineConfig, normalizePath } from "vite";
+
+const guideMarkdown = new MarkdownIt({ html: false });
 
 export default defineConfig({
+  plugins: [{
+    name: "developer-guide-markdown",
+    enforce: "pre",
+    transform(source, id) {
+      if (!/\/docs\/developers\/[^/]+\.md$/.test(normalizePath(id))) return;
+      return { code: "export default " + JSON.stringify(guideMarkdown.render(source)), map: null };
+    },
+  }],
   build: {
     target: "es2022",
     rolldownOptions: {

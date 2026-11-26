@@ -14,11 +14,13 @@ const ExperienceRegistry = lazy(() => import("./experience-registry-admin").then
 const Builder = lazy(() => import("./ui-builder").then(({ UiBuilder }) => ({ default: UiBuilder })));
 const EmbedStudio = lazy(() => import("./embed-studio").then(({ EmbedStudio }) => ({ default: EmbedStudio })));
 const Help = lazy(() => import("./help").then(({ Help }) => ({ default: Help })));
+const DeveloperDocs = lazy(() => import("./developer-docs").then(({ DeveloperDocs }) => ({ default: DeveloperDocs })));
 const GatewayAdmin = lazy(() => import("./gateway-admin").then(({ GatewayAdmin }) => ({ default: GatewayAdmin })));
 const Diagnostics = lazy(() => import("./admin-diagnostics").then(({ AdminDiagnostics }) => ({ default: AdminDiagnostics })));
 
 export function AdminWorkspace() {
   const path = location.pathname;
+  const guide = new URLSearchParams(location.search).get("guide");
   const [thread, setThread] = useState(() => new URLSearchParams(location.search).get("thread") ?? "");
   return <div className="app-layout administration-layout">
     <aside className="administration-sidebar" aria-label="Admin workspace">
@@ -41,7 +43,7 @@ export function AdminWorkspace() {
           {path === adminPaths.intents && <ExperienceRegistry />}
           {path === adminPaths.builder && <Builder />}
           {path === adminPaths.embed && <EmbedStudio />}
-          {path === adminPaths.help && <Help />}
+          {path === adminPaths.help && (guide ? <DeveloperDocs topic={guide} /> : <Help />)}
           {path === adminPaths.gateway && <GatewayAdmin />}
           {(path === adminPaths.logs || path === adminPaths.inspector) && <Diagnostics view={path === adminPaths.logs ? "logs" : "inspector"} selectThread={setThread} />}
         </Suspense>

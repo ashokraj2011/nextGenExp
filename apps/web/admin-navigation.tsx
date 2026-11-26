@@ -1,6 +1,8 @@
 import { Activity, Blocks, Cpu, BookOpenText, Briefcase, Code2, FileText, GitBranch, Landmark, Layers, MessageSquare, Plug, PanelsTopLeft, Settings2, UsersRound } from "lucide-react";
 import { adminPaths } from "../../packages/contracts/admin-paths";
 
+export const developerGuideHref = (guide = "start") => adminPaths.help + "?guide=" + encodeURIComponent(guide);
+
 export function diagnosticHref(path: typeof adminPaths.logs | typeof adminPaths.inspector, thread?: string, turn?: string) {
   const params = new URLSearchParams();
   if (thread) params.set("thread", thread);
@@ -19,6 +21,7 @@ const destinations = [
   { label: "Logs", path: adminPaths.logs, Icon: FileText },
   { label: "Inspector", path: adminPaths.inspector, Icon: Code2 },
   { label: "Architecture", path: adminPaths.help, Icon: BookOpenText },
+  { label: "Developer docs", path: developerGuideHref(), Icon: Code2 },
   { label: "Admin chat", path: adminPaths.chat, Icon: MessageSquare },
 ] as const;
 
@@ -31,10 +34,12 @@ const workspaceDestinations = [
 ] as const;
 
 export function AdminNavigation({ thread }: { thread?: string }) {
+  const current = location.pathname === adminPaths.help && new URLSearchParams(location.search).get("guide")
+    ? developerGuideHref() : location.pathname;
   return <nav className="admin-navigation" aria-label="Administration">
     {destinations.map(({ label, path, Icon }) => <a key={path} className="rail-link"
       href={path === adminPaths.logs || path === adminPaths.inspector ? diagnosticHref(path, thread) : path}
-      aria-current={location.pathname === path ? "page" : undefined}>
+      aria-current={current === path ? "page" : undefined}>
       <Icon size={17} aria-hidden="true" />{label}
     </a>)}
     <div style={{ margin: "12px 10px 4px", fontSize: "0.68rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)" }}>
