@@ -1741,6 +1741,17 @@ export async function startApp(options: Options) {
         return json(res, uxEvolution.dismissProposal(proposalId));
       }
     }
+    if (resource === "threads" && id === "status" && method === "GET") {
+      const personaId = url.searchParams.get("personaId") || demo.defaultPersonaId;
+      const currentConversationId = url.searchParams.get("conversationId") || undefined;
+      return json(res, await experience.threadStatusOverview({
+        principalId,
+        personaId,
+        viewer,
+        operator: Boolean(operator),
+        currentConversationId,
+      }));
+    }
     if (resource === "conversations") {
       if (method === "POST" && !id) {
         return createChat();

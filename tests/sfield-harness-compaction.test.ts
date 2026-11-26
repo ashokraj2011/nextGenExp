@@ -184,3 +184,39 @@ test("CEP end-to-end: clarification reply '1' resolves paused clarification and 
   assert.ok(c2.props.nodes.some((n) => n.type === "piechart"), "expected piechart after replying '1'");
   assert.ok((t2.harnessStages?.length ?? 0) >= 3, "expected live harnessStages recorded on TurnView");
 });
+
+test("Concurrent turns in same thread AND cross-thread status answers in chat + /api/threads/status", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "cep-concurrent-threads-"));
+  const gateway = await startFixtureGateway();
+  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: gateway.settings });
+  t.after(async () => { await app.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
+  const client = await testClient(app.url);
+
+  // Thread A: submit TWO messages back-to-back without waiting for the first turn to finish!
+  const threadA = await client.conversation();
+  await client.request(`/api/conversations/${threadA.id}/settings`, { operation: "rename", title: "Portfolio Analysis" });
+  const firstAccepted = await client.submit(threadA.id, "Show my portfolio summary.");
+  const secondAccepted = await client.submit(threadA.id, "Show my portfolio as a pie chart");
+  assert.notEqual(firstAccepted.turnId, secondAccepted.turnId);
+
+  const [firstDone, secondDone] = await Promise.all([client.wait(firstAccepted), client.wait(secondAccepted)]);
+  assert.equal(firstDone.turn.status, "completed");
+  assert.equal(secondDone.turn.status, "completed");
+
+  // Thread B: ask chat for the live status of other threads!
+  const threadB = await client.conversation();
+  await client.request(`/api/conversations/${threadB.id}/settings`, { operation: "rename", title: "Status Check" });
+  const statusTurn = (await client.ask(threadB.id, "What is the status of my other threads?")).turn;
+  assert.equal(statusTurn.status, "completed");
+  const statusCard = statusTurn.experience?.blocks.find((b) => b.component === "PznDynamicCanvas");
+  assert.ok(statusCard && statusCard.component === "PznDynamicCanvas");
+  assert.equal(statusCard.props.badge, "Live Thread Monitor");
+  assert.match(JSON.stringify(statusCard.props.nodes), /Portfolio Analysis/);
+  assert.ok(statusCard.props.harnessTrace?.stages.some((s) => s.stage === "fetch"));
+
+  // Direct API endpoint /api/threads/status matches
+  const apiStatus = await client.request<{ otherThreads: Array<{ title: string; totalTurns: number }> }>(
+    `/api/threads/status?conversationId=${encodeURIComponent(threadB.id)}`,
+  );
+  assert.ok(apiStatus.otherThreads.some((row) => row.title === "Portfolio Analysis" && row.totalTurns === 2));
+});

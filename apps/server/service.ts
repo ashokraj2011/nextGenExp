@@ -60,6 +60,7 @@ import { workflowOfferSource, offeredWorkflows, nextStepRecommendation } from ".
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import { principalFor, type Runtime } from "./runtime";
 import { PznChatHistory, resolveClarificationReply } from "./chat-history";
+import { collectCrossThreadStatus, isThreadStatusPrompt, runThreadStatusHarness } from "./thread-status";
 
 class TurnFailure extends Error {
   constructor(readonly code: FailureCode) { super(code); }
@@ -817,6 +818,54 @@ export class ExperienceService {
           return;
         }
 
+        // 0. Cross-thread & background task status lookup (works in any domain and even while another turn runs in parallel)
+        if (isThreadStatusPrompt(scopedPrompt)) {
+          stage = "compose";
+          this.store.progress(id, "planning", this.now());
+          const harnessStageProgress = (st: HarnessStageRecord["stage"]) => (
+            st === "plan" || st === "clarify" ? "planning"
+              : st === "fetch" ? "portfolio"
+              : st === "compose" ? "composition"
+              : "verifying"
+          );
+          const viewer = initial.operatorName
+            ? { operator: initial.operatorName, customer: conversation.userId }
+            : { customer: conversation.userId };
+          const generated = await runThreadStatusHarness({
+            prompt: scopedPrompt,
+            store: this.store,
+            history: this.history,
+            runtime,
+            harness: runtime.harness,
+            principalId: initial.scope.principalId,
+            personaId: conversation.personaId,
+            viewer,
+            operator: Boolean(initial.operatorName),
+            currentConversation: conversation,
+            tradeStore: domainTools.tradeStore,
+            workflowEngine: domainTools.workflowEngine,
+            onStage: (entry) => this.store.recordHarnessStage(id, entry, harnessStageProgress(entry.stage), this.now()),
+            now: this.now(),
+            signal,
+          });
+          current();
+          const now = this.now();
+          const dynamicResult = compileDynamicCanvas(generated.intro, generated.canvas, now + DECISION_TTL);
+          this.store.update(id, (row) => {
+            row.public.actionMode = "dynamic_ui";
+            row.public.semanticRoute = {
+              capabilityId: "custom_dynamic_ui",
+              capabilityLabel: "Live Thread Monitor",
+              method: "deterministic",
+              confidence: 0.96,
+              reasoning: "Matched cross-thread and background task status inquiry.",
+            };
+            row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
+          });
+          this.store.finish(id, { type: "completed", result: dynamicResult }, now);
+          return;
+        }
+
         const recentForRoute = await this.history.recent(conversation, initial.ordinal);
         const pendingClarification = await this.history.pendingClarification(conversation, initial.ordinal);
         const clarificationMatch = resolveClarificationReply(scopedPrompt, pendingClarification);
@@ -1514,6 +1563,28 @@ export class ExperienceService {
     } catch {
       // Compaction is best-effort and never affects turn delivery.
     }
+  }
+
+  async threadStatusOverview(input: {
+    principalId: string;
+    personaId: string;
+    viewer?: { customer?: string; operator?: string };
+    operator?: boolean;
+    currentConversationId?: string;
+  }) {
+    return collectCrossThreadStatus({
+      store: this.store,
+      history: this.history,
+      runtime: this.runtime,
+      principalId: input.principalId,
+      personaId: input.personaId,
+      viewer: input.viewer,
+      operator: input.operator,
+      currentConversationId: input.currentConversationId,
+      tradeStore: this.dynamicUi?.tradeStore,
+      workflowEngine: this.dynamicUi?.workflowEngine,
+      now: this.now(),
+    });
   }
 
   async conversationContext(conversation: ConversationRecord, principalId: string) {

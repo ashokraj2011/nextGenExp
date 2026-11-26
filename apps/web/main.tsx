@@ -389,7 +389,7 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
     });
   };
 
-  const canSubmit = !running && !pending && !disabled && (Boolean(draft.trim()) || attachments.length > 0);
+  const canSubmit = !pending && !disabled && (Boolean(draft.trim()) || attachments.length > 0);
   const send = () => {
     if (!canSubmit) return;
     if (voice.listening) voice.stop();
@@ -442,6 +442,9 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
         />
       )}
       {activeNotice && <div className="request-notice" role="status">{activeNotice}</div>}
+      {running && !pending && !activeNotice && (
+        <div className="submit-status" role="status">Task running in this thread — you can send your next question anytime.</div>
+      )}
       {pending && !running && !activeNotice && <div className="submit-status" role="status">Sending your request…</div>}
       <div className="composer-slash-wrap">
       <SlashCommandMenu commands={slashCommands} activeIndex={slashIndex} onPick={runSlashCommand} />
@@ -483,7 +486,7 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
                 className="composer-tool-btn"
                 aria-label="Attach file"
                 title="Attach invoice, CSV, log, PDF, or pick a sample document"
-                disabled={disabled || pending || running}
+                disabled={disabled || pending}
                 onClick={() => setSampleMenuOpen((open) => !open)}
               >
                 <Paperclip size={16} aria-hidden="true" />
@@ -524,16 +527,19 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
               aria-label={voice.listening ? "Stop voice input" : "Voice input"}
               aria-pressed={voice.listening}
               title={voice.listening ? "Stop voice dictation" : "Dictate with microphone"}
-              disabled={disabled || pending || running}
+              disabled={disabled || pending}
               onClick={() => voice.toggle(draft)}
             >
               {voice.listening ? <MicOff size={16} aria-hidden="true" /> : <Mic size={16} aria-hidden="true" />}
             </button>
-            {running ? <button className="send-button stop-button" type="button" disabled={pending} onClick={() => aui.thread().cancelRun()}>
-              <Square size={13} aria-hidden="true" />Stop
-            </button> : <button className="send-button" type="submit" disabled={!canSubmit}>
+            {running && (
+              <button className="send-button stop-button" type="button" disabled={pending} onClick={() => aui.thread().cancelRun()} title="Stop running task">
+                <Square size={12} aria-hidden="true" />Stop
+              </button>
+            )}
+            <button className="send-button" type="submit" disabled={!canSubmit}>
               Send <ArrowUp size={15} aria-hidden="true" />
-            </button>}
+            </button>
           </div>
         </div>
       </form>
@@ -608,7 +614,7 @@ function Chat({
 }: ChatProps) {
   const turns = conversation?.turns ?? noTurns;
   const latest = turns.at(-1);
-  const running = latest?.status === "working";
+  const running = turns.some((t) => t.status === "working");
   const [pinnedTurnId, setPinnedTurnId] = useState<string | undefined>(undefined);
   useEffect(() => { setPinnedTurnId(undefined); }, [conversation?.id]);
   const pinnedTurn = useMemo(() => turns.find((t) => t.id === pinnedTurnId && t.experience), [turns, pinnedTurnId]);
@@ -957,7 +963,11 @@ function App() {
   const pendingActions = usePendingActions(!adminChat && domainPack.id === "wealth" ? activeProfile?.personaId : undefined);
   const draftKey = chat?.id ?? "new:" + (conversation?.personaId ?? signedInProfileId ?? "");
   const latest = chat?.turns.at(-1);
-  const activeTurnId = latest?.status === "working" ? latest.id : undefined;
+  const activeTurnIds = useMemo(
+    () => (chat?.turns ?? []).filter((t) => t.status === "working").map((t) => t.id),
+    [chat?.turns],
+  );
+  const activeTurnKey = activeTurnIds.join(",");
   const scopedPersonaId = adminChat ? null : (workspaceProfileId ?? activeProfile?.personaId ?? null);
   const visibleConversations = conversations.filter((row) => row.domainId === domainPack.id && (!scopedPersonaId || row.personaId === scopedPersonaId));
 
@@ -1078,42 +1088,48 @@ function App() {
   }, [recordProgress]);
 
   useEffect(() => {
-    if (!activeTurnId) return;
-    const id = activeTurnId;
+    if (!activeTurnKey) return;
+    const ids = activeTurnKey.split(",").filter(Boolean);
     let alive = true;
-    let seen = 0;
-    const stream = new EventSource("/api/turns/" + id + "/events");
-    const refresh = () => void api.turn(id).then((snapshot) => {
-      if (!alive) return;
-      upsert(snapshot);
-      if (snapshot.status !== "working") stream.close();
-    }).catch(() => { /* EventSource reconnects with the last event ID. */ });
-    stream.addEventListener("turn.status", (event) => {
-      const sequence = Number(event.lastEventId);
-      if (sequence <= seen) return;
-      seen = sequence;
-      const payload = JSON.parse(event.data).payload as { progress?: Progress; harnessStage?: NonNullable<TurnView["harnessStages"]>[number] };
-      const progress = payload.progress;
-      if (progress && Object.hasOwn(progressLabels, progress)) recordProgress(id, progress);
-      setConversation((previous) => previous ? {
-        ...previous,
-        turns: previous.turns.map((turn) => {
-          if (turn.id !== id || turn.status !== "working") return turn;
-          const nextStages = payload.harnessStage
-            ? [...(turn.harnessStages ?? []), payload.harnessStage].slice(-8)
-            : turn.harnessStages;
-          return {
-            ...turn,
-            ...(progress && Object.hasOwn(progressLabels, progress) ? { progress } : {}),
-            ...(nextStages ? { harnessStages: nextStages } : {}),
-          };
-        }),
-      } : previous);
+    const cleanups = ids.map((id) => {
+      let seen = 0;
+      const stream = new EventSource("/api/turns/" + id + "/events");
+      const refresh = () => void api.turn(id).then((snapshot) => {
+        if (!alive) return;
+        upsert(snapshot);
+        if (snapshot.status !== "working") stream.close();
+      }).catch(() => { /* EventSource reconnects with the last event ID. */ });
+      stream.addEventListener("turn.status", (event) => {
+        const sequence = Number(event.lastEventId);
+        if (sequence <= seen) return;
+        seen = sequence;
+        const payload = JSON.parse(event.data).payload as { progress?: Progress; harnessStage?: NonNullable<TurnView["harnessStages"]>[number] };
+        const progress = payload.progress;
+        if (progress && Object.hasOwn(progressLabels, progress)) recordProgress(id, progress);
+        setConversation((previous) => previous ? {
+          ...previous,
+          turns: previous.turns.map((turn) => {
+            if (turn.id !== id || turn.status !== "working") return turn;
+            const nextStages = payload.harnessStage
+              ? [...(turn.harnessStages ?? []), payload.harnessStage].slice(-8)
+              : turn.harnessStages;
+            return {
+              ...turn,
+              ...(progress && Object.hasOwn(progressLabels, progress) ? { progress } : {}),
+              ...(nextStages ? { harnessStages: nextStages } : {}),
+            };
+          }),
+        } : previous);
+      });
+      for (const type of ["experience.ready", "turn.failed", "turn.cancelled", "gap", "error"]) stream.addEventListener(type, refresh);
+      const recoveryPoll = setInterval(refresh, 4000);
+      return () => { stream.close(); clearInterval(recoveryPoll); };
     });
-    for (const type of ["experience.ready", "turn.failed", "turn.cancelled", "gap", "error"]) stream.addEventListener(type, refresh);
-    const recoveryPoll = setInterval(refresh, 4000);
-    return () => { alive = false; stream.close(); clearInterval(recoveryPoll); };
-  }, [activeTurnId, upsert, recordProgress]);
+    return () => {
+      alive = false;
+      for (const cleanup of cleanups) cleanup();
+    };
+  }, [activeTurnKey, upsert, recordProgress]);
 
   const exclusive = async (task: () => Promise<void>) => {
     if (inFlight.current) return false;
@@ -1679,7 +1695,12 @@ function App() {
         } : undefined}
         draft={drafts[draftKey] ?? ""} onDraft={(value) => setDrafts((all) => ({ ...all, [draftKey]: value }))} notice={notice}
         onSend={send} onStop={async () => {
-          if (activeTurnId) await exclusive(async () => upsert(await api.cancel(activeTurnId)));
+          if (activeTurnIds.length) {
+            await exclusive(async () => {
+              const results = await Promise.all(activeTurnIds.map((id) => api.cancel(id)));
+              for (const row of results) upsert(row);
+            });
+          }
         }}
         onRetry={(id) => {
           if (chat) void exclusive(async () => accept(await api.retry(id, requestId("retry:" + id))));

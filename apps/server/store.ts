@@ -504,7 +504,7 @@ export class Store {
         record.title = change.title;
         record.customTitle = true;
       } else if (change.operation === "archive") {
-        if (this.latestTurn(id)?.public.status === "working") {
+        if (this.workingTurnsInConversation(id).length > 0) {
           throw new ApiError(409, "turn_active", "Wait for the current response or stop it before archiving this chat.");
         }
         record.archivedAt ??= now;
@@ -623,6 +623,11 @@ export class Store {
       .map((row) => parse<TurnRecord>(row)!);
   }
 
+  workingTurnsInConversation(conversationId: string) {
+    return this.db.all<{ record: string }>("SELECT record FROM turns WHERE conversation_id = ? AND status = 'working' ORDER BY rowid", conversationId)
+      .map((row) => parse<TurnRecord>(row)!);
+  }
+
   latestTurn(id: string) {
     return parse<TurnRecord>(this.db.one("SELECT record FROM turns WHERE conversation_id = ? ORDER BY rowid DESC LIMIT 1", id));
   }
@@ -661,7 +666,13 @@ export class Store {
       if (previous) return previous;
       if (conversation.archivedAt !== undefined) throw new ApiError(409, "chat_archived", "Restore this chat to continue it.");
       const latest = this.latestTurn(conversation.id);
-      if (latest?.public.status === "working") throw new ApiError(409, "turn_active", "Wait for the current response or stop it first.");
+      const activeWorking = this.workingTurnsInConversation(conversation.id);
+      if (origin !== "message" && activeWorking.length > 0) {
+        throw new ApiError(409, "turn_active", "Wait for the current response or stop it first.");
+      }
+      if (origin === "message" && activeWorking.length >= 4) {
+        throw new ApiError(409, "turn_active", "Too many concurrent requests are already running in this thread. Wait for one to finish or stop it first.");
+      }
       if (retry && (latest?.public.id !== retry.public.id || !["cancelled", "failed"].includes(retry.public.status))) {
         throw new ApiError(409, "retry_stale", "Start a fresh request to ask this question again.");
       }

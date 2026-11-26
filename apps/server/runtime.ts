@@ -495,7 +495,7 @@ export class Runtime implements IntegrationTaskRuntime {
 
   current(id: string): TurnRecord {
     const turn = this.store.turn(id);
-    requireCheck(turn?.public.status === "working" && this.store.latestTurn(turn.scope.conversationId)?.public.id === id, "TURN_INACTIVE");
+    requireCheck(turn?.public.status === "working", "TURN_INACTIVE");
     const deadline = this.experiences.shouldHandle(turn) ? this.goalBudget.activeSeconds * 1000 : TURN_DEADLINE;
     requireCheck(turn.public.createdAt <= this.now() && turn.public.createdAt + deadline > this.now(), "TURN_EXPIRED");
     return turn;
