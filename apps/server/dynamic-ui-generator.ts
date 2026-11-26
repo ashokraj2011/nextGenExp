@@ -19,6 +19,7 @@ import { parseStockTradePrompt, type SettlementCallback, type TradeStore } from 
 import { connectorInvokeToolRef, domainWriteToolRef } from "./runtime";
 import { generateWidgetFromText } from "./widget-library";
 import { runDynamicUiHarness } from "./dynamic-ui-harness";
+import type { AgenticHarness } from "@sfield/core";
 import type { PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import type { GoalProgressProvider } from "../../packages/goal-progress";
 
@@ -1221,6 +1222,7 @@ export async function generateDynamicUi(input: {
   recentContext?: string;
   gateway?: GatewaySettings | null;
   dataDir: string;
+  harness?: AgenticHarness;
   portfolioSnapshots?: PortfolioSnapshotProvider;
   goalProgressProvider?: GoalProgressProvider;
   opsStore?: OpsIncidentStore;
@@ -1246,7 +1248,7 @@ export async function generateDynamicUi(input: {
   signal?: AbortSignal;
 }): Promise<{ intro: string; canvas: DynamicCanvasProps }> {
   const {
-    prompt, profileSummary, recentContext, gateway, dataDir, portfolioSnapshots, goalProgressProvider, opsStore, salesStore, connectorStore, approvalStore,
+    prompt, profileSummary, recentContext, gateway, dataDir, harness, portfolioSnapshots, goalProgressProvider, opsStore, salesStore, connectorStore, approvalStore,
     tradeStore, matchedActionFlow, personaId, conversationId, principalId, onTradeSettle, requesterName, semanticRoute, tradeContinuation, signal,
   } = input;
 
@@ -1387,9 +1389,11 @@ export async function generateDynamicUi(input: {
     return runDynamicUiHarness({
       prompt,
       personaId,
+      principalId,
       recentContext,
       gateway,
       dataDir,
+      harness,
       portfolioSnapshots,
       goalProgressProvider,
       tradeStore,

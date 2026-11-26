@@ -1,10 +1,12 @@
 import { z } from "zod";
+import { runAgenticHarness, type AgenticHarness, type HarnessTrace } from "@sfield/core";
 import {
   dynamicCanvasSchema,
   type DynamicCanvasNode,
   type DynamicCanvasProps,
   type DynamicHarnessTrace,
 } from "../../packages/contracts/dynamic-canvas";
+import { principalFor } from "./runtime";
 import type { PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import type { GoalProgressProvider } from "../../packages/goal-progress";
 import { findProfileById } from "../../packages/customer-profiles";
@@ -599,78 +601,196 @@ function validateAgainstPlan(raw: unknown, plan: DynamicUiPlan, prompt: string, 
   return { ok: true, result: { intro, canvas: parsed.data }, violations: [] };
 }
 
+function toCanvasTrace(trace: HarnessTrace): DynamicHarnessTrace {
+  return {
+    harnessRunId: trace.harnessRunId,
+    resolvedGoal: trace.resolvedGoal,
+    fetchedSources: trace.fetchedSources,
+    visualTargets: trace.visualTargets,
+    repaired: trace.repaired,
+    stages: trace.stages,
+  };
+}
+
 export async function runDynamicUiHarness(input: {
   prompt: string;
   personaId?: string;
+  principalId?: string;
   recentContext?: string;
   gateway?: GatewaySettings | null;
   dataDir: string;
+  harness?: AgenticHarness;
   portfolioSnapshots?: PortfolioSnapshotProvider;
   goalProgressProvider?: GoalProgressProvider;
   tradeStore?: TradeStore;
   signal?: AbortSignal;
 }): Promise<{ intro: string; canvas: DynamicCanvasProps }> {
-  const stages: DynamicHarnessTrace["stages"] = [];
+  const execute = input.harness
+    ? input.harness.run.bind(input.harness)
+    : runAgenticHarness;
 
-  // ── STAGE 1: PLAN (clarify intent, typos, multi-turn follow-ups, needed data & required visuals) ──
-  const planStart = Date.now();
-  const detPlan = inferDeterministicPlan(input.prompt, input.recentContext);
-  let plan: DynamicUiPlan = detPlan;
+  const outcome = await execute<DynamicUiPlan, FetchedGroundedData, { intro: string; canvas: DynamicCanvasProps }, unknown>({
+    kind: "dynamic_ui",
+    principal: input.principalId ? principalFor(input.principalId) : undefined,
+    signal: input.signal,
+    maxRepairs: 1,
 
-  const shouldUseLlmPlanner = Boolean(input.gateway) && !explicitUnconnectedWord.test(input.prompt);
-  if (shouldUseLlmPlanner && input.gateway) {
-    const plannerPrompt = [
-      input.recentContext?.trim() ? `RECENT CONVERSATION:\n${input.recentContext.trim().slice(0, 1400)}` : "RECENT CONVERSATION: (none)",
-      `USER MESSAGE: ${input.prompt}`,
-    ].join("\n\n");
-    const rawPlan = await callLlmStage(
-      input.gateway,
-      input.dataDir,
-      "dynamic_ui_plan",
-      plannerSystemPrompt,
-      plannerPrompt,
-      8_000,
-      input.signal,
-    );
-    const parsedPlan = planSchema.safeParse(rawPlan);
-    if (parsedPlan.success) {
-      // Preserve explicit visual requirements detected deterministically (e.g. "pie chart") so the planner never drops them.
-      const mergedVisuals = [...new Set([...parsedPlan.data.requiredVisuals, ...extractRequiredVisuals(input.prompt)])].slice(0, 5);
-      // Guard against LLM accidentally dropping missing_external_source when the prompt has zero wealth/follow-up cues.
-      const llmNeedsMissing = parsedPlan.data.neededSources.includes("missing_external_source");
-      const detNeedsMissing = detPlan.neededSources.includes("missing_external_source");
-      plan = {
-        ...parsedPlan.data,
-        neededSources: (detNeedsMissing && llmNeedsMissing)
-          ? ["missing_external_source"]
-          : parsedPlan.data.neededSources,
-        requiredVisuals: mergedVisuals.length ? mergedVisuals : detPlan.requiredVisuals,
+    // ── STAGE 1: PLAN ──
+    plan: async () => {
+      const detPlan = inferDeterministicPlan(input.prompt, input.recentContext);
+      let plan: DynamicUiPlan = detPlan;
+
+      const shouldUseLlmPlanner = Boolean(input.gateway) && !explicitUnconnectedWord.test(input.prompt);
+      if (shouldUseLlmPlanner && input.gateway) {
+        const plannerPrompt = [
+          input.recentContext?.trim() ? `RECENT CONVERSATION:\n${input.recentContext.trim().slice(0, 1400)}` : "RECENT CONVERSATION: (none)",
+          `USER MESSAGE: ${input.prompt}`,
+        ].join("\n\n");
+        const rawPlan = await callLlmStage(
+          input.gateway,
+          input.dataDir,
+          "dynamic_ui_plan",
+          plannerSystemPrompt,
+          plannerPrompt,
+          8_000,
+          input.signal,
+        );
+        const parsedPlan = planSchema.safeParse(rawPlan);
+        if (parsedPlan.success) {
+          const mergedVisuals = [...new Set([...parsedPlan.data.requiredVisuals, ...extractRequiredVisuals(input.prompt)])].slice(0, 5);
+          const llmNeedsMissing = parsedPlan.data.neededSources.includes("missing_external_source");
+          const detNeedsMissing = detPlan.neededSources.includes("missing_external_source");
+          plan = {
+            ...parsedPlan.data,
+            neededSources: (detNeedsMissing && llmNeedsMissing)
+              ? ["missing_external_source"]
+              : parsedPlan.data.neededSources,
+            requiredVisuals: mergedVisuals.length ? mergedVisuals : detPlan.requiredVisuals,
+          };
+        }
+      }
+
+      if (plan.neededSources.includes("missing_external_source")) {
+        return {
+          status: "needs_data",
+          plan,
+          missingSource: plan.missingSourceName,
+          resolvedGoal: plan.resolvedGoal,
+          targets: plan.requiredVisuals,
+          summary: `Identified unconnected data request (${plan.missingSourceName ?? "external source"})`,
+        };
+      }
+
+      return {
+        status: "ready",
+        plan,
+        resolvedGoal: plan.resolvedGoal,
+        targets: plan.requiredVisuals,
+        summary: `Goal resolved · visuals: ${plan.requiredVisuals.join(", ") || "auto"} · sources: ${plan.neededSources.join(", ")}`,
       };
-    }
-  }
+    },
 
-  stages.push({
-    stage: "plan",
-    status: plan.neededSources.includes("missing_external_source") ? "needs_data" : "ok",
-    summary: plan.neededSources.includes("missing_external_source")
-      ? `Identified unconnected data request (${plan.missingSourceName ?? "external source"})`
-      : `Goal resolved · visuals: ${plan.requiredVisuals.join(", ") || "auto"} · sources: ${plan.neededSources.join(", ")}`,
-    durationMs: Date.now() - planStart,
+    // ── STAGE 2: GATHER / FETCH ──
+    gather: async (plan) => {
+      const fetched = await fetchGroundedData({
+        plan,
+        personaId: input.personaId,
+        portfolioSnapshots: input.portfolioSnapshots,
+        goalProgressProvider: input.goalProgressProvider,
+        tradeStore: input.tradeStore,
+        recentContext: input.recentContext,
+        signal: input.signal,
+      });
+      return {
+        status: "ok",
+        evidence: fetched,
+        sources: fetched.sourceLabels,
+        summary: fetched.sourceLabels.length
+          ? `Fetched grounded data from ${fetched.sourceLabels.join(", ")}`
+          : "Loaded session context",
+      };
+    },
+
+    // ── STAGE 3: SYNTHESIZE / COMPOSE ──
+    synthesize: async (plan, fetched) => {
+      if (input.gateway && fetched.promptContextText) {
+        const composePrompt = [
+          `VERIFIED PLAN:\n${JSON.stringify(plan, null, 2)}`,
+          fetched.promptContextText,
+          `USER REQUEST: ${input.prompt}`,
+        ].join("\n\n");
+        const raw = await callLlmStage(
+          input.gateway,
+          input.dataDir,
+          "dynamic_ui_compose",
+          composerSystemPrompt,
+          composePrompt,
+          12_000,
+          input.signal,
+        );
+        return { candidate: raw, summary: `LLM composed candidate for ${plan.requiredVisuals.join(" + ") || "dynamic view"}` };
+      }
+      const fallback = buildGroundedFallbackCanvas(input.prompt, plan, fetched);
+      return {
+        candidate: { __groundedDirect: true, result: fallback },
+        summary: `Composed grounded ${fallback.canvas.nodes.map((n) => n.type).join(" + ")} directly from live data`,
+      };
+    },
+
+    // ── STAGE 4a: VERIFY ──
+    verify: (candidate, plan, fetched) => {
+      if (candidate && typeof candidate === "object" && "__groundedDirect" in candidate && "result" in candidate) {
+        const direct = (candidate as { result: { intro: string; canvas: DynamicCanvasProps } }).result;
+        return {
+          ok: true,
+          output: direct,
+          summary: `Verified required visuals (${plan.requiredVisuals.join(", ") || "valid"}) against Customer 360`,
+        };
+      }
+      const dataSourceLabel = fetched.sourceLabels.join(" + ") || "Customer 360";
+      const check = validateAgainstPlan(candidate, plan, input.prompt, dataSourceLabel);
+      if (check.ok && check.result) {
+        return {
+          ok: true,
+          output: check.result,
+          summary: `Verified schema + required visuals (${plan.requiredVisuals.join(", ") || "valid"})`,
+        };
+      }
+      return { ok: false, violations: check.violations };
+    },
+
+    // ── STAGE 4b: TARGETED LLM REPAIR ──
+    repair: input.gateway
+      ? async (plan, fetched, violations) => {
+          const repairPrompt = [
+            `VERIFIED PLAN:\n${JSON.stringify(plan, null, 2)}`,
+            fetched.promptContextText,
+            `USER REQUEST: ${input.prompt}`,
+            `VERIFICATION VIOLATIONS TO FIX:\n- ${violations.join("\n- ")}`,
+            "Fix every violation above and return ONLY the corrected JSON object.",
+          ].join("\n\n");
+          const raw = await callLlmStage(
+            input.gateway!,
+            input.dataDir,
+            "dynamic_ui_repair",
+            composerSystemPrompt,
+            repairPrompt,
+            10_000,
+            input.signal,
+          );
+          return { candidate: raw, summary: `LLM auto-repaired canvas for ${plan.requiredVisuals.join(" + ") || "view"}` };
+        }
+      : undefined,
+
+    // ── STAGE 4c: DETERMINISTIC GROUNDED FALLBACK ──
+    fallback: (plan, fetched) => buildGroundedFallbackCanvas(input.prompt, plan, fetched),
   });
 
-  // ── STAGE 2: FETCH (ground strictly in connected CEP providers; refuse unconnected sources cleanly) ──
-  const fetchStart = Date.now();
-  if (plan.neededSources.includes("missing_external_source")) {
-    const missingLabel = plan.missingSourceName && plan.missingSourceName !== "that dataset"
-      ? `for "${plan.missingSourceName}"`
+  if (outcome.status === "needs_data") {
+    const missingLabel = outcome.missingSource && outcome.missingSource !== "that dataset"
+      ? `for "${outcome.missingSource}"`
       : "for that view";
     const intro = `I don’t have a connected data source ${missingLabel}. Which source should supply the records?`;
-    stages.push({
-      stage: "fetch",
-      status: "needs_data",
-      summary: "No connected CEP provider supplies those external records — stopped without fabricating data.",
-      durationMs: Date.now() - fetchStart,
-    });
     return {
       intro,
       canvas: {
@@ -679,142 +799,42 @@ export async function runDynamicUiHarness(input: {
         generatedBy: "synthesizer",
         nodes: [{ type: "callout", tone: "info", body: intro }],
         disclaimer: "No records were loaded.",
-        harnessTrace: {
-          resolvedGoal: plan.resolvedGoal,
-          fetchedSources: [],
-          visualTargets: plan.requiredVisuals,
-          repaired: false,
-          stages,
-        },
+        harnessTrace: toCanvasTrace(outcome.trace),
       },
     };
   }
 
-  const fetched = await fetchGroundedData({
-    plan,
-    personaId: input.personaId,
-    portfolioSnapshots: input.portfolioSnapshots,
-    goalProgressProvider: input.goalProgressProvider,
-    tradeStore: input.tradeStore,
-    recentContext: input.recentContext,
-    signal: input.signal,
-  });
-
-  stages.push({
-    stage: "fetch",
-    status: "ok",
-    summary: fetched.sourceLabels.length
-      ? `Fetched grounded data from ${fetched.sourceLabels.join(", ")}`
-      : "Loaded session context",
-    durationMs: Date.now() - fetchStart,
-  });
-
-  // ── STAGE 3: COMPOSE (generate DynamicCanvas strictly from plan + fetched data) ──
-  const dataSourceLabel = fetched.sourceLabels.join(" + ") || "Customer 360";
-  let verifiedResult: { intro: string; canvas: DynamicCanvasProps } | null = null;
-  let repaired = false;
-
-  if (input.gateway && fetched.promptContextText) {
-    const composeStart = Date.now();
-    const composePrompt = [
-      `VERIFIED PLAN:\n${JSON.stringify(plan, null, 2)}`,
-      fetched.promptContextText,
-      `USER REQUEST: ${input.prompt}`,
-    ].join("\n\n");
-
-    const rawComposed = await callLlmStage(
-      input.gateway,
-      input.dataDir,
-      "dynamic_ui_compose",
-      composerSystemPrompt,
-      composePrompt,
-      12_000,
-      input.signal,
-    );
-    const firstCheck = validateAgainstPlan(rawComposed, plan, input.prompt, dataSourceLabel);
-
-    stages.push({
-      stage: "compose",
-      status: firstCheck.ok ? "ok" : "repaired",
-      summary: firstCheck.ok
-        ? `LLM composed ${firstCheck.result!.canvas.nodes.map((n) => n.type).join(" + ")}`
-        : `Draft needed repair: ${firstCheck.violations[0] ?? "validation failed"}`,
-      durationMs: Date.now() - composeStart,
-    });
-
-    // ── STAGE 4: VERIFY & TARGETED REPAIR ──
-    if (firstCheck.ok && firstCheck.result) {
-      verifiedResult = firstCheck.result;
-      stages.push({
-        stage: "verify",
-        status: "ok",
-        summary: `Verified schema + required visuals (${plan.requiredVisuals.join(", ") || "valid"})`,
-      });
-    } else {
-      const repairStart = Date.now();
-      const repairPrompt = [
-        composePrompt,
-        `VERIFICATION VIOLATIONS TO FIX:\n- ${firstCheck.violations.join("\n- ")}`,
-        `Fix every violation above and return ONLY the corrected JSON object.`,
-      ].join("\n\n");
-
-      const rawRepaired = await callLlmStage(
-        input.gateway,
-        input.dataDir,
-        "dynamic_ui_repair",
-        composerSystemPrompt,
-        repairPrompt,
-        10_000,
-        input.signal,
-      );
-      const secondCheck = validateAgainstPlan(rawRepaired, plan, input.prompt, dataSourceLabel);
-      repaired = true;
-
-      if (secondCheck.ok && secondCheck.result) {
-        verifiedResult = secondCheck.result;
-        stages.push({
-          stage: "repair",
-          status: "repaired",
-          summary: `LLM auto-repaired canvas (${secondCheck.result.canvas.nodes.map((n) => n.type).join(" + ")})`,
-          durationMs: Date.now() - repairStart,
-        });
-      } else {
-        verifiedResult = buildGroundedFallbackCanvas(input.prompt, plan, fetched);
-        stages.push({
-          stage: "repair",
-          status: "repaired",
-          summary: `Synthesized deterministic grounded ${plan.requiredVisuals.join(" + ") || "canvas"} after repair check`,
-          durationMs: Date.now() - repairStart,
-        });
-      }
-    }
-  } else {
-    const synthStart = Date.now();
-    verifiedResult = buildGroundedFallbackCanvas(input.prompt, plan, fetched);
-    stages.push({
-      stage: "compose",
-      status: "ok",
-      summary: `Composed grounded ${verifiedResult.canvas.nodes.map((n) => n.type).join(" + ")} directly from live data`,
-      durationMs: Date.now() - synthStart,
-    });
-    stages.push({
-      stage: "verify",
-      status: "ok",
-      summary: `Verified required visuals (${plan.requiredVisuals.join(", ") || "valid"}) against Customer 360`,
-    });
+  if (outcome.status === "needs_clarification") {
+    return {
+      intro: outcome.question,
+      canvas: {
+        title: "Quick clarification",
+        badge: "sfield Harness",
+        generatedBy: "synthesizer",
+        nodes: [{ type: "callout", tone: "info", body: outcome.question }],
+        ...(outcome.choices?.length ? { choices: outcome.choices } : {}),
+        disclaimer: "Choose an option or reply with the details you'd like shown.",
+        harnessTrace: toCanvasTrace(outcome.trace),
+      },
+    };
   }
 
-  return {
-    intro: verifiedResult.intro,
-    canvas: {
-      ...verifiedResult.canvas,
-      harnessTrace: {
-        resolvedGoal: plan.resolvedGoal,
-        fetchedSources: fetched.sourceLabels,
-        visualTargets: plan.requiredVisuals,
-        repaired,
-        stages,
+  if (outcome.status === "completed") {
+    return {
+      intro: outcome.output.intro,
+      canvas: {
+        ...outcome.output.canvas,
+        harnessTrace: toCanvasTrace(outcome.trace),
       },
+    };
+  }
+
+  const emergency = buildGroundedFallbackCanvas(input.prompt, outcome.plan, outcome.evidence);
+  return {
+    intro: emergency.intro,
+    canvas: {
+      ...emergency.canvas,
+      harnessTrace: toCanvasTrace(outcome.trace),
     },
   };
 }

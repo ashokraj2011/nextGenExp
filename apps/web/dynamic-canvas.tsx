@@ -718,12 +718,15 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
         <details className="dyn-harness-trace">
           <summary>
             <span>
-              Agentic Harness · {props.harnessTrace.stages.map((s) => s.stage.charAt(0).toUpperCase() + s.stage.slice(1)).join(" → ")}
+              sfield Harness · {props.harnessTrace.stages.map((s) => s.stage.charAt(0).toUpperCase() + s.stage.slice(1)).join(" → ")}
               {props.harnessTrace.repaired ? " (auto-repaired)" : ""}
             </span>
           </summary>
           <div className="dyn-harness-body">
-            <p className="dyn-harness-goal"><strong>Resolved goal:</strong> {props.harnessTrace.resolvedGoal}</p>
+            <p className="dyn-harness-goal">
+              <strong>Resolved goal:</strong> {props.harnessTrace.resolvedGoal}
+              {props.harnessTrace.harnessRunId && <small style={{ marginLeft: 8, opacity: 0.7 }}>({props.harnessTrace.harnessRunId})</small>}
+            </p>
             <ol className="dyn-harness-steps">
               {props.harnessTrace.stages.map((step, idx) => (
                 <li key={idx} className={"is-" + step.status}>

@@ -62,3 +62,16 @@ integration-task version) must restart.
 - approval in the same process, via `approvals.decide()` (patch 1);
 - restart, then approval resumes the original sfield run and approval, with exactly one sfield approval record (patch 2);
 - a version published after startup is registered as a dedicated tool and runs, with and without approval (patch 3).
+
+## 4. General-purpose multi-stage Agentic Harness (`sfield.harness`)
+
+**Symptom:** Host applications building multi-step LLM capabilities (dynamic UI generation, multi-source RAG/Q&A, action planning, authoring copilots) either cram everything into a brittle single LLM call or re-implement ad-hoc plan/fetch/verify/repair loops outside `sfield`'s governance and audit trail.
+
+**Fix** ([agentic-harness.ts](runtime/agentic-harness.ts), [sfield.ts](sfield.ts), [index.ts](index.ts)):
+
+- Added `AgenticHarness` (`sfield.harness.run(spec)`) and standalone `runAgenticHarness(spec)` implementing a domain-agnostic 4-stage pipeline:
+  1. `plan` — clarify intent, resolve follow-ups/corrections, or pause cleanly with `needs_clarification` / `needs_data`;
+  2. `gather` — execute only the grounded data/tool reads selected by the plan;
+  3. `synthesize` — produce a candidate output from the verified plan and evidence;
+  4. `verify` + bounded `repair` (and optional deterministic `fallback`) — validate schema, grounding, and user constraints before returning.
+- Every run gets a `hrn_*` id, honors `AbortSignal` between stages, captures per-stage timings in `HarnessTrace`, and appends an `agentic_harness_completed` audit record to `sfield`'s persistence store.

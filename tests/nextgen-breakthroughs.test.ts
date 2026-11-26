@@ -10,6 +10,7 @@ import { startFixtureGateway } from "./gateway-fixture";
 import type { HandoffTicket } from "../packages/contracts/handoff";
 import type { AgentDelegationPass, NegotiationSession, Watchcard } from "../packages/contracts/nextgen-chat";
 import { generateDynamicUi } from "../apps/server/dynamic-ui-generator";
+import { AgenticHarness, type AuditRecord } from "@sfield/core";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { deterministicCapabilityRoute } from "../apps/server/semantic-router";
@@ -379,4 +380,75 @@ test("4-Stage Dynamic UI Harness: handles pie chart typos, follow-up corrections
   });
   assert.equal(jiraOut.canvas.title, "Data source needed");
   assert.equal(jiraOut.canvas.harnessTrace?.stages.some((s) => s.status === "needs_data"), true);
+  assert.match(jiraOut.canvas.harnessTrace?.harnessRunId ?? "", /^hrn_/);
+});
+
+test("@sfield/core AgenticHarness: works generically for non-UI workflows (clarification pause, verify->repair loop, and sfield audit persistence)", async () => {
+  const audits: AuditRecord[] = [];
+  const harness = new AgenticHarness({
+    persistence: {
+      appendAudit: async (records) => { audits.push(...records); },
+    },
+    configDigest: () => "sha256:test-config",
+  });
+
+  // 1. Ambiguous action pauses cleanly with needs_clarification + clickable choices
+  const clarified = await harness.run({
+    kind: "action_plan",
+    plan: async () => ({
+      status: "needs_clarification",
+      resolvedGoal: "Sell shares without specified ticker or quantity",
+      question: "Which stock and how many shares would you like to sell?",
+      choices: [{ id: "AAPL", label: "Apple (AAPL)" }, { id: "MSFT", label: "Microsoft (MSFT)" }],
+      summary: "Missing required ticker and quantity",
+    }),
+    gather: async () => ({ evidence: {}, sources: [], summary: "unused" }),
+    synthesize: async () => ({ candidate: null }),
+    verify: () => ({ ok: true, output: null }),
+  });
+  assert.equal(clarified.status, "needs_clarification");
+  assert.equal(clarified.choices?.length, 2);
+  assert.equal(audits.length, 1);
+  assert.equal(audits[0].type, "agentic_harness_completed");
+  assert.equal(audits[0].data.kind, "action_plan");
+  assert.equal(audits[0].data.status, "needs_clarification");
+
+  // 2. Non-UI multi-source Q&A with citation verification & automatic repair
+  const qa = await harness.run<{ query: string }, { citations: string[] }, { answer: string; citations: string[] }, { answer: string; citations: string[] }>({
+    kind: "policy_rag_qa",
+    maxRepairs: 1,
+    plan: async () => ({
+      status: "ready",
+      plan: { query: "wire transfer limit" },
+      resolvedGoal: "Answer wire transfer threshold with policy citation",
+      summary: "Selected policy_kb source",
+      targets: ["citation_required"],
+    }),
+    gather: async () => ({
+      evidence: { citations: ["POL-WIRE-01"] },
+      sources: ["policy_kb"],
+      summary: "Fetched POL-WIRE-01",
+    }),
+    synthesize: async () => ({
+      // Intentionally omits required citation so Stage 4 triggers repair
+      candidate: { answer: "Wires over $25,000 require dual control.", citations: [] },
+      summary: "Drafted initial answer",
+    }),
+    verify: (cand, _plan, ev) => {
+      if (!cand.citations.some((c) => ev.citations.includes(c))) {
+        return { ok: false, violations: ["Missing grounded policy citation from Stage 2 evidence."] };
+      }
+      return { ok: true, output: cand, summary: "Verified policy citation" };
+    },
+    repair: async (_plan, ev, _violations, prev) => ({
+      candidate: { answer: prev.answer, citations: ev.citations },
+      summary: "Added missing grounded citation POL-WIRE-01",
+    }),
+  });
+  assert.equal(qa.status, "completed");
+  assert.deepEqual(qa.output.citations, ["POL-WIRE-01"]);
+  assert.equal(qa.trace.repaired, true);
+  assert.equal(audits.length, 2);
+  assert.equal(audits[1].data.kind, "policy_rag_qa");
+  assert.equal(audits[1].data.repaired, true);
 });

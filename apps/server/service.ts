@@ -874,6 +874,7 @@ export class ExperienceService {
           recentContext: recentSummary,
           gateway: domainTools.gateway,
           dataDir: domainTools.dataDir,
+          harness: runtime.harness,
           portfolioSnapshots: domainTools.portfolioSnapshots,
           goalProgressProvider: domainTools.goalProgressProvider,
           opsStore: domainTools.opsStore,

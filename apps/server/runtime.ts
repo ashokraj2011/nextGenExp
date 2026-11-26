@@ -485,6 +485,10 @@ export class Runtime implements IntegrationTaskRuntime {
     return this.sf.chat;
   }
 
+  get harness() {
+    return this.sf.harness;
+  }
+
   current(id: string): TurnRecord {
     const turn = this.store.turn(id);
     requireCheck(turn?.public.status === "working" && this.store.latestTurn(turn.scope.conversationId)?.public.id === id, "TURN_INACTIVE");
