@@ -140,12 +140,13 @@ function parse<T>(row?: { record: string }): T | undefined {
   return row ? JSON.parse(row.record) as T : undefined;
 }
 export function presentConversation(record: ConversationRecord): Conversation {
-  const { id, title, tenantId, domainId, userId, personaId, scenarioId, updatedAt, archivedAt, audience, folderId } = record;
+  const { id, title, tenantId, domainId, userId, personaId, scenarioId, updatedAt, archivedAt, audience, folderId, forkedFrom } = record;
   return {
     id, title, tenantId, domainId, userId, personaId, scenarioId, updatedAt,
     ...(archivedAt === undefined ? {} : { archivedAt }),
     ...(audience && { audience }),
     ...(folderId && { folderId }),
+    ...(forkedFrom && { forkedFrom }),
   };
 }
 function inaccessible(): never {
@@ -196,7 +197,7 @@ export class Store {
       );
       CREATE TABLE IF NOT EXISTS conversation_folders (
         id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, domain_id TEXT NOT NULL,
-        name TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        name TEXT NOT NULL, instructions TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS folders_principal ON conversation_folders(principal_id, domain_id, name);
       CREATE TABLE IF NOT EXISTS user_threads (
@@ -243,6 +244,10 @@ export class Store {
         );
     `);
     this.initializeDesignLibrary();
+    const folderCols = this.db.all<{ name: string }>("PRAGMA table_info(conversation_folders)");
+    if (!folderCols.some((c) => c.name === "instructions")) {
+      this.db.run("ALTER TABLE conversation_folders ADD COLUMN instructions TEXT");
+    }
     this.db.run(`INSERT OR IGNORE INTO user_threads SELECT c.id, ?, json_extract(c.record,'$.domainId'), json_extract(c.record,'$.userId')
       FROM conversations c WHERE json_extract(c.record,'$.tenantId')=? AND json_extract(c.record,'$.audience') IS NULL
       AND (json_extract(c.record,'$.domainId') IN ('it_ops','sales_revops') OR EXISTS (
@@ -491,51 +496,148 @@ export class Store {
   }
 
   getFolder(id: string, principalId: string): ConversationFolder | undefined {
-    const row = this.db.one<{ id: string; name: string; domain_id: DomainPackId; created_at: number; updated_at: number }>(
-      "SELECT id, name, domain_id, created_at, updated_at FROM conversation_folders WHERE id = ? AND principal_id = ? AND tenant_id = ?",
+    const row = this.db.one<{ id: string; name: string; domain_id: DomainPackId; instructions: string | null; created_at: number; updated_at: number }>(
+      "SELECT id, name, domain_id, instructions, created_at, updated_at FROM conversation_folders WHERE id = ? AND principal_id = ? AND tenant_id = ?",
       id, principalId, serverTenantId,
     );
-    return row ? { id: row.id, name: row.name, domainId: row.domain_id, createdAt: row.created_at, updatedAt: row.updated_at } : undefined;
+    return row
+      ? {
+          id: row.id, name: row.name, domainId: row.domain_id,
+          ...(row.instructions ? { instructions: row.instructions } : {}),
+          createdAt: row.created_at, updatedAt: row.updated_at,
+        }
+      : undefined;
   }
 
   listFolders(principalId: string, domainId?: DomainPackId): ConversationFolder[] {
     const rows = domainId
-      ? this.db.all<{ id: string; name: string; domain_id: DomainPackId; created_at: number; updated_at: number }>(
-          "SELECT id, name, domain_id, created_at, updated_at FROM conversation_folders WHERE principal_id = ? AND tenant_id = ? AND domain_id = ? ORDER BY created_at ASC, name ASC",
+      ? this.db.all<{ id: string; name: string; domain_id: DomainPackId; instructions: string | null; created_at: number; updated_at: number }>(
+          "SELECT id, name, domain_id, instructions, created_at, updated_at FROM conversation_folders WHERE principal_id = ? AND tenant_id = ? AND domain_id = ? ORDER BY created_at ASC, name ASC",
           principalId, serverTenantId, domainId,
         )
-      : this.db.all<{ id: string; name: string; domain_id: DomainPackId; created_at: number; updated_at: number }>(
-          "SELECT id, name, domain_id, created_at, updated_at FROM conversation_folders WHERE principal_id = ? AND tenant_id = ? ORDER BY created_at ASC, name ASC",
+      : this.db.all<{ id: string; name: string; domain_id: DomainPackId; instructions: string | null; created_at: number; updated_at: number }>(
+          "SELECT id, name, domain_id, instructions, created_at, updated_at FROM conversation_folders WHERE principal_id = ? AND tenant_id = ? ORDER BY created_at ASC, name ASC",
           principalId, serverTenantId,
         );
-    return rows.map((row) => ({ id: row.id, name: row.name, domainId: row.domain_id, createdAt: row.created_at, updatedAt: row.updated_at }));
+    return rows.map((row) => ({
+      id: row.id, name: row.name, domainId: row.domain_id,
+      ...(row.instructions ? { instructions: row.instructions } : {}),
+      createdAt: row.created_at, updatedAt: row.updated_at,
+    }));
   }
 
-  createFolder(principalId: string, domainId: DomainPackId, name: string, now: number): ConversationFolder {
+  createFolder(principalId: string, domainId: DomainPackId, name: string, now: number, instructions?: string): ConversationFolder {
     const clean = name.replace(/\s+/g, " ").trim().slice(0, 48);
     if (!clean) throw new ApiError(400, "folder_name_invalid", "Enter a folder name.");
     const existing = this.listFolders(principalId, domainId);
     if (existing.length >= 24) throw new ApiError(409, "folder_limit", "You can create up to 24 folders.");
     const duplicate = existing.find((f) => f.name.toLowerCase() === clean.toLowerCase());
     if (duplicate) return duplicate;
-    const folder: ConversationFolder = { id: makeId("fld"), name: clean, domainId, createdAt: now, updatedAt: now };
+    const cleanInstructions = instructions?.trim().slice(0, 600) || undefined;
+    const folder: ConversationFolder = {
+      id: makeId("fld"), name: clean, domainId,
+      ...(cleanInstructions ? { instructions: cleanInstructions } : {}),
+      createdAt: now, updatedAt: now,
+    };
     this.db.run(
-      "INSERT INTO conversation_folders VALUES (?, ?, ?, ?, ?, ?, ?)",
-      folder.id, serverTenantId, principalId, domainId, folder.name, now, now,
+      "INSERT INTO conversation_folders (id, tenant_id, principal_id, domain_id, name, instructions, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      folder.id, serverTenantId, principalId, domainId, folder.name, cleanInstructions ?? null, now, now,
     );
     return folder;
   }
 
   renameFolder(id: string, principalId: string, name: string, now: number): ConversationFolder {
-    const clean = name.replace(/\s+/g, " ").trim().slice(0, 48);
-    if (!clean) throw new ApiError(400, "folder_name_invalid", "Enter a folder name.");
+    return this.updateFolder(id, principalId, { name }, now);
+  }
+
+  updateFolder(id: string, principalId: string, patch: { name?: string; instructions?: string | null }, now: number): ConversationFolder {
     const existing = this.getFolder(id, principalId);
     if (!existing) inaccessible();
+    const nextName = patch.name !== undefined ? patch.name.replace(/\s+/g, " ").trim().slice(0, 48) : existing.name;
+    if (!nextName) throw new ApiError(400, "folder_name_invalid", "Enter a folder name.");
+    const nextInstructions = patch.instructions === undefined
+      ? existing.instructions
+      : (patch.instructions === null ? undefined : (patch.instructions.trim().slice(0, 600) || undefined));
     this.db.run(
-      "UPDATE conversation_folders SET name = ?, updated_at = ? WHERE id = ? AND principal_id = ? AND tenant_id = ?",
-      clean, now, id, principalId, serverTenantId,
+      "UPDATE conversation_folders SET name = ?, instructions = ?, updated_at = ? WHERE id = ? AND principal_id = ? AND tenant_id = ?",
+      nextName, nextInstructions ?? null, now, id, principalId, serverTenantId,
     );
-    return { ...existing, name: clean, updatedAt: now };
+    return {
+      ...existing,
+      name: nextName,
+      ...(nextInstructions ? { instructions: nextInstructions } : { instructions: undefined }),
+      updatedAt: now,
+    };
+  }
+
+  folderConversations(folderId: string, principalId: string): ConversationRecord[] {
+    return this.db.all<{ record: string }>(
+      "SELECT record FROM conversations WHERE principal_id = ? AND json_extract(record, '$.folderId') = ? ORDER BY updated_at DESC, rowid DESC",
+      principalId, folderId,
+    ).flatMap((row) => {
+      const parsed = parse<ConversationRecord>(row);
+      return parsed ? [parsed] : [];
+    });
+  }
+
+  forkConversation(
+    source: ConversationRecord,
+    principalId: string,
+    now: number,
+    upToTurnId?: string,
+    customTitle?: string,
+  ): ConversationRecord {
+    return this.db.tx(() => {
+      const sourceTurns = this.conversationTurns(source.id).filter((t) => t.public.status === "completed");
+      let cut = sourceTurns;
+      if (upToTurnId) {
+        const idx = sourceTurns.findIndex((t) => t.public.id === upToTurnId);
+        if (idx === -1) throw new ApiError(404, "turn_not_found", "Turn not found in this conversation.");
+        cut = sourceTurns.slice(0, idx + 1);
+      }
+      const title = (customTitle?.trim() || `Branch · ${source.title}`).slice(0, 80);
+      const forked: ConversationRecord = {
+        id: makeId("conv"),
+        principalId,
+        tenantId: source.tenantId,
+        domainId: source.domainId,
+        userId: source.userId,
+        title,
+        personaId: source.personaId,
+        scenarioId: source.scenarioId,
+        updatedAt: now,
+        sessions: {},
+        ...(source.audience && { audience: source.audience }),
+        ...(source.folderId && { folderId: source.folderId }),
+        forkedFrom: { conversationId: source.id, ...(upToTurnId ? { turnId: upToTurnId } : {}) },
+      };
+      this.db.run("INSERT INTO conversations VALUES (?, ?, ?, ?)", forked.id, principalId, now, JSON.stringify(forked));
+      if (forked.audience !== "admin") {
+        this.db.run(
+          "INSERT OR IGNORE INTO user_threads VALUES (?, ?, ?, ?)",
+          forked.id, forked.tenantId, forked.domainId, forked.userId,
+        );
+      }
+      cut.forEach((orig, idx) => {
+        const clonedTurnId = makeId("turn");
+        const cloned: TurnRecord = {
+          ...orig,
+          ordinal: idx + 1,
+          historyStatus: undefined,
+          scope: { ...orig.scope, conversationId: forked.id, principalId },
+          public: {
+            ...orig.public,
+            id: clonedTurnId,
+            conversationId: forked.id,
+          },
+        };
+        this.db.run(
+          "INSERT INTO turns (id, conversation_id, request_id, ordinal, status, record) VALUES (?, ?, ?, ?, ?, ?)",
+          clonedTurnId, forked.id, `fork:${orig.public.id}:${clonedTurnId}`, cloned.ordinal, cloned.public.status, JSON.stringify(cloned),
+        );
+      });
+      return forked;
+    });
   }
 
   deleteFolder(id: string, principalId: string): { deleted: boolean; unfiledIds: string[] } {

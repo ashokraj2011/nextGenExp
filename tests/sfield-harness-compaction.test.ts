@@ -359,3 +359,70 @@ test("Multi-goal creator, native bubble chart, on-demand compaction, and recent-
   assert.equal(deletedGoal.deleted, true);
   assert.equal(deletedGoal.goals.some((g) => g.id === createdGoal.goal.id), false);
 });
+
+test("Chat Workspace & Folder Superpowers: shared folder instructions, cross-thread folder brief, and message branching", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "cep-folder-superpowers-"));
+  const gateway = await startFixtureGateway();
+  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: gateway.settings });
+  t.after(async () => { await app.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
+  const client = await testClient(app.url);
+  const boot = await client.request<{ defaultPersonaId: string; defaultScenarioId: string }>("/api/bootstrap?domain=wealth");
+
+  // 1. Create folder with shared project instructions & update instructions
+  const folderRes = await client.request<{ folder: { id: string; name: string; instructions?: string } }>("/api/folders", {
+    name: "Home 2027",
+    domainId: "wealth",
+    instructions: "Target budget $650k; keep $40k liquid cash buffer.",
+  }, 201);
+  assert.equal(folderRes.folder.instructions, "Target budget $650k; keep $40k liquid cash buffer.");
+
+  const updatedFolder = await client.request<{ folder: { id: string; name: string; instructions?: string } }>(
+    `/api/folders/${folderRes.folder.id}/update`,
+    { instructions: "Target budget $700k for 2027 home purchase; prefer conservative cash buffer." },
+  );
+  assert.match(updatedFolder.folder.instructions ?? "", /\$700k/);
+
+  // 2. Create a conversation inside the folder and run 2 turns
+  const thread1 = await client.request<{ id: string; folderId?: string }>("/api/conversations", {
+    personaId: boot.defaultPersonaId,
+    scenarioId: boot.defaultScenarioId,
+    domainId: "wealth",
+    folderId: folderRes.folder.id,
+  }, 201);
+  const turn1 = (await client.ask(thread1.id, "Show my portfolio allocation as a pie chart")).turn;
+  const turn2 = (await client.ask(thread1.id, "Show my stock holdings as a bubble chart")).turn;
+  assert.equal(turn1.status, "completed");
+  assert.equal(turn2.status, "completed");
+
+  // 3. Branch/fork from turn1 -> new thread stays in the same folder and has exactly 1 cloned turn!
+  const forked = await client.request<{ id: string; folderId?: string; forkedFrom?: { conversationId: string; turnId?: string }; turns: Array<{ id: string; message: string }> }>(
+    `/api/conversations/${thread1.id}/fork`,
+    { turnId: turn1.id, title: "What-if Pie Branch" },
+    201,
+  );
+  assert.equal(forked.folderId, folderRes.folder.id);
+  assert.equal(forked.forkedFrom?.conversationId, thread1.id);
+  assert.equal(forked.forkedFrom?.turnId, turn1.id);
+  assert.equal(forked.turns.length, 1);
+  assert.equal(forked.turns[0]!.message, "Show my portfolio allocation as a pie chart");
+
+  // Forked thread can immediately continue chatting with its cloned sfield history!
+  const branchFollowUp = (await client.ask(forked.id, "as bar chart")).turn;
+  assert.equal(branchFollowUp.status, "completed");
+
+  // 4. Folder summary API returns both threads inside the folder
+  const summaryApi = await client.request<{ folder: { name: string }; threadCount: number; threads: Array<{ conversationId: string; completedTurns: number }> }>(
+    `/api/folders/${folderRes.folder.id}/summary`,
+  );
+  assert.equal(summaryApi.folder.name, "Home 2027");
+  assert.equal(summaryApi.threadCount, 2);
+
+  // 5. Asking chat to "Summarize all threads in my Home 2027 folder" renders a Folder Project Brief card!
+  const briefTurn = (await client.ask(thread1.id, "Summarize all threads in my Home 2027 folder")).turn;
+  assert.equal(briefTurn.status, "completed");
+  const briefCard = briefTurn.experience?.blocks.find((b) => b.component === "PznDynamicCanvas");
+  assert.ok(briefCard && briefCard.component === "PznDynamicCanvas");
+  assert.equal(briefCard.props.badge, "Folder Brief");
+  assert.match(JSON.stringify(briefCard.props.nodes), /\$700k/);
+  assert.match(JSON.stringify(briefCard.props.nodes), /What-if Pie Branch/);
+});

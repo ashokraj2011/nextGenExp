@@ -116,7 +116,7 @@ import { z } from "zod";
 import demo from "../../fixtures/host.json";
 import type { Bootstrap, Conversation, TurnView } from "../../packages/contracts/api";
 import type { SelectionMode } from "../../packages/contracts/domain";
-import { actionBody, conversationChangeBody, createBody, eventBody, folderCreateBody, folderRenameBody, idPattern, messageBody, previewFundingBody, retryBody } from "../../packages/contracts/http-inputs";
+import { actionBody, conversationChangeBody, createBody, eventBody, folderCreateBody, folderRenameBody, folderUpdateBody, forkBody, idPattern, messageBody, previewFundingBody, retryBody } from "../../packages/contracts/http-inputs";
 import { accountPortalPath, pendingActionsContext, workspacePinsSchema, type PortalFundingView } from "../../packages/contracts/workspace";
 import { adminPaths, isAdminPath } from "../../packages/contracts/admin-paths";
 import { mockCcreRuleSchema, toolSetupSchema, treatmentPreviewSchema } from "../../packages/contracts/tool-setup";
@@ -1861,11 +1861,37 @@ export async function startApp(options: Options) {
       }
       if (method === "POST" && !id) {
         const input = await body(req, folderCreateBody);
-        return json(res, { folder: store.createFolder(principalId, input.domainId, input.name, now()) }, 201);
+        return json(res, { folder: store.createFolder(principalId, input.domainId, input.name, now(), input.instructions) }, 201);
       }
       if (id && ((method === "POST" && operation === "rename") || (method === "PATCH" && !operation))) {
         const input = await body(req, folderRenameBody);
         return json(res, { folder: store.renameFolder(id, principalId, input.name, now()) });
+      }
+      if (id && method === "POST" && operation === "update") {
+        const input = await body(req, folderUpdateBody);
+        return json(res, { folder: store.updateFolder(id, principalId, input, now()) });
+      }
+      if (id && method === "GET" && operation === "summary") {
+        const folder = store.getFolder(id, principalId);
+        if (!folder) throw new ApiError(404, "folder_not_found", "Folder not found.");
+        const convs = store.folderConversations(id, principalId);
+        const threads = convs.map((c) => {
+          const turns = store.conversationTurns(c.id);
+          const completed = turns.filter((t) => t.public.status === "completed");
+          const running = turns.filter((t) => t.public.status === "working");
+          const last = turns.at(-1);
+          return {
+            conversationId: c.id,
+            title: c.title,
+            updatedAt: c.updatedAt,
+            totalTurns: turns.length,
+            completedTurns: completed.length,
+            runningTurns: running.length,
+            lastPrompt: last?.public.message ?? null,
+            lastSummary: last?.public.experience?.intro ?? last?.public.experience?.question ?? null,
+          };
+        });
+        return json(res, { folder, threadCount: threads.length, threads });
       }
       if (id && ((method === "POST" && operation === "delete") || (method === "DELETE" && !operation))) {
         return json(res, store.deleteFolder(id, principalId));
@@ -1899,6 +1925,12 @@ export async function startApp(options: Options) {
         }
         if (method === "POST" && operation === "settings") {
           return json(res, store.changeConversation(id, conversation.principalId, await body(req, conversationChangeBody), now()));
+        }
+        if (method === "POST" && operation === "fork") {
+          const input = await body(req, forkBody);
+          const forked = store.forkConversation(conversation, conversation.principalId, now(), input.turnId, input.title);
+          const turns = await experience.conversationTurns(forked);
+          return json(res, { ...presentConversation(forked), turns: turns.map((turn) => visibleTurn(turn, operator)) }, 201);
         }
         if (method === "POST" && operation === "preview-funding") {
           const { clientRequestId, source } = await body(req, previewFundingBody);

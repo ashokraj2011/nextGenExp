@@ -952,6 +952,118 @@ export class ExperienceService {
           return;
         }
 
+        // 0c. Cross-thread Folder Project Summary ("Summarize all threads in this folder", "Summarize my Home folder")
+        const isFolderSummary = /\b(summarize|summary|recap|overview|brief|what\s+have\s+we\s+decided|decisions?)\b.*\b(folder|project)\b|\bfolder\s+(summary|recap|brief|overview)\b/i.test(scopedPrompt);
+        if (isFolderSummary) {
+          stage = "compose";
+          this.store.progress(id, "planning", this.now());
+          const allFolders = this.store.listFolders(conversation.principalId, conversation.domainId);
+          const lowerPrompt = scopedPrompt.toLowerCase();
+          const matchedFolder = (conversation.folderId ? this.store.getFolder(conversation.folderId, conversation.principalId) : undefined)
+            ?? allFolders.find((f) => lowerPrompt.includes(f.name.toLowerCase()));
+          const now = this.now();
+          if (matchedFolder) {
+            const folderConvs = this.store.folderConversations(matchedFolder.id, conversation.principalId);
+            const threadSummaries = folderConvs.map((c) => {
+              const turns = this.store.conversationTurns(c.id).filter((t) => t.public.id !== id);
+              const completed = turns.filter((t) => t.public.status === "completed");
+              const working = turns.filter((t) => t.public.status === "working");
+              const last = completed.at(-1) ?? turns.at(-1);
+              return {
+                title: c.title,
+                completedCount: completed.length,
+                workingCount: working.length,
+                lastPrompt: last?.public.message ?? "No messages yet",
+                lastReply: last?.public.experience?.intro ?? last?.public.experience?.question ?? "Waiting for first turn",
+              };
+            });
+            const totalCompleted = threadSummaries.reduce((sum, t) => sum + t.completedCount, 0);
+            const totalWorking = threadSummaries.reduce((sum, t) => sum + t.workingCount, 0);
+            const nodes: import("../../packages/contracts/dynamic-canvas").DynamicCanvasNode[] = [
+              {
+                type: "metrics",
+                items: [
+                  { label: "Folder", value: matchedFolder.name.slice(0, 34), delta: matchedFolder.instructions ? "Shared rules on" : "No shared rules" },
+                  { label: "Threads", value: String(threadSummaries.length) },
+                  { label: "Completed Turns", value: String(totalCompleted) },
+                  { label: "In Progress", value: String(totalWorking), delta: totalWorking > 0 ? "Live" : "All clear" },
+                ],
+              },
+            ];
+            if (matchedFolder.instructions) {
+              nodes.push({
+                type: "callout",
+                tone: "highlight",
+                title: `Shared Project Instructions (${matchedFolder.name})`,
+                body: matchedFolder.instructions,
+              });
+            }
+            if (threadSummaries.length > 0) {
+              nodes.push({
+                type: "table",
+                caption: `Threads in "${matchedFolder.name}"`,
+                columns: ["Thread", "Turns", "Latest Question", "Latest Outcome"],
+                rows: threadSummaries.slice(0, 10).map((t) => [
+                  t.title.slice(0, 40),
+                  `${t.completedCount} done${t.workingCount ? ` · ${t.workingCount} live` : ""}`,
+                  t.lastPrompt.slice(0, 60),
+                  t.lastReply.slice(0, 76),
+                ]),
+              });
+              const highlights = threadSummaries
+                .filter((t) => t.completedCount > 0)
+                .slice(0, 6)
+                .map((t) => `${t.title}: ${t.lastReply.slice(0, 110)}`);
+              if (highlights.length) {
+                nodes.push({
+                  type: "checklist",
+                  title: "Key Takeaways Across Folder",
+                  items: highlights,
+                });
+              }
+            }
+            const canvas = {
+              title: `${matchedFolder.name} — Folder Project Brief`,
+              badge: "Folder Brief",
+              subtitle: `Synthesized across ${threadSummaries.length} thread${threadSummaries.length === 1 ? "" : "s"} in ${matchedFolder.name}`,
+              generatedBy: "synthesizer" as const,
+              dataSource: "SQLite Folders · sfield Chat Transcripts",
+              prompt: scopedPrompt.slice(0, 600),
+              nodes,
+              disclaimer: "Synthesized directly from your persisted threads and folder instructions.",
+              suggestedFollowUp: "What is the status of my other threads?",
+              harnessTrace: {
+                resolvedGoal: `Synthesize all threads and instructions in folder "${matchedFolder.name}"`,
+                thinking: `Loaded ${threadSummaries.length} thread(s) and ${totalCompleted} completed turn(s) from folder "${matchedFolder.name}"${matchedFolder.instructions ? " along with shared folder instructions" : ""}.`,
+                fetchedSources: ["ConversationFolders", "sfield.chat_threads"],
+                visualTargets: ["metrics", "table", "checklist"],
+                repaired: false,
+                stages: [
+                  { stage: "plan" as const, status: "ok" as const, summary: `Matched folder summary request for "${matchedFolder.name}"`, durationMs: 1 },
+                  { stage: "fetch" as const, status: "ok" as const, summary: `Scanned ${threadSummaries.length} thread(s) (${totalCompleted} turns)`, durationMs: 2 },
+                  { stage: "compose" as const, status: "ok" as const, summary: "Built cross-thread Folder Project Brief", durationMs: 1 },
+                  { stage: "verify" as const, status: "ok" as const, summary: "Verified grounded thread summaries", durationMs: 1 },
+                ],
+              },
+            };
+            const intro = `Here is the project brief across **${threadSummaries.length} thread${threadSummaries.length === 1 ? "" : "s"}** in **${matchedFolder.name}** (${totalCompleted} completed turn${totalCompleted === 1 ? "" : "s"}).`;
+            const dynamicResult = compileDynamicCanvas(intro, canvas, now + DECISION_TTL);
+            this.store.update(id, (row) => {
+              row.public.actionMode = "dynamic_ui";
+              row.public.semanticRoute = {
+                capabilityId: "custom_dynamic_ui",
+                capabilityLabel: `Folder Brief · ${matchedFolder.name}`,
+                method: "deterministic",
+                confidence: 0.96,
+                reasoning: `Synthesized cross-thread summary for folder "${matchedFolder.name}".`,
+              };
+              row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
+            });
+            this.store.finish(id, { type: "completed", result: dynamicResult }, now);
+            return;
+          }
+        }
+
         const recentForRoute = await this.history.recent(conversation, initial.ordinal);
         const pendingClarification = await this.history.pendingClarification(conversation, initial.ordinal);
         const clarificationMatch = resolveClarificationReply(scopedPrompt, pendingClarification);
@@ -959,9 +1071,12 @@ export class ExperienceService {
         const rollingSummaryObj = await runtime.compactor.getSummary(activePrincipal, conversation.id).catch(() => null);
         const rollingSummaryText = rollingSummaryObj ? formatRollingSummary(rollingSummaryObj) : undefined;
         const userMemoryItems = await runtime.listMemory(initial.scope.principalId).catch(() => []);
-        const userMemorySummary = userMemoryItems.length
-          ? userMemoryItems.slice(0, 6).map((m) => `- [${m.kind}] ${m.content}`).join("\n")
-          : undefined;
+        const activeFolder = conversation.folderId ? this.store.getFolder(conversation.folderId, conversation.principalId) : undefined;
+        const memoryLines = [
+          ...(activeFolder?.instructions ? [`- [folder_instructions · ${activeFolder.name}] ${activeFolder.instructions}`] : []),
+          ...userMemoryItems.slice(0, 6).map((m) => `- [${m.kind}] ${m.content}`),
+        ];
+        const userMemorySummary = memoryLines.length ? memoryLines.join("\n") : undefined;
         const recentTurnsJson = recentForRoute.slice(-3).map((turn) => JSON.stringify({
           message: turn.request, intent: turn.intentId ?? turn.contextId,
           reply: turn.clarificationQuestion ?? turn.assistantReply,

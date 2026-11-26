@@ -23,9 +23,18 @@ export const conversationChangeBody = z.discriminatedUnion("operation", [
 export const folderCreateBody = z.object({
   name: z.string().trim().min(1).max(48).transform((name) => name.replace(/\s+/g, " ")),
   domainId: z.enum(domainPackIds).default("wealth"),
+  instructions: z.string().trim().max(600).optional(),
 }).strict();
 export const folderRenameBody = z.object({
   name: z.string().trim().min(1).max(48).transform((name) => name.replace(/\s+/g, " ")),
+}).strict();
+export const folderUpdateBody = z.object({
+  name: z.string().trim().min(1).max(48).transform((name) => name.replace(/\s+/g, " ")).optional(),
+  instructions: z.string().trim().max(600).nullable().optional(),
+}).strict();
+export const forkBody = z.object({
+  turnId: requestId.optional(),
+  title: z.string().trim().min(1).max(80).transform((t) => t.replace(/\s+/g, " ")).optional(),
 }).strict();
 export const retryBody = z.object({ clientRequestId: requestId }).strict();
 export const previewFundingBody = retryBody.extend({ source: z.literal(pendingActionsContext).optional() });

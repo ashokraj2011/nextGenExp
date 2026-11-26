@@ -254,9 +254,18 @@ export const api = {
   }> }>("/api/admin/recent-turns"),
   changeConversation: (id: string, change: ConversationChange) => request<Conversation>("/api/conversations/" + id + "/settings", change),
   folders: (domainId?: Conversation["domainId"]) => request<{ folders: ConversationFolder[] }>("/api/folders" + (domainId ? "?domain=" + domainId : "")),
-  createFolder: (name: string, domainId: Conversation["domainId"] = "wealth") => request<{ folder: ConversationFolder }>("/api/folders", { name, domainId }),
+  createFolder: (name: string, domainId: Conversation["domainId"] = "wealth", instructions?: string) => request<{ folder: ConversationFolder }>("/api/folders", { name, domainId, ...(instructions ? { instructions } : {}) }),
   renameFolder: (id: string, name: string) => request<{ folder: ConversationFolder }>("/api/folders/" + id + "/rename", { name }),
+  updateFolder: (id: string, patch: { name?: string; instructions?: string | null }) => request<{ folder: ConversationFolder }>("/api/folders/" + id + "/update", patch),
+  folderSummary: (id: string) => request<{ folder: ConversationFolder; threadCount: number; threads: Array<{ conversationId: string; title: string; updatedAt: number; totalTurns: number; completedTurns: number; runningTurns: number; lastPrompt: string | null; lastSummary: string | null }> }>("/api/folders/" + id + "/summary"),
   deleteFolder: (id: string) => request<{ deleted: boolean; id: string }>("/api/folders/" + id + "/delete", {}),
+  forkConversation: (id: string, input: { turnId?: string; title?: string } = {}) => request<ConversationView>("/api/conversations/" + id + "/fork", input),
+  threadStatus: (personaId: string, conversationId?: string) => request<{
+    otherThreads: Array<{ conversationId: string; title: string; runningTurns: number; completedTurns: number; totalTurns: number; status: string }>;
+    currentThread?: { conversationId: string; runningTurns: number; completedTurns: number; totalTurns: number };
+    activeTradeJobs: Array<{ jobId: string; status: string }>;
+    activeWorkflowRuns: Array<{ runId: string; status: string }>;
+  }>("/api/threads/status?" + new URLSearchParams({ personaId, ...(conversationId ? { conversationId } : {}) })),
   nextStep: (personaId: string) => request<WorkspaceNextStep | null>("/api/workspace/" + personaId + "/next-step"),
   pendingActions: (personaId: string) => request<WorkspacePendingAction[]>("/api/workspace/" + personaId + "/" + pendingActionsContext),
   portalFunding: () => request<PortalFundingView>("/api/account-portal/funding"),

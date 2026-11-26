@@ -3944,3 +3944,52 @@
   color: var(--muted);
   line-height: 1.35;
 }
+
+/* Sidebar Live Thread Status & Unread Badges + Folder Settings */
+.rail-thread-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.rail-thread-status-dot.is-running {
+  background: #2f7d32;
+  box-shadow: 0 0 0 0 rgba(47, 125, 50, 0.55);
+  animation: rail-pulse 1.5s infinite;
+}
+
+.rail-thread-status-dot.is-unread {
+  background: #0284c7;
+}
+
+@keyframes rail-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(47, 125, 50, 0.55); }
+  70% { box-shadow: 0 0 0 6px rgba(47, 125, 50, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(47, 125, 50, 0); }
+}
+
+.rail-folder-has-rules {
+  color: var(--teal);
+  flex-shrink: 0;
+}
+
+.folder-settings-form textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.84rem;
+  color: var(--ink);
+  background: var(--white);
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.folder-settings-hint {
+  font-size: 0.75rem;
+  font-weight: 450;
+  color: var(--muted);
+}

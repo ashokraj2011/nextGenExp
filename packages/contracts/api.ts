@@ -145,6 +145,7 @@ export type ConversationFolder = {
   id: string;
   name: string;
   domainId: import("./domain-packs").DomainPackId;
+  instructions?: string;
   createdAt: number;
   updatedAt: number;
 };
@@ -156,6 +157,7 @@ export type Conversation = {
   archivedAt?: number;
   audience?: "admin";
   folderId?: string;
+  forkedFrom?: { conversationId: string; turnId?: string };
 };
 export type ConversationChange =
   | { operation: "rename"; title: string }

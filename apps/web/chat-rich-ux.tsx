@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  BookOpen, Brain, Check, CheckCircle2, Copy, Download, Headphones, PanelRightOpen,
+  BookOpen, Brain, Check, CheckCircle2, Copy, Download, GitBranch, Headphones, PanelRightOpen,
   Plus, Search, Send, ShieldCheck, Sparkles, Table2, Trash2, UserCheck, X,
 } from "lucide-react";
 import type { TurnView } from "../../packages/contracts/api";
@@ -433,12 +433,13 @@ function buildTurnBriefMarkdown(turn: TurnView): string {
   return lines.filter((l, i, arr) => l !== "" || arr[i - 1] !== "").join("\n");
 }
 
-export function TurnRichActions({ turn, pending, pinnedInCanvas, onPinCanvas, onReframe }: {
+export function TurnRichActions({ turn, pending, pinnedInCanvas, onPinCanvas, onReframe, onBranch }: {
   turn: TurnView;
   pending: boolean;
   pinnedInCanvas: boolean;
   onPinCanvas: (turn: TurnView) => void;
   onReframe: (prompt: string) => void;
+  onBranch?: (turn: TurnView) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const hasBlocks = (turn.experience?.blocks.length ?? 0) > 0;
@@ -494,6 +495,17 @@ export function TurnRichActions({ turn, pending, pinnedInCanvas, onPinCanvas, on
       >
         <Table2 size={11} aria-hidden="true" />As table
       </button>
+      {onBranch && (
+        <button
+          type="button"
+          className="rich-action-chip is-subtle"
+          disabled={pending}
+          title="Branch a new conversation from this message"
+          onClick={() => onBranch(turn)}
+        >
+          <GitBranch size={11} aria-hidden="true" />Branch
+        </button>
+      )}
     </div>
   );
 }

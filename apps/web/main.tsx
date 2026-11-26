@@ -35,7 +35,7 @@ import { CEP_EMBED_PROTOCOL, type CepEmbedScreenContext } from "../../packages/e
 import type { ProactiveAlert } from "../../packages/contracts/proactive-events";
 import { usePendingActions, WorkspaceHome, WorkspaceOverview, type PendingActions } from "./workspace-overview";
 import { WorkspaceCustomization, WorkspaceMenu, type WorkspaceSection } from "./workspace-menu";
-import { ThreadList, ThreadSettings } from "./thread-list";
+import { FolderSettings, ThreadList, ThreadSettings, type ThreadBadge } from "./thread-list";
 import type { HandoffTicket } from "../../packages/contracts/handoff";
 import {
   CitationsStrip, isHandoffPhrase, LiveCanvasPane, LiveHandoffCard, matchSlashCommands,
@@ -91,6 +91,7 @@ type ConversationOperations = {
   expertiseMode: ExpertiseMode;
   pinnedTurnId?: string;
   pinCanvas: (turn: TurnView) => void;
+  branchTurn?: (turn: TurnView) => void;
   retry: (id: string) => void;
   anchorTurn: (id: string, message: HTMLElement) => void;
   feedback: (turnId: string, experienceId: string, value: "helpful" | "unhelpful") => void;
@@ -205,7 +206,7 @@ function NbaCompanionCard({ nba, personaId, disabled, onRunPrompt, onPreviewFund
 
 function AssistantMessage() {
   const turn = useAuiState((state) => state.message.metadata.custom?.turn as TurnView | undefined);
-  const { latest, pending, activeProfile, progressHistory, expertiseMode, pinnedTurnId, pinCanvas, retry, feedback, anchorTurn, runPrompt, previewFunding } = useContext(ConversationControls);
+  const { latest, pending, activeProfile, progressHistory, expertiseMode, pinnedTurnId, pinCanvas, branchTurn, retry, feedback, anchorTurn, runPrompt, previewFunding } = useContext(ConversationControls);
   const element = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (element.current && turn && latest?.id === turn.id) anchorTurn(turn.id, element.current);
@@ -297,6 +298,7 @@ function AssistantMessage() {
                 pinnedInCanvas={pinnedTurnId === turn.id}
                 onPinCanvas={pinCanvas}
                 onReframe={runPrompt}
+                onBranch={branchTurn}
               />
               <footer className="feedback-controls" aria-label="Response feedback">
                 <SpeakButton text={experience.question ?? experience.intro} />
@@ -589,6 +591,7 @@ type ChatProps = {
   onWriteBack?: (updates: Record<string, string>) => Promise<string[]>;
   draft: string; onDraft: (value: string) => void; onSend: (text: string) => Promise<void>; onStop: () => Promise<void>;
   onRetry: (id: string) => void;
+  onBranch: (turn: TurnView) => void;
   onFollowUp: (id: string, envelope: ActionMessage) => void;
   onFeedback: ConversationOperations["feedback"];
   activeHandoff: HandoffTicket | null;
@@ -608,7 +611,7 @@ type ChatProps = {
 const noTurns: TurnView[] = [];
 
 function Chat({
-  conversation, configuration, activeProfile, pendingActions, pending, draft, onDraft, onSend, onStop, onRetry, onFollowUp, onFeedback, notice,
+  conversation, configuration, activeProfile, pendingActions, pending, draft, onDraft, onSend, onStop, onRetry, onBranch, onFollowUp, onFeedback, notice,
   section, pins, progressHistory, domainPack, onSelect, onPreviewFunding, onRestore, onWriteBack,
   activeHandoff, onStartHandoff, onDismissHandoff, onOpenMemory,
   expertiseMode, futuresOpen, onToggleFutures, watchcards, onWatchcardsChange, watchCreatorOpen, onToggleWatchCreator, onOpenDelegate,
@@ -702,7 +705,7 @@ function Chat({
       rendered,
     }}>
       <ConversationControls.Provider value={{
-        latest, pending, activeProfile, progressHistory, expertiseMode, pinnedTurnId, pinCanvas: (t) => { onToggleFutures(false); pinCanvas(t); }, retry: onRetry, feedback: onFeedback, anchorTurn,
+        latest, pending, activeProfile, progressHistory, expertiseMode, pinnedTurnId, pinCanvas: (t) => { onToggleFutures(false); pinCanvas(t); }, branchTurn: onBranch, retry: onRetry, feedback: onFeedback, anchorTurn,
         runPrompt: (prompt) => void onSend(prompt),
         previewFunding: () => onPreviewFunding(pendingActionsContext),
       }}>
@@ -773,7 +776,7 @@ function messageFor(error: unknown) {
   return error instanceof Error && error.name !== "TypeError" ? error.message : "Couldn’t connect. Your draft is still here.";
 }
 
-type Panel = { kind: "profiles" } | { kind: "pins" } | { kind: "thread"; id: string };
+type Panel = { kind: "profiles" } | { kind: "pins" } | { kind: "thread"; id: string } | { kind: "folder"; id: string };
 const narrowNavigation = "(max-width: 850px)";
 
 /** What the customer sees above the chat: a plain-language snapshot of the screen they're on, plus a few next steps. */
@@ -914,6 +917,8 @@ function App() {
   const [configuration, setConfiguration] = useState<Bootstrap>();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [folders, setFolders] = useState<ConversationFolder[]>([]);
+  const [threadBadges, setThreadBadges] = useState<Record<string, ThreadBadge>>({});
+  const seenCompletedRef = useRef<Record<string, number>>({});
   const [conversation, setConversation] = useState<ConversationView>();
   const [overviewOpen, setOverviewOpen] = useState(entry.showOverview);
   const [section, setSection] = useState<WorkspaceSection>("summary");
@@ -1071,12 +1076,44 @@ function App() {
     const closed = previousPanel.current;
     previousPanel.current = panel?.kind;
     if (panel || !closed) return;
-    const triggers = { profiles: profilesTrigger, pins: customizeTrigger, thread: threadTrigger };
+    const triggers = { profiles: profilesTrigger, pins: customizeTrigger, thread: threadTrigger, folder: threadTrigger };
     const isNavigationPanel = closed !== "pins";
     if (isNavigationPanel && window.matchMedia(narrowNavigation).matches) railTrigger.current?.focus();
     else if (triggers[closed].current?.isConnected) triggers[closed].current?.focus();
     else newThreadTrigger.current?.focus();
   }, [panel]);
+
+  useEffect(() => {
+    if (!configuration) return;
+    let alive = true;
+    const persona = activeProfile?.personaId ?? configuration.defaultPersonaId;
+    const syncThreadStatuses = async () => {
+      try {
+        const res = await api.threadStatus(persona, chat?.id);
+        if (!alive) return;
+        const rows = [
+          ...res.otherThreads,
+          ...(res.currentThread ? [{ ...res.currentThread, title: chat?.title ?? "", status: "" }] : []),
+        ];
+        setThreadBadges((prev) => {
+          const next: Record<string, ThreadBadge> = {};
+          for (const row of rows) {
+            const seen = seenCompletedRef.current[row.conversationId];
+            const isActive = row.conversationId === chat?.id;
+            if (isActive || seen === undefined) {
+              seenCompletedRef.current[row.conversationId] = row.completedTurns;
+            }
+            const unread = !isActive && seen !== undefined && (row.completedTurns > seen || Boolean(prev[row.conversationId]?.unread));
+            next[row.conversationId] = { running: row.runningTurns > 0, unread };
+          }
+          return next;
+        });
+      } catch { /* ignore polling errors */ }
+    };
+    void syncThreadStatuses();
+    const timer = setInterval(() => void syncThreadStatuses(), 4000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [configuration, activeProfile?.personaId, chat?.id, chat?.title, activeTurnKey]);
 
   const upsert = useCallback((turn: TurnView) => {
     recordProgress(turn.id, turn.progress);
@@ -1312,12 +1349,37 @@ function App() {
     const res = await api.renameFolder(id, name);
     setFolders((list) => list.map((item) => item.id === id ? res.folder : item));
   });
+  const updateFolder = async (id: string, patch: { name?: string; instructions?: string | null }) => exclusive(async () => {
+    const res = await api.updateFolder(id, patch);
+    setFolders((list) => list.map((item) => item.id === id ? res.folder : item));
+  });
   const deleteFolder = async (id: string) => exclusive(async () => {
     await api.deleteFolder(id);
     setFolders((list) => list.filter((item) => item.id !== id));
     setConversations((list) => list.map((row) => row.folderId === id ? { ...row, folderId: undefined } : row));
     setConversation((current) => current?.folderId === id ? { ...current, folderId: undefined } : current);
   });
+  const branchFromTurn = (turn: TurnView) => {
+    if (!chat) return;
+    void exclusive(async () => {
+      const forked = await api.forkConversation(chat.id, { turnId: turn.id });
+      revealChat(forked);
+    });
+  };
+  const summarizeFolder = (folder: ConversationFolder) => {
+    if (!configuration) return;
+    const prompt = `Summarize all threads in my ${folder.name} folder.`;
+    if (chat?.folderId === folder.id) {
+      void send(prompt);
+      return;
+    }
+    void exclusive(async () => {
+      const personaId = activeProfile?.personaId ?? configuration.defaultPersonaId;
+      const target = await createConversation(personaId, configuration.defaultScenarioId, domainPack.id, folder.id);
+      revealChat(target);
+      accept(await api.send(target.id, prompt, requestId(target.id + ":" + prompt)));
+    });
+  };
   const savePins = async (next: WorkspacePin[]) => {
     if (!activeProfile) return false;
     return exclusive(async () => {
@@ -1467,6 +1529,7 @@ function App() {
     : configuration?.gatewayConfigured ? (configuration.copilotModel || configuration.openAiModel
       ? `Live · ${configuration.copilotModel ?? configuration.openAiModel}` : "Live Advisory") : "Model offline";
   const managedThread = panel?.kind === "thread" ? visibleConversations.find(({ id }) => id === panel.id) : undefined;
+  const managedFolder = panel?.kind === "folder" ? visibleFolders.find(({ id }) => id === panel.id) : undefined;
   const canRunRailActions = Boolean(configuration) && !pending && latest?.status !== "working";
 
   return <div className={"app-layout" + (embedMode ? " embed-layout" : "") + (railCollapsed ? " rail-collapsed" : "")}>
@@ -1500,8 +1563,11 @@ function App() {
         </button>
       </div>
       <ThreadList threads={visibleConversations} folders={visibleFolders} profiles={profilesById} activeId={chat?.id}
-        showNames={adminChat} pending={pending || !configuration}
-        open={(id) => void exclusive(async () => revealChat(await api.conversation(id)))}
+        showNames={adminChat} pending={pending || !configuration} threadBadges={threadBadges}
+        open={(id) => {
+          setThreadBadges((prev) => prev[id] ? { ...prev, [id]: { ...prev[id], unread: false } } : prev);
+          void exclusive(async () => revealChat(await api.conversation(id)));
+        }}
         manage={(id, trigger) => { threadTrigger.current = trigger; openPanel({ kind: "thread", id }); }}
         onCreateFolder={createFolder}
         onRenameFolder={renameFolder}
@@ -1509,7 +1575,8 @@ function App() {
         onMoveThread={(threadId, folderId) => changeConversation(threadId, { operation: "move", folderId })}
         onNewInFolder={(folderId) => {
           if (configuration) void startConversation(conversation?.personaId ?? signedInProfileId ?? configuration.defaultPersonaId, conversation?.scenarioId ?? configuration.defaultScenarioId, folderId);
-        }} />
+        }}
+        onOpenFolderSettings={(folder) => openPanel({ kind: "folder", id: folder.id })} />
       {!adminChat && (
         <section className="rail-section rail-topics" aria-label="Quick planning topics">
           <h2>{domainPack.id === "wealth" ? "Topics" : `${domainPack.shortLabel} Actions`}</h2>
@@ -1742,6 +1809,7 @@ function App() {
         onRetry={(id) => {
           if (chat) void exclusive(async () => accept(await api.retry(id, requestId("retry:" + id))));
         }}
+        onBranch={branchFromTurn}
         onFollowUp={(id, envelope) => {
           if (chat) void exclusive(async () => accept(await api.followUp(id, envelope, requestId("action:" + String(envelope.action.context.actionId) + ":" + JSON.stringify(envelope.action.context.values ?? null)))));
         }}
@@ -1793,6 +1861,18 @@ function App() {
     {panel?.kind === "pins" && <WorkspaceCustomization key={activeProfile?.personaId} initial={pins} pending={pending} notice={notice} close={closePanel} save={savePins} />}
     {managedThread && <ThreadSettings key={managedThread.id} thread={managedThread} folders={visibleFolders} pending={pending} notice={notice} close={closePanel}
       change={(input) => changeConversation(managedThread.id, input)} />}
+    {managedFolder && (
+      <FolderSettings
+        key={managedFolder.id}
+        folder={managedFolder}
+        threadCount={visibleConversations.filter((c) => c.folderId === managedFolder.id && c.archivedAt === undefined).length}
+        pending={pending}
+        notice={notice}
+        close={closePanel}
+        onUpdate={(patch) => updateFolder(managedFolder.id, patch)}
+        onSummarize={() => summarizeFolder(managedFolder)}
+      />
+    )}
   </div>;
 }
 

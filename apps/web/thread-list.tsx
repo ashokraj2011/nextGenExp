@@ -1,13 +1,15 @@
 import { useId, useState, type DragEvent } from "react";
 import {
   Archive, Check, ChevronDown, ChevronRight, Ellipsis, Folder, FolderOpen, FolderPlus,
-  MessageSquare, Pencil, Plus, Search, Trash2, X,
+  GitBranch, MessageSquare, Pencil, Plus, Search, SlidersHorizontal, Sparkles, Trash2, X,
 } from "lucide-react";
 import type { Conversation, ConversationChange, ConversationFolder, DemoPersona } from "../../packages/contracts/api";
 import { DeveloperDrawer } from "./developer-drawer";
 
 const COLLAPSED_STORAGE_KEY = "cep_collapsed_folders";
 const UNFILED_TARGET = "__unfiled__";
+
+export type ThreadBadge = { running: boolean; unread: boolean };
 
 function loadCollapsed(): Record<string, boolean> {
   try {
@@ -27,8 +29,8 @@ function saveCollapsed(map: Record<string, boolean>) {
 }
 
 export function ThreadList({
-  threads, folders, profiles, activeId, showNames, pending, open, manage,
-  onCreateFolder, onRenameFolder, onDeleteFolder, onMoveThread, onNewInFolder,
+  threads, folders, profiles, activeId, showNames, pending, threadBadges, open, manage,
+  onCreateFolder, onRenameFolder, onDeleteFolder, onMoveThread, onNewInFolder, onOpenFolderSettings,
 }: {
   threads: Conversation[];
   folders: ConversationFolder[];
@@ -36,6 +38,7 @@ export function ThreadList({
   activeId?: string;
   showNames: boolean;
   pending: boolean;
+  threadBadges?: Record<string, ThreadBadge>;
   open: (id: string) => void;
   manage: (id: string, trigger: HTMLButtonElement) => void;
   onCreateFolder: (name: string) => Promise<ConversationFolder | null>;
@@ -43,6 +46,7 @@ export function ThreadList({
   onDeleteFolder: (id: string) => Promise<boolean>;
   onMoveThread: (threadId: string, folderId: string | null) => Promise<boolean>;
   onNewInFolder: (folderId: string) => void;
+  onOpenFolderSettings: (folder: ConversationFolder) => void;
 }) {
   const heading = useId();
   const [search, setSearch] = useState("");
@@ -129,30 +133,40 @@ export function ThreadList({
     await onMoveThread(threadId, folderId);
   };
 
-  const renderThreadRow = (thread: Conversation) => (
-    <div
-      className={
-        "rail-thread-row"
-        + (activeId === thread.id ? " rail-thread-active" : "")
-        + (dragThreadId === thread.id ? " rail-thread-dragging" : "")
-      }
-      key={thread.id}
-      draggable={!pending && !archived}
-      onDragStart={(event) => handleDragStart(event, thread.id)}
-      onDragEnd={handleDragEnd}
-    >
-      <button type="button" className="conversation-link" aria-current={activeId === thread.id ? "page" : undefined}
-        title={thread.title} disabled={pending} onClick={() => open(thread.id)}>
-        <MessageSquare size={15} aria-hidden="true" />
-        <span className="conversation-link-copy">
-          <span className="conversation-link-title">{thread.title}</span>
-          {showNames && <small>{profiles.get(thread.personaId)?.displayName}</small>}
-        </span>
-      </button>
-      <button type="button" className="icon-button thread-options" aria-haspopup="dialog" aria-label={"Manage " + thread.title}
-        disabled={pending} onClick={(event) => manage(thread.id, event.currentTarget)}><Ellipsis size={16} aria-hidden="true" /></button>
-    </div>
-  );
+  const renderThreadRow = (thread: Conversation) => {
+    const badge = threadBadges?.[thread.id];
+    const isRunning = Boolean(badge?.running);
+    const isUnread = Boolean(badge?.unread && activeId !== thread.id);
+    return (
+      <div
+        className={
+          "rail-thread-row"
+          + (activeId === thread.id ? " rail-thread-active" : "")
+          + (dragThreadId === thread.id ? " rail-thread-dragging" : "")
+        }
+        key={thread.id}
+        draggable={!pending && !archived}
+        onDragStart={(event) => handleDragStart(event, thread.id)}
+        onDragEnd={handleDragEnd}
+      >
+        <button type="button" className="conversation-link" aria-current={activeId === thread.id ? "page" : undefined}
+          title={thread.title + (isRunning ? " · Running in background" : isUnread ? " · New reply ready" : "")}
+          disabled={pending} onClick={() => open(thread.id)}>
+          {thread.forkedFrom
+            ? <GitBranch size={14} aria-hidden="true" />
+            : <MessageSquare size={15} aria-hidden="true" />}
+          <span className="conversation-link-copy">
+            <span className="conversation-link-title">{thread.title}</span>
+            {showNames && <small>{profiles.get(thread.personaId)?.displayName}</small>}
+          </span>
+          {isRunning && <span className="rail-thread-status-dot is-running" aria-label="Running" title="Working…" />}
+          {!isRunning && isUnread && <span className="rail-thread-status-dot is-unread" aria-label="New reply ready" title="Completed while away" />}
+        </button>
+        <button type="button" className="icon-button thread-options" aria-haspopup="dialog" aria-label={"Manage " + thread.title}
+          disabled={pending} onClick={(event) => manage(thread.id, event.currentTarget)}><Ellipsis size={16} aria-hidden="true" /></button>
+      </div>
+    );
+  };
 
   const threadsByFolder = new Map<string, Conversation[]>();
   const unfiled: Conversation[] = [];
@@ -252,6 +266,8 @@ export function ThreadList({
             const isOpen = Boolean(query) || !collapsed[folder.id];
             const isRenaming = renamingId === folder.id;
             const isDropTarget = dropTarget === folder.id;
+            const folderRunning = items.some((t) => threadBadges?.[t.id]?.running);
+            const folderUnread = items.some((t) => threadBadges?.[t.id]?.unread && t.id !== activeId);
             return (
               <div
                 key={folder.id}
@@ -291,11 +307,15 @@ export function ThreadList({
                       type="button"
                       className="rail-folder-toggle"
                       aria-expanded={isOpen}
+                      title={folder.instructions ? `${folder.name} · Shared instructions active` : folder.name}
                       onClick={() => toggleFolder(folder.id)}
                     >
                       {isOpen ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
                       {isOpen ? <FolderOpen size={14} aria-hidden="true" /> : <Folder size={14} aria-hidden="true" />}
                       <span className="rail-folder-name">{folder.name}</span>
+                      {folder.instructions && <Sparkles size={11} className="rail-folder-has-rules" aria-label="Shared project instructions" />}
+                      {!isOpen && folderRunning && <span className="rail-thread-status-dot is-running" aria-label="Thread running" />}
+                      {!isOpen && !folderRunning && folderUnread && <span className="rail-thread-status-dot is-unread" aria-label="Unread reply" />}
                       <span className="rail-folder-count">{items.length}</span>
                     </button>
                     <div className="rail-folder-actions">
@@ -311,6 +331,16 @@ export function ThreadList({
                         }}
                       >
                         <Plus size={13} aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label={"Folder settings for " + folder.name}
+                        title="Folder instructions & summary"
+                        disabled={pending}
+                        onClick={() => onOpenFolderSettings(folder)}
+                      >
+                        <SlidersHorizontal size={12} aria-hidden="true" />
                       </button>
                       <button
                         type="button"
@@ -365,6 +395,68 @@ export function ThreadList({
       )}
     </nav>
   </section>;
+}
+
+export function FolderSettings({ folder, threadCount, pending, notice, close, onUpdate, onSummarize }: {
+  folder: ConversationFolder;
+  threadCount: number;
+  pending: boolean;
+  notice: string;
+  close: () => void;
+  onUpdate: (patch: { name?: string; instructions?: string | null }) => Promise<boolean>;
+  onSummarize: () => void;
+}) {
+  const [name, setName] = useState(folder.name);
+  const [instructions, setInstructions] = useState(folder.instructions ?? "");
+  const unchanged = name.trim() === folder.name && instructions.trim() === (folder.instructions ?? "");
+  return (
+    <DeveloperDrawer title={`Folder · ${folder.name}`} closeLabel="Close folder settings" close={close} icon={<FolderOpen size={17} />}>
+      <form
+        className="thread-settings folder-settings-form"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          if (!name.trim()) return;
+          const ok = await onUpdate({ name: name.trim(), instructions: instructions.trim() || null });
+          if (ok) close();
+        }}
+      >
+        <label>
+          Folder name
+          <input value={name} maxLength={48} required onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label>
+          Shared project instructions
+          <textarea
+            rows={4}
+            maxLength={600}
+            placeholder="e.g. Target budget $650k for 2027 home purchase; keep at least $40k cash buffer and favor tax-efficient index funds."
+            value={instructions}
+            onChange={(e) => setInstructions(e.target.value)}
+          />
+          <small className="folder-settings-hint">
+            Automatically shared with every chat inside <strong>{folder.name}</strong> ({threadCount} thread{threadCount === 1 ? "" : "s"}).
+          </small>
+        </label>
+        <div className="thread-settings-actions">
+          <button className="primary-button" type="submit" disabled={pending || !name.trim() || unchanged}>
+            Save folder settings
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={pending}
+            onClick={() => {
+              close();
+              onSummarize();
+            }}
+          >
+            <Sparkles size={14} aria-hidden="true" /> Summarize all threads
+          </button>
+        </div>
+      </form>
+      {notice && <p className="request-notice" role="alert">{notice}</p>}
+    </DeveloperDrawer>
+  );
 }
 
 export function ThreadSettings({ thread, folders, pending, notice, close, change }: {
