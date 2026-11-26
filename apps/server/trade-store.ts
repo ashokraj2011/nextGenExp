@@ -198,6 +198,24 @@ export class TradeStore {
     }, 0);
   }
 
+  recentlyBoughtSymbols(personaId: string): Set<string> {
+    const cutoff = Date.now() - WASH_SALE_WINDOW_MS;
+    const symbols = new Set<string>();
+    for (const entry of this.state.washSaleLedger) {
+      if (entry.personaId === personaId && entry.side === "buy" && Date.parse(entry.executedAt) >= cutoff) {
+        symbols.add(entry.symbol.toUpperCase());
+      }
+    }
+    for (const job of this.state.jobs) {
+      if (job.personaId !== personaId || job.status === "cancelled" || job.status === "failed") continue;
+      if (Date.parse(job.createdAt) < cutoff) continue;
+      for (const leg of job.legs) {
+        if (leg.side === "buy") symbols.add(leg.symbol.toUpperCase());
+      }
+    }
+    return symbols;
+  }
+
   washSaleWarningsFor(personaId: string, rawSymbol: string, side: TradeSide): string[] {
     const symbol = rawSymbol.toUpperCase();
     const cutoff = Date.now() - WASH_SALE_WINDOW_MS;
