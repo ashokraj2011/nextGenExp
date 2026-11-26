@@ -23,8 +23,24 @@ if (location.pathname === "/embed") {
   saveProfileSession(personaParam);
   document.documentElement.dataset.embed = "true";
   void import("./main");
-} else if (["/", "/chat", "/wealth"].includes(location.pathname) && readProfileSession() === "") {
-  location.replace("/login" + location.search);
+} else if (["/", "/chat", "/wealth"].includes(location.pathname)) {
+  const personaParam = new URLSearchParams(location.search).get("personaId")?.trim();
+  if (personaParam) {
+    saveProfileSession(personaParam);
+    document.title = "Wealth Advisory · CEP";
+    void fetch("/api/profile-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ personaId: personaParam }),
+    }).catch(() => undefined).finally(() => {
+      void import("./main");
+    });
+  } else if (readProfileSession() === "") {
+    location.replace("/login" + location.search);
+  } else {
+    document.title = "Wealth Advisory · CEP";
+    void import("./main");
+  }
 } else if (isAdminPath(location.pathname) && location.pathname !== adminPaths.chat) {
   document.title = "Administration · CEP";
   void import("./admin-workspace").then(({ AdminWorkspace }) => createRoot(document.getElementById("root")!).render(<AdminWorkspace />));

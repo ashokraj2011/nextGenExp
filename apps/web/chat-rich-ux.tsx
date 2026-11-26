@@ -8,7 +8,6 @@ import type { HandoffTicket } from "../../packages/contracts/handoff";
 import type { KnowledgeCitation } from "../../packages/contracts/knowledge-base";
 import type { DisplayExperience } from "../../packages/contracts/surface";
 import { api, toolSetupErrorMessage } from "./api";
-import { MultiplayerCoBrowseCard } from "./nextgen-chat-features";
 import { ExperienceCanvasView } from "./surface";
 import "./chat-rich-ux.css";
 
@@ -229,6 +228,8 @@ export function LiveHandoffCard({ ticket: initialTicket, onDismiss }: {
     }
   }
 
+  const sharedExp = ticket.coBrowse?.sharedCard?.experience as DisplayExperience | undefined;
+
   return (
     <section className={"live-handoff-card is-" + ticket.status} aria-label="Live human advisor handoff">
       <div className="live-handoff-head">
@@ -236,17 +237,17 @@ export function LiveHandoffCard({ ticket: initialTicket, onDismiss }: {
           <Headphones size={16} aria-hidden="true" />
           <div>
             <strong>
-              {ticket.status === "queued" && "Connecting you to a live specialist…"}
-              {ticket.status === "claimed" && `Connected with ${ticket.assignedAgent ?? "Live Specialist"}`}
-              {ticket.status === "resolved" && "Specialist session resolved"}
+              {ticket.status === "queued" && "Connecting you to a live advisor…"}
+              {ticket.status === "claimed" && `Live session with ${ticket.assignedAgent ?? "Your Advisor"}`}
+              {ticket.status === "resolved" && "Advisor session ended"}
             </strong>
-            <small>Ticket <code>{ticket.handoffId}</code> · Priority: {ticket.priority}</small>
+            <small>{sharedExp ? "You and your advisor are viewing the exact same card" : `Room ${ticket.handoffId}`}</small>
           </div>
         </div>
         <div className="live-handoff-badges">
           <span className={"handoff-status-pill is-" + ticket.status}>
             {ticket.status === "claimed" ? <UserCheck size={12} /> : ticket.status === "resolved" ? <CheckCircle2 size={12} /> : <Sparkles size={12} />}
-            {ticket.status}
+            {ticket.status === "claimed" ? "live" : ticket.status}
           </span>
           <button type="button" className="icon-button" aria-label="Dismiss handoff card" onClick={onDismiss}>
             <X size={15} aria-hidden="true" />
@@ -254,38 +255,24 @@ export function LiveHandoffCard({ ticket: initialTicket, onDismiss }: {
         </div>
       </div>
 
-      <p className="live-handoff-brief"><strong>Context shared with specialist:</strong> {ticket.aiBrief}</p>
-
-      {Object.keys(ticket.customerSnapshot).length > 0 && (
-        <div className="live-handoff-snapshot">
-          {Object.entries(ticket.customerSnapshot).map(([k, v]) => (
-            <span key={k}>{k}: <strong>{v}</strong></span>
-          ))}
-        </div>
-      )}
-
-      {ticket.coBrowse?.sharedCard?.experience && (
+      {sharedExp && (
         <div className="shared-live-card-box" role="region" aria-label="Shared Live A2UI Card">
           <div className="shared-live-card-head">
             <span className="cobrowse-live-pill">
               <Sparkles size={11} aria-hidden="true" />
-              SYNCED LIVE CARD · VIEWED BY BOTH YOU &amp; {ticket.assignedAgent ?? ticket.coBrowse.sharedCard.sharedByName}
+              SHARED LIVE CARD · {ticket.assignedAgent ?? ticket.coBrowse?.sharedCard?.sharedByName} &amp; {ticket.customerName}
             </span>
-            <small>Shared from: &ldquo;{ticket.coBrowse.sharedCard.prompt.slice(0, 72)}&rdquo;</small>
+            <small>&ldquo;{ticket.coBrowse?.sharedCard?.prompt.slice(0, 72)}&rdquo;</small>
           </div>
-          <ExperienceCanvasView data={ticket.coBrowse.sharedCard.experience as unknown as DisplayExperience} />
+          <ExperienceCanvasView data={sharedExp} />
         </div>
       )}
 
-      {ticket.status !== "resolved" && (
-        <MultiplayerCoBrowseCard ticket={ticket} role="customer" onTicketUpdated={setTicket} />
-      )}
-
-      {ticket.notes.length > 0 && (
+      {ticket.notes.filter((n) => n.role !== "system").length > 0 && (
         <div className="live-handoff-messages">
-          {ticket.notes.map((n) => (
+          {ticket.notes.filter((n) => n.role !== "system").slice(-4).map((n) => (
             <div key={n.id} className={"handoff-msg is-" + n.role}>
-              <strong>{n.author}</strong>
+              <strong>{n.author}:</strong>
               <span>{n.text}</span>
             </div>
           ))}
@@ -295,8 +282,8 @@ export function LiveHandoffCard({ ticket: initialTicket, onDismiss }: {
       {ticket.status !== "resolved" && (
         <form className="live-handoff-reply" onSubmit={(e) => void sendReply(e)}>
           <input
-            aria-label="Message live specialist"
-            placeholder="Write a message to your specialist…"
+            aria-label="Message live advisor"
+            placeholder="Message your advisor…"
             value={reply}
             onChange={(e) => setReply(e.target.value)}
           />

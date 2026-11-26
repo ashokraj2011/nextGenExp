@@ -700,6 +700,9 @@ function Chat({
                 onPrompt={(prompt) => void onSend(prompt)}
               />
             )}
+            {!adminChat && activeHandoff && (
+              <LiveHandoffCard ticket={activeHandoff} onDismiss={onDismissHandoff} />
+            )}
             {useHeroComposer && (
               <div className="editorial-hero-stage">
                 {domainPack.id === "wealth"
@@ -720,7 +723,6 @@ function Chat({
             {turns.length > 0 && <div className="messages">
               <ThreadPrimitive.Messages>{({ message }) => message.role === "user" ? <UserMessage /> : <AssistantMessage />}</ThreadPrimitive.Messages>
             </div>}
-            {activeHandoff && <LiveHandoffCard ticket={activeHandoff} onDismiss={onDismissHandoff} />}
           </ThreadPrimitive.Viewport>
           {!useHeroComposer && composerEl}
         </ThreadPrimitive.Root>
