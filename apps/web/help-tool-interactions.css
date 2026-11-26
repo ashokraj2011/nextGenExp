@@ -26,6 +26,115 @@
   flex-wrap: wrap;
 }
 
+.ti-toolbar-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ti-replay-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid #bfd2c5;
+  border-radius: 7px;
+  background: #f6faf7;
+  color: #1f4d3b;
+  font-size: 0.82rem;
+}
+
+.ti-replay-picker select {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  max-width: 240px;
+  cursor: pointer;
+}
+
+.ti-icon-btn {
+  padding: 6px 8px;
+}
+
+.ti-replay-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 10px 16px;
+  background: #eaf6ee;
+  border-bottom: 1px solid #bedbc7;
+  color: #153e2e;
+}
+
+.ti-replay-copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+}
+
+.ti-replay-pill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #1d4b3e;
+  color: #ffffff;
+  font-size: 0.69rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.ti-replay-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ti-replay-actions a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: #184e38;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ti-replay-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid #b5cfc0;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #1d4b3e;
+  cursor: pointer;
+}
+
+:root[data-theme="dark"] .ti-replay-picker,
+:root[data-theme="dark"] .ti-replay-clear {
+  background: #141b16;
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .ti-replay-banner {
+  background: var(--teal-pale);
+  border-color: var(--teal-border);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .ti-replay-actions a {
+  color: var(--teal-dark);
+}
+
 .ti-summary-strip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

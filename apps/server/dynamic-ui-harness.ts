@@ -28,6 +28,7 @@ export type HarnessSourceId =
 export type HarnessVisualType =
   | "piechart"
   | "barchart"
+  | "bubblechart"
   | "table"
   | "metrics"
   | "progress"
@@ -57,6 +58,7 @@ const planSchema = z.object({
   requiredVisuals: z.array(z.enum([
     "piechart",
     "barchart",
+    "bubblechart",
     "table",
     "metrics",
     "progress",
@@ -103,7 +105,7 @@ const holdingsWord = /\b(holdings?|stocks?|tickers?|equities|shares?|positions?|
 const goalWord = /\b(goal|home\s+(?:goal|plan|savings?|purchase)|down\s*payment|savings?\s+target)\b/i;
 const balanceWord = /\b(balance|balances|cash|available|current\s+balance|beneficiar(?:y|ies)|funding|account\s+status)\b/i;
 const followUpOrCorrectionWord = /\b(this\s+is\s+not|that\s+is\s+not|not\s+a\s+(?:pie|bar|donut|table|chart)|instead|make\s+it|change\s+it|turn\s+(?:it|that|this)\s+into|show\s+(?:it|that|this)\s+as|last\s+answer|previous\s+answer|prior\s+answer|your\s+answer|above|reframe|try\s+again)\b|^\s*(?:as|in|into|like|switch\s+to|convert\s+to)\s+(?:a\s+|an\s+)?[\w\s-]{2,28}(?:chart|graph|table|plot|diagram|map|view|summary|list|matrix|bullets?)\s*[.!?]*$/i;
-const unsupportedVisualTypeRegex = /\b(bubble\s*chart|scatter\s*(?:plot|chart)|heat\s*map|radar\s*chart|spider\s*chart|tree\s*map|sankey(?:\s*diagram)?|waterfall\s*chart|gantt\s*chart|candlestick(?:\s*chart)?|box\s*plot|funnel\s*chart|3d\s*chart)\b/i;
+const unsupportedVisualTypeRegex = /\b(heat\s*map|radar\s*chart|spider\s*chart|tree\s*map|sankey(?:\s*diagram)?|waterfall\s*chart|gantt\s*chart|candlestick(?:\s*chart)?|box\s*plot|funnel\s*chart|3d\s*chart)\b/i;
 const explicitUnconnectedWord = /\b(jira|confluence|snowflake|databricks|bigquery|sap|erp|workday|bamboohr|zendesk|freshdesk|hubspot|marketo|shopify|stripe\s+invoices|github\s+issues|linear\s+tickets|datadog|splunk|warehouse|shipments?|inventory|weather|sports\s+scores|flights?|hotels?)\b/i;
 
 function fmtUsd(cents: number): string {
@@ -121,12 +123,13 @@ function pct1(part: number, total: number): number {
 export function extractRequiredVisuals(prompt: string): HarnessVisualType[] {
   const visuals: HarnessVisualType[] = [];
   if (/\b(pie\s*chart|donut\s*chart|\bpie\b|\bdonut\b)\b/i.test(prompt)) visuals.push("piechart");
+  if (/\b(bubble\s*chart|scatter\s*(?:plot|chart))\b/i.test(prompt)) visuals.push("bubblechart");
   if (/\b(bar\s*chart|column\s*chart|histogram)\b/i.test(prompt)) visuals.push("barchart");
   if (/\b(table|matrix|spreadsheet|tabular|grid)\b/i.test(prompt)) visuals.push("table");
   if (/\b(bullet\s*points?|checklist|summarize|key\s+takeaways?|3\s+points?)\b/i.test(prompt) && !visuals.includes("table")) {
     visuals.push("checklist");
   }
-  if (/\b(side[- ]by[- ]side|pros\s+and\s+cons|trade-?offs?)\b/i.test(prompt)) visuals.push("comparison");
+  if (/\b(side[- ]by[- ]side|pros\s+and\s+cons|trade-?offs?|compare\s+.+\s+(?:vs\.?|versus|and|against))\b/i.test(prompt)) visuals.push("comparison");
   if (/\b(calculator|simulator|slider|what[- ]if)\b/i.test(prompt)) visuals.push("sliders");
   return visuals;
 }
@@ -183,11 +186,13 @@ export function inferDeterministicPlan(prompt: string, recentContext?: string): 
   if (!hasAnyDomainCue && !hasRecentContext && ambiguousVisualOnlyPrompt.test(clean)) {
     const formatWord = requiredVisuals.includes("piechart")
       ? "pie chart"
-      : requiredVisuals.includes("barchart")
-        ? "bar chart"
-        : requiredVisuals.includes("table")
-          ? "table"
-          : "view";
+      : requiredVisuals.includes("bubblechart")
+        ? "bubble chart"
+        : requiredVisuals.includes("barchart")
+          ? "bar chart"
+          : requiredVisuals.includes("table")
+            ? "table"
+            : "view";
     const visualSuffix = formatWord === "view" ? "breakdown" : formatWord;
     return {
       resolvedGoal: `Clarify which connected dataset to render as a ${formatWord}`,
@@ -318,6 +323,7 @@ const composerSystemPrompt = [
       nodes: [
         "1 to 5 nodes using ONLY these exact schemas:",
         "{ type: 'piechart', title?, centerLabel?, centerValue?, slices: [{ label, value: number>=0, displayValue, color?: '#hex', highlight?: boolean }] } (2-8 slices)",
+        "{ type: 'bubblechart', title?, xLabel, yLabel, sizeLabel?, points: [{ label, x, y, size: number>0, xDisplay, yDisplay, sizeDisplay?, category?, color?: '#hex' }] } (2-12 bubbles)",
         "{ type: 'barchart', title?, unit?: 'usd'|'percent'|'number', bars: [{ label, value: number>=0, displayValue, highlight?: boolean }] } (2-8 bars)",
         "{ type: 'metrics', items: [{ label, value, delta? }] } (1-4 items)",
         "{ type: 'table', caption?, columns: [2..5 strings], rows: [[2..5 strings matching columns]] } (1-10 rows)",
@@ -537,7 +543,68 @@ export function buildGroundedFallbackCanvas(
       nodes.push({ type: "checklist", title: "Key Portfolio Takeaways", items });
     }
 
-    if (visuals.has("table") || (!visuals.has("piechart") && !visuals.has("barchart") && !visuals.has("checklist"))) {
+    if (visuals.has("bubblechart")) {
+      const bubblePoints = fetched.holdings?.length
+        ? fetched.holdings.slice(0, 8).map((h, idx) => {
+            const costBasis = Math.max(1, h.shares * h.avgCostCents);
+            const plPct = Math.round((h.unrealizedPlCents / costBasis) * 1000) / 10;
+            const palette = ["#2f7d32", "#0d9488", "#476b8a", "#c88a2b", "#6d5bd0", "#c2410c"];
+            return {
+              label: h.symbol,
+              x: h.shares,
+              y: plPct,
+              size: Math.max(1, Math.round(h.marketValueCents / 100)),
+              xDisplay: `${h.shares} sh`,
+              yDisplay: `${plPct >= 0 ? "+" : ""}${plPct}% P/L`,
+              sizeDisplay: fmtUsd(h.marketValueCents),
+              category: h.name,
+              color: palette[idx % palette.length],
+            };
+          })
+        : [
+            { label: "Stocks", x: stocksPct, y: 8.5, size: Math.max(1, Math.round(p.equityCents / 100)), xDisplay: `${stocksPct}% share`, yDisplay: "Growth tier", sizeDisplay: fmtUsd(p.equityCents), category: "Equities", color: "#2f7d32" },
+            { label: "Fixed Income", x: fixedPct, y: 4.5, size: Math.max(1, Math.round(p.fixedIncomeCents / 100)), xDisplay: `${fixedPct}% share`, yDisplay: "Income tier", sizeDisplay: fmtUsd(p.fixedIncomeCents), category: "Bonds", color: "#476b8a" },
+            { label: "Cash", x: cashPct, y: 2.0, size: Math.max(1, Math.round(p.cashCents / 100)), xDisplay: `${cashPct}% share`, yDisplay: "Liquidity tier", sizeDisplay: fmtUsd(p.cashCents), category: "Cash", color: "#c88a2b" },
+          ].filter((pt) => pt.size > 0);
+      if (bubblePoints.length >= 2) {
+        nodes.push({
+          type: "bubblechart",
+          title: fetched.holdings?.length ? `${name}'s Stock Holdings Bubble Chart` : `${name}'s Portfolio Mix Bubble Chart`,
+          xLabel: fetched.holdings?.length ? "Shares Held" : "Portfolio Share (%)",
+          yLabel: fetched.holdings?.length ? "Unrealized P/L (%)" : "Risk / Return Tier",
+          sizeLabel: "Market Value",
+          points: bubblePoints,
+        });
+      }
+    }
+
+    if (visuals.has("comparison")) {
+      nodes.push({
+        type: "comparison",
+        columns: [
+          {
+            title: `Invested Assets (${fmtUsd(p.investedCents)})`,
+            points: [
+              `Stocks / Equities: ${fmtUsd(p.equityCents)} (${stocksPct}% of portfolio)`,
+              `Fixed Income: ${fmtUsd(p.fixedIncomeCents)} (${fixedPct}% of portfolio)`,
+              "Compounding growth & dividend income exposure",
+            ],
+          },
+          {
+            title: `Cash & Goal Liquidity (${fmtUsd(p.cashCents)})`,
+            points: [
+              `Available Cash: ${fmtUsd(p.cashCents)} (${cashPct}% of portfolio)`,
+              fetched.goal
+                ? `Home Goal: ${fmtUsd(fetched.goal.savedCents)} of ${fmtUsd(fetched.goal.targetCents)} (${Math.min(100, Math.round((fetched.goal.savedCents / fetched.goal.targetCents) * 100))}%)`
+                : "Immediate liquidity with zero market volatility",
+              cashPct >= 20 ? "Elevated cash reserve — candidate for staged deployment" : "Balanced near-term liquidity reserve",
+            ],
+          },
+        ],
+      });
+    }
+
+    if (visuals.has("table") || (!visuals.has("piechart") && !visuals.has("bubblechart") && !visuals.has("barchart") && !visuals.has("checklist") && !visuals.has("comparison"))) {
       const rows: string[][] = [
         ["Stocks / Equities", fmtUsd(p.equityCents), `${stocksPct}%`, "Long-term growth"],
         ["Fixed Income", fmtUsd(p.fixedIncomeCents), `${fixedPct}%`, "Stability & income"],
@@ -590,27 +657,39 @@ export function buildGroundedFallbackCanvas(
 
   const primaryVisual = visuals.has("piechart")
     ? "pie chart"
-    : visuals.has("barchart")
-      ? "bar chart"
-      : visuals.has("checklist")
-        ? "summary checklist"
-        : "comparison table";
+    : visuals.has("bubblechart")
+      ? "bubble chart"
+      : visuals.has("barchart")
+        ? "bar chart"
+        : visuals.has("comparison")
+          ? "side-by-side comparison"
+          : visuals.has("checklist")
+            ? "summary checklist"
+            : "comparison table";
 
   const title = visuals.has("piechart")
     ? "Portfolio Allocation Pie Chart"
-    : visuals.has("barchart")
-      ? "Portfolio Allocation Bar Chart"
-      : visuals.has("checklist")
-        ? "Portfolio Summary Takeaways"
-        : "Portfolio Summary Comparison Table";
+    : visuals.has("bubblechart")
+      ? (fetched.holdings?.length ? "Stock Holdings Bubble Chart" : "Portfolio Allocation Bubble Chart")
+      : visuals.has("barchart")
+        ? "Portfolio Allocation Bar Chart"
+        : visuals.has("comparison")
+          ? "Invested vs. Cash Comparison"
+          : visuals.has("checklist")
+            ? "Portfolio Summary Takeaways"
+            : "Portfolio Summary Comparison Table";
 
   const badge = visuals.has("piechart")
     ? "Pie Chart"
-    : visuals.has("barchart")
-      ? "Bar Chart"
-      : visuals.has("checklist")
-        ? "Dynamic Summary"
-        : "Dynamic Table";
+    : visuals.has("bubblechart")
+      ? "Bubble Chart"
+      : visuals.has("barchart")
+        ? "Bar Chart"
+        : visuals.has("comparison")
+          ? "Comparison"
+          : visuals.has("checklist")
+            ? "Dynamic Summary"
+            : "Dynamic Table";
 
   const intro = p
     ? `Here is ${name}'s live portfolio as a ${primaryVisual} (${fmtUsd(p.totalCents)} total: ${pct1(p.equityCents, p.totalCents)}% stocks, ${pct1(p.fixedIncomeCents, p.totalCents)}% fixed income, ${pct1(p.cashCents, p.totalCents)}% cash).`

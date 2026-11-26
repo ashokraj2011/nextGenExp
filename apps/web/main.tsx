@@ -45,6 +45,7 @@ import type { ExpertiseMode, Watchcard } from "../../packages/contracts/nextgen-
 import {
   ChatToolsMenu, ConsumerA2aDrawer, ExpertiseTurnBanner, LivingWatchcardsStrip, ParallelFuturesPane,
 } from "./nextgen-chat-features";
+import { ContextHealthPill } from "./context-health-pill";
 import "./customer-workbench.css";
 
 const homeGoalPrompt = "Show my home-buying goal and savings progress.";
@@ -1593,7 +1594,13 @@ function App() {
           )}
           <div className="topbar-actions">
             {!adminChat && (
-              <ChatToolsMenu
+              <>
+                <ContextHealthPill
+                  conversationId={chat?.id}
+                  turnCount={chat?.turns.filter((t) => t.status === "completed").length ?? 0}
+                  disabled={!configuration}
+                />
+                <ChatToolsMenu
                 expertiseMode={expertiseMode}
                 onChangeExpertise={changeExpertiseMode}
                 futuresOpen={futuresOpen}
@@ -1608,6 +1615,7 @@ function App() {
                 handoffActive={Boolean(activeHandoff)}
                 onStartHandoff={() => void startHandoff()}
               />
+              </>
             )}
             <ThemeToggle compact />
             {adminChat && configuration && (

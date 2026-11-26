@@ -81,7 +81,8 @@ export function deterministicCapabilityRoute(prompt: string): SemanticRouteDecis
       extractedParams: parsed,
     };
   }
-  if (isStockHoldingsPrompt(clean) || /\b(?:equity|stock)\s+book\b|\bmy\s+equities\b/i.test(clean)) {
+  const explicitChartFormat = /\b(pie\s*chart|donut\s*chart|bar\s*chart|bubble\s*chart|scatter\s*(?:plot|chart)|radar\s*chart|heat\s*map)\b/i.test(clean);
+  if (!explicitChartFormat && (isStockHoldingsPrompt(clean) || /\b(?:equity|stock)\s+book\b|\bmy\s+equities\b/i.test(clean))) {
     return {
       capabilityId: "stock_holdings",
       capabilityLabel: capabilityLabelFor("stock_holdings"),

@@ -45,6 +45,44 @@ export const dynamicPieChartNodeSchema = z.object({
   }).strict()).min(2).max(8),
 }).strict();
 
+export const dynamicBubbleChartNodeSchema = z.object({
+  type: z.literal("bubblechart"),
+  title: z.string().trim().max(90).optional(),
+  xLabel: z.string().trim().min(1).max(48),
+  yLabel: z.string().trim().min(1).max(48),
+  sizeLabel: z.string().trim().max(48).optional(),
+  points: z.array(z.object({
+    label: z.string().trim().min(1).max(48),
+    x: z.number(),
+    y: z.number(),
+    size: z.number().positive(),
+    xDisplay: z.string().trim().min(1).max(36),
+    yDisplay: z.string().trim().min(1).max(36),
+    sizeDisplay: z.string().trim().max(36).optional(),
+    category: z.string().trim().max(32).optional(),
+    color: z.string().trim().max(24).optional(),
+  }).strict()).min(2).max(12),
+}).strict();
+
+export const dynamicGoalCreatorNodeSchema = z.object({
+  type: z.literal("goal_creator"),
+  personaId: z.string().trim().min(1).max(64),
+  actorName: z.string().trim().min(1).max(80),
+  suggestedName: z.string().trim().max(64).optional(),
+  suggestedCategory: z.enum(["home", "retirement", "education", "emergency", "travel", "custom"]).optional(),
+  suggestedTargetUsd: z.number().positive().optional(),
+  goals: z.array(z.object({
+    id: z.string().trim().min(1).max(64),
+    name: z.string().trim().min(1).max(64),
+    category: z.enum(["home", "retirement", "education", "emergency", "travel", "custom"]),
+    targetCents: z.number().int().positive(),
+    savedCents: z.number().int().nonnegative(),
+    monthlyContributionCents: z.number().int().nonnegative(),
+    targetDate: z.string().trim().min(1).max(32),
+    builtIn: z.boolean().optional(),
+  }).strict()).max(16),
+}).strict();
+
 export const dynamicProgressNodeSchema = z.object({
   type: z.literal("progress"),
   label: shortText,
@@ -182,6 +220,8 @@ export const dynamicNodeSchema = z.discriminatedUnion("type", [
   dynamicTableNodeSchema,
   dynamicBarChartNodeSchema,
   dynamicPieChartNodeSchema,
+  dynamicBubbleChartNodeSchema,
+  dynamicGoalCreatorNodeSchema,
   dynamicProgressNodeSchema,
   dynamicSliderCalcNodeSchema,
   dynamicComparisonNodeSchema,

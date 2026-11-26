@@ -3445,3 +3445,502 @@
 [data-theme="dark"] .rail-folder-rename {
   background: rgba(255, 255, 255, 0.04);
 }
+
+/* Interactive Chart Drill-Down Bar */
+.dyn-drill-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--teal-pale);
+  border: 1px solid color-mix(in srgb, var(--teal) 32%, transparent);
+  font-size: 0.8rem;
+}
+
+.dyn-drill-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink);
+}
+
+.dyn-drill-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dyn-drill-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--teal);
+  background: var(--white);
+  color: var(--teal-dark);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 640;
+  cursor: pointer;
+}
+
+.dyn-drill-actions button:hover {
+  background: var(--teal);
+  color: #ffffff;
+}
+
+.dyn-table-row-clickable {
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.dyn-table-row-clickable:hover td {
+  background: var(--teal-pale);
+}
+
+/* Native Bubble / Scatter Chart */
+.dyn-bubblechart {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+}
+
+.dyn-bubble-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.dyn-bubble-head h4 {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.dyn-bubble-size-hint {
+  font-size: 0.73rem;
+  color: var(--muted);
+}
+
+.dyn-bubble-canvas {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.dyn-bubble-svg {
+  display: block;
+  width: 100%;
+  min-width: 340px;
+  height: auto;
+}
+
+.dyn-bubble-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.dyn-bubble-axis {
+  stroke: var(--muted);
+  stroke-width: 1.2;
+}
+
+.dyn-bubble-axis-label {
+  fill: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-anchor: middle;
+}
+
+.dyn-bubble-point {
+  cursor: pointer;
+}
+
+.dyn-bubble-label {
+  fill: #ffffff;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-anchor: middle;
+  pointer-events: none;
+  paint-order: stroke;
+  stroke: rgba(15, 23, 42, 0.35);
+  stroke-width: 2.5px;
+}
+
+.dyn-bubble-readout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 8px 11px;
+  border-radius: 9px;
+  background: var(--white);
+  border: 1px solid var(--line);
+  font-size: 0.78rem;
+  color: var(--soft-ink);
+}
+
+.dyn-bubble-readout strong {
+  color: var(--ink);
+}
+
+.dyn-bubble-cat {
+  color: var(--muted);
+}
+
+.dyn-bubble-hint {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* Multi-Goal Creator Node */
+.dyn-goal-creator {
+  display: grid;
+  gap: 14px;
+}
+
+.dyn-goal-existing,
+.dyn-goal-form {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--paper);
+}
+
+.dyn-goal-existing h4,
+.dyn-goal-form h4 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.dyn-goal-list {
+  display: grid;
+  gap: 10px;
+}
+
+.dyn-goal-item {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--white);
+  border: 1px solid var(--line);
+}
+
+.dyn-goal-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dyn-goal-item-head > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dyn-goal-cat {
+  font-size: 0.69rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--teal-pale);
+  color: var(--teal-dark);
+}
+
+.dyn-goal-item-right {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.dyn-goal-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dyn-goal-preset-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong, var(--line));
+  background: var(--white);
+  color: var(--soft-ink);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dyn-goal-preset-chip:hover {
+  border-color: var(--teal);
+  color: var(--teal-dark);
+  background: var(--teal-pale);
+}
+
+.dyn-goal-inputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.dyn-goal-inputs label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.76rem;
+  font-weight: 620;
+  color: var(--soft-ink);
+}
+
+.dyn-goal-inputs input,
+.dyn-goal-inputs select {
+  padding: 7px 9px;
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: 8px;
+  background: var(--white);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.dyn-goal-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dyn-goal-pace {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+/* Topbar Context Health Pill & Popover */
+.context-health-wrap {
+  position: relative;
+}
+
+.context-health-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--white);
+  color: var(--soft-ink);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 630;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.context-health-pill:hover:not(:disabled) {
+  border-color: var(--teal);
+  color: var(--ink);
+}
+
+.context-health-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #2f7d32;
+}
+
+.context-health-pill.is-mid .context-health-dot {
+  background: #d97706;
+}
+
+.context-health-pill.is-high .context-health-dot {
+  background: #dc2626;
+}
+
+.context-health-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--teal-pale);
+  color: var(--teal-dark);
+  font-size: 0.66rem;
+  font-weight: 750;
+}
+
+.context-health-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(340px, 90vw);
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--white);
+  border: 1px solid var(--line);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14);
+  z-index: 60;
+  display: grid;
+  gap: 11px;
+}
+
+.context-health-pop-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.context-health-pop-head strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.84rem;
+  color: var(--ink);
+}
+
+.context-health-pop-head small {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.context-health-meter {
+  display: grid;
+  gap: 5px;
+}
+
+.context-health-meter-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.context-health-meter-row strong {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.context-health-track {
+  height: 7px;
+  border-radius: 999px;
+  background: var(--surface-subtle, #eef3f7);
+  overflow: hidden;
+}
+
+.context-health-track span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: #2f7d32;
+}
+
+.context-health-track span.is-mid {
+  background: #d97706;
+}
+
+.context-health-track span.is-high {
+  background: #dc2626;
+}
+
+.context-health-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.context-health-stats > div {
+  padding: 7px 8px;
+  border-radius: 8px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+
+.context-health-stats dt {
+  font-size: 0.67rem;
+  color: var(--muted);
+}
+
+.context-health-stats dd {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.context-health-summary,
+.context-health-clarify {
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--teal-pale);
+  border: 1px solid color-mix(in srgb, var(--teal) 25%, transparent);
+  display: grid;
+  gap: 4px;
+}
+
+.context-health-summary span,
+.context-health-clarify span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--teal-dark);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.context-health-summary p,
+.context-health-clarify p {
+  margin: 0;
+  font-size: 0.77rem;
+  line-height: 1.45;
+  color: var(--ink);
+  max-height: 110px;
+  overflow-y: auto;
+}
+
+.context-health-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.context-health-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.context-health-note {
+  font-size: 0.72rem;
+  color: var(--muted);
+  line-height: 1.35;
+}

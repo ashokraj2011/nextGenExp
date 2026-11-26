@@ -388,17 +388,26 @@ test("4-Stage Dynamic UI Harness: handles pie chart typos, follow-up corrections
     ["plan", "clarify"],
   );
 
-  // 5b. Unsupported chart shorthand ("as bubble chart") asks a clarifying question instead of "Data source needed"!
+  // 5b. Unsupported chart shorthand ("as radar chart") asks a clarifying question instead of "Data source needed"!
+  const radarOut = await generateDynamicUi({
+    prompt: "as radar chart",
+    personaId: "demo-learner",
+    dataDir: dir,
+    recentContext: JSON.stringify({ message: "show the protfolio as pie chart", reply: "Here's your pie chart." }),
+  });
+  assert.equal(radarOut.canvas.title, "Quick clarification");
+  assert.match(radarOut.intro, /radar chart/i);
+  assert.ok((radarOut.canvas.choices?.length ?? 0) >= 3);
+  assert.deepEqual(radarOut.canvas.harnessTrace?.stages.map((s) => s.stage), ["plan", "clarify"]);
+
+  // 5b2. Native bubble chart shorthand ("as bubble chart") inherits prior portfolio context and renders a bubblechart!
   const bubbleOut = await generateDynamicUi({
     prompt: "as bubble chart",
     personaId: "demo-learner",
     dataDir: dir,
     recentContext: JSON.stringify({ message: "show the protfolio as pie chart", reply: "Here's your pie chart." }),
   });
-  assert.equal(bubbleOut.canvas.title, "Quick clarification");
-  assert.match(bubbleOut.intro, /bubble chart/i);
-  assert.ok((bubbleOut.canvas.choices?.length ?? 0) >= 3);
-  assert.deepEqual(bubbleOut.canvas.harnessTrace?.stages.map((s) => s.stage), ["plan", "clarify"]);
+  assert.ok(bubbleOut.canvas.nodes.some((n) => n.type === "bubblechart"), "expected native bubblechart on terse follow-up");
 
   // 5c. Supported shorthand follow-up ("as bar chart") inherits prior portfolio context and renders a barchart!
   const shorthandBarOut = await generateDynamicUi({

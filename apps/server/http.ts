@@ -61,6 +61,7 @@ import { coBrowseSlidersSchema, createHandoffInputSchema } from "../../packages/
 import { buildA2aAgentCard, handleCepMcpRequest } from "./cep-mcp-server";
 import { agUiRunInputSchema, streamAgUiRun } from "./ag-ui";
 import { WatchcardStore } from "./watchcard-store";
+import { CustomerGoalStore } from "./goal-store";
 import { AgentDelegationStore } from "./agent-delegation";
 import {
   createDelegationPassInputSchema,
@@ -417,6 +418,7 @@ export async function startApp(options: Options) {
   tradeStore.reconcilePendingJobs(makeTradeSettler("system-reconcile"));
 
   const integrationService = new IntegrationTaskService(integrationTasks, approvalStore, () => runtime);
+  const goalStore = new CustomerGoalStore(tenantDataDirectory(options.dataDir));
   workflowEngine.setIntegrationService(integrationService);
   const experience = new ExperienceService(store, runtime, selectionMode, now, inspectorEnabled, offline && {
     chat: new ChatHarness(offline), close: () => offline.close(),
@@ -424,7 +426,7 @@ export async function startApp(options: Options) {
     isTenantAdmin: membership.isTenantAdmin,
     gateway: options.gateway, dataDir: options.dataDir, customer360, portfolioSnapshots, goalProgressProvider,
     opsStore, salesStore, connectorStore, approvalStore, tradeStore, actionFlowStore, workflowEngine, knowledgeBase, widgetLibraries, piiFirewall,
-    integrationService, onTradeSettle: makeTradeSettler,
+    goalStore, integrationService, onTradeSettle: makeTradeSettler,
   });
 
   const demoMcp = createDemoMcpServer();
@@ -1742,6 +1744,115 @@ export async function startApp(options: Options) {
         return json(res, uxEvolution.dismissProposal(proposalId));
       }
     }
+    if (resource === "goals") {
+      const goalPersona = url.searchParams.get("personaId") || demo.defaultPersonaId;
+      if (method === "GET" && !id) {
+        return json(res, { goals: goalStore.list(goalPersona) });
+      }
+      if (method === "POST" && !id) {
+        const input = await body(req, z.object({
+          personaId: z.string().trim().min(1).max(64).default(demo.defaultPersonaId),
+          name: z.string().trim().min(1).max(64),
+          category: z.enum(["home", "retirement", "education", "emergency", "travel", "custom"]).default("custom"),
+          targetCents: z.number().int().positive(),
+          savedCents: z.number().int().nonnegative().default(0),
+          monthlyContributionCents: z.number().int().nonnegative().default(50_000),
+          targetDate: z.string().trim().max(32).optional(),
+        }).strict());
+        let sfieldRunId: string | undefined;
+        let auditId: string | undefined;
+        const actor = profileStore.list().find((p) => p.personaId === input.personaId)?.displayName ?? "Customer";
+        if (runtime) {
+          try {
+            const governed = await runtime.executeGovernedWrite(principalId, {
+              domain: "customer360",
+              recordId: input.personaId,
+              action: "create_financial_goal",
+              actor,
+              note: `Created goal "${input.name}" ($${Math.round(input.targetCents / 100).toLocaleString("en-US")} target)`,
+              updates: { [`goal.${input.category}`]: `${input.name} ($${Math.round(input.targetCents / 100)})` },
+            }, AbortSignal.timeout(4000));
+            sfieldRunId = governed.sfieldRunId;
+            auditId = governed.audit?.auditId;
+          } catch {
+            // Fall back to direct audit if runtime is unavailable
+          }
+        }
+        const goal = goalStore.create({ ...input, sfieldRunId }, now());
+        if (!auditId) {
+          const audit = writeAudit.record({
+            sfieldRunId: sfieldRunId ?? "local",
+            sfieldToolRef: domainWriteToolRef,
+            domain: "customer360",
+            recordId: goal.id,
+            action: "create_financial_goal",
+            actor,
+            summary: `Created goal "${goal.name}" ($${Math.round(goal.targetCents / 100).toLocaleString("en-US")})`,
+            status: "succeeded",
+          });
+          auditId = audit.auditId;
+        }
+        return json(res, { goal, goals: goalStore.list(input.personaId), sfieldRunId, auditId }, 201);
+      }
+      if (id && method === "POST" && operation === "update") {
+        const input = await body(req, z.object({
+          personaId: z.string().trim().min(1).max(64).default(demo.defaultPersonaId),
+          name: z.string().trim().min(1).max(64).optional(),
+          targetCents: z.number().int().positive().optional(),
+          savedCents: z.number().int().nonnegative().optional(),
+          monthlyContributionCents: z.number().int().nonnegative().optional(),
+          targetDate: z.string().trim().max(32).optional(),
+        }).strict());
+        const updated = goalStore.update(id, input.personaId, input, now());
+        if (!updated) throw new ApiError(404, "goal_not_found", "Goal not found.");
+        return json(res, { goal: updated, goals: goalStore.list(input.personaId) });
+      }
+      if (id && method === "POST" && operation === "delete") {
+        const input = await body(req, z.object({
+          personaId: z.string().trim().min(1).max(64).default(demo.defaultPersonaId),
+        }).strict());
+        const deleted = goalStore.delete(id, input.personaId);
+        if (!deleted) throw new ApiError(404, "goal_not_found", "Goal not found.");
+        return json(res, { deleted: true, goals: goalStore.list(input.personaId) });
+      }
+    }
+    if (resource === "admin" && id === "recent-turns" && !operation && method === "GET" && inspectorEnabled) {
+      const recent = store.listAllCompletedTurns(25).map((turn) => {
+        const dynBlock = turn.public.experience?.blocks.find((b) => b.component === "PznDynamicCanvas");
+        const harnessTrace = dynBlock && dynBlock.component === "PznDynamicCanvas" ? dynBlock.props.harnessTrace : undefined;
+        const mode: "intent" | "experience" | "funding" | "harness" = harnessTrace
+          ? "harness"
+          : turn.agentRunId
+            ? "experience"
+            : turn.fundingRun || turn.workflow
+              ? "funding"
+              : "intent";
+        return {
+          turnId: turn.public.id,
+          conversationId: turn.scope.conversationId,
+          personaId: turn.scope.personaId,
+          domainId: turn.scope.domainId,
+          message: turn.public.message,
+          createdAt: turn.public.createdAt,
+          actionMode: turn.public.actionMode ?? null,
+          mode,
+          semanticRoute: turn.public.semanticRoute ?? null,
+          selectedContextId: turn.route?.contextId ?? turn.decision?.contextId ?? null,
+          components: turn.trace.components ?? [],
+          routerRunId: turn.attempts.route?.runId ?? null,
+          composerRunId: turn.attempts.compose?.runId ?? null,
+          agentRunId: turn.agentRunId ?? null,
+          routeRun: turn.trace.routeRun ?? null,
+          composeRun: turn.trace.composeRun ?? null,
+          portfolioReadSucceeded: Boolean(turn.portfolioSnapshot),
+          goalReadSucceeded: Boolean(turn.goalProgress),
+          metricReadSucceeded: Boolean(turn.proof),
+          tsSource: turn.trace.ts?.source ?? null,
+          harnessTrace: harnessTrace ?? null,
+        };
+      });
+      return json(res, { turns: recent });
+    }
     if (resource === "folders") {
       if (method === "GET" && !id) {
         const domain = url.searchParams.get("domain");
@@ -1781,6 +1892,7 @@ export async function startApp(options: Options) {
         if (conversation.audience === "admin" || (!operator && store.hasOperatorContent(id))) requireOperator();
         if (method === "GET" && operation === "updates") return json(res, await experience.recordUpdates(conversation, Boolean(operator)));
         if (method === "GET" && operation === "context") return json(res, await experience.conversationContext(conversation, conversation.principalId));
+        if (method === "POST" && operation === "compact") return json(res, await experience.compactConversation(conversation, conversation.principalId));
         if (method === "GET" && !operation) {
           const turns = await experience.conversationTurns(conversation);
           return json(res, { ...presentConversation(conversation), turns: turns.map((turn) => visibleTurn(turn, operator)) });

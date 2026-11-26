@@ -61,6 +61,7 @@ import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import { principalFor, type Runtime } from "./runtime";
 import { PznChatHistory, resolveClarificationReply } from "./chat-history";
 import { collectCrossThreadStatus, isThreadStatusPrompt, runThreadStatusHarness } from "./thread-status";
+import { CustomerGoalStore, inferSuggestedGoalFromPrompt, isGoalSetupPrompt } from "./goal-store";
 
 class TurnFailure extends Error {
   constructor(readonly code: FailureCode) { super(code); }
@@ -140,6 +141,7 @@ export class ExperienceService {
       knowledgeBase?: KnowledgeBaseStore;
       widgetLibraries?: Record<Conversation["domainId"], WidgetLibraryStore>;
       piiFirewall?: PiiFirewallStore;
+      goalStore?: CustomerGoalStore;
       onTradeSettle?: (principalId: string) => SettlementCallback;
     },
   ) {
@@ -859,6 +861,90 @@ export class ExperienceService {
               method: "deterministic",
               confidence: 0.96,
               reasoning: "Matched cross-thread and background task status inquiry.",
+            };
+            row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
+          });
+          this.store.finish(id, { type: "completed", result: dynamicResult }, now);
+          return;
+        }
+
+        // 0b. Multi-goal setup & management ("I want to set up another goal", "create a college goal", "manage my goals")
+        if (conversation.domainId === "wealth" && domainTools.goalStore && isGoalSetupPrompt(scopedPrompt)) {
+          stage = "compose";
+          this.store.progress(id, "planning", this.now());
+          const startedAt = this.now();
+          const goals = domainTools.goalStore.list(conversation.personaId);
+          const suggested = inferSuggestedGoalFromPrompt(scopedPrompt);
+          const profile = findProfileById(conversation.personaId);
+          const actorName = profile?.displayName ?? "Customer";
+          const totalTargetCents = goals.reduce((sum, g) => sum + g.targetCents, 0);
+          const totalSavedCents = goals.reduce((sum, g) => sum + g.savedCents, 0);
+          const now = this.now();
+          const canvas = {
+            title: suggested.suggestedName ? `Set Up ${suggested.suggestedName}` : "Financial Goals Planner",
+            badge: "Goal Builder",
+            subtitle: `${actorName} · ${goals.length} active goal${goals.length === 1 ? "" : "s"} tracked in Customer 360`,
+            generatedBy: "synthesizer" as const,
+            dataSource: "Customer 360 Goals · sfield Governed Write",
+            prompt: scopedPrompt.slice(0, 600),
+            nodes: [
+              {
+                type: "metrics" as const,
+                items: [
+                  { label: "Active Goals", value: String(goals.length), delta: "Tracked live" },
+                  { label: "Total Saved", value: `$${Math.round(totalSavedCents / 100).toLocaleString("en-US")}` },
+                  { label: "Combined Target", value: `$${Math.round(totalTargetCents / 100).toLocaleString("en-US")}` },
+                ],
+              },
+              {
+                type: "goal_creator" as const,
+                personaId: conversation.personaId,
+                actorName,
+                ...(suggested.suggestedName ? { suggestedName: suggested.suggestedName } : {}),
+                ...(suggested.suggestedCategory ? { suggestedCategory: suggested.suggestedCategory } : {}),
+                ...(suggested.suggestedTargetUsd ? { suggestedTargetUsd: suggested.suggestedTargetUsd } : {}),
+                goals: goals.map((g) => ({
+                  id: g.id,
+                  name: g.name,
+                  category: g.category,
+                  targetCents: g.targetCents,
+                  savedCents: g.savedCents,
+                  monthlyContributionCents: g.monthlyContributionCents,
+                  targetDate: g.targetDate,
+                  ...(g.builtIn ? { builtIn: true } : {}),
+                })),
+              },
+            ],
+            disclaimer: "New goals persist via sfield governed writes and immediately appear in your portfolio & goals tracking.",
+            suggestedFollowUp: "Show my portfolio allocation as a bubble chart",
+            harnessTrace: {
+              resolvedGoal: suggested.suggestedName
+                ? `Open interactive goal creator pre-filled for ${suggested.suggestedName}`
+                : "Open interactive multi-goal planner & creator",
+              thinking: `Matched multi-goal creation intent for ${actorName}. Loaded ${goals.length} existing goal(s) and opened the governed Goal Creator card.`,
+              fetchedSources: ["CustomerGoalStore", "Customer 360"],
+              visualTargets: ["metrics", "goal_creator"],
+              repaired: false,
+              stages: [
+                { stage: "plan" as const, status: "ok" as const, summary: "Matched goal setup & management request", durationMs: 2 },
+                { stage: "fetch" as const, status: "ok" as const, summary: `Loaded ${goals.length} existing goal(s) for ${actorName}`, durationMs: Math.max(1, now - startedAt) },
+                { stage: "compose" as const, status: "ok" as const, summary: "Composed interactive Goal Creator & tracker", durationMs: 1 },
+                { stage: "verify" as const, status: "ok" as const, summary: "Verified schema and governed write endpoint", durationMs: 1 },
+              ],
+            },
+          };
+          const intro = suggested.suggestedName
+            ? `Let’s set up your **${suggested.suggestedName}** goal! I’ve pre-filled a starting target below — adjust the name, target, monthly contribution, or target date and click **Create Goal**.`
+            : `You currently have **${goals.length} goal${goals.length === 1 ? "" : "s"}** tracked. Pick a preset or enter custom details below to set up another goal — it will save immediately to your profile.`;
+          const dynamicResult = compileDynamicCanvas(intro, canvas, now + DECISION_TTL);
+          this.store.update(id, (row) => {
+            row.public.actionMode = "dynamic_ui";
+            row.public.semanticRoute = {
+              capabilityId: "custom_dynamic_ui",
+              capabilityLabel: "Financial Goals Planner",
+              method: "deterministic",
+              confidence: 0.96,
+              reasoning: "Matched multi-goal setup or management request.",
             };
             row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
           });
@@ -1604,12 +1690,64 @@ export class ExperienceService {
     const memoryItems = runtime
       ? await runtime.listMemory(principalId).catch(() => [])
       : [];
+    const rollingSummaryText = rollingSummary ? formatRollingSummary(rollingSummary) : null;
+    const charCount = completedTurns.reduce((sum, t) => {
+      const msgLen = t.public.message?.length ?? 0;
+      const introLen = t.public.experience?.intro?.length ?? 0;
+      const blocksLen = t.public.experience ? Math.min(1800, JSON.stringify(t.public.experience.blocks).length) : 0;
+      return sum + msgLen + introLen + blocksLen;
+    }, 0) + (rollingSummaryText?.length ?? 0) + memoryItems.reduce((s, m) => s + m.content.length, 0);
+    const estimatedContextTokens = Math.max(120, Math.round(charCount / 4));
+    const tokenBudget = 24_000;
+    const utilizationPct = Math.min(100, Math.round((estimatedContextTokens / tokenBudget) * 100));
     return {
       conversationId: conversation.id,
       completedTurnCount: completedTurns.length,
       rollingSummary,
+      rollingSummaryText,
       pendingClarification,
       memoryCount: memoryItems.length,
+      estimatedContextTokens,
+      tokenBudget,
+      utilizationPct,
+    };
+  }
+
+  async compactConversation(conversation: ConversationRecord, principalId: string) {
+    const runtime = this.runtime;
+    if (!runtime) {
+      return {
+        compacted: false,
+        reason: "Model runtime is offline.",
+        context: await this.conversationContext(conversation, principalId),
+      };
+    }
+    const allCompleted = await this.history.allCompletedForCompaction(conversation);
+    if (allCompleted.length < 3) {
+      return {
+        compacted: false,
+        reason: `Need at least 3 completed turns to compact (currently ${allCompleted.length}).`,
+        context: await this.conversationContext(conversation, principalId),
+      };
+    }
+    const activePrincipal = principalFor(principalId, {
+      userId: conversation.userId,
+      personaId: conversation.personaId,
+      domainId: conversation.domainId,
+    });
+    const result = await runtime.compactor.compactIfNeeded({
+      principal: activePrincipal,
+      conversationId: conversation.id,
+      turns: allCompleted,
+      verbatimWindow: Math.min(2, allCompleted.length - 1),
+      compactEveryTurns: 1,
+    });
+    return {
+      compacted: result.compacted,
+      reason: result.compacted
+        ? `Compacted through turn ${result.summary?.coveredThroughOrdinal ?? allCompleted.length}.`
+        : "Conversation is already compacted up to the latest turns.",
+      context: await this.conversationContext(conversation, principalId),
     };
   }
 

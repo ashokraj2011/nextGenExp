@@ -199,6 +199,59 @@ export const api = {
   previewTreatmentSelector: (input: TreatmentPreviewInput) => request<TreatmentPreview>("/api/admin/treatment-preview", input),
   recordUpdates: (id: string) => request<RecordUpdate[]>("/api/conversations/" + id + "/updates"),
   conversation: (id: string) => request<ConversationView>("/api/conversations/" + id),
+  conversationContext: (id: string) => request<{
+    conversationId: string;
+    completedTurnCount: number;
+    rollingSummary: { activeGoal: string; establishedFacts: string[]; coveredThroughOrdinal: number; turnCountCovered: number; method: string; updatedAt: string } | null;
+    rollingSummaryText: string | null;
+    pendingClarification: { question: string; choices: Array<{ id: string; label: string; prompt?: string }> } | null;
+    memoryCount: number;
+    estimatedContextTokens: number;
+    tokenBudget: number;
+    utilizationPct: number;
+  }>("/api/conversations/" + id + "/context"),
+  compactConversation: (id: string) => request<{
+    compacted: boolean;
+    reason: string;
+    context: {
+      conversationId: string;
+      completedTurnCount: number;
+      rollingSummary: { activeGoal: string; establishedFacts: string[]; coveredThroughOrdinal: number; turnCountCovered: number; method: string; updatedAt: string } | null;
+      rollingSummaryText: string | null;
+      pendingClarification: { question: string; choices: Array<{ id: string; label: string; prompt?: string }> } | null;
+      memoryCount: number;
+      estimatedContextTokens: number;
+      tokenBudget: number;
+      utilizationPct: number;
+    };
+  }>("/api/conversations/" + id + "/compact", {}),
+  goals: (personaId: string) => request<{ goals: Array<{ id: string; personaId: string; name: string; category: "home" | "retirement" | "education" | "emergency" | "travel" | "custom"; targetCents: number; savedCents: number; monthlyContributionCents: number; targetDate: string; builtIn?: boolean; sfieldRunId?: string }> }>("/api/goals?personaId=" + encodeURIComponent(personaId)),
+  createGoal: (input: { personaId: string; name: string; category: "home" | "retirement" | "education" | "emergency" | "travel" | "custom"; targetCents: number; savedCents?: number; monthlyContributionCents?: number; targetDate?: string }) => request<{ goal: { id: string; name: string; targetCents: number; savedCents: number; monthlyContributionCents: number; targetDate: string; category: "home" | "retirement" | "education" | "emergency" | "travel" | "custom" }; goals: Array<{ id: string; personaId: string; name: string; category: "home" | "retirement" | "education" | "emergency" | "travel" | "custom"; targetCents: number; savedCents: number; monthlyContributionCents: number; targetDate: string; builtIn?: boolean }>; sfieldRunId?: string; auditId?: string }>("/api/goals", input),
+  updateGoal: (id: string, input: { personaId: string; name?: string; targetCents?: number; savedCents?: number; monthlyContributionCents?: number; targetDate?: string }) => request<{ goal: { id: string; name: string }; goals: Array<{ id: string; personaId: string; name: string; category: "home" | "retirement" | "education" | "emergency" | "travel" | "custom"; targetCents: number; savedCents: number; monthlyContributionCents: number; targetDate: string; builtIn?: boolean }> }>("/api/goals/" + id + "/update", input),
+  deleteGoal: (id: string, personaId: string) => request<{ deleted: boolean; goals: Array<{ id: string; personaId: string; name: string; category: "home" | "retirement" | "education" | "emergency" | "travel" | "custom"; targetCents: number; savedCents: number; monthlyContributionCents: number; targetDate: string; builtIn?: boolean }> }>("/api/goals/" + id + "/delete", { personaId }),
+  recentTurns: () => request<{ turns: Array<{
+    turnId: string;
+    conversationId: string;
+    personaId: string;
+    domainId: string;
+    message: string;
+    createdAt: number;
+    actionMode: string | null;
+    mode: "intent" | "experience" | "funding" | "harness";
+    semanticRoute: { capabilityId: string; capabilityLabel: string; method: string; confidence: number; reasoning: string } | null;
+    selectedContextId: string | null;
+    components: string[];
+    routerRunId: string | null;
+    composerRunId: string | null;
+    agentRunId: string | null;
+    routeRun: Stage | null;
+    composeRun: Stage | null;
+    portfolioReadSucceeded: boolean;
+    goalReadSucceeded: boolean;
+    metricReadSucceeded: boolean;
+    tsSource: string | null;
+    harnessTrace: import("../../packages/contracts/dynamic-canvas").DynamicHarnessTrace | null;
+  }> }>("/api/admin/recent-turns"),
   changeConversation: (id: string, change: ConversationChange) => request<Conversation>("/api/conversations/" + id + "/settings", change),
   folders: (domainId?: Conversation["domainId"]) => request<{ folders: ConversationFolder[] }>("/api/folders" + (domainId ? "?domain=" + domainId : "")),
   createFolder: (name: string, domainId: Conversation["domainId"] = "wealth") => request<{ folder: ConversationFolder }>("/api/folders", { name, domainId }),

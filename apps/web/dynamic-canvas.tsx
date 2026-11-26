@@ -1,5 +1,5 @@
 import { useId, useMemo, useState } from "react";
-import { ArrowUpRight, BookmarkPlus, Check, CheckCircle2, Clock, Database, RotateCcw, ShieldAlert, Sparkles, XCircle } from "lucide-react";
+import { ArrowUpRight, BookmarkPlus, Check, CheckCircle2, Clock, Database, Plus, RotateCcw, ShieldAlert, Sparkles, Target, Trash2, XCircle } from "lucide-react";
 import type { DynamicCanvasNode, DynamicCanvasProps } from "../../packages/contracts/dynamic-canvas";
 import type { WidgetDraft } from "../../packages/contracts/widget";
 import { api } from "./api";
@@ -10,8 +10,10 @@ import { WorkflowRunnerNode } from "./workflow-runner";
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const PIE_PALETTE = ["#2f7d32", "#476b8a", "#c88a2b", "#0d9488", "#6d5bd0", "#c2410c", "#0284c7", "#64748b"];
 
-function PieChartNode({ node }: { node: Extract<DynamicCanvasNode, { type: "piechart" }> }) {
-  const [activeIdx, setActiveIdx] = useState<number | null>(null);
+function PieChartNode({ node, onFollowUp }: { node: Extract<DynamicCanvasNode, { type: "piechart" }>; onFollowUp?: (prompt: string) => void }) {
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const activeIdx = hoverIdx ?? selectedIdx;
   const total = Math.max(node.slices.reduce((sum, s) => sum + Math.max(0, s.value), 0), 0.0001);
   const radius = 64;
   const circumference = 2 * Math.PI * radius;
@@ -30,6 +32,7 @@ function PieChartNode({ node }: { node: Extract<DynamicCanvasNode, { type: "piec
   });
 
   const focused = activeIdx !== null ? segments[activeIdx] : null;
+  const selected = selectedIdx !== null ? segments[selectedIdx] : null;
   const centerTop = focused ? focused.label : (node.centerLabel ?? "Total");
   const centerMain = focused ? `${focused.pct}%` : (node.centerValue ?? usd.format(total));
   const centerSub = focused ? focused.displayValue : `${segments.length} segments`;
@@ -54,11 +57,11 @@ function PieChartNode({ node }: { node: Extract<DynamicCanvasNode, { type: "piec
                 strokeDashoffset={seg.dashOffset}
                 transform="rotate(-90 90 90)"
                 className="dyn-pie-slice"
-                onMouseEnter={() => setActiveIdx(seg.idx)}
-                onMouseLeave={() => setActiveIdx(null)}
-                onClick={() => setActiveIdx((cur) => (cur === seg.idx ? null : seg.idx))}
+                onMouseEnter={() => setHoverIdx(seg.idx)}
+                onMouseLeave={() => setHoverIdx(null)}
+                onClick={() => setSelectedIdx((cur) => (cur === seg.idx ? null : seg.idx))}
               >
-                <title>{`${seg.label}: ${seg.displayValue} (${seg.pct}%)`}</title>
+                <title>{`${seg.label}: ${seg.displayValue} (${seg.pct}%) — Click to drill down`}</title>
               </circle>
             ))}
           </svg>
@@ -73,9 +76,9 @@ function PieChartNode({ node }: { node: Extract<DynamicCanvasNode, { type: "piec
             <li
               key={seg.label}
               className={activeIdx === seg.idx ? "is-active" : ""}
-              onMouseEnter={() => setActiveIdx(seg.idx)}
-              onMouseLeave={() => setActiveIdx(null)}
-              onClick={() => setActiveIdx((cur) => (cur === seg.idx ? null : seg.idx))}
+              onMouseEnter={() => setHoverIdx(seg.idx)}
+              onMouseLeave={() => setHoverIdx(null)}
+              onClick={() => setSelectedIdx((cur) => (cur === seg.idx ? null : seg.idx))}
             >
               <span className="dyn-pie-swatch" style={{ background: seg.color }} aria-hidden="true" />
               <span className="dyn-pie-legend-name">{seg.label}</span>
@@ -85,6 +88,335 @@ function PieChartNode({ node }: { node: Extract<DynamicCanvasNode, { type: "piec
           ))}
         </ul>
       </div>
+      {selected && onFollowUp && (
+        <div className="dyn-drill-bar" role="region" aria-label={`Drill-down actions for ${selected.label}`}>
+          <span className="dyn-drill-label">
+            <span className="dyn-pie-swatch" style={{ background: selected.color }} aria-hidden="true" />
+            <strong>{selected.label}</strong> ({selected.displayValue} · {selected.pct}%)
+          </span>
+          <div className="dyn-drill-actions">
+            <button type="button" onClick={() => onFollowUp(`Show a detailed breakdown of ${selected.label} in my portfolio`)}>
+              Drill into {selected.label} <ArrowUpRight size={12} aria-hidden="true" />
+            </button>
+            <button type="button" onClick={() => onFollowUp(`Compare ${selected.label} against the rest of my portfolio side-by-side`)}>
+              Compare side-by-side
+            </button>
+            <button type="button" onClick={() => onFollowUp("Show my stock holdings as a bubble chart")}>
+              As Bubble Chart
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BubbleChartNode({ node, onFollowUp }: { node: Extract<DynamicCanvasNode, { type: "bubblechart" }>; onFollowUp?: (prompt: string) => void }) {
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const activeIdx = hoverIdx ?? selectedIdx;
+
+  const xs = node.points.map((p) => p.x);
+  const ys = node.points.map((p) => p.y);
+  const sizes = node.points.map((p) => Math.max(1, p.size));
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const maxSize = Math.max(...sizes, 1);
+
+  const padX = (maxX - minX) * 0.16 || Math.max(1, Math.abs(maxX) * 0.25);
+  const padY = (maxY - minY) * 0.18 || Math.max(1, Math.abs(maxY) * 0.25);
+  const x0 = minX - padX;
+  const x1 = maxX + padX;
+  const y0 = minY - padY;
+  const y1 = maxY + padY;
+
+  const plotL = 56;
+  const plotR = 524;
+  const plotT = 22;
+  const plotB = 224;
+  const mapX = (x: number) => plotL + ((x - x0) / Math.max(0.0001, x1 - x0)) * (plotR - plotL);
+  const mapY = (y: number) => plotB - ((y - y0) / Math.max(0.0001, y1 - y0)) * (plotB - plotT);
+  const mapR = (size: number) => 12 + Math.sqrt(Math.max(0, size) / maxSize) * 24;
+
+  const plotted = node.points.map((pt, idx) => ({
+    ...pt,
+    idx,
+    cx: mapX(pt.x),
+    cy: mapY(pt.y),
+    r: mapR(pt.size),
+    color: pt.color && /^#[0-9a-f]{3,8}$/i.test(pt.color) ? pt.color : PIE_PALETTE[idx % PIE_PALETTE.length],
+  }));
+
+  const focused = activeIdx !== null ? plotted[activeIdx] : null;
+  const selected = selectedIdx !== null ? plotted[selectedIdx] : null;
+
+  return (
+    <div className="dyn-bubblechart">
+      <div className="dyn-bubble-head">
+        {node.title && <h4>{node.title}</h4>}
+        {node.sizeLabel && <span className="dyn-bubble-size-hint">Bubble size: {node.sizeLabel}</span>}
+      </div>
+      <div className="dyn-bubble-canvas">
+        <svg viewBox="0 0 560 264" className="dyn-bubble-svg" role="img" aria-label={node.title || "Bubble chart"}>
+          {[0, 0.25, 0.5, 0.75, 1].map((t) => {
+            const gy = plotB - t * (plotB - plotT);
+            return <line key={"hy" + t} x1={plotL} y1={gy} x2={plotR} y2={gy} className="dyn-bubble-grid" />;
+          })}
+          {[0, 0.25, 0.5, 0.75, 1].map((t) => {
+            const gx = plotL + t * (plotR - plotL);
+            return <line key={"hx" + t} x1={gx} y1={plotT} x2={gx} y2={plotB} className="dyn-bubble-grid" />;
+          })}
+          <line x1={plotL} y1={plotB} x2={plotR} y2={plotB} className="dyn-bubble-axis" />
+          <line x1={plotL} y1={plotT} x2={plotL} y2={plotB} className="dyn-bubble-axis" />
+          <text x={(plotL + plotR) / 2} y={254} className="dyn-bubble-axis-label">{node.xLabel}</text>
+          <text x={18} y={(plotT + plotB) / 2} transform={`rotate(-90 18 ${(plotT + plotB) / 2})`} className="dyn-bubble-axis-label">{node.yLabel}</text>
+
+          {plotted.map((pt) => {
+            const isActive = activeIdx === pt.idx;
+            return (
+              <g
+                key={pt.label}
+                className="dyn-bubble-point"
+                onMouseEnter={() => setHoverIdx(pt.idx)}
+                onMouseLeave={() => setHoverIdx(null)}
+                onClick={() => setSelectedIdx((cur) => (cur === pt.idx ? null : pt.idx))}
+              >
+                <circle
+                  cx={pt.cx}
+                  cy={pt.cy}
+                  r={isActive ? pt.r + 3 : pt.r}
+                  fill={pt.color}
+                  fillOpacity={isActive ? 0.88 : 0.68}
+                  stroke={pt.color}
+                  strokeWidth={isActive ? 2.5 : 1.5}
+                >
+                  <title>{`${pt.label}: ${pt.xDisplay}, ${pt.yDisplay}${pt.sizeDisplay ? ` · ${pt.sizeDisplay}` : ""}`}</title>
+                </circle>
+                <text x={pt.cx} y={pt.cy + 4} className="dyn-bubble-label">{pt.label}</text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      <div className="dyn-bubble-readout" aria-live="polite">
+        {focused ? (
+          <>
+            <span className="dyn-pie-swatch" style={{ background: focused.color }} aria-hidden="true" />
+            <strong>{focused.label}</strong>
+            {focused.category && <span className="dyn-bubble-cat">{focused.category}</span>}
+            <span>{node.xLabel}: <b>{focused.xDisplay}</b></span>
+            <span>{node.yLabel}: <b>{focused.yDisplay}</b></span>
+            {focused.sizeDisplay && <span>{node.sizeLabel ?? "Value"}: <b>{focused.sizeDisplay}</b></span>}
+          </>
+        ) : (
+          <span className="dyn-bubble-hint">Hover or click any bubble to inspect metrics and drill down.</span>
+        )}
+      </div>
+      {selected && onFollowUp && (
+        <div className="dyn-drill-bar" role="region" aria-label={`Drill-down actions for ${selected.label}`}>
+          <span className="dyn-drill-label">
+            <span className="dyn-pie-swatch" style={{ background: selected.color }} aria-hidden="true" />
+            <strong>{selected.label}</strong> {selected.sizeDisplay ? `(${selected.sizeDisplay})` : ""}
+          </span>
+          <div className="dyn-drill-actions">
+            <button type="button" onClick={() => onFollowUp(`Show full details for ${selected.label} in my portfolio`)}>
+              Inspect {selected.label} <ArrowUpRight size={12} aria-hidden="true" />
+            </button>
+            <button type="button" onClick={() => onFollowUp("Show my portfolio allocation as a pie chart")}>
+              View as Pie Chart
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const GOAL_PRESETS: Array<{ label: string; name: string; category: "emergency" | "education" | "retirement" | "travel" | "home"; targetUsd: number; monthlyUsd: number }> = [
+  { label: "Emergency Fund", name: "Emergency Reserve", category: "emergency", targetUsd: 35000, monthlyUsd: 800 },
+  { label: "College 529", name: "College 529 Fund", category: "education", targetUsd: 80000, monthlyUsd: 650 },
+  { label: "Early Retirement", name: "Early Retirement Fund", category: "retirement", targetUsd: 500000, monthlyUsd: 2500 },
+  { label: "Travel / Sabbatical", name: "Sabbatical & Travel", category: "travel", targetUsd: 20000, monthlyUsd: 600 },
+];
+
+function GoalCreatorNode({ node, onFollowUp }: { node: Extract<DynamicCanvasNode, { type: "goal_creator" }>; onFollowUp?: (prompt: string) => void }) {
+  const [goals, setGoals] = useState(node.goals);
+  const [name, setName] = useState(node.suggestedName ?? "");
+  const [category, setCategory] = useState<"home" | "retirement" | "education" | "emergency" | "travel" | "custom">(node.suggestedCategory ?? "emergency");
+  const [targetUsd, setTargetUsd] = useState(String(node.suggestedTargetUsd ?? 35000));
+  const [savedUsd, setSavedUsd] = useState("5000");
+  const [monthlyUsd, setMonthlyUsd] = useState("750");
+  const [targetDate, setTargetDate] = useState("2029-06-01");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [receipt, setReceipt] = useState<string | null>(null);
+
+  const parsedTarget = Math.max(100, Number(targetUsd) || 0);
+  const parsedSaved = Math.max(0, Number(savedUsd) || 0);
+  const parsedMonthly = Math.max(0, Number(monthlyUsd) || 0);
+  const monthsRemaining = parsedMonthly > 0 ? Math.ceil(Math.max(0, parsedTarget - parsedSaved) / parsedMonthly) : null;
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) { setNotice("Enter a name for your goal."); return; }
+    setBusy(true);
+    setNotice("");
+    try {
+      const res = await api.createGoal({
+        personaId: node.personaId,
+        name: name.trim(),
+        category,
+        targetCents: Math.round(parsedTarget * 100),
+        savedCents: Math.round(parsedSaved * 100),
+        monthlyContributionCents: Math.round(parsedMonthly * 100),
+        targetDate,
+      });
+      setGoals(res.goals);
+      setReceipt(`Saved "${res.goal.name}" (${usd.format(res.goal.targetCents / 100)} target)${res.sfieldRunId ? ` · sfieldRunId ${res.sfieldRunId.slice(0, 14)}` : ""}`);
+      setName("");
+      notifyDomainDataUpdated();
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Could not save goal.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete(goalId: string) {
+    setBusy(true);
+    try {
+      const res = await api.deleteGoal(goalId, node.personaId);
+      setGoals(res.goals);
+      notifyDomainDataUpdated();
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Could not remove goal.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="dyn-goal-creator">
+      <div className="dyn-goal-existing">
+        <h4><Target size={15} aria-hidden="true" /> Tracked Goals ({goals.length})</h4>
+        <div className="dyn-goal-list">
+          {goals.map((g) => {
+            const pct = Math.min(100, Math.round((g.savedCents / Math.max(1, g.targetCents)) * 100));
+            return (
+              <div key={g.id} className="dyn-goal-item">
+                <div className="dyn-goal-item-head">
+                  <div>
+                    <strong>{g.name}</strong>
+                    <span className="dyn-goal-cat">{g.category}</span>
+                  </div>
+                  <div className="dyn-goal-item-right">
+                    <span>{pct}%</span>
+                    {!g.builtIn && (
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label={`Remove ${g.name}`}
+                        title="Remove goal"
+                        disabled={busy}
+                        onClick={() => void handleDelete(g.id)}
+                      >
+                        <Trash2 size={13} aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="dyn-bar-track" aria-hidden="true">
+                  <span className="is-highlight" style={{ width: `${Math.max(3, pct)}%` }} />
+                </div>
+                <div className="dyn-progress-foot">
+                  <span>{usd.format(g.savedCents / 100)} saved · +{usd.format(g.monthlyContributionCents / 100)}/mo</span>
+                  <span>Target {usd.format(g.targetCents / 100)} by {g.targetDate}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <form className="dyn-goal-form" onSubmit={handleCreate}>
+        <h4><Plus size={15} aria-hidden="true" /> Create a New Goal</h4>
+        <div className="dyn-goal-presets">
+          {GOAL_PRESETS.map((p) => (
+            <button
+              key={p.label}
+              type="button"
+              className="dyn-goal-preset-chip"
+              onClick={() => {
+                setName(p.name);
+                setCategory(p.category);
+                setTargetUsd(String(p.targetUsd));
+                setMonthlyUsd(String(p.monthlyUsd));
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <div className="dyn-goal-inputs">
+          <label>
+            <span>Goal name *</span>
+            <input type="text" placeholder="e.g. College 529 Fund" maxLength={64} required value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <label>
+            <span>Category</span>
+            <select value={category} onChange={(e) => setCategory(e.target.value as typeof category)}>
+              <option value="emergency">Emergency</option>
+              <option value="education">Education</option>
+              <option value="retirement">Retirement</option>
+              <option value="home">Home</option>
+              <option value="travel">Travel</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <label>
+            <span>Target amount ($)</span>
+            <input type="number" min={100} step={100} required value={targetUsd} onChange={(e) => setTargetUsd(e.target.value)} />
+          </label>
+          <label>
+            <span>Starting saved ($)</span>
+            <input type="number" min={0} step={100} value={savedUsd} onChange={(e) => setSavedUsd(e.target.value)} />
+          </label>
+          <label>
+            <span>Monthly contribution ($)</span>
+            <input type="number" min={0} step={50} value={monthlyUsd} onChange={(e) => setMonthlyUsd(e.target.value)} />
+          </label>
+          <label>
+            <span>Target date</span>
+            <input type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} />
+          </label>
+        </div>
+        <div className="dyn-goal-footer">
+          <span className="dyn-goal-pace">
+            {monthsRemaining === null
+              ? "Add a monthly contribution to estimate your completion pace."
+              : monthsRemaining === 0
+                ? "Target already funded!"
+                : `Estimated pace: ~${monthsRemaining} month${monthsRemaining === 1 ? "" : "s"} (${(monthsRemaining / 12).toFixed(1)} yrs)`}
+          </span>
+          <button type="submit" className="primary-button" disabled={busy || !name.trim()}>
+            {busy ? "Saving…" : "Create Goal"}
+          </button>
+        </div>
+        {notice && <p className="dyn-form-error" role="alert">{notice}</p>}
+        {receipt && (
+          <div className="dyn-form-submitted" role="status">
+            <strong><CheckCircle2 size={14} aria-hidden="true" /> Goal Created via sfield</strong>
+            <p>{receipt}</p>
+            {onFollowUp && (
+              <button type="button" className="secondary-button" onClick={() => onFollowUp("Show my portfolio and goals summary")}>
+                View updated summary <ArrowUpRight size={12} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        )}
+      </form>
     </div>
   );
 }
@@ -693,7 +1025,14 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
                   </thead>
                   <tbody>
                     {node.rows.map((row, rIdx) => (
-                      <tr key={rIdx}>{row.map((cell, cIdx) => <td key={cIdx}>{cell}</td>)}</tr>
+                      <tr
+                        key={rIdx}
+                        className={props.onFollowUp ? "dyn-table-row-clickable" : undefined}
+                        title={props.onFollowUp ? `Click to drill into ${row[0]}` : undefined}
+                        onClick={() => props.onFollowUp?.(`Show details and analysis for ${row[0]}`)}
+                      >
+                        {row.map((cell, cIdx) => <td key={cIdx}>{cell}</td>)}
+                      </tr>
                     ))}
                   </tbody>
                 </table>
@@ -721,7 +1060,9 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
               </div>
             );
           }
-          if (node.type === "piechart") return <PieChartNode key={idx} node={node} />;
+          if (node.type === "piechart") return <PieChartNode key={idx} node={node} onFollowUp={props.onFollowUp} />;
+          if (node.type === "bubblechart") return <BubbleChartNode key={idx} node={node} onFollowUp={props.onFollowUp} />;
+          if (node.type === "goal_creator") return <GoalCreatorNode key={idx} node={node} onFollowUp={props.onFollowUp} />;
           if (node.type === "progress") {
             const pct = Math.min(100, Math.round((node.current / Math.max(node.target, 1)) * 100));
             return (

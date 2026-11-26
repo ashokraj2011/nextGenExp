@@ -1,9 +1,13 @@
-import { useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
-  ArrowLeft, ArrowRight, Braces, CheckCircle2, Cpu, Database, Download, Filter,
-  Layers, Lock, Server, ShieldCheck, Sparkles, Wrench,
+  ArrowLeft, ArrowRight, ArrowUpRight, Braces, CheckCircle2, Cpu, Database, Download, Filter,
+  Layers, Lock, Play, RefreshCw, Server, ShieldCheck, Sparkles, Wrench, X,
 } from "lucide-react";
+import { adminPaths } from "../../packages/contracts/admin-paths";
+import { api } from "./api";
 import "./help-tool-interactions.css";
+
+type RecentTurnSummary = Awaited<ReturnType<typeof api.recentTurns>>["turns"][number];
 
 type ModeId = "intent" | "experience" | "funding" | "harness";
 type NodeId = "host" | "allowlist" | "narrow" | "llm" | "proposal" | "registry" | "gate" | "executor" | "systems";
@@ -683,13 +687,57 @@ const inlineSvgStyles = `
 export function ToolInteractionDiagram() {
   const [modeId, setModeId] = useState<ModeId>("intent");
   const [selection, setSelection] = useState<Selection>({ kind: "step", index: 1 });
+  const [recentTurns, setRecentTurns] = useState<RecentTurnSummary[]>([]);
+  const [replayTurnId, setReplayTurnId] = useState<string>("");
+  const [loadingTurns, setLoadingTurns] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
   const idPrefix = useId().replace(/[^a-z0-9_-]/gi, "");
   const detailId = idPrefix + "-detail";
 
+  const loadRecentTurns = useCallback(async () => {
+    setLoadingTurns(true);
+    try {
+      const res = await api.recentTurns();
+      setRecentTurns(res.turns);
+    } catch {
+      // Inspector may be disabled
+    } finally {
+      setLoadingTurns(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadRecentTurns();
+  }, [loadRecentTurns]);
+
+  const replayedTurn = replayTurnId ? recentTurns.find((t) => t.turnId === replayTurnId) : undefined;
   const mode = MODES[modeId];
   const activeStep = selection.kind === "step" ? mode.steps[selection.index] : undefined;
   const activeNode = selection.kind === "node" ? selection.id : undefined;
+
+  const liveContractJson = replayedTurn
+    ? JSON.stringify({
+        turnId: replayedTurn.turnId,
+        mode: replayedTurn.mode,
+        prompt: replayedTurn.message.slice(0, 120),
+        selectedContextId: replayedTurn.selectedContextId,
+        semanticRoute: replayedTurn.semanticRoute?.capabilityLabel ?? null,
+        componentsRendered: replayedTurn.components,
+        routerRunId: replayedTurn.routerRunId,
+        composerRunId: replayedTurn.composerRunId,
+        harnessRunId: replayedTurn.harnessTrace?.harnessRunId ?? null,
+        fetchedSources: replayedTurn.harnessTrace?.fetchedSources ?? [
+          ...(replayedTurn.portfolioReadSucceeded ? ["portfolio_snapshot"] : []),
+          ...(replayedTurn.goalReadSucceeded ? ["goal_progress"] : []),
+          ...(replayedTurn.metricReadSucceeded ? ["balances"] : []),
+        ],
+        latencyMs: {
+          route: replayedTurn.routeRun?.elapsedMs ?? null,
+          compose: replayedTurn.composeRun?.elapsedMs ?? null,
+          harnessStages: replayedTurn.harnessTrace?.stages.map((s) => `${s.stage}:${s.durationMs ?? 0}ms`) ?? null,
+        },
+      }, null, 2)
+    : mode.requestToolsJson;
 
   const registryRows: { label: string; tag: string; hidden: boolean }[] = [
     { label: "Domain Read Tools (11)", tag: modeId === "intent" ? "Host / 1" : modeId === "funding" ? "1–2 gated" : "Host only", hidden: modeId === "harness" },
@@ -720,6 +768,7 @@ export function ToolInteractionDiagram() {
                 aria-pressed={modeId === key}
                 onClick={() => {
                   setModeId(key);
+                  setReplayTurnId("");
                   setSelection({ kind: "step", index: 1 });
                 }}
               >
@@ -727,15 +776,77 @@ export function ToolInteractionDiagram() {
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            className="sa-download"
-            onClick={() => svgRef.current && downloadSvg(svgRef.current, modeId)}
-          >
-            <Download size={15} aria-hidden="true" />
-            Download SVG
-          </button>
+          <div className="ti-toolbar-right">
+            <label className="ti-replay-picker">
+              <Play size={13} aria-hidden="true" />
+              <select
+                aria-label="Replay a real recorded turn"
+                value={replayTurnId}
+                onChange={(e) => {
+                  const nextId = e.target.value;
+                  setReplayTurnId(nextId);
+                  const found = recentTurns.find((t) => t.turnId === nextId);
+                  if (found) {
+                    setModeId(found.mode);
+                    setSelection({ kind: "step", index: 2 });
+                  }
+                }}
+              >
+                <option value="">{recentTurns.length ? `Replay a real turn (${recentTurns.length})` : "No recorded turns yet"}</option>
+                {recentTurns.map((t) => (
+                  <option key={t.turnId} value={t.turnId}>
+                    [{MODES[t.mode].shortLabel}] {t.message.slice(0, 48)}{t.message.length > 48 ? "…" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="sa-download ti-icon-btn"
+              title="Refresh recent turns"
+              aria-label="Refresh recent turns"
+              disabled={loadingTurns}
+              onClick={() => void loadRecentTurns()}
+            >
+              <RefreshCw size={14} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="sa-download"
+              onClick={() => svgRef.current && downloadSvg(svgRef.current, modeId)}
+            >
+              <Download size={15} aria-hidden="true" />
+              Download SVG
+            </button>
+          </div>
         </div>
+
+        {replayedTurn && (
+          <div className="ti-replay-banner" role="status">
+            <div className="ti-replay-copy">
+              <span className="ti-replay-pill">LIVE REPLAY · {MODES[replayedTurn.mode].shortLabel}</span>
+              <strong>“{replayedTurn.message}”</strong>
+              <span>
+                {replayedTurn.semanticRoute?.capabilityLabel || replayedTurn.selectedContextId || "Chat turn"}
+                {" · "}
+                {replayedTurn.components.join(", ") || "Text reply"}
+                {replayedTurn.harnessTrace?.stages.length
+                  ? ` · ${replayedTurn.harnessTrace.stages.map((s) => `${s.stage} (${s.status})`).join(" → ")}`
+                  : replayedTurn.routeRun
+                    ? ` · Route ${replayedTurn.routeRun.elapsedMs}ms${replayedTurn.composeRun ? ` / Compose ${replayedTurn.composeRun.elapsedMs}ms` : ""}`
+                    : ""}
+              </span>
+            </div>
+            <div className="ti-replay-actions">
+              <a href={`${adminPaths.inspector}?turn=${encodeURIComponent(replayedTurn.turnId)}`}>
+                Open in Inspector <ArrowUpRight size={13} aria-hidden="true" />
+              </a>
+              <button type="button" className="ti-replay-clear" aria-label="Exit replay" onClick={() => setReplayTurnId("")}>
+                <X size={14} aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="ti-summary-strip">
           <div className="ti-summary-pill">
@@ -1048,8 +1159,11 @@ export function ToolInteractionDiagram() {
 
         <div className="ti-contract-split">
           <div className="ti-contract-box">
-            <h4><Braces size={14} aria-hidden="true" /> Effective LLM dispatch contract (<code>request.tools</code>)</h4>
-            <pre><code>{mode.requestToolsJson}</code></pre>
+            <h4>
+              <Braces size={14} aria-hidden="true" />{" "}
+              {replayedTurn ? `Captured Live Turn Evidence (${replayedTurn.turnId.slice(0, 12)})` : <>Effective LLM dispatch contract (<code>request.tools</code>)</>}
+            </h4>
+            <pre><code>{liveContractJson}</code></pre>
           </div>
           <div className="ti-contract-box">
             <h4><Layers size={14} aria-hidden="true" /> Exposed vs. Hidden from LLM</h4>

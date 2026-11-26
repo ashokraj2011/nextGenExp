@@ -176,12 +176,12 @@ test("CEP end-to-end: clarification reply '1' resolves paused clarification and 
   assert.equal(ctx1.completedTurnCount, 1);
   assert.ok(ctx1.pendingClarification && ctx1.pendingClarification.choices.length >= 3);
 
-  // Turn 2: User replies tersely with "1" -> resolves to Portfolio Pie Chart!
+  // Turn 2: User replies tersely with "1" -> resolves to Portfolio Bubble Chart!
   const t2 = (await client.ask(chat.id, "1")).turn;
   assert.equal(t2.status, "completed");
   const c2 = t2.experience?.blocks.find((b) => b.component === "PznDynamicCanvas");
   assert.ok(c2 && c2.component === "PznDynamicCanvas");
-  assert.ok(c2.props.nodes.some((n) => n.type === "piechart"), "expected piechart after replying '1'");
+  assert.ok(c2.props.nodes.some((n) => n.type === "bubblechart"), "expected bubblechart after replying '1'");
   assert.ok((t2.harnessStages?.length ?? 0) >= 3, "expected live harnessStages recorded on TurnView");
 });
 
@@ -289,4 +289,73 @@ test("Conversation folders: CRUD, bootstrap, move/unfile, delete unfiles chats, 
   const surviving = afterBoot.conversations.find((c) => c.id === inFolder.id);
   assert.ok(surviving, "conversation inside deleted folder should still exist");
   assert.equal(surviving.folderId, undefined, "conversation inside deleted folder should be unfiled");
+});
+
+test("Multi-goal creator, native bubble chart, on-demand compaction, and recent-turns live replay API", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "cep-goals-compact-replay-"));
+  const gateway = await startFixtureGateway();
+  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: gateway.settings, operatorAuth: "off" });
+  t.after(async () => { await app.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
+  const client = await testClient(app.url);
+  const chat = await client.conversation();
+
+  // 1. "I want to set up another goal" opens the interactive goal_creator card
+  const goalTurn = (await client.ask(chat.id, "I want to set up another goal")).turn;
+  assert.equal(goalTurn.status, "completed");
+  const goalCard = goalTurn.experience?.blocks.find((b) => b.component === "PznDynamicCanvas");
+  assert.ok(goalCard && goalCard.component === "PznDynamicCanvas");
+  assert.ok(goalCard.props.nodes.some((n) => n.type === "goal_creator"), "expected goal_creator node");
+
+  // 2. Goal CRUD API persists goals through governed write
+  const createdGoal = await client.request<{ goal: { id: string; name: string }; goals: Array<{ id: string; name: string }>; auditId?: string }>(
+    "/api/goals",
+    { personaId: "demo-learner", name: "College 529 Fund", category: "education", targetCents: 8_000_000, savedCents: 1_200_000, monthlyContributionCents: 65_000 },
+    201,
+  );
+  assert.equal(createdGoal.goal.name, "College 529 Fund");
+  assert.ok(createdGoal.goals.some((g) => g.id === createdGoal.goal.id));
+  assert.ok(createdGoal.auditId, "expected write audit receipt");
+
+  const updatedGoal = await client.request<{ goal: { id: string; savedCents: number } }>(
+    `/api/goals/${createdGoal.goal.id}/update`,
+    { personaId: "demo-learner", savedCents: 1_500_000 },
+  );
+  assert.equal(updatedGoal.goal.savedCents, 1_500_000);
+
+  // 3. Native bubble chart in chat
+  const bubbleTurn = (await client.ask(chat.id, "Show my stock holdings as a bubble chart")).turn;
+  assert.equal(bubbleTurn.status, "completed");
+  const bubbleCard = bubbleTurn.experience?.blocks.find((b) => b.component === "PznDynamicCanvas");
+  assert.ok(bubbleCard && bubbleCard.component === "PznDynamicCanvas");
+  assert.ok(bubbleCard.props.nodes.some((n) => n.type === "bubblechart"), "expected native bubblechart node");
+
+  // 4. Add a 3rd turn, then check context health metrics & trigger on-demand compaction!
+  await client.ask(chat.id, "Show my portfolio allocation as a pie chart");
+  const ctxBefore = await client.request<{ completedTurnCount: number; estimatedContextTokens: number; tokenBudget: number; utilizationPct: number }>(
+    `/api/conversations/${chat.id}/context`,
+  );
+  assert.equal(ctxBefore.completedTurnCount, 3);
+  assert.ok(ctxBefore.estimatedContextTokens > 0);
+  assert.equal(ctxBefore.tokenBudget, 24_000);
+
+  const compacted = await client.request<{ compacted: boolean; context: { rollingSummary: { coveredThroughOrdinal: number } | null; rollingSummaryText: string | null } }>(
+    `/api/conversations/${chat.id}/compact`,
+    {},
+  );
+  assert.equal(compacted.compacted, true);
+  assert.ok(compacted.context.rollingSummary && compacted.context.rollingSummary.coveredThroughOrdinal >= 1);
+  assert.ok(compacted.context.rollingSummaryText && compacted.context.rollingSummaryText.length > 10);
+
+  // 5. /api/admin/recent-turns exposes recorded turns for Live Turn Replay
+  const recent = await client.request<{ turns: Array<{ turnId: string; mode: string; message: string }> }>("/api/admin/recent-turns");
+  assert.ok(recent.turns.length >= 3);
+  assert.ok(recent.turns.some((row) => row.turnId === bubbleTurn.id && row.mode === "harness"));
+
+  // 6. Delete custom goal cleans up cleanly
+  const deletedGoal = await client.request<{ deleted: boolean; goals: Array<{ id: string }> }>(
+    `/api/goals/${createdGoal.goal.id}/delete`,
+    { personaId: "demo-learner" },
+  );
+  assert.equal(deletedGoal.deleted, true);
+  assert.equal(deletedGoal.goals.some((g) => g.id === createdGoal.goal.id), false);
 });
