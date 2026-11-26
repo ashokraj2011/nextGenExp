@@ -899,6 +899,7 @@ function App() {
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [memoryError, setMemoryError] = useState("");
   const [activeHandoff, setActiveHandoff] = useState<HandoffTicket | null>(null);
+  const dismissedHandoffIds = useRef(new Set<string>());
   const [expertiseMode, setExpertiseMode] = useState<ExpertiseMode>(() => {
     try {
       const saved = localStorage.getItem("cep_expertise_mode");
@@ -1161,8 +1162,10 @@ function App() {
     const syncActiveHandoff = () => {
       void api.activeHandoff(activeProfile.personaId).then((res) => {
         if (!alive) return;
-        if (res.ticket) {
+        if (res.ticket && !dismissedHandoffIds.current.has(res.ticket.handoffId)) {
           setActiveHandoff((prev) => (prev?.handoffId === res.ticket!.handoffId && prev.updatedAt === res.ticket!.updatedAt ? prev : res.ticket));
+        } else if (!res.ticket) {
+          setActiveHandoff(null);
         }
       }).catch(() => undefined);
     };
@@ -1656,7 +1659,13 @@ function App() {
         }}
         activeHandoff={activeHandoff}
         onStartHandoff={(reason) => void startHandoff(reason)}
-        onDismissHandoff={() => setActiveHandoff(null)}
+        onDismissHandoff={() => {
+          if (activeHandoff) {
+            dismissedHandoffIds.current.add(activeHandoff.handoffId);
+            void api.closeHandoff(activeHandoff.handoffId).catch(() => undefined);
+          }
+          setActiveHandoff(null);
+        }}
         onOpenMemory={() => { setMemoryOpen(true); void loadMemory(); }}
         expertiseMode={expertiseMode}
         futuresOpen={futuresOpen}

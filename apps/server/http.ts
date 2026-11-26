@@ -1199,6 +1199,12 @@ export async function startApp(options: Options) {
       if (!ticket) throw new ApiError(404, "handoff_not_found", "Handoff ticket not found.");
       return json(res, { ticket });
     }
+    if (resource === "handoffs" && id && operation === "close" && method === "POST") {
+      const existing = handoffStore.findById(id);
+      if (!existing) throw new ApiError(404, "handoff_not_found", "Handoff ticket not found.");
+      const ticket = handoffStore.resolve(id, existing.customerName, "Closed by customer from chat.");
+      return json(res, { ticket });
+    }
     if (resource === "handoffs" && id && operation === "reply" && method === "POST") {
       const { text, role, author } = await body(req, z.object({
         text: z.string().trim().min(1).max(2000),
