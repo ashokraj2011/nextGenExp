@@ -46,7 +46,7 @@ import type { CapabilityManifest, CapabilityRef, OutputKind } from "../../packag
 import type { AgenticTrace } from "./decision-trace";
 import type { EvaluationRow } from "../../packages/contracts/evaluation";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
-import type { RecordUpdate, Bootstrap, ProfileChoice, Conversation, ConversationChange, ConversationView, DomainWriteAuditEntry, EngagementAnalyticsView, TurnAccepted, TurnView } from "../../packages/contracts/api";
+import type { RecordUpdate, Bootstrap, ProfileChoice, Conversation, ConversationChange, ConversationFolder, ConversationView, DomainWriteAuditEntry, EngagementAnalyticsView, TurnAccepted, TurnView } from "../../packages/contracts/api";
 import { pendingActionsContext, type PortalFundingView, type WorkspaceActionLog, type WorkspaceNextStep, type WorkspacePendingAction, type WorkspacePin } from "../../packages/contracts/workspace";
 import type { TreatmentRun, TurnPayloads } from "../../packages/contracts/inspector";
 import type { ContextCatalog, PropensityResult, SelectionMode } from "../../packages/contracts/domain";
@@ -200,6 +200,10 @@ export const api = {
   recordUpdates: (id: string) => request<RecordUpdate[]>("/api/conversations/" + id + "/updates"),
   conversation: (id: string) => request<ConversationView>("/api/conversations/" + id),
   changeConversation: (id: string, change: ConversationChange) => request<Conversation>("/api/conversations/" + id + "/settings", change),
+  folders: (domainId?: Conversation["domainId"]) => request<{ folders: ConversationFolder[] }>("/api/folders" + (domainId ? "?domain=" + domainId : "")),
+  createFolder: (name: string, domainId: Conversation["domainId"] = "wealth") => request<{ folder: ConversationFolder }>("/api/folders", { name, domainId }),
+  renameFolder: (id: string, name: string) => request<{ folder: ConversationFolder }>("/api/folders/" + id + "/rename", { name }),
+  deleteFolder: (id: string) => request<{ deleted: boolean; id: string }>("/api/folders/" + id + "/delete", {}),
   nextStep: (personaId: string) => request<WorkspaceNextStep | null>("/api/workspace/" + personaId + "/next-step"),
   pendingActions: (personaId: string) => request<WorkspacePendingAction[]>("/api/workspace/" + personaId + "/" + pendingActionsContext),
   portalFunding: () => request<PortalFundingView>("/api/account-portal/funding"),
@@ -321,8 +325,18 @@ export const api = {
   previewFunding: (conversationId: string, clientRequestId: string, source?: typeof pendingActionsContext) => request<TurnAccepted>(
     "/api/conversations/" + conversationId + "/preview-funding", { clientRequestId, source },
   ),
-  newConversation: (personaId: string, scenarioId: string, domainId: Conversation["domainId"] = "wealth") => request<ConversationView>("/api/conversations", domainId === "wealth" ? { personaId, scenarioId, domainId } : { domainId }),
-  newAdminConversation: (personaId: string, scenarioId: string, domainId: Conversation["domainId"] = "wealth") => request<ConversationView>("/api/admin/conversations", domainId === "wealth" ? { personaId, scenarioId, domainId } : { domainId }),
+  newConversation: (personaId: string, scenarioId: string, domainId: Conversation["domainId"] = "wealth", folderId?: string) => request<ConversationView>(
+    "/api/conversations",
+    domainId === "wealth"
+      ? { personaId, scenarioId, domainId, ...(folderId ? { folderId } : {}) }
+      : { domainId, ...(folderId ? { folderId } : {}) },
+  ),
+  newAdminConversation: (personaId: string, scenarioId: string, domainId: Conversation["domainId"] = "wealth", folderId?: string) => request<ConversationView>(
+    "/api/admin/conversations",
+    domainId === "wealth"
+      ? { personaId, scenarioId, domainId, ...(folderId ? { folderId } : {}) }
+      : { domainId, ...(folderId ? { folderId } : {}) },
+  ),
   turn: (id: string) => request<TurnView>("/api/turns/" + id),
   send: (id: string, message: string, clientRequestId: string) => (
     request<TurnAccepted>("/api/conversations/" + id + "/turns", { message, clientRequestId })

@@ -15,7 +15,7 @@ import { EventEmitter } from "node:events";
 import { SqliteDatabase } from "@sfield/store-sqlite";
 import type { UsageSummary } from "@sfield/core";
 import type { ContentEntry, CatalogSnapshot, ContentDecision, PropensityResult, RouteDecision, BalanceProof, Scope, SelectionMode } from "../../packages/contracts/domain";
-import type { Conversation, ConversationChange, FailureCode, Progress, PublicEvent, PublicEventType, TurnStatus, TurnView } from "../../packages/contracts/api";
+import type { Conversation, ConversationChange, ConversationFolder, FailureCode, Progress, PublicEvent, PublicEventType, TurnStatus, TurnView } from "../../packages/contracts/api";
 import type { GatewayExchange, OfferClick, TreatmentRun, TurnExchange, TurnExchangeStage } from "../../packages/contracts/inspector";
 import type { GoalProgress } from "../../packages/contracts/goal-progress";
 import {
@@ -140,8 +140,13 @@ function parse<T>(row?: { record: string }): T | undefined {
   return row ? JSON.parse(row.record) as T : undefined;
 }
 export function presentConversation(record: ConversationRecord): Conversation {
-  const { id, title, tenantId, domainId, userId, personaId, scenarioId, updatedAt, archivedAt, audience } = record;
-  return { id, title, tenantId, domainId, userId, personaId, scenarioId, updatedAt, ...(archivedAt === undefined ? {} : { archivedAt }), ...(audience && { audience }) };
+  const { id, title, tenantId, domainId, userId, personaId, scenarioId, updatedAt, archivedAt, audience, folderId } = record;
+  return {
+    id, title, tenantId, domainId, userId, personaId, scenarioId, updatedAt,
+    ...(archivedAt === undefined ? {} : { archivedAt }),
+    ...(audience && { audience }),
+    ...(folderId && { folderId }),
+  };
 }
 function inaccessible(): never {
   throw new ApiError(404, "not_found", "This item is unavailable.");
@@ -189,6 +194,11 @@ export class Store {
       CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, updated_at INTEGER NOT NULL, record TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS conversation_folders (
+        id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, domain_id TEXT NOT NULL,
+        name TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS folders_principal ON conversation_folders(principal_id, domain_id, name);
       CREATE TABLE IF NOT EXISTS user_threads (
         thread_id TEXT PRIMARY KEY REFERENCES conversations(id), tenant_id TEXT NOT NULL, domain_id TEXT NOT NULL, user_id TEXT NOT NULL
       );
@@ -464,10 +474,11 @@ export class Store {
     );
   }
 
-  createConversation(principalId: string, personaId: string, scenarioId: string, now: number, audience?: Conversation["audience"], domainId: DomainPackId = "wealth", userId = personaId, preview?: ConversationRecord["preview"]) {
+  createConversation(principalId: string, personaId: string, scenarioId: string, now: number, audience?: Conversation["audience"], domainId: DomainPackId = "wealth", userId = personaId, preview?: ConversationRecord["preview"], folderId?: string) {
+    const validFolderId = folderId && this.getFolder(folderId, principalId)?.domainId === domainId ? folderId : undefined;
     const record: ConversationRecord = {
       id: makeId("conv"), tenantId: serverTenantId, domainId, userId, principalId, personaId, scenarioId, title: "New conversation", updatedAt: now, sessions: {},
-      ...(audience && { audience }), ...(preview && { preview }),
+      ...(audience && { audience }), ...(preview && { preview }), ...(validFolderId && { folderId: validFolderId }),
     };
     this.db.tx(() => {
       this.db.run("INSERT INTO conversations VALUES (?, ?, ?, ?)", record.id, principalId, now, JSON.stringify(record));
@@ -477,6 +488,75 @@ export class Store {
       }
     });
     return record;
+  }
+
+  getFolder(id: string, principalId: string): ConversationFolder | undefined {
+    const row = this.db.one<{ id: string; name: string; domain_id: DomainPackId; created_at: number; updated_at: number }>(
+      "SELECT id, name, domain_id, created_at, updated_at FROM conversation_folders WHERE id = ? AND principal_id = ? AND tenant_id = ?",
+      id, principalId, serverTenantId,
+    );
+    return row ? { id: row.id, name: row.name, domainId: row.domain_id, createdAt: row.created_at, updatedAt: row.updated_at } : undefined;
+  }
+
+  listFolders(principalId: string, domainId?: DomainPackId): ConversationFolder[] {
+    const rows = domainId
+      ? this.db.all<{ id: string; name: string; domain_id: DomainPackId; created_at: number; updated_at: number }>(
+          "SELECT id, name, domain_id, created_at, updated_at FROM conversation_folders WHERE principal_id = ? AND tenant_id = ? AND domain_id = ? ORDER BY created_at ASC, name ASC",
+          principalId, serverTenantId, domainId,
+        )
+      : this.db.all<{ id: string; name: string; domain_id: DomainPackId; created_at: number; updated_at: number }>(
+          "SELECT id, name, domain_id, created_at, updated_at FROM conversation_folders WHERE principal_id = ? AND tenant_id = ? ORDER BY created_at ASC, name ASC",
+          principalId, serverTenantId,
+        );
+    return rows.map((row) => ({ id: row.id, name: row.name, domainId: row.domain_id, createdAt: row.created_at, updatedAt: row.updated_at }));
+  }
+
+  createFolder(principalId: string, domainId: DomainPackId, name: string, now: number): ConversationFolder {
+    const clean = name.replace(/\s+/g, " ").trim().slice(0, 48);
+    if (!clean) throw new ApiError(400, "folder_name_invalid", "Enter a folder name.");
+    const existing = this.listFolders(principalId, domainId);
+    if (existing.length >= 24) throw new ApiError(409, "folder_limit", "You can create up to 24 folders.");
+    const duplicate = existing.find((f) => f.name.toLowerCase() === clean.toLowerCase());
+    if (duplicate) return duplicate;
+    const folder: ConversationFolder = { id: makeId("fld"), name: clean, domainId, createdAt: now, updatedAt: now };
+    this.db.run(
+      "INSERT INTO conversation_folders VALUES (?, ?, ?, ?, ?, ?, ?)",
+      folder.id, serverTenantId, principalId, domainId, folder.name, now, now,
+    );
+    return folder;
+  }
+
+  renameFolder(id: string, principalId: string, name: string, now: number): ConversationFolder {
+    const clean = name.replace(/\s+/g, " ").trim().slice(0, 48);
+    if (!clean) throw new ApiError(400, "folder_name_invalid", "Enter a folder name.");
+    const existing = this.getFolder(id, principalId);
+    if (!existing) inaccessible();
+    this.db.run(
+      "UPDATE conversation_folders SET name = ?, updated_at = ? WHERE id = ? AND principal_id = ? AND tenant_id = ?",
+      clean, now, id, principalId, serverTenantId,
+    );
+    return { ...existing, name: clean, updatedAt: now };
+  }
+
+  deleteFolder(id: string, principalId: string): { deleted: boolean; unfiledIds: string[] } {
+    return this.db.tx(() => {
+      const existing = this.getFolder(id, principalId);
+      if (!existing) inaccessible();
+      const unfiledIds: string[] = [];
+      const rows = this.db.all<{ record: string }>(
+        "SELECT record FROM conversations WHERE principal_id = ? AND json_extract(record, '$.folderId') = ?",
+        principalId, id,
+      );
+      for (const row of rows) {
+        const conv = parse<ConversationRecord>(row);
+        if (!conv) continue;
+        delete conv.folderId;
+        this.saveConversation(conv);
+        unfiledIds.push(conv.id);
+      }
+      this.db.run("DELETE FROM conversation_folders WHERE id = ? AND principal_id = ? AND tenant_id = ?", id, principalId, serverTenantId);
+      return { deleted: true, unfiledIds };
+    });
   }
 
   hasOperatorContent(conversationId: string) {
@@ -508,6 +588,14 @@ export class Store {
           throw new ApiError(409, "turn_active", "Wait for the current response or stop it before archiving this chat.");
         }
         record.archivedAt ??= now;
+      } else if (change.operation === "move") {
+        if (change.folderId === null) {
+          delete record.folderId;
+        } else {
+          const folder = this.getFolder(change.folderId, principalId);
+          if (!folder || folder.domainId !== record.domainId) throw new ApiError(404, "folder_not_found", "Folder not found.");
+          record.folderId = folder.id;
+        }
       } else {
         delete record.archivedAt;
       }

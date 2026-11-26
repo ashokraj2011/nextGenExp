@@ -71,6 +71,7 @@ export async function collectCrossThreadStatus(input: {
     .filter((c) => c.archivedAt === undefined)
     .slice(0, 16);
 
+  const folderNames = new Map(input.store.listFolders(input.principalId).map((f) => [f.id, f.name]));
   const threads: ThreadStatusSummaryItem[] = [];
   for (const conv of conversations) {
     const turns = input.store.conversationTurns(conv.id);
@@ -116,9 +117,10 @@ export async function collectCrossThreadStatus(input: {
     const latestCompleted = completed[completed.length - 1]?.public;
     const latestReply = latestCompleted?.experience?.question ?? latestCompleted?.experience?.intro;
 
+    const folderLabel = conv.folderId ? folderNames.get(conv.folderId) : undefined;
     threads.push({
       conversationId: conv.id,
-      title: conv.title || "Untitled conversation",
+      title: folderLabel ? `[${folderLabel}] ${conv.title || "Untitled conversation"}` : (conv.title || "Untitled conversation"),
       domainId: conv.domainId,
       isCurrent: conv.id === input.currentConversationId,
       status,

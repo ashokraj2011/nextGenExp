@@ -141,6 +141,13 @@ export type TurnView = {
   retryOf?: string;
   feedback?: "helpful" | "unhelpful";
 };
+export type ConversationFolder = {
+  id: string;
+  name: string;
+  domainId: import("./domain-packs").DomainPackId;
+  createdAt: number;
+  updatedAt: number;
+};
 export type Conversation = {
   tenantId: string;
   userId: string;
@@ -148,8 +155,12 @@ export type Conversation = {
   id: string; title: string; personaId: string; scenarioId: string; updatedAt: number;
   archivedAt?: number;
   audience?: "admin";
+  folderId?: string;
 };
-export type ConversationChange = { operation: "rename"; title: string } | { operation: "archive" | "restore" };
+export type ConversationChange =
+  | { operation: "rename"; title: string }
+  | { operation: "archive" | "restore" }
+  | { operation: "move"; folderId: string | null };
 export type RecordUpdate = { id: string; recordId: string; label: string; state: "watching" | "reached"; value: string; updatedAt: number };
 export type ConversationView = Conversation & { turns: TurnView[] };
 export type DemoPersona = {
@@ -174,6 +185,7 @@ export type Bootstrap = {
   requiresProfile?: boolean;
   tenantId: string;
   conversations: Conversation[];
+  folders?: ConversationFolder[];
   personas: DemoPersona[];
   scenarios: { scenarioId: string; label: string }[];
   intentPrompts?: { intentId: string; label: string; prompt: string; isCustom: boolean }[];

@@ -220,3 +220,73 @@ test("Concurrent turns in same thread AND cross-thread status answers in chat + 
   );
   assert.ok(apiStatus.otherThreads.some((row) => row.title === "Portfolio Analysis" && row.totalTurns === 2));
 });
+
+test("Conversation folders: CRUD, bootstrap, move/unfile, delete unfiles chats, and user isolation", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "cep-folders-"));
+  const gateway = await startFixtureGateway();
+  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: gateway.settings });
+  t.after(async () => { await app.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
+  const client = await testClient(app.url);
+  const otherClient = await testClient(app.url);
+
+  // 1. Create a folder and verify it appears in /api/bootstrap and /api/folders
+  const created = await client.request<{ folder: { id: string; name: string; domainId: string } }>("/api/folders", {
+    name: "Tax Planning",
+    domainId: "wealth",
+  }, 201);
+  assert.equal(created.folder.name, "Tax Planning");
+  assert.equal(created.folder.domainId, "wealth");
+
+  const boot = await client.request<{ folders?: Array<{ id: string; name: string }>; defaultPersonaId: string; defaultScenarioId: string }>(
+    "/api/bootstrap?domain=wealth",
+  );
+  assert.ok(boot.folders?.some((f) => f.id === created.folder.id && f.name === "Tax Planning"));
+
+  // 2. Create a conversation directly inside the folder
+  const inFolder = await client.request<{ id: string; folderId?: string }>("/api/conversations", {
+    personaId: boot.defaultPersonaId,
+    scenarioId: boot.defaultScenarioId,
+    domainId: "wealth",
+    folderId: created.folder.id,
+  }, 201);
+  assert.equal(inFolder.folderId, created.folder.id);
+
+  // 3. Create an unfiled conversation, then move it into the folder, then unfile it
+  const unfiled = await client.conversation();
+  assert.equal(unfiled.folderId, undefined);
+  const movedIn = await client.request<{ id: string; folderId?: string }>(`/api/conversations/${unfiled.id}/settings`, {
+    operation: "move",
+    folderId: created.folder.id,
+  });
+  assert.equal(movedIn.folderId, created.folder.id);
+
+  const movedOut = await client.request<{ id: string; folderId?: string }>(`/api/conversations/${unfiled.id}/settings`, {
+    operation: "move",
+    folderId: null,
+  });
+  assert.equal(movedOut.folderId, undefined);
+
+  // 4. Rename folder
+  const renamed = await client.request<{ folder: { id: string; name: string } }>(`/api/folders/${created.folder.id}/rename`, {
+    name: "Taxes & Year-End",
+  });
+  assert.equal(renamed.folder.name, "Taxes & Year-End");
+
+  // 5. Cross-user isolation: another user cannot rename, delete, or move into this folder
+  const otherChat = await otherClient.conversation();
+  await otherClient.request(`/api/folders/${created.folder.id}/rename`, { name: "Hijacked" }, 404);
+  await otherClient.request(`/api/folders/${created.folder.id}/delete`, {}, 404);
+  await otherClient.request(`/api/conversations/${otherChat.id}/settings`, { operation: "move", folderId: created.folder.id }, 404);
+
+  // 6. Delete folder -> folder is removed, conversation inside it is kept and cleanly unfiled
+  const del = await client.request<{ deleted: boolean; id: string }>(`/api/folders/${created.folder.id}/delete`, {});
+  assert.equal(del.deleted, true);
+
+  const afterBoot = await client.request<{ folders?: Array<{ id: string }>; conversations: Array<{ id: string; folderId?: string }> }>(
+    "/api/bootstrap?domain=wealth",
+  );
+  assert.equal(afterBoot.folders?.some((f) => f.id === created.folder.id), false);
+  const surviving = afterBoot.conversations.find((c) => c.id === inFolder.id);
+  assert.ok(surviving, "conversation inside deleted folder should still exist");
+  assert.equal(surviving.folderId, undefined, "conversation inside deleted folder should be unfiled");
+});

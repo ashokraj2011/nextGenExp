@@ -115,7 +115,7 @@ import { z } from "zod";
 import demo from "../../fixtures/host.json";
 import type { Bootstrap, Conversation, TurnView } from "../../packages/contracts/api";
 import type { SelectionMode } from "../../packages/contracts/domain";
-import { actionBody, conversationChangeBody, createBody, eventBody, idPattern, messageBody, previewFundingBody, retryBody } from "../../packages/contracts/http-inputs";
+import { actionBody, conversationChangeBody, createBody, eventBody, folderCreateBody, folderRenameBody, idPattern, messageBody, previewFundingBody, retryBody } from "../../packages/contracts/http-inputs";
 import { accountPortalPath, pendingActionsContext, workspacePinsSchema, type PortalFundingView } from "../../packages/contracts/workspace";
 import { adminPaths, isAdminPath } from "../../packages/contracts/admin-paths";
 import { mockCcreRuleSchema, toolSetupSchema, treatmentPreviewSchema } from "../../packages/contracts/tool-setup";
@@ -804,7 +804,7 @@ export async function startApp(options: Options) {
       const input = test?.conversation ?? await body(req, createBody);
       const personaId = input.domainId === "wealth" ? input.personaId : requireOperator();
       requireChatDomain(input.domainId, personaId);
-      const thread = experience.createConversation(principalId, personaId, input.scenarioId ?? demo.defaultScenarioId, audience, input.domainId, operator, test && { tools: test.setup });
+      const thread = experience.createConversation(principalId, personaId, input.scenarioId ?? demo.defaultScenarioId, audience, input.domainId, operator, test && { tools: test.setup }, input.folderId);
       return json(res, { ...presentConversation(thread), turns: [] }, 201);
     };
     const internalApi = ["admin", "debug", "pzn", "approvals", "connectors", "ops", "ops-incidents", "sales", "sales-deals", "workflows", "workflow-runs", "mcp", "ag-ui"].includes(resource)
@@ -845,6 +845,7 @@ export async function startApp(options: Options) {
           (adminBootstrap || conversation.audience !== "admin")
           && ((adminBootstrap && domain === null) || conversation.domainId === activeDomain)
           && isThreadUser(conversation) && membership.chat(conversation.domainId, conversation.personaId, operator)),
+        folders: store.listFolders(principalId, adminBootstrap && domain === null ? undefined : activeDomain),
         personas,
         scenarios: tsFixtures.scenarios.map(({ scenarioId, label }) => ({ scenarioId, label })),
         intentPrompts,
@@ -1739,6 +1740,24 @@ export async function startApp(options: Options) {
       if (id === "ux-evolution-dismiss" && method === "POST") {
         const { id: proposalId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());
         return json(res, uxEvolution.dismissProposal(proposalId));
+      }
+    }
+    if (resource === "folders") {
+      if (method === "GET" && !id) {
+        const domain = url.searchParams.get("domain");
+        const parsedDomain = domain ? z.enum(domainPackIds).safeParse(domain) : null;
+        return json(res, { folders: store.listFolders(principalId, parsedDomain?.success ? parsedDomain.data : undefined) });
+      }
+      if (method === "POST" && !id) {
+        const input = await body(req, folderCreateBody);
+        return json(res, { folder: store.createFolder(principalId, input.domainId, input.name, now()) }, 201);
+      }
+      if (id && ((method === "POST" && operation === "rename") || (method === "PATCH" && !operation))) {
+        const input = await body(req, folderRenameBody);
+        return json(res, { folder: store.renameFolder(id, principalId, input.name, now()) });
+      }
+      if (id && ((method === "POST" && operation === "delete") || (method === "DELETE" && !operation))) {
+        return json(res, store.deleteFolder(id, principalId));
       }
     }
     if (resource === "threads" && id === "status" && method === "GET") {

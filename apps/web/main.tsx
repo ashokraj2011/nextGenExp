@@ -8,7 +8,7 @@ import {
   Square, ThumbsDown, ThumbsUp, X,
 } from "lucide-react";
 import {
-  failureCopy, progressLabels, type Bootstrap, type Conversation, type ConversationChange, type ConversationView,
+  failureCopy, progressLabels, type Bootstrap, type Conversation, type ConversationChange, type ConversationFolder, type ConversationView,
   type DemoPersona, type NextBestActionCard, type Progress, type TurnAccepted, type TurnView,
 } from "../../packages/contracts/api";
 import { MAX_MESSAGE_LENGTH } from "../../packages/contracts/domain";
@@ -912,6 +912,7 @@ function App() {
   const [domainPack, setDomainPack] = useDomainPack();
   const [configuration, setConfiguration] = useState<Bootstrap>();
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [folders, setFolders] = useState<ConversationFolder[]>([]);
   const [conversation, setConversation] = useState<ConversationView>();
   const [overviewOpen, setOverviewOpen] = useState(entry.showOverview);
   const [section, setSection] = useState<WorkspaceSection>("summary");
@@ -970,6 +971,7 @@ function App() {
   const activeTurnKey = activeTurnIds.join(",");
   const scopedPersonaId = adminChat ? null : (workspaceProfileId ?? activeProfile?.personaId ?? null);
   const visibleConversations = conversations.filter((row) => row.domainId === domainPack.id && (!scopedPersonaId || row.personaId === scopedPersonaId));
+  const visibleFolders = folders.filter((folder) => folder.domainId === domainPack.id);
 
   const recordProgress = useCallback((turnId: string, progress: Progress) => {
     setProgressHistory((prev) => {
@@ -1009,6 +1011,7 @@ function App() {
       }
       const threads = data.conversations.filter(({ audience, domainId }) => (audience === "admin") === adminChat && domainId === domainPack.id);
       setConversations(threads);
+      setFolders(data.folders ?? []);
       const matching = domainPack.id === "wealth" && entry.profileId ? threads.filter((row) => row.personaId === entry.profileId) : threads;
       const preferred = matching.find((row) => row.id === readActiveConversation(adminChat, domainPack.id))
         ?? matching.find(({ archivedAt }) => archivedAt === undefined);
@@ -1277,8 +1280,8 @@ function App() {
     choose(row);
     if (!adminChat && !row.turns.length) pendingActions.refresh();
   };
-  const startConversation = async (personaId: string, scenarioId: string) => exclusive(async () => {
-    const row = await createConversation(personaId, scenarioId, domainPack.id);
+  const startConversation = async (personaId: string, scenarioId: string, folderId?: string) => exclusive(async () => {
+    const row = await createConversation(personaId, scenarioId, domainPack.id, folderId);
     if (domainPack.id === "wealth" && signedInProfileId && signedInProfileId !== row.personaId) {
       if (!saveProfileSession(row.personaId)) throw new Error("Couldn’t switch profiles in this tab. Please try again.");
       setSignedInProfileId(row.personaId);
@@ -1288,12 +1291,31 @@ function App() {
   const changeConversation = async (id: string, change: ConversationChange) => exclusive(async () => {
     const updated = await api.changeConversation(id, change);
     remember(updated);
-    setConversation((current) => current?.id === id ? { ...current, ...updated, archivedAt: updated.archivedAt } : current);
+    setConversation((current) => current?.id === id ? { ...current, ...updated, archivedAt: updated.archivedAt, folderId: updated.folderId } : current);
     if (change.operation === "archive" && readActiveConversation(adminChat, domainPack.id) === id) {
       rememberActiveConversation(null, adminChat, domainPack.id);
       setOverviewOpen(true);
       setSection("summary");
     }
+  });
+  const createFolder = async (name: string): Promise<ConversationFolder | null> => {
+    let created: ConversationFolder | null = null;
+    await exclusive(async () => {
+      const res = await api.createFolder(name, domainPack.id);
+      created = res.folder;
+      setFolders((list) => [...list.filter((item) => item.id !== res.folder.id), res.folder]);
+    });
+    return created;
+  };
+  const renameFolder = async (id: string, name: string) => exclusive(async () => {
+    const res = await api.renameFolder(id, name);
+    setFolders((list) => list.map((item) => item.id === id ? res.folder : item));
+  });
+  const deleteFolder = async (id: string) => exclusive(async () => {
+    await api.deleteFolder(id);
+    setFolders((list) => list.filter((item) => item.id !== id));
+    setConversations((list) => list.map((row) => row.folderId === id ? { ...row, folderId: undefined } : row));
+    setConversation((current) => current?.folderId === id ? { ...current, folderId: undefined } : current);
   });
   const savePins = async (next: WorkspacePin[]) => {
     if (!activeProfile) return false;
@@ -1476,10 +1498,17 @@ function App() {
           <LayoutDashboard size={16} aria-hidden="true" />Overview
         </button>
       </div>
-      <ThreadList threads={visibleConversations} profiles={profilesById} activeId={chat?.id}
+      <ThreadList threads={visibleConversations} folders={visibleFolders} profiles={profilesById} activeId={chat?.id}
         showNames={adminChat} pending={pending || !configuration}
         open={(id) => void exclusive(async () => revealChat(await api.conversation(id)))}
-        manage={(id, trigger) => { threadTrigger.current = trigger; openPanel({ kind: "thread", id }); }} />
+        manage={(id, trigger) => { threadTrigger.current = trigger; openPanel({ kind: "thread", id }); }}
+        onCreateFolder={createFolder}
+        onRenameFolder={renameFolder}
+        onDeleteFolder={deleteFolder}
+        onMoveThread={(threadId, folderId) => changeConversation(threadId, { operation: "move", folderId })}
+        onNewInFolder={(folderId) => {
+          if (configuration) void startConversation(conversation?.personaId ?? signedInProfileId ?? configuration.defaultPersonaId, conversation?.scenarioId ?? configuration.defaultScenarioId, folderId);
+        }} />
       {!adminChat && (
         <section className="rail-section rail-topics" aria-label="Quick planning topics">
           <h2>{domainPack.id === "wealth" ? "Topics" : `${domainPack.shortLabel} Actions`}</h2>
@@ -1754,7 +1783,7 @@ function App() {
       activePersonaId={activeProfile.personaId} pending={pending} close={closePanel}
       startChat={(personaId) => startConversation(personaId, configuration.defaultScenarioId)} />}
     {panel?.kind === "pins" && <WorkspaceCustomization key={activeProfile?.personaId} initial={pins} pending={pending} notice={notice} close={closePanel} save={savePins} />}
-    {managedThread && <ThreadSettings key={managedThread.id} thread={managedThread} pending={pending} notice={notice} close={closePanel}
+    {managedThread && <ThreadSettings key={managedThread.id} thread={managedThread} folders={visibleFolders} pending={pending} notice={notice} close={closePanel}
       change={(input) => changeConversation(managedThread.id, input)} />}
   </div>;
 }

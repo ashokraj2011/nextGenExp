@@ -148,10 +148,10 @@ export class ExperienceService {
     this.history = new PznChatHistory(store, chat);
   }
 
-  createConversation(principalId: string, personaId: string, scenarioId: string, audience?: Conversation["audience"], domainId: Conversation["domainId"] = "wealth", operatorName?: string, preview?: ConversationRecord["preview"]) {
+  createConversation(principalId: string, personaId: string, scenarioId: string, audience?: Conversation["audience"], domainId: Conversation["domainId"] = "wealth", operatorName?: string, preview?: ConversationRecord["preview"], folderId?: string) {
     const allowed = domainId === "wealth" ? findProfileById(personaId)?.allowedScenarios.includes(scenarioId) : Boolean(operatorName) && scenarioId === demo.defaultScenarioId;
     if (!allowed) throw new ApiError(400, "demo_scope_invalid", "Select an available profile and scenario.");
-    return this.store.createConversation(principalId, personaId, scenarioId, this.now(), audience, domainId, domainId === "wealth" ? personaId : operatorName, preview);
+    return this.store.createConversation(principalId, personaId, scenarioId, this.now(), audience, domainId, domainId === "wealth" ? personaId : operatorName, preview, folderId);
   }
 
   conversationTurns(conversation: ConversationRecord) {
