@@ -27,11 +27,14 @@ export interface KnowledgeCitation {
   domain: string;
   chunkIndex: number;
   score: number;
+  bm25Score?: number;
+  vectorScore?: number;
   excerpt: string;
 }
 
 export interface KnowledgeSearchResult {
   query: string;
+  retrievalMode?: "hybrid_bm25_vector";
   citations: KnowledgeCitation[];
   suggestedFollowUp?: { label: string; prompt: string };
 }

@@ -1787,6 +1787,42 @@ export class Runtime implements IntegrationTaskRuntime {
     }
   }
 
+  /** Lists active sfield memory items (preferences & facts) scoped to this principal. */
+  async listMemory(principalId: string) {
+    const handle = this.sf.memory.for(principalFor(principalId));
+    const page = await handle.list({ status: "active" }, { limit: 50 });
+    return page.items;
+  }
+
+  /** Persists a scoped preference or fact via sfield's MemoryService (blocks secrets, enforces caps & retention, audited). */
+  async rememberMemory(
+    principalId: string,
+    input: { kind: "preference" | "fact"; content: string; key?: string; origin?: "user_explicit" | "trusted_source" },
+  ) {
+    const principal = principalFor(principalId);
+    const handle = this.sf.memory.for(principal);
+    return handle.put(
+      {
+        scope: { kind: "subject", tenantId: principal.tenantId, subjectId: principal.subjectId },
+        kind: input.kind,
+        content: input.content.trim(),
+        origin: input.origin ?? "user_explicit",
+        provenance: [{ sourceType: "message", sourceId: principalId, observedAt: new Date(this.now()).toISOString() }],
+        ...(input.key ? { structured: { key: input.key, value: input.content.trim() } } : {}),
+      },
+      { idempotencyKey: `mem_${principalId}_${input.kind}_${digestJson({ content: input.content, key: input.key ?? null }).slice(0, 16)}` },
+    );
+  }
+
+  /** Forgets a memory item via sfield's MemoryService and returns its deletion receipt. */
+  async forgetMemory(principalId: string, memoryId: string) {
+    const handle = this.sf.memory.for(principalFor(principalId));
+    return handle.forget(
+      { id: memoryId },
+      { idempotencyKey: `forget_${principalId}_${memoryId}` },
+    );
+  }
+
   async close() {
     await this.sf.close();
   }

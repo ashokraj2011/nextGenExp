@@ -11,6 +11,7 @@ import { EvalRunnerPanel } from "./eval-runner-panel";
 import { PiiFirewallPanel } from "./pii-firewall-panel";
 import { UxEvolutionPanel } from "./ux-evolution-panel";
 import { TelemetryPanel } from "./telemetry-panel";
+import { HandoffInboxPanel } from "./handoff-inbox";
 import { Inspector } from "./inspector";
 import { readActiveConversation, rememberActiveConversation } from "./conversation-storage";
 
@@ -128,6 +129,22 @@ function ApprovalQueuePanel() {
               onChange={(e) => void togglePolicy({ gateHighRiskTrades: e.target.checked })}
             />
             Gate high-value stock trades (&gt;${data.policy.highRiskTradeThresholdUsd.toLocaleString("en-US")})
+          </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "0.85rem" }}>
+            <input
+              type="checkbox"
+              checked={Boolean(data.policy.requireEvalBeforePublish)}
+              onChange={(e) => void togglePolicy({ requireEvalBeforePublish: e.target.checked })}
+            />
+            Require passing Guardrail Eval before publish / gateway activate
+          </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "0.85rem" }}>
+            <input
+              type="checkbox"
+              checked={Boolean(data.policy.gateTaskPublish)}
+              onChange={(e) => void togglePolicy({ gateTaskPublish: e.target.checked })}
+            />
+            Require approval to publish Integration Tasks
           </label>
         </div>
       )}
@@ -413,6 +430,7 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
   const piiView = view === "logs" && query.get("source") === "pii";
   const uxEvolutionView = view === "logs" && query.get("source") === "ux-evolution";
   const telemetryView = view === "logs" && query.get("source") === "telemetry";
+  const handoffsView = view === "logs" && query.get("source") === "handoffs";
 
   useEffect(() => {
     let active = true;
@@ -429,13 +447,13 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
   }, [query, selectThread]);
 
   useEffect(() => {
-    if (!selectedId || pendingActionView || approvalsView || writeAuditView || analyticsView || evalsView || piiView || uxEvolutionView || telemetryView) return;
+    if (!selectedId || pendingActionView || approvalsView || writeAuditView || analyticsView || evalsView || piiView || uxEvolutionView || telemetryView || handoffsView) return;
     let active = true;
     void api.conversation(selectedId).then((row) => {
       if (active) setConversation(row);
     }, (error: unknown) => { if (active) setNotice(toolSetupErrorMessage(error)); });
     return () => { active = false; };
-  }, [selectedId, refresh, pendingActionView, approvalsView, writeAuditView, analyticsView, evalsView, piiView, uxEvolutionView, telemetryView]);
+  }, [selectedId, refresh, pendingActionView, approvalsView, writeAuditView, analyticsView, evalsView, piiView, uxEvolutionView, telemetryView, handoffsView]);
 
   const loaded = conversation?.id === selectedId ? conversation : undefined;
   const requestedTurn = loaded?.id === query.get("thread") ? query.get("turn") ?? undefined : undefined;
@@ -447,6 +465,7 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
   const piiQuery = new URLSearchParams({ source: "pii" });
   const uxEvolutionQuery = new URLSearchParams({ source: "ux-evolution" });
   const telemetryQuery = new URLSearchParams({ source: "telemetry" });
+  const handoffsQuery = new URLSearchParams({ source: "handoffs" });
   if (selectedId) {
     pendingQuery.set("thread", selectedId);
     approvalsQuery.set("thread", selectedId);
@@ -456,8 +475,9 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
     piiQuery.set("thread", selectedId);
     uxEvolutionQuery.set("thread", selectedId);
     telemetryQuery.set("thread", selectedId);
+    handoffsQuery.set("thread", selectedId);
   }
-  const isChatCallsView = !pendingActionView && !approvalsView && !writeAuditView && !analyticsView && !evalsView && !piiView && !uxEvolutionView && !telemetryView;
+  const isChatCallsView = !pendingActionView && !approvalsView && !writeAuditView && !analyticsView && !evalsView && !piiView && !uxEvolutionView && !telemetryView && !handoffsView;
   return <main className="admin-main admin-diagnostics" aria-labelledby="diagnostics-title">
     <header className="admin-heading"><h1 id="diagnostics-title">{title}</h1></header>
     {view === "logs" && <nav className="log-sources" aria-label="Log sources">
@@ -479,6 +499,8 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
         href={adminPaths.logs + "?" + uxEvolutionQuery}>Self-Evolving UX</a>
       <a className="rail-link" aria-current={telemetryView ? "page" : undefined}
         href={adminPaths.logs + "?" + telemetryQuery}>OTel Telemetry &amp; Cost</a>
+      <a className="rail-link" aria-current={handoffsView ? "page" : undefined}
+        href={adminPaths.logs + "?" + handoffsQuery}>Live Agent Handoff</a>
     </nav>}
     {pendingActionView ? <PendingActionLogs profiles={configuration?.personas ?? []} />
       : approvalsView ? <ApprovalQueuePanel />
@@ -488,6 +510,7 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
       : piiView ? <PiiFirewallPanel />
       : uxEvolutionView ? <UxEvolutionPanel />
       : telemetryView ? <TelemetryPanel />
+      : handoffsView ? <HandoffInboxPanel />
       : <section className="admin-card diagnostics-picker">
       <label htmlFor={selectId}>Conversation</label>
       <div>

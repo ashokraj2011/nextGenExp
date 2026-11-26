@@ -56,6 +56,10 @@ import { VerticalPackStore } from "./vertical-factory";
 import { PiiFirewallStore, registerLlmEgressContext, scrubWithPiiFirewall, unregisterLlmEgressContext } from "./pii-firewall";
 import { CepTelemetry } from "./telemetry";
 import { migrateLegacyConnectors } from "./connector-migration";
+import { HandoffStore } from "./handoff-store";
+import { createHandoffInputSchema } from "../../packages/contracts/handoff";
+import { buildA2aAgentCard, handleCepMcpRequest } from "./cep-mcp-server";
+import { agUiRunInputSchema, streamAgUiRun } from "./ag-ui";
 import { piiFirewallConfigSchema } from "../../packages/contracts/pii-firewall";
 import { UxEvolutionStore } from "./ux-evolution";
 import { extractDocumentAction } from "./document-extractor";
@@ -339,6 +343,7 @@ export async function startApp(options: Options) {
   });
   const uxEvolution = new UxEvolutionStore(options.dataDir);
   const evalRunner = new EvalRunnerStore(options.dataDir);
+  const handoffStore = new HandoffStore(options.dataDir);
   const tradeStore = new TradeStore(options.dataDir, profileStore);
   const scheduledJobs = new ScheduledJobStore(options.dataDir, {
     profileStore, tradeStore, opsStore, salesStore, proactiveStore,
@@ -414,7 +419,44 @@ export async function startApp(options: Options) {
 
   const demoMcp = createDemoMcpServer();
 
+  function enforceEvalGate(actionLabel: string) {
+    if (!approvalStore.getPolicy().requireEvalBeforePublish) return;
+    const latest = evalRunner.view().latest;
+    if (!latest) {
+      throw new ApiError(409, "eval_gate_failed", `Pre-publish compliance eval gate is enabled. Run the Guardrail Eval Suite (/admin/logs?source=evals) and achieve 100% pass before ${actionLabel}.`);
+    }
+    if (latest.releaseGate !== "ready_to_publish") {
+      throw new ApiError(409, "eval_gate_failed", `Latest Guardrail Eval (${latest.runId}) is blocked (${latest.passedCases}/${latest.totalCases} passed, ${latest.criticalFailures} critical). Fix failures before ${actionLabel}.`);
+    }
+  }
+
   async function executeApprovedRecord(principalId: string, record: ApprovalRecord) {
+    if (record.targetKind === "task_publish") {
+      const ref = typeof record.payload.ref === "string" ? record.payload.ref : record.recordId;
+      const claim = approvalStore.claimForExecution(record.id);
+      if (!claim.ok) throw new ApiError(409, claim.code, claim.message);
+      try {
+        const published = await integrationService.publish(ref);
+        const summary = `Published integration task ${published.contract.ref} via ${published.sfieldRoute}`;
+        const audit = writeAudit.record({
+          sfieldRunId: "task_publish",
+          sfieldToolRef: record.sfieldToolRef,
+          domain: "integration",
+          recordId: published.contract.ref,
+          action: "publish_task",
+          actor: record.decidedBy ?? record.requester,
+          summary,
+          status: "succeeded",
+          approvalId: record.id,
+        });
+        const finalRecord = approvalStore.markExecuted(record.id, { summary, sfieldRunId: published.sfieldRoute, auditId: audit.auditId }) ?? record;
+        return { approval: finalRecord, execution: { ...published, summary, auditId: audit.auditId } };
+      } catch (err) {
+        approvalStore.releaseClaim(record.id);
+        const code = err instanceof IntegrationTaskError ? err.code : "task_publish_failed";
+        throw new ApiError(409, code, err instanceof Error ? err.message : "Could not publish integration task.");
+      }
+    }
     if (record.targetKind === "integration_task") {
       try {
         const out = await integrationService.resume(record, principalId);
@@ -661,6 +703,10 @@ export async function startApp(options: Options) {
       }
       return parsed.data;
     };
+    if (pathname === "/.well-known/agent.json" && req.method === "GET") {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      return json(res, buildA2aAgentCard(origin, integrationService));
+    }
     if (!pathname.startsWith("/api/")) {
       if (pathname === "/it-ops" || pathname === "/revops") requireChatDomain(pathname === "/it-ops" ? "it_ops" : "sales_revops", "");
       if (isAdminPath(pathname) || ["/integrations", "/recommendations", "/it-ops", "/revops"].includes(pathname)) requireOperator();
@@ -751,7 +797,7 @@ export async function startApp(options: Options) {
       const thread = experience.createConversation(principalId, personaId, input.scenarioId ?? demo.defaultScenarioId, audience, input.domainId, operator, test && { tools: test.setup });
       return json(res, { ...presentConversation(thread), turns: [] }, 201);
     };
-    const internalApi = ["admin", "debug", "pzn", "approvals", "connectors", "ops", "ops-incidents", "sales", "sales-deals", "workflows", "workflow-runs"].includes(resource)
+    const internalApi = ["admin", "debug", "pzn", "approvals", "connectors", "ops", "ops-incidents", "sales", "sales-deals", "workflows", "workflow-runs", "mcp", "ag-ui"].includes(resource)
       || (resource === "integrations" && id !== "demo-mcp")
       || (resource === "proactive" && id === "trigger");
     if (internalApi) {
@@ -861,6 +907,110 @@ export async function startApp(options: Options) {
       if (operation === "reset" && method === "POST") return json(res, telemetry.reset());
       throw new ApiError(404, "not_found", "This item is unavailable.");
     }
+    if (resource === "admin" && id === "handoffs" && inspectorEnabled) {
+      const actor = requireOperator();
+      if (!operation && method === "GET") return json(res, handoffStore.view());
+      if (operation === "claim" && method === "POST") {
+        const { handoffId } = await body(req, z.object({ handoffId: z.string().min(3).max(64) }).strict());
+        const ticket = handoffStore.claim(handoffId, actor);
+        if (!ticket) throw new ApiError(404, "handoff_not_found", "Handoff ticket not found.");
+        return json(res, { ticket, view: handoffStore.view() });
+      }
+      if (operation === "reply" && method === "POST") {
+        const { handoffId, text } = await body(req, z.object({ handoffId: z.string().min(3).max(64), text: z.string().trim().min(1).max(2000) }).strict());
+        const ticket = handoffStore.addReply(handoffId, actor, text, "agent");
+        if (!ticket) throw new ApiError(404, "handoff_not_found", "Handoff ticket not found.");
+        return json(res, { ticket, view: handoffStore.view() });
+      }
+      if (operation === "resolve" && method === "POST") {
+        const { handoffId, resolutionNote } = await body(req, z.object({ handoffId: z.string().min(3).max(64), resolutionNote: z.string().max(300).optional() }).strict());
+        const ticket = handoffStore.resolve(handoffId, actor, resolutionNote);
+        if (!ticket) throw new ApiError(404, "handoff_not_found", "Handoff ticket not found.");
+        return json(res, { ticket, view: handoffStore.view() });
+      }
+      throw new ApiError(404, "not_found", "This item is unavailable.");
+    }
+    if (resource === "handoffs" && !id && method === "POST") {
+      const input = await body(req, createHandoffInputSchema, 16 * 1024);
+      const profile = profileStore.findByPersonaId(input.personaId);
+      const customerSnapshot: Record<string, string> = profile ? {
+        Customer: profile.displayName,
+        Account: profile.accountFundingStatus,
+        Beneficiary: profile.beneficiaryStatus,
+        ...(profile.cashCents != null ? { Cash: `$${(profile.cashCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}` } : {}),
+        ...(profile.equityCents != null ? { Equities: `$${(profile.equityCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}` } : {}),
+      } : {};
+      let recentTranscript: Array<{ role: "user" | "assistant"; text: string }> = [];
+      try {
+        const conv = store.conversation(input.conversationId, principalId, viewer);
+        const turns = await experience.conversationTurns(conv);
+        recentTranscript = turns.slice(-5).flatMap((t) => [
+          { role: "user" as const, text: t.message },
+          ...(t.experience?.intro ? [{ role: "assistant" as const, text: t.experience.intro }] : []),
+        ]);
+      } catch { /* conversation may be external or brand new */ }
+      const ticket = handoffStore.create({
+        conversationId: input.conversationId,
+        personaId: input.personaId,
+        customerName: profile?.displayName ?? input.personaId,
+        domain: input.domain,
+        reason: input.reason,
+        priority: input.priority,
+        customerSnapshot,
+        recentTranscript,
+      });
+      return json(res, { ticket }, 201);
+    }
+    if (resource === "mcp" && !id && method === "POST") {
+      const actor = requireOperator();
+      const out = await handleCepMcpRequest(await body(req, z.unknown(), 64 * 1024), {
+        integrationService,
+        knowledgeBase,
+        principalId,
+        operatorName: actor,
+      });
+      res.writeHead(out.status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...out.headers });
+      res.end(out.body === undefined ? "" : JSON.stringify(out.body));
+      return;
+    }
+    if (resource === "ag-ui" && !id && method === "POST") {
+      const actor = requireOperator();
+      const input = await body(req, agUiRunInputSchema, 48 * 1024);
+      await streamAgUiRun(res, input, {
+        integrationService,
+        principalId,
+        operatorName: actor,
+        gateway: options.gateway,
+        dataDir: options.dataDir,
+      });
+      return;
+    }
+    if (resource === "memory") {
+      if (!runtime) throw new ApiError(503, "sfield_runtime_required", "Connect a model gateway to enable sfield MemoryService.");
+      if (!id && method === "GET") {
+        const items = await runtime.listMemory(principalId);
+        return json(res, { items });
+      }
+      if (!id && method === "POST") {
+        const input = await body(req, z.object({
+          kind: z.enum(["preference", "fact"]).default("preference"),
+          content: z.string().trim().min(2).max(500),
+          key: z.string().trim().min(1).max(64).optional(),
+        }).strict());
+        try {
+          const item = await runtime.rememberMemory(principalId, input);
+          return json(res, { item, items: await runtime.listMemory(principalId) }, 201);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Could not save memory item.";
+          throw new ApiError(400, "memory_rejected", msg);
+        }
+      }
+      if (id === "forget" && !operation && method === "POST") {
+        const { id: memoryId } = await body(req, z.object({ id: z.string().trim().min(2).max(120) }).strict());
+        const receipt = await runtime.forgetMemory(principalId, memoryId);
+        return json(res, { receipt, items: await runtime.listMemory(principalId) });
+      }
+    }
     if (resource === "admin" && id === "gateway" && inspectorEnabled) {
       const actor = requireOperator();
       const restartSupported = Boolean(options.onGatewayActivated);
@@ -879,6 +1029,7 @@ export async function startApp(options: Options) {
         return json(res, result);
       }
       if (operation === "activate" && method === "POST") {
+        enforceEvalGate("activating a new LLM Gateway configuration");
         const config = await parseConfig();
         const last = gatewayConfig.read().lastTest;
         if (!last?.ok || last.configDigest !== configDigest(config) || Date.now() - Date.parse(last.testedAt) > 30 * 60_000) {
@@ -1950,8 +2101,45 @@ export async function startApp(options: Options) {
         const { integrationId } = await body(req, integrationMcpDiscoverRequestSchema);
         return json(res, await guard(() => integrationService.discoverMcp(integrationId)));
       }
-      if (id === "contracts" && operation === "publish" && method === "POST") {
+      if (id === "contracts" && operation === "delete" && method === "POST") {
         const { ref } = await body(req, z.object({ ref: z.string().min(3).max(120) }).strict());
+        const deleted = await guard(() => integrationTasks.deleteDraft(ref));
+        return json(res, { ...deleted, view: integrationService.view() });
+      }
+      if (id === "integrations" && operation === "delete" && method === "POST") {
+        const { id: integrationId } = await body(req, z.object({ id: z.string().min(2).max(64) }).strict());
+        const deleted = await guard(() => integrationTasks.deleteIntegration(integrationId));
+        return json(res, { ...deleted, view: integrationService.view() });
+      }
+      if (id === "contracts" && operation === "publish" && method === "POST") {
+        enforceEvalGate("publishing an integration task contract");
+        const { ref } = await body(req, z.object({ ref: z.string().min(3).max(120) }).strict());
+        if (approvalStore.getPolicy().gateTaskPublish) {
+          const contract = integrationTasks.contract(ref);
+          if (!contract) throw new ApiError(404, "contract_not_found", `Unknown task contract ${ref}`);
+          if (contract.status !== "draft") throw new ApiError(409, "not_draft", `${ref} is already ${contract.status}.`);
+          const actor = requireOperator();
+          const approval = approvalStore.createPending({
+            targetKind: "task_publish",
+            sfieldToolRef: contract.ref,
+            domain: "integration",
+            recordId: contract.ref,
+            action: "publish_task",
+            title: `Publish Integration Task · ${contract.ref}`,
+            summary: `Publish ${contract.effect} task "${contract.description.slice(0, 140)}" into the live sfield runtime.`,
+            riskLevel: contract.effect === "read" ? "low" : "high",
+            payload: { ref: contract.ref, contractDigest: contract.contractDigest, bindingDigest: contract.bindingDigest },
+            details: [
+              { label: "Task Ref", value: contract.ref },
+              { label: "Effect", value: contract.effect },
+              { label: "Contract Digest", value: contract.contractDigest.slice(0, 22) },
+              { label: "Binding Digest", value: contract.bindingDigest.slice(0, 22) },
+            ],
+            requester: actor,
+            dualControl: approvalStore.getPolicy().defaultDualControl,
+          });
+          return json(res, { status: "pending_approval", approval, view: integrationService.view() }, 202);
+        }
         const published = await guard(() => integrationService.publish(ref));
         return json(res, { ...published, view: integrationService.view() });
       }
@@ -2060,6 +2248,7 @@ export async function startApp(options: Options) {
         return json(res, { context: out.data, sfieldToolRef: out.sfieldToolRef, sfieldRunId: out.sfieldRunId, workspace: selfServicePzn.getWorkspaceState() });
       }
       if (id === "contexts" && operation === "publish" && method === "POST") {
+        enforceEvalGate("publishing a PZN context");
         const data = await body(req, z.object({
           contextId: pznSlugSchema,
           publishedBy: z.string().max(80).optional(),
@@ -2167,7 +2356,7 @@ export async function startApp(options: Options) {
   return {
     url: "http://127.0.0.1:" + (server.address() as AddressInfo).port,
     /** For tests: direct access to the sfield runtime and approval store (e.g. to call tools with forged approvals). */
-    internals: { runtime, approvalStore, telemetry, piiFirewall, workflowEngine, connectorStore, integrationService },
+    internals: { runtime, approvalStore, telemetry, piiFirewall, workflowEngine, connectorStore, integrationService, handoffStore, knowledgeBase, evalRunner },
     async close() {
       for (const stream of streams) stream.end();
       await vite?.close();

@@ -101,6 +101,52 @@ function tokenize(text: string): string[] {
     .filter((w) => w.length >= 2 && !STOP_WORDS.has(w));
 }
 
+function stem(token: string): string {
+  return token.replace(/(?:ing|tion|sions?|ments?|ies|ed|es|s)$/, (m) => (m === "ies" ? "y" : ""));
+}
+
+const VEC_DIM = 256;
+function fnvHash(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/** Deterministic 256-dim L2-normalized semantic vector over stemmed tokens + character 3/4-grams (offline, zero external model). */
+export function embedHybridVector(text: string): Float32Array {
+  const vec = new Float32Array(VEC_DIM);
+  const tokens = tokenize(text);
+  for (const tok of tokens) {
+    const root = stem(tok);
+    const h1 = fnvHash(`w:${tok}`);
+    vec[h1 % VEC_DIM] += (h1 & 1 ? 1 : -1) * 1.6;
+    if (root.length >= 3 && root !== tok) {
+      const hr = fnvHash(`r:${root}`);
+      vec[hr % VEC_DIM] += (hr & 1 ? 1 : -1) * 1.2;
+    }
+    const padded = `^${root}$`;
+    for (let i = 0; i <= padded.length - 3; i++) {
+      const tri = padded.slice(i, i + 3);
+      const hg = fnvHash(`g3:${tri}`);
+      vec[hg % VEC_DIM] += (hg & 1 ? 1 : -1) * 0.45;
+    }
+  }
+  let norm = 0;
+  for (let i = 0; i < VEC_DIM; i++) norm += vec[i]! * vec[i]!;
+  norm = Math.sqrt(norm);
+  if (norm > 0) for (let i = 0; i < VEC_DIM; i++) vec[i] = vec[i]! / norm;
+  return vec;
+}
+
+function cosineSimilarity(a: Float32Array, b: Float32Array): number {
+  let dot = 0;
+  for (let i = 0; i < a.length; i++) dot += a[i]! * b[i]!;
+  return Math.max(0, dot);
+}
+
 export function isPolicyQuestion(prompt: string): boolean {
   const lower = prompt.toLowerCase().trim();
   if (lower.length < 10) return false;
@@ -184,39 +230,87 @@ export class KnowledgeBaseStore {
 
   search(query: string, limit = 3): KnowledgeSearchResult {
     const qTokens = [...new Set(tokenize(query))];
-    if (qTokens.length === 0) return { query, citations: [] };
+    if (qTokens.length === 0) return { query, retrievalMode: "hybrid_bm25_vector", citations: [] };
+    const qStems = [...new Set(qTokens.map(stem))];
+    const qVec = embedHybridVector(query);
 
-    const scored: KnowledgeCitation[] = [];
+    // Collect all active chunks across enabled documents for corpus-wide BM25 IDF + vector cosine.
+    type Entry = {
+      doc: KnowledgeDocument;
+      chunkIndex: number;
+      chunk: string;
+      tokens: string[];
+      stems: string[];
+      titleStems: Set<string>;
+      bm25: number;
+      vecSim: number;
+    };
+    const corpus: Entry[] = [];
     for (const doc of this.docs) {
       if (!doc.enabled) continue;
-      const titleTokens = new Set(tokenize(`${doc.title} ${doc.tags.join(" ")}`));
+      const titleStems = new Set(tokenize(`${doc.title} ${doc.tags.join(" ")}`).map(stem));
       const chunks = splitChunks(doc.content);
       chunks.forEach((chunk, chunkIndex) => {
-        const chunkTokens = tokenize(chunk);
-        const chunkSet = new Set(chunkTokens);
-        let score = 0;
-        for (const qt of qTokens) {
-          if (chunkSet.has(qt)) score += 3;
-          else if (chunk.toLowerCase().includes(qt)) score += 1.5;
-          if (titleTokens.has(qt)) score += 2.5;
-        }
-        if (score >= 3) {
-          const normalizedScore = Math.min(99, Math.round((score / Math.max(qTokens.length * 4.5, 4)) * 100));
-          scored.push({
-            docId: doc.id,
-            docTitle: doc.title,
-            version: doc.version,
-            domain: doc.domain,
-            chunkIndex: chunkIndex + 1,
-            score: normalizedScore,
-            excerpt: chunk.slice(0, 380),
-          });
-        }
+        const tokens = tokenize(chunk);
+        corpus.push({
+          doc, chunkIndex, chunk, tokens, stems: tokens.map(stem), titleStems,
+          bm25: 0, vecSim: cosineSimilarity(qVec, embedHybridVector(`${doc.title} ${doc.tags.join(" ")} ${chunk}`)),
+        });
       });
     }
+    if (corpus.length === 0) return { query, retrievalMode: "hybrid_bm25_vector", citations: [] };
 
-    scored.sort((a, b) => b.score - a.score);
-    const citations = scored.slice(0, limit);
+    // BM25 (k1=1.5, b=0.75) with title/tag boost.
+    const N = corpus.length;
+    const avgdl = corpus.reduce((s, e) => s + e.stems.length, 0) / Math.max(N, 1);
+    const df = new Map<string, number>();
+    for (const qs of qStems) {
+      df.set(qs, corpus.filter((e) => e.stems.includes(qs) || e.titleStems.has(qs)).length);
+    }
+    const k1 = 1.5;
+    const b = 0.75;
+    for (const entry of corpus) {
+      const dl = Math.max(1, entry.stems.length);
+      let bm25 = 0;
+      for (const qs of qStems) {
+        const n = df.get(qs) ?? 0;
+        if (n === 0) continue;
+        const idf = Math.log(1 + (N - n + 0.5) / (n + 0.5));
+        const tf = entry.stems.filter((t) => t === qs).length + (entry.titleStems.has(qs) ? 1.5 : 0);
+        if (tf > 0) bm25 += idf * ((tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (dl / Math.max(avgdl, 1)))));
+      }
+      entry.bm25 = bm25;
+    }
+
+    // Reciprocal Rank Fusion (RRF) of BM25 + Vector Cosine rankings.
+    const bm25Rank = new Map<Entry, number>([...corpus].sort((a, b) => b.bm25 - a.bm25).map((e, i) => [e, i + 1]));
+    const vecRank = new Map<Entry, number>([...corpus].sort((a, b) => b.vecSim - a.vecSim).map((e, i) => [e, i + 1]));
+    const maxBm25 = Math.max(0.0001, ...corpus.map((e) => e.bm25));
+
+    const scored = corpus
+      .filter((e) => e.bm25 > 0.35 || e.vecSim >= 0.24)
+      .map((e) => {
+        const rrf = (e.bm25 > 0 ? 1 / (25 + (bm25Rank.get(e) ?? N)) : 0) + (e.vecSim > 0 ? 1 / (25 + (vecRank.get(e) ?? N)) : 0);
+        const bm25Norm = Math.min(1, e.bm25 / maxBm25);
+        const combined = Math.min(99, Math.max(12, Math.round((bm25Norm * 0.55 + e.vecSim * 0.45) * 95 + rrf * 120)));
+        return {
+          citation: {
+            docId: e.doc.id,
+            docTitle: e.doc.title,
+            version: e.doc.version,
+            domain: e.doc.domain,
+            chunkIndex: e.chunkIndex + 1,
+            score: combined,
+            bm25Score: Number(e.bm25.toFixed(2)),
+            vectorScore: Number((e.vecSim * 100).toFixed(1)),
+            excerpt: e.chunk.slice(0, 380),
+          } as KnowledgeCitation,
+          sortKey: combined + rrf * 200,
+        };
+      })
+      .sort((a, b) => b.sortKey - a.sortKey);
+
+    const citations = scored.slice(0, limit).map((s) => s.citation);
 
     let suggestedFollowUp: KnowledgeSearchResult["suggestedFollowUp"];
     const topDoc = citations[0]?.docId;
@@ -230,7 +324,7 @@ export class KnowledgeBaseStore {
       suggestedFollowUp = { label: "Open Acme Deal Desk Approval", prompt: "Show the enterprise discount approval card for Acme Cloud Corp" };
     }
 
-    return { query, citations, ...(suggestedFollowUp ? { suggestedFollowUp } : {}) };
+    return { query, retrievalMode: "hybrid_bm25_vector", citations, ...(suggestedFollowUp ? { suggestedFollowUp } : {}) };
   }
 }
 

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type {
   FieldProvenance,
   IntegrationCopilotCard,
@@ -26,6 +27,12 @@ type Plan = {
     | AuthoringAction;
   suggestedPrompts?: string[];
 };
+
+const copilotPlanSchema = z.object({
+  reply: z.string().min(1).max(2000),
+  action: z.object({ type: z.string().min(1).max(40) }).passthrough(),
+  suggestedPrompts: z.array(z.string().max(160)).max(6).optional(),
+});
 
 const runnable = (view: IntegrationTasksView) => view.contracts.filter((c) => c.status === "published");
 
@@ -185,10 +192,16 @@ export async function runIntegrationCopilot(
       const history = (req.history ?? []).slice(-6).map((h) => `${h.role.toUpperCase()}: ${h.text}`).join("\n");
       const raw = await callConfiguredLlmJson(options.gateway, options.dataDir, systemPrompt(view),
         history ? `RECENT CONVERSATION:\n${history}\n\nNEW MESSAGE:\n${req.message}` : req.message, AbortSignal.timeout(20_000));
-      const candidate = raw as Plan | null;
-      if (candidate && typeof candidate.reply === "string" && candidate.action && typeof candidate.action === "object") {
-        plan = candidate;
-        generatedBy = "copilot_llm";
+      const parsed = copilotPlanSchema.safeParse(raw);
+      if (parsed.success) {
+        const candidate = parsed.data as unknown as Plan;
+        const validRef = (ref: unknown) => typeof ref === "string" && view.contracts.some((c) => c.ref === ref);
+        const a = candidate.action as { type: string; toolRef?: unknown };
+        const refOk = !["task", "contract", "new_version", "edit_draft"].includes(a.type) || validRef(a.toolRef);
+        if (refOk) {
+          plan = candidate;
+          generatedBy = "copilot_llm";
+        }
       }
     } catch { /* fall back */ }
   }

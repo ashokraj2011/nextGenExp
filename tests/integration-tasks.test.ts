@@ -298,7 +298,7 @@ test("chat authoring: connect an MCP server, import tools, publish, run, and dra
   type Candidate = { toolName: string; draft: Record<string, any>; check: { ok: boolean; issues: string[] }; notes: string[] };
   const imported = card<{ candidates: Candidate[] }>(await chat("Import tools from demo_commerce"), "mcp_import");
   const byName = Object.fromEntries(imported.candidates.map((c) => [c.toolName, c]));
-  assert.deepEqual(Object.keys(byName).sort(), ["cancel_subscription", "lookup_order", "refund_order"]);
+  assert.deepEqual(Object.keys(byName).sort(), ["cancel_subscription", "lookup_order", "order_tracker_widget", "refund_order"]);
   for (const c of imported.candidates) assert.equal(c.check.ok, true, `${c.toolName}: ${c.check.issues.join("; ")}`);
   assert.equal(byName.lookup_order!.draft.effect, "read");
   assert.equal(byName.lookup_order!.draft.outputSchema.additionalProperties, false, "server output schema is closed");
@@ -310,7 +310,7 @@ test("chat authoring: connect an MCP server, import tools, publish, run, and dra
   assert.equal(byName.cancel_subscription!.draft.manualReconcile, true);
   assert.equal((await client.request<IntegrationTasksView>("/api/integrations")).contracts.some((c) => c.integrationId === "demo_commerce"), false, "import saved nothing");
   for (const c of imported.candidates) await client.request("/api/integrations/contracts", c.draft);
-  assert.equal(card<{ drafts: unknown[] }>(await chat("Show drafts"), "drafts").drafts.length, 3);
+  assert.equal(card<{ drafts: unknown[] }>(await chat("Show drafts"), "drafts").drafts.length, 4);
 
   // 3. Publish from chat: a review card first; publishing registers a dedicated sfield tool (no restart).
   const LOOKUP = "int.demo_commerce.lookup_order@1.0.0";

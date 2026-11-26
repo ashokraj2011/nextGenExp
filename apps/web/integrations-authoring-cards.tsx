@@ -388,7 +388,7 @@ export function PublishReviewCard({ contract, check, onPrompt, post }: { contrac
   const [reviewed, setReviewed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [result, setResult] = useState<{ route: string; note?: string; contract?: ViewContract } | null>(null);
+  const [result, setResult] = useState<{ route: string; note?: string; contract?: ViewContract; pendingApprovalId?: string } | null>(null);
   const props = Object.keys(((contract.inputSchema as { properties?: Json }).properties) ?? {});
   const blocked = !check.ok || check.publishBlockers.length > 0;
 
@@ -397,10 +397,16 @@ export function PublishReviewCard({ contract, check, onPrompt, post }: { contrac
     setError("");
     try {
       const out = await api.publishIntegrationTask(contract.ref);
+      if (out.status === "pending_approval" && out.approval) {
+        setResult({ route: "pending_approval", pendingApprovalId: out.approval.id, note: `Approval ${out.approval.id} queued in HITL.` });
+        post?.(`Publishing **${contract.ref}** requires HITL approval (**${out.approval.id}**). Approve it in the Approvals queue to publish.`, { suggestions: ["Show pending approvals"] });
+        return;
+      }
       const published = out.view.contracts.find((c) => c.ref === contract.ref);
-      setResult({ route: out.sfieldRoute, ...(out.registrationNote ? { note: out.registrationNote } : {}), ...(published ? { contract: published } : {}) });
+      const route = out.sfieldRoute ?? "unavailable";
+      setResult({ route, ...(out.registrationNote ? { note: out.registrationNote } : {}), ...(published ? { contract: published } : {}) });
       post?.(
-        `Published **${contract.ref}**. ${out.sfieldRoute === "dedicated" ? "It's registered as its own sfield tool and can run now." : out.sfieldRoute === "dispatcher" ? "It runs now through the sfield dispatcher." : "The sfield runtime isn't available, so it can't run yet."}`,
+        `Published **${contract.ref}**. ${route === "dedicated" ? "It's registered as its own sfield tool and can run now." : route === "dispatcher" ? "It runs now through the sfield dispatcher." : "The sfield runtime isn't available, so it can't run yet."}`,
         { suggestions: [`Run ${contract.ref}`, "Show integrations and tasks"] },
       );
     } catch (e) {
@@ -445,10 +451,14 @@ export function PublishReviewCard({ contract, check, onPrompt, post }: { contrac
         </>
       ) : (
         <div className="pzn-btn-row">
-          <span className="pzn-badge is-pass">Published</span>
+          <span className={"pzn-badge " + (result.pendingApprovalId ? "is-warn" : "is-pass")}>
+            {result.pendingApprovalId ? `Pending approval (${result.pendingApprovalId})` : "Published"}
+          </span>
           {result.contract && <RouteBadge contract={result.contract} />}
           {result.note && <span className="pzn-subtitle" style={{ fontSize: "0.74rem" }}>{result.note}</span>}
-          <button type="button" className="pzn-btn pzn-btn-sm pzn-btn-primary" onClick={() => onPrompt(`Run ${contract.ref}`)}>Run it</button>
+          {!result.pendingApprovalId && (
+            <button type="button" className="pzn-btn pzn-btn-sm pzn-btn-primary" onClick={() => onPrompt(`Run ${contract.ref}`)}>Run it</button>
+          )}
         </div>
       )}
     </section>
@@ -617,7 +627,25 @@ export function McpImportCard({ integrationId, candidates, error, onPrompt, post
 
 /* ============================================================================ DRAFTS */
 
-export function DraftsCard({ drafts, onPrompt }: { drafts: ViewContract[]; onPrompt: (p: string) => void }) {
+export function DraftsCard({ drafts: initialDrafts, onPrompt }: { drafts: ViewContract[]; onPrompt: (p: string) => void }) {
+  const [drafts, setDrafts] = useState(initialDrafts);
+  const [busyRef, setBusyRef] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => { setDrafts(initialDrafts); }, [initialDrafts]);
+
+  async function removeDraft(ref: string) {
+    setBusyRef(ref);
+    setError("");
+    try {
+      await api.deleteIntegrationDraft(ref);
+      setDrafts((prev) => prev.filter((d) => d.ref !== ref));
+    } catch (e) {
+      setError(toolSetupErrorMessage(e));
+    } finally {
+      setBusyRef(null);
+    }
+  }
+
   return (
     <section className="content-card pzn-widget-card" aria-label="Drafts">
       <div className="pzn-widget-head">
@@ -627,6 +655,7 @@ export function DraftsCard({ drafts, onPrompt }: { drafts: ViewContract[]; onPro
         </div>
         <button type="button" className="pzn-btn pzn-btn-sm" onClick={() => onPrompt("Create a new task")}><Plus size={12} /> New task</button>
       </div>
+      {error && <p className="pzn-error" role="alert">{error}</p>}
       <div className="pzn-list">
         {drafts.map((d) => (
           <div key={d.ref} className="pzn-attr-card">
@@ -639,6 +668,7 @@ export function DraftsCard({ drafts, onPrompt }: { drafts: ViewContract[]; onPro
               <div className="pzn-btn-row">
                 <button type="button" className="pzn-btn pzn-btn-sm" onClick={() => onPrompt(`Edit ${d.ref}`)}><Pencil size={12} /> Edit</button>
                 <button type="button" className="pzn-btn pzn-btn-sm pzn-btn-primary" onClick={() => onPrompt(`Publish ${d.ref}`)}><Rocket size={12} /> Publish</button>
+                <button type="button" className="pzn-btn pzn-btn-sm" disabled={busyRef === d.ref} aria-label={`Delete draft ${d.ref}`} onClick={() => void removeDraft(d.ref)}><Trash2 size={12} /></button>
               </div>
             </div>
             <p className="pzn-subtitle" style={{ fontSize: "0.8rem" }}>{d.description}</p>

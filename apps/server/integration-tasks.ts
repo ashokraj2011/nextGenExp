@@ -330,9 +330,15 @@ export class TaskCallExecutor {
         }
       }
       // Generated code is review-only: it is size-checked and stored, never evaluated.
+      const uiUri = typeof readPath(body, "uiUri") === "string" ? String(readPath(body, "uiUri")) : undefined;
+      if (contract.artifact.type === "mcp_app_ui") {
+        if (uiUri && !uiUri.startsWith("ui://")) errors.push("MCP App URI must use the ui:// scheme");
+        if (!text.trim().startsWith("<")) errors.push("MCP App UI content must be HTML markup");
+      }
       result.artifact = {
         type: contract.artifact.type,
         ...(contract.artifact.language ? { language: contract.artifact.language } : {}),
+        ...(uiUri ? { uri: uiUri } : {}),
         content: text.slice(0, 32_000),
         digest: digestJson({ text } as JsonObject),
         validation: { ok: errors.length === 0, errors },
@@ -527,6 +533,32 @@ export class IntegrationTaskStore {
   }
 
   /** Publishes a draft. Breaking changes against the latest published version require a major version bump. */
+  /** Deletes a draft contract. Published and deprecated versions are immutable and cannot be deleted. */
+  deleteDraft(ref: string): { deleted: boolean; ref: string } {
+    const existing = this.contract(ref);
+    if (!existing) throw new IntegrationTaskError("contract_not_found", `${ref} not found.`);
+    if (existing.status !== "draft") {
+      throw new IntegrationTaskError("version_immutable", `${ref} is ${existing.status} and cannot be deleted. Published versions are immutable.`);
+    }
+    this.state.contracts = this.state.contracts.filter((c) => c.ref !== ref);
+    this.save();
+    return { deleted: true, ref };
+  }
+
+  /** Deletes an integration only if it has zero published/deprecated tasks (drafts are removed with it). */
+  deleteIntegration(id: string): { deleted: boolean; id: string; removedDrafts: number } {
+    const existing = this.integration(id);
+    if (!existing) throw new IntegrationTaskError("integration_not_found", `Integration "${id}" not found.`);
+    if (this.state.contracts.some((c) => c.integrationId === id && c.status !== "draft")) {
+      throw new IntegrationTaskError("integration_in_use", `Integration "${id}" has published tasks and cannot be deleted.`);
+    }
+    const removedDrafts = this.state.contracts.filter((c) => c.integrationId === id).length;
+    this.state.contracts = this.state.contracts.filter((c) => c.integrationId !== id);
+    this.state.integrations = this.state.integrations.filter((i) => i.id !== id);
+    this.save();
+    return { deleted: true, id, removedDrafts };
+  }
+
   publish(ref: string): { contract: TaskContract; breaking: string[] } {
     const draft = this.contract(ref);
     if (!draft) throw new IntegrationTaskError("contract_not_found", `${ref} not found.`);

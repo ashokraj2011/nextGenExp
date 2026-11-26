@@ -11,6 +11,7 @@ export const evalCategorySchema = z.enum([
   "financial_grounding",
   "workflow_engine",
   "a2ui_schema",
+  "copilot_authoring",
 ]);
 export type EvalCategory = z.infer<typeof evalCategorySchema>;
 

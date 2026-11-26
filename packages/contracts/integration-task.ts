@@ -102,7 +102,7 @@ export const taskContractInputSchema = z.object({
   outputSchema: jsonSchemaObject,
   resultKind: taskResultKindSchema.default("data"),
   artifact: z.object({
-    type: z.enum(["json_schema", "code"]),
+    type: z.enum(["json_schema", "code", "mcp_app_ui"]),
     language: z.string().max(24).optional(),
     /** Dotted path in the output that holds the artifact content (string). */
     contentPath: z.string().max(64),
@@ -162,6 +162,7 @@ export const taskRunSchema = z.object({
   artifact: z.object({
     type: z.string(),
     language: z.string().optional(),
+    uri: z.string().optional(),
     content: z.string(),
     digest: z.string(),
     validation: z.object({ ok: z.boolean(), errors: z.array(z.string()) }),

@@ -11,6 +11,7 @@ export type McpTool = {
   inputSchema?: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
   annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean; title?: string };
+  _meta?: { ui?: { resourceUri?: string } };
 };
 
 export class McpTransportError extends Error {
@@ -76,13 +77,32 @@ export async function callMcpTool(integration: Integration, contract: TaskContra
   if (!rpc) return { status: 502, body: { error: "The MCP server returned no JSON-RPC response" } as Record<string, unknown> };
   // JSON-RPC errors (unknown tool, invalid params) are rejected before the tool runs.
   if (rpc.error) return { status: 400, body: { error: rpc.error.message, code: rpc.error.code } as Record<string, unknown> };
-  const result = (rpc.result ?? {}) as { content?: { type: string; text?: string }[]; structuredContent?: unknown; isError?: boolean };
+  const result = (rpc.result ?? {}) as {
+    content?: Array<{ type: string; text?: string; resource?: { uri?: string; mimeType?: string; text?: string } }>;
+    structuredContent?: unknown;
+    isError?: boolean;
+    _meta?: { ui?: { resourceUri?: string } };
+  };
   const text = (result.content ?? []).filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n").slice(0, 20_000);
   if (result.isError) return { status: 422, body: { text } as Record<string, unknown> };
-  if (result.structuredContent && typeof result.structuredContent === "object" && !Array.isArray(result.structuredContent)) {
-    return { status: 200, body: result.structuredContent as Record<string, unknown> };
+  // MCP Apps (ui://): inspect embedded resource content or fetch via resources/read when _meta.ui.resourceUri is present.
+  const embeddedUi = (result.content ?? []).find((c) => c.type === "resource" && c.resource?.uri?.startsWith("ui://") && typeof c.resource.text === "string")?.resource;
+  let uiUri = embeddedUi?.uri ?? result._meta?.ui?.resourceUri;
+  let uiHtml = embeddedUi?.text;
+  if (uiUri && uiUri.startsWith("ui://") && !uiHtml) {
+    try {
+      const readRes = await mcpRequest(integration, "resources/read", { uri: uiUri }, signal);
+      const contents = (readRes.rpc?.result as { contents?: Array<{ uri?: string; text?: string }> } | undefined)?.contents;
+      uiHtml = contents?.find((item) => typeof item.text === "string")?.text;
+    } catch { /* fallback to structured/text output */ }
   }
-  return { status: 200, body: { text } as Record<string, unknown> };
+  const baseBody: Record<string, unknown> = result.structuredContent && typeof result.structuredContent === "object" && !Array.isArray(result.structuredContent)
+    ? { ...(result.structuredContent as Record<string, unknown>) }
+    : { text };
+  if (uiHtml && uiUri) {
+    return { status: 200, body: { ...baseBody, uiUri, uiHtml: uiHtml.slice(0, 30_000) } };
+  }
+  return { status: 200, body: baseBody };
 }
 
 /* ---------------------------------------------------------------- discovery → drafts */
@@ -133,10 +153,15 @@ export function draftFromMcpTool(integration: Integration, tool: McpTool, store:
   const effect: TaskEffect = a.readOnlyHint ? "read" : a.destructiveHint === false ? "write" : "destructive";
   notes.push(a.readOnlyHint ? "Read-only per the server's annotations." : a.destructiveHint === false ? "Treated as a write (server says it is not destructive)." : "Treated as destructive (MCP default when the server does not say otherwise). Change it if you know better.");
   const inputSchema = closeSchema(tool.inputSchema ?? { type: "object", properties: {} }, notes, "input") as Record<string, unknown>;
-  const outputSchema = tool.outputSchema
-    ? closeSchema(tool.outputSchema, notes, "output") as Record<string, unknown>
-    : { type: "object", additionalProperties: false, required: ["text"], properties: { text: { type: "string" } } };
-  if (!tool.outputSchema) notes.push("No output schema from the server: the task returns the tool's text content.");
+  const uiResourceUri = tool._meta?.ui?.resourceUri;
+  const isMcpApp = typeof uiResourceUri === "string" && uiResourceUri.startsWith("ui://");
+  const outputSchema = isMcpApp
+    ? { type: "object", additionalProperties: false, required: ["uiUri", "uiHtml"], properties: { text: { type: "string" }, uiUri: { type: "string" }, uiHtml: { type: "string" } } }
+    : tool.outputSchema
+      ? closeSchema(tool.outputSchema, notes, "output") as Record<string, unknown>
+      : { type: "object", additionalProperties: false, required: ["text"], properties: { text: { type: "string" } } };
+  if (isMcpApp) notes.push(`Declares MCP App UI (${uiResourceUri}): renders inside a strictly sandboxed iframe.`);
+  else if (!tool.outputSchema) notes.push("No output schema from the server: the task returns the tool's text content.");
   const props = ((inputSchema.properties ?? {}) as Record<string, { type?: unknown }>);
   const keyField = effect !== "read" ? IDEMPOTENCY_FIELDS.find((f) => props[f] && (props[f].type === "string" || props[f].type === undefined)) : undefined;
   if (effect !== "read") {
@@ -153,7 +178,8 @@ export function draftFromMcpTool(integration: Integration, tool: McpTool, store:
     effect,
     inputSchema,
     outputSchema,
-    resultKind: "data",
+    resultKind: isMcpApp ? "artifact" : "data",
+    ...(isMcpApp ? { artifact: { type: "mcp_app_ui" as const, language: "html", contentPath: "uiHtml" } } : {}),
     outcomeCodes: [
       { code: "OK", meaning: "The tool completed", success: true },
       { code: "TOOL_ERROR", meaning: "The tool reported an error", success: false },
@@ -210,6 +236,12 @@ export function createDemoMcpServer() {
       name: "cancel_subscription", description: "Cancel a customer subscription immediately.",
       inputSchema: { type: "object", properties: { subscriptionId: { type: "string", minLength: 3, maxLength: 40 } }, required: ["subscriptionId"] },
     },
+    {
+      name: "order_tracker_widget", description: "Return an interactive sandboxed MCP App (ui://) shipment tracker card for an order.",
+      annotations: { readOnlyHint: true, title: "Order Tracker (MCP App)" },
+      _meta: { ui: { resourceUri: "ui://demo-commerce/order-tracker" } },
+      inputSchema: { type: "object", properties: { orderId: { type: "string", minLength: 3, maxLength: 40 } }, required: ["orderId"] },
+    },
   ];
   const ok = (id: unknown, result: unknown) => ({ status: 200, body: { jsonrpc: "2.0", id, result } });
   const text = (t: string, isError = false) => ({ content: [{ type: "text", text: t }], ...(isError ? { isError: true } : {}) });
@@ -219,6 +251,14 @@ export function createDemoMcpServer() {
     if (msg.id === undefined) return { status: 202, headers };
     if (msg.method === "initialize") return { ...ok(msg.id, { protocolVersion: PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: "cep-demo-commerce", version: "1.0.0" } }), headers };
     if (msg.method === "tools/list") return { ...ok(msg.id, { tools }), headers };
+    if (msg.method === "resources/read") {
+      const uri = String((msg.params as { uri?: string } | undefined)?.uri ?? "");
+      if (uri === "ui://demo-commerce/order-tracker") {
+        const html = `<!doctype html><html><body style="font-family:system-ui,sans-serif;margin:0;padding:12px;background:#f8fafc;color:#0f172a"><div style="border:1px solid #cbd5e1;border-radius:10px;padding:12px;background:#fff"><div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#0f766e;font-weight:700">MCP App · ui://demo-commerce/order-tracker</div><h4 style="margin:4px 0 8px">Live Shipment Tracker</h4><div style="display:flex;gap:8px;font-size:12px"><span style="padding:3px 8px;border-radius:99px;background:#dcfce7;color:#166534">Confirmed</span><span style="padding:3px 8px;border-radius:99px;background:#dcfce7;color:#166534">Packed</span><span style="padding:3px 8px;border-radius:99px;background:#dbeafe;color:#1e40af;font-weight:600">In Transit</span></div></div></body></html>`;
+        return { ...ok(msg.id, { contents: [{ uri, mimeType: "text/html", text: html }] }), headers };
+      }
+      return { status: 200, headers, body: { jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: `Unknown resource ${uri}` } } };
+    }
     if (msg.method !== "tools/call") return { status: 200, headers, body: { jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: `Unknown method ${msg.method}` } } };
     const args = msg.params?.arguments ?? {};
     switch (msg.params?.name) {
@@ -237,6 +277,14 @@ export function createDemoMcpServer() {
         const refund = { refundId: `RF-${++seq}`, status: "issued" };
         if (key) refunds.set(key, refund);
         return { ...ok(msg.id, { ...text(`Refund ${refund.refundId} issued`), structuredContent: refund }), headers };
+      }
+      case "order_tracker_widget": {
+        const id = String(args.orderId ?? "ORD-1001");
+        const order = orders.get(id);
+        const statusLabel = order ? `${order.status} ($${order.total.toFixed(2)})` : "not found";
+        const uri = "ui://demo-commerce/order-tracker";
+        const html = `<!doctype html><html><body style="font-family:system-ui,sans-serif;margin:0;padding:12px;background:#f8fafc;color:#0f172a"><div style="border:1px solid #cbd5e1;border-radius:10px;padding:12px;background:#fff"><div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#0f766e;font-weight:700">MCP App · ${uri}</div><h4 style="margin:4px 0 6px">Order ${id}</h4><p style="margin:0 0 8px;font-size:13px">Status: <strong>${statusLabel}</strong></p><div style="display:flex;gap:8px;font-size:12px"><span style="padding:3px 8px;border-radius:99px;background:#dcfce7;color:#166534">Confirmed</span><span style="padding:3px 8px;border-radius:99px;background:#dbeafe;color:#1e40af;font-weight:600">${order ? order.status : "unknown"}</span></div></div></body></html>`;
+        return { ...ok(msg.id, { content: [{ type: "text", text: `Order ${id}: ${statusLabel}` }, { type: "resource", resource: { uri, mimeType: "text/html", text: html } }] }), headers };
       }
       case "cancel_subscription": {
         const id = String(args.subscriptionId ?? "");

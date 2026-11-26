@@ -310,7 +310,9 @@ export function TaskRunCard({ run, onPrompt }: { run: TaskRun; onPrompt: (p: str
       {run.artifact && (
         <div className="pzn-attachment-card">
           <div className="pzn-attr-head">
-            <span className="pzn-stage-kicker"><FileCode2 size={13} /> Generated {run.artifact.type.replaceAll("_", " ")} (review only)</span>
+            <span className="pzn-stage-kicker">
+              <FileCode2 size={13} /> {run.artifact.type === "mcp_app_ui" ? `MCP App UI (${run.artifact.uri ?? "ui://sandboxed"})` : `Generated ${run.artifact.type.replaceAll("_", " ")} (review only)`}
+            </span>
             <div className="pzn-btn-row">
               <span className={"pzn-badge " + (run.artifact.validation.ok ? "is-pass" : "is-fail")}>{run.artifact.validation.ok ? "Valid" : "Invalid"}</span>
               <button type="button" className="pzn-btn pzn-btn-sm" onClick={() => { void navigator.clipboard?.writeText(run.artifact!.content); setCopied(true); }}>
@@ -319,9 +321,18 @@ export function TaskRunCard({ run, onPrompt }: { run: TaskRun; onPrompt: (p: str
             </div>
           </div>
           {!run.artifact.validation.ok && <p className="pzn-error">{run.artifact.validation.errors.join("; ")}</p>}
-          <pre style={{ fontSize: "0.74rem", maxHeight: 260, overflow: "auto", margin: 0, padding: 10, borderRadius: 8, background: "var(--surface-2)" }}>
-            {(() => { try { return JSON.stringify(JSON.parse(run.artifact.content), null, 2); } catch { return run.artifact.content; } })()}
-          </pre>
+          {run.artifact.type === "mcp_app_ui" && run.artifact.validation.ok ? (
+            <iframe
+              title={`Sandboxed MCP App · ${run.artifact.uri ?? run.taskId}`}
+              sandbox="allow-scripts"
+              srcDoc={run.artifact.content}
+              style={{ width: "100%", height: 220, border: "1px solid var(--line)", borderRadius: 8, background: "#fff" }}
+            />
+          ) : (
+            <pre style={{ fontSize: "0.74rem", maxHeight: 260, overflow: "auto", margin: 0, padding: 10, borderRadius: 8, background: "var(--surface-2)" }}>
+              {(() => { try { return JSON.stringify(JSON.parse(run.artifact.content), null, 2); } catch { return run.artifact.content; } })()}
+            </pre>
+          )}
         </div>
       )}
       <div className="pzn-list-meta" style={{ fontSize: "0.74rem" }}>

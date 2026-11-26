@@ -29,6 +29,8 @@ const defaultPolicy: ApprovalPolicySettings = {
   gatePznDictionaryChanges: false,
   pznDualControl: "high_risk",
   pznApprovalExpiryMinutes: 30,
+  requireEvalBeforePublish: false,
+  gateTaskPublish: false,
 };
 
 interface PersistedApprovals {
