@@ -4,7 +4,7 @@ import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useAui, us
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import {
   ArrowLeft, ArrowUpRight, BookOpenText, ChevronDown, ChevronRight, Columns2, Eye, GraduationCap, House, LayoutDashboard,
-  ListChecks, LogIn, LogOut, MapPin, MessageSquare, Mic, MicOff, PanelLeft, PanelLeftClose, Paperclip, Play, Plus, RotateCcw, Sparkles,
+  ListChecks, LogIn, LogOut, MapPin, Mic, MicOff, PanelLeft, PanelLeftClose, Paperclip, Play, Plus, RotateCcw, Sparkles,
   Square, ThumbsDown, ThumbsUp, X,
 } from "lucide-react";
 import {
@@ -471,7 +471,6 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
       >
         <AttachmentChipList attachments={attachments} onRemove={removeAttachment} />
         <div className="composer-input-row">
-          <MessageSquare size={18} className="composer-icon" aria-hidden="true" />
           <div className="composer-field">
             <label className="sr-only" htmlFor="composer-input">Your question</label>
             <textarea id="composer-input" ref={input} rows={1} value={draft} maxLength={MAX_MESSAGE_LENGTH}
