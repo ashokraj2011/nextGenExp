@@ -53,8 +53,8 @@ function routingPrompt(catalog: readonly CepCapabilityDefinition[]) {
     ...whenRegistered("external_connector", "Choose 'external_connector' for triggering/invoking external webhooks or bridges (PagerDuty, ServiceNow, external connectors)."),
     ...whenRegistered("ops_incident", "Choose 'ops_incident' for production incidents, latency/5xx outages, SRE triage, or release rollbacks."),
     ...whenRegistered("sales_deal_desk", "Choose 'sales_deal_desk' for Q4 sales pipeline, RevOps forecast, Deal Desk discount approvals, or enterprise close plans."),
-    ...whenRegistered("verified_experience", "A request to visualize the current portfolio allocation is a verified_experience. The Portfolio Snapshot supplies the asset mix."),
-    ...whenRegistered("custom_dynamic_ui", "Choose 'custom_dynamic_ui' ONLY when the user explicitly wants an interactive calculator, custom chart/table/form/matrix/checklist/dashboard that does not fit another available capability."),
+    ...whenRegistered("verified_experience", "A generic request to visualize the current portfolio allocation (without specifying pie chart, donut chart, bar chart, or table) is a verified_experience."),
+    ...whenRegistered("custom_dynamic_ui", "Choose 'custom_dynamic_ui' whenever the user explicitly asks for a specific chart/visual format (pie chart, donut chart, bar chart, comparison table, 3 bullet points, checklist, calculator, form, dashboard) OR corrects a previous visual (e.g. 'this is not a pie chart', 'make it a table instead')."),
     'Return ONLY valid JSON: { "capabilityId": "...", "confidence": 0.95, "reasoning": "short 1-sentence reason", "extractedParams": {} }.',
   ].join("\n");
 }
@@ -127,12 +127,15 @@ export function deterministicCapabilityRoute(prompt: string): SemanticRouteDecis
     };
   }
   if (isDynamicUiRequest(clean)) {
+    const explicitFormatOrCorrection = /\b(pie\s*chart|donut\s*chart|bar\s*chart|comparison\s+table|as\s+a\s+(?:clear\s+)?(?:comparison\s+)?table|summarize\s+(?:your\s+)?last\s+answer|in\s+\d+\s+bullet\s+points?|not\s+a\s+(?:pie|bar|donut)\s*chart)\b/i.test(clean);
     return {
       capabilityId: "custom_dynamic_ui",
       capabilityLabel: capabilityLabelFor("custom_dynamic_ui"),
       method: "deterministic",
-      confidence: 0.85,
-      reasoning: "Matched ad-hoc interactive UI composition request.",
+      confidence: explicitFormatOrCorrection ? 0.94 : 0.85,
+      reasoning: explicitFormatOrCorrection
+        ? "Matched explicit dynamic visual format or visual correction request."
+        : "Matched ad-hoc interactive UI composition request.",
     };
   }
   return {

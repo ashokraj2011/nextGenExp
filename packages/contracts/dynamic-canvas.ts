@@ -31,6 +31,20 @@ export const dynamicBarChartNodeSchema = z.object({
   }).strict()).min(2).max(8),
 }).strict();
 
+export const dynamicPieChartNodeSchema = z.object({
+  type: z.literal("piechart"),
+  title: z.string().trim().max(90).optional(),
+  centerLabel: z.string().trim().max(32).optional(),
+  centerValue: z.string().trim().max(32).optional(),
+  slices: z.array(z.object({
+    label: z.string().trim().min(1).max(48),
+    value: z.number().min(0),
+    displayValue: z.string().trim().min(1).max(32),
+    color: z.string().trim().max(24).optional(),
+    highlight: z.boolean().optional(),
+  }).strict()).min(2).max(8),
+}).strict();
+
 export const dynamicProgressNodeSchema = z.object({
   type: z.literal("progress"),
   label: shortText,
@@ -167,6 +181,7 @@ export const dynamicNodeSchema = z.discriminatedUnion("type", [
   dynamicMetricsNodeSchema,
   dynamicTableNodeSchema,
   dynamicBarChartNodeSchema,
+  dynamicPieChartNodeSchema,
   dynamicProgressNodeSchema,
   dynamicSliderCalcNodeSchema,
   dynamicComparisonNodeSchema,
@@ -181,6 +196,23 @@ export const dynamicNodeSchema = z.discriminatedUnion("type", [
 
 export type DynamicCanvasNode = z.infer<typeof dynamicNodeSchema>;
 
+export const harnessTraceStepSchema = z.object({
+  stage: z.enum(["plan", "fetch", "compose", "verify", "repair"]),
+  status: z.enum(["ok", "repaired", "skipped", "needs_data"]),
+  summary: z.string().trim().min(1).max(200),
+  durationMs: z.number().int().min(0).optional(),
+}).strict();
+
+export const harnessTraceSchema = z.object({
+  resolvedGoal: z.string().trim().min(1).max(220),
+  fetchedSources: z.array(z.string().trim().min(1).max(64)).max(8),
+  visualTargets: z.array(z.string().trim().min(1).max(32)).max(6),
+  repaired: z.boolean(),
+  stages: z.array(harnessTraceStepSchema).min(1).max(8),
+}).strict();
+
+export type DynamicHarnessTrace = z.infer<typeof harnessTraceSchema>;
+
 export const dynamicCanvasSchema = z.object({
   title: z.string().trim().min(1).max(96),
   badge: z.string().trim().min(1).max(44),
@@ -193,6 +225,7 @@ export const dynamicCanvasSchema = z.object({
   disclaimer: z.string().trim().min(1).max(240),
   choices: z.array(z.object({ id: z.string().min(1).max(64), label: z.string().min(1).max(120) }).strict()).max(12).optional(),
   suggestedFollowUp: z.string().trim().max(160).optional(),
+  harnessTrace: harnessTraceSchema.optional(),
 }).strict();
 
 export type DynamicCanvasProps = z.infer<typeof dynamicCanvasSchema>;

@@ -8,6 +8,86 @@ import { TradeTicketNode } from "./trade-ticket";
 import { WorkflowRunnerNode } from "./workflow-runner";
 
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+const PIE_PALETTE = ["#2f7d32", "#476b8a", "#c88a2b", "#0d9488", "#6d5bd0", "#c2410c", "#0284c7", "#64748b"];
+
+function PieChartNode({ node }: { node: Extract<DynamicCanvasNode, { type: "piechart" }> }) {
+  const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  const total = Math.max(node.slices.reduce((sum, s) => sum + Math.max(0, s.value), 0), 0.0001);
+  const radius = 64;
+  const circumference = 2 * Math.PI * radius;
+
+  let offset = 0;
+  const segments = node.slices.map((slice, idx) => {
+    const fraction = Math.max(0, slice.value) / total;
+    const pct = Math.round(fraction * 1000) / 10;
+    const length = fraction * circumference;
+    const dashOffset = -offset;
+    offset += length;
+    const color = slice.color && /^#[0-9a-f]{3,8}$/i.test(slice.color)
+      ? slice.color
+      : PIE_PALETTE[idx % PIE_PALETTE.length];
+    return { ...slice, idx, pct, length, dashOffset, color };
+  });
+
+  const focused = activeIdx !== null ? segments[activeIdx] : null;
+  const centerTop = focused ? focused.label : (node.centerLabel ?? "Total");
+  const centerMain = focused ? `${focused.pct}%` : (node.centerValue ?? usd.format(total));
+  const centerSub = focused ? focused.displayValue : `${segments.length} segments`;
+
+  return (
+    <div className="dyn-piechart">
+      {node.title && <h4>{node.title}</h4>}
+      <div className="dyn-pie-layout">
+        <div className="dyn-pie-visual">
+          <svg viewBox="0 0 180 180" className="dyn-pie-svg" role="img" aria-label={node.title || "Pie chart"}>
+            <circle cx="90" cy="90" r={radius} fill="none" stroke="var(--line)" strokeWidth="26" />
+            {segments.map((seg) => (
+              <circle
+                key={seg.label}
+                cx="90"
+                cy="90"
+                r={radius}
+                fill="none"
+                stroke={seg.color}
+                strokeWidth={activeIdx === seg.idx ? 30 : 26}
+                strokeDasharray={`${Math.max(seg.length - 1.5, 0)} ${circumference}`}
+                strokeDashoffset={seg.dashOffset}
+                transform="rotate(-90 90 90)"
+                className="dyn-pie-slice"
+                onMouseEnter={() => setActiveIdx(seg.idx)}
+                onMouseLeave={() => setActiveIdx(null)}
+                onClick={() => setActiveIdx((cur) => (cur === seg.idx ? null : seg.idx))}
+              >
+                <title>{`${seg.label}: ${seg.displayValue} (${seg.pct}%)`}</title>
+              </circle>
+            ))}
+          </svg>
+          <div className="dyn-pie-center" aria-live="polite">
+            <span className="dyn-pie-center-label">{centerTop}</span>
+            <strong className="dyn-pie-center-value">{centerMain}</strong>
+            <small className="dyn-pie-center-sub">{centerSub}</small>
+          </div>
+        </div>
+        <ul className="dyn-pie-legend">
+          {segments.map((seg) => (
+            <li
+              key={seg.label}
+              className={activeIdx === seg.idx ? "is-active" : ""}
+              onMouseEnter={() => setActiveIdx(seg.idx)}
+              onMouseLeave={() => setActiveIdx(null)}
+              onClick={() => setActiveIdx((cur) => (cur === seg.idx ? null : seg.idx))}
+            >
+              <span className="dyn-pie-swatch" style={{ background: seg.color }} aria-hidden="true" />
+              <span className="dyn-pie-legend-name">{seg.label}</span>
+              <span className="dyn-pie-legend-pct">{seg.pct}%</span>
+              <strong>{seg.displayValue}</strong>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
 
 function formatUnit(value: number, unit: "usd" | "percent" | "years") {
   if (unit === "usd") return usd.format(value);
@@ -585,6 +665,7 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
               </div>
             );
           }
+          if (node.type === "piechart") return <PieChartNode key={idx} node={node} />;
           if (node.type === "progress") {
             const pct = Math.min(100, Math.round((node.current / Math.max(node.target, 1)) * 100));
             return (
@@ -632,6 +713,29 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
           );
         })}
       </div>
+
+      {props.harnessTrace && (
+        <details className="dyn-harness-trace">
+          <summary>
+            <span>
+              Agentic Harness · {props.harnessTrace.stages.map((s) => s.stage.charAt(0).toUpperCase() + s.stage.slice(1)).join(" → ")}
+              {props.harnessTrace.repaired ? " (auto-repaired)" : ""}
+            </span>
+          </summary>
+          <div className="dyn-harness-body">
+            <p className="dyn-harness-goal"><strong>Resolved goal:</strong> {props.harnessTrace.resolvedGoal}</p>
+            <ol className="dyn-harness-steps">
+              {props.harnessTrace.stages.map((step, idx) => (
+                <li key={idx} className={"is-" + step.status}>
+                  <span className="dyn-harness-stage">{step.stage}</span>
+                  <span>{step.summary}</span>
+                  {step.durationMs !== undefined && <small>{step.durationMs}ms</small>}
+                </li>
+              ))}
+            </ol>
+          </div>
+        </details>
+      )}
 
       <footer className="dyn-canvas-footer">
         <p className="disclosure">{props.disclaimer}</p>

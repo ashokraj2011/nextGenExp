@@ -18,8 +18,11 @@ import type { ActionFlowStore } from "./action-flow-store";
 import { parseStockTradePrompt, type SettlementCallback, type TradeStore } from "./trade-store";
 import { connectorInvokeToolRef, domainWriteToolRef } from "./runtime";
 import { generateWidgetFromText } from "./widget-library";
+import { runDynamicUiHarness } from "./dynamic-ui-harness";
+import type { PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
+import type { GoalProgressProvider } from "../../packages/goal-progress";
 
-const dynamicUiTrigger = /\b(widget|table|bar chart|chart|graph|dashboard|visuali[sz]e|visuali[sz]ation|calculator|simulator|matrix|breakdown|dynamic ui|custom ui|interactive|summarize\s+(?:your\s+)?last\s+answer|in\s+\d+\s+bullet\s+points?|approval\s+(?:card|flow|form|workflow|request|queue)|pending\s+approvals?|show\s+(?:my\s+)?approvals?|review\s+approvals?|hitl\s+queue|pagerduty|external\s+connector|invoke\s+connector|run\s+connector|trigger\s+webhook|timeline|roadmap|triage|incident\s+(?:triage|dashboard|timeline|queue|status|report|response)|rollback|deal\s+desk|sales\s+pipeline|discount\s+approval|close[- ]plan|intake\s+form|(?:sell|buy|purchase|trim|trade)\b.*\b(?:shares?|stocks?|aapl|apple|msft|microsoft|nvda|nvidia|intc|intel|boeing|pfizer|voo)\b|tax[- ]?loss\s+harvest(?:ing)?|(?:show|list|view|all|what|see)\b.*\b(?:my\s+)?(?:stocks?|holdings?|shares?|positions?|equities)\b|\bmy\s+(?:stocks?|holdings?|shares?|positions?)\b|stock\s+(?:holdings?|positions?|list)|build\s+(?:me\s+)?a\b|design\s+(?:me\s+)?a\b|generate\s+(?:me\s+)?a\b|create\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist|workflow)|make\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist))\b/i;
+const dynamicUiTrigger = /\b(widget|table|pie\s*chart|donut\s*chart|bar\s*chart|chart|graph|dashboard|visuali[sz]e|visuali[sz]ation|calculator|simulator|matrix|breakdown|dynamic ui|custom ui|interactive|summarize\s+(?:your\s+)?last\s+answer|in\s+\d+\s+bullet\s+points?|not\s+a\s+(?:pie|bar|donut)\s*chart|approval\s+(?:card|flow|form|workflow|request|queue)|pending\s+approvals?|show\s+(?:my\s+)?approvals?|review\s+approvals?|hitl\s+queue|pagerduty|external\s+connector|invoke\s+connector|run\s+connector|trigger\s+webhook|timeline|roadmap|triage|incident\s+(?:triage|dashboard|timeline|queue|status|report|response)|rollback|deal\s+desk|sales\s+pipeline|discount\s+approval|close[- ]plan|intake\s+form|(?:sell|buy|purchase|trim|trade)\b.*\b(?:shares?|stocks?|aapl|apple|msft|microsoft|nvda|nvidia|intc|intel|boeing|pfizer|voo)\b|tax[- ]?loss\s+harvest(?:ing)?|(?:show|list|view|all|what|see)\b.*\b(?:my\s+)?(?:stocks?|holdings?|shares?|positions?|equities)\b|\bmy\s+(?:stocks?|holdings?|shares?|positions?)\b|stock\s+(?:holdings?|positions?|list)|build\s+(?:me\s+)?a\b|design\s+(?:me\s+)?a\b|generate\s+(?:me\s+)?a\b|create\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist|workflow)|make\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist))\b/i;
 const nonDynamicGuard = /\b(weather|stock price|tomorrow|create a? ?rule)\b/i;
 const opsIncidentTrigger = /\b(incidents?|triage|rollback|sre|sev\s*[0-3]|p[1-3]\b|latency|5xx|error rate|it ops|operations dashboard|post-incident|production alert|inc-\d+)\b/i;
 const salesDealTrigger = /\b(deals?|deal\s*desk|deal-\d+|sales\s*pipeline|pipeline\s*(?:breakdown|chart|table|forecast)|revops|discount\s*approval|pricing\s*exception|mutual\s*action\s*plan|close[- ]plan|acme\s*cloud|enterprise\s*renewal)\b/i;
@@ -31,7 +34,9 @@ const stockHoldingsTrigger = /\b((?:show|list|view|see|all|what)\b.*\b(?:my\s+)?
 export function isDynamicUiRequest(message: string): boolean {
   const clean = message.trim();
   if (clean.length < 8 || nonDynamicGuard.test(clean)) return false;
-  // The portfolio snapshot renders its allocation from the member's current balances.
+  // Explicit visual formats (pie/donut/bar chart, comparison table) always enter the Dynamic UI Harness.
+  if (/\b(pie\s*chart|donut\s*chart|bar\s*chart|comparison\s+table|as\s+a\s+(?:clear\s+)?(?:comparison\s+)?table|not\s+a\s+(?:pie|bar|donut)\s*chart)\b/i.test(clean)) return true;
+  // Generic portfolio allocation queries use the verified Portfolio Snapshot card.
   if (/\bportfolio\b/i.test(clean) && /\b(?:allocation|asset mix)\b/i.test(clean) && !/\b(?:simulat\w*|project\w*|forecast\w*|histor\w*|trend\w*|model)\b/i.test(clean)) return false;
   return dynamicUiTrigger.test(clean);
 }
@@ -1216,6 +1221,8 @@ export async function generateDynamicUi(input: {
   recentContext?: string;
   gateway?: GatewaySettings | null;
   dataDir: string;
+  portfolioSnapshots?: PortfolioSnapshotProvider;
+  goalProgressProvider?: GoalProgressProvider;
   opsStore?: OpsIncidentStore;
   salesStore?: SalesDealStore;
   connectorStore?: ConnectorStore;
@@ -1239,7 +1246,7 @@ export async function generateDynamicUi(input: {
   signal?: AbortSignal;
 }): Promise<{ intro: string; canvas: DynamicCanvasProps }> {
   const {
-    prompt, profileSummary, recentContext, gateway, dataDir, opsStore, salesStore, connectorStore, approvalStore,
+    prompt, profileSummary, recentContext, gateway, dataDir, portfolioSnapshots, goalProgressProvider, opsStore, salesStore, connectorStore, approvalStore,
     tradeStore, matchedActionFlow, personaId, conversationId, principalId, onTradeSettle, requesterName, semanticRoute, tradeContinuation, signal,
   } = input;
 
@@ -1373,36 +1380,21 @@ export async function generateDynamicUi(input: {
   }
   const isDedicatedDomain = (opsStore && (capId === "ops_incident" || isOpsIncidentPrompt(prompt)))
     || (salesStore && (capId === "sales_deal_desk" || isSalesDealPrompt(prompt)));
+  const isFormOrCalc = /\b(form|intake|request|application|survey|onboarding form|pto|expense)\b/i.test(prompt)
+    || (/\b(calculator|simulator|simulate|calculate|project)\b/i.test(prompt) && generateWidgetFromText(prompt).kind === "calculator");
 
-  if (!isDedicatedDomain && gateway && groundedCustomerDataTrigger.test(prompt) && !unconnectedExternalSourceTrigger.test(prompt)) {
-    const grounded = buildGroundedCustomerContext(personaId, tradeStore, profileSummary, recentContext);
-    if (grounded.hasCustomerData || grounded.hasRecentContext) {
-      const llmComposed = await composeDynamicCanvasWithLlm({
-        prompt,
-        groundedContext: grounded.text,
-        gateway,
-        dataDir,
-        signal,
-      });
-      if (llmComposed) {
-        if ("needsDataSource" in llmComposed) {
-          const intro = llmComposed.missingSource
-            ? `I don’t have a connected data source for ${llmComposed.missingSource}. Which source should supply the records?`
-            : "I don’t have a connected data source for that view. Which source should supply the records?";
-          return {
-            intro,
-            canvas: {
-              title: "Data source needed",
-              badge: "Data availability",
-              generatedBy: "synthesizer",
-              nodes: [{ type: "callout", tone: "info", body: intro }],
-              disclaimer: "No external records were loaded.",
-            },
-          };
-        }
-        return llmComposed;
-      }
-    }
+  if (!isDedicatedDomain && !isFormOrCalc) {
+    return runDynamicUiHarness({
+      prompt,
+      personaId,
+      recentContext,
+      gateway,
+      dataDir,
+      portfolioSnapshots,
+      goalProgressProvider,
+      tradeStore,
+      signal,
+    });
   }
 
   return synthesizeDynamicCanvas(prompt, profileSummary, opsStore, salesStore, capId, personaId, tradeStore, recentContext);

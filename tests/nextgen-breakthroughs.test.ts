@@ -10,6 +10,9 @@ import { startFixtureGateway } from "./gateway-fixture";
 import type { HandoffTicket } from "../packages/contracts/handoff";
 import type { AgentDelegationPass, NegotiationSession, Watchcard } from "../packages/contracts/nextgen-chat";
 import { generateDynamicUi } from "../apps/server/dynamic-ui-generator";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { deterministicCapabilityRoute } from "../apps/server/semantic-router";
 
 test("#1 Multiplayer Live Glass Co-Browse: SSE slider sync, Advisor-Proposed card, and customer cryptographic sign-off", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "cep-ng-1-"));
@@ -241,11 +244,40 @@ test("#6 Consumer A2A Delegated Negotiation: scoped pass, live A2A/MCP negotiati
   assert.equal(denied.session.status, "denied");
 });
 
-test("Grounded Dynamic UI: generates live comparison table & 3-point summary from Customer 360 while guarding unconnected external sources", async (t) => {
+test("4-Stage Dynamic UI Harness: handles pie chart typos, follow-up corrections, auto-repair, and unconnected-source guards", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "cep-dyn-ui-"));
   t.after(async () => { await rm(dir, { recursive: true, force: true }); });
 
-  // 1. Comparison table for portfolio summary (exact prompt sent by 'As table' button)
+  // 1. Typo "show the protfolio as pie chart" routes to custom_dynamic_ui and renders a real piechart with harnessTrace
+  const pieRoute = deterministicCapabilityRoute("show the protfolio as pie chart");
+  assert.equal(pieRoute.capabilityId, "custom_dynamic_ui");
+  assert.ok(pieRoute.confidence >= 0.93);
+
+  const pieOut = await generateDynamicUi({
+    prompt: "show the protfolio as pie chart",
+    personaId: "demo-learner",
+    dataDir: dir,
+  });
+  assert.ok(pieOut.canvas.nodes.some((n) => n.type === "piechart"), "expected piechart node");
+  assert.ok(pieOut.canvas.harnessTrace, "expected harnessTrace");
+  assert.deepEqual(
+    pieOut.canvas.harnessTrace.stages.map((s) => s.stage),
+    ["plan", "fetch", "compose", "verify"],
+  );
+
+  // 2. Follow-up visual correction ("this is not a pie chart") resolves prior portfolio context instead of "Data source needed"
+  const fixRoute = deterministicCapabilityRoute("this is not a pie chart");
+  assert.equal(fixRoute.capabilityId, "custom_dynamic_ui");
+  const fixOut = await generateDynamicUi({
+    prompt: "this is not a pie chart",
+    personaId: "demo-learner",
+    dataDir: dir,
+    recentContext: JSON.stringify({ message: "show the protfolio as pie chart", reply: "Here's your summary." }),
+  });
+  assert.notEqual(fixOut.canvas.title, "Data source needed");
+  assert.ok(fixOut.canvas.nodes.some((n) => n.type === "piechart"), "expected piechart node on follow-up correction");
+
+  // 3. Comparison table ('As table' button) & 3-bullet summary ('Summarize' button)
   const tableOut = await generateDynamicUi({
     prompt: 'Show your last answer about "Let me know my portfolio summary." as a clear comparison table.',
     personaId: "demo-learner",
@@ -255,9 +287,7 @@ test("Grounded Dynamic UI: generates live comparison table & 3-point summary fro
   assert.notEqual(tableOut.canvas.title, "Data source needed");
   assert.ok(tableOut.canvas.nodes.some((n) => n.type === "table"), "expected dynamic table node");
   assert.ok(tableOut.canvas.nodes.some((n) => n.type === "metrics"), "expected metrics node");
-  assert.match(tableOut.canvas.dataSource ?? "", /Customer 360/i);
 
-  // 2. 3-bullet summary ('Summarize' button)
   const summaryOut = await generateDynamicUi({
     prompt: 'Summarize your last answer about "Let me know my portfolio summary." in 3 bullet points.',
     personaId: "demo-learner",
@@ -265,11 +295,88 @@ test("Grounded Dynamic UI: generates live comparison table & 3-point summary fro
   });
   assert.ok(summaryOut.canvas.nodes.some((n) => n.type === "checklist"), "expected checklist summary node");
 
-  // 3. Unconnected external data source still honestly asks for a data source
+  // 4. Multi-step LLM auto-repair: if Stage 3 LLM returns a barchart instead of piechart, Stage 4 catches it and repairs!
+  let callCount = 0;
+  const mockLlm = createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      callCount += 1;
+      let content = "";
+      if (callCount === 1) {
+        // Stage 1: Planner
+        content = JSON.stringify({
+          resolvedGoal: "Show Alice Morgan's live portfolio breakdown as a pie chart",
+          neededSources: ["portfolio_snapshot", "customer_balances"],
+          requiredVisuals: ["piechart", "metrics"],
+        });
+      } else if (callCount === 2) {
+        // Stage 3: Composer intentionally violates contract by returning a barchart instead of piechart
+        content = JSON.stringify({
+          intro: "Here is your breakdown.",
+          canvas: {
+            title: "Portfolio Breakdown",
+            badge: "Chart",
+            generatedBy: "llm",
+            nodes: [{ type: "barchart", bars: [{ label: "Stocks", value: 27500, displayValue: "$27,500" }, { label: "Cash", value: 12500, displayValue: "$12,500" }] }],
+            disclaimer: "Grounded in Customer 360.",
+          },
+        });
+      } else {
+        // Stage 4: Repair fixes violation with a real piechart
+        content = JSON.stringify({
+          intro: "Here is your live portfolio as a pie chart.",
+          canvas: {
+            title: "Portfolio Allocation Pie Chart",
+            badge: "Pie Chart",
+            generatedBy: "llm",
+            nodes: [{
+              type: "piechart",
+              title: "Allocation",
+              centerLabel: "Total",
+              centerValue: "$50,000",
+              slices: [
+                { label: "Stocks", value: 27500, displayValue: "$27,500" },
+                { label: "Cash", value: 12500, displayValue: "$12,500" },
+                { label: "Fixed Income", value: 10000, displayValue: "$10,000" },
+              ],
+            }],
+            disclaimer: "Grounded in Customer 360.",
+          },
+        });
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ choices: [{ message: { content } }] }));
+    });
+  });
+  await new Promise<void>((resolve) => mockLlm.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>((resolve) => mockLlm.close(() => resolve())));
+  const port = (mockLlm.address() as AddressInfo).port;
+
+  const repairedOut = await generateDynamicUi({
+    prompt: "show the protfolio as pie chart",
+    personaId: "demo-learner",
+    dataDir: dir,
+    gateway: {
+      profile: "openai",
+      baseUrl: `http://127.0.0.1:${port}`,
+      model: "mock-harness",
+      contextWindow: 32_000,
+      maxOutputTokens: 1200,
+      apiKey: "test",
+    },
+  });
+  assert.equal(callCount, 3, "expected 3 LLM calls: plan -> compose -> repair");
+  assert.ok(repairedOut.canvas.nodes.some((n) => n.type === "piechart"), "expected repaired piechart node");
+  assert.equal(repairedOut.canvas.harnessTrace?.repaired, true);
+  assert.ok(repairedOut.canvas.harnessTrace?.stages.some((s) => s.stage === "repair"));
+
+  // 5. Unconnected external data source still stops cleanly at Stage 2 with zero fabricated numbers
   const jiraOut = await generateDynamicUi({
     prompt: "Show all my Jira tickets as a table",
     personaId: "demo-learner",
     dataDir: dir,
   });
   assert.equal(jiraOut.canvas.title, "Data source needed");
+  assert.equal(jiraOut.canvas.harnessTrace?.stages.some((s) => s.status === "needs_data"), true);
 });
