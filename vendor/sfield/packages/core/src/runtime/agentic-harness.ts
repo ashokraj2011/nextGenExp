@@ -18,6 +18,7 @@ export interface HarnessStageRecord {
   stage: HarnessStageName;
   status: HarnessStageStatus;
   summary: string;
+  thinking?: string;
   durationMs?: number;
 }
 
@@ -25,6 +26,7 @@ export interface HarnessTrace {
   harnessRunId: string;
   kind: string;
   resolvedGoal: string;
+  thinking?: string;
   fetchedSources: string[];
   visualTargets: string[];
   repaired: boolean;
@@ -34,6 +36,7 @@ export interface HarnessTrace {
 export interface HarnessClarificationChoice {
   id: string;
   label: string;
+  prompt?: string;
 }
 
 export type HarnessPlanOutcome<TPlan> =
@@ -42,6 +45,7 @@ export type HarnessPlanOutcome<TPlan> =
       plan: TPlan;
       resolvedGoal: string;
       summary: string;
+      thinking?: string;
       targets?: string[];
     }
   | {
@@ -50,6 +54,7 @@ export type HarnessPlanOutcome<TPlan> =
       missingSource?: string;
       resolvedGoal: string;
       summary: string;
+      thinking?: string;
       targets?: string[];
     }
   | {
@@ -59,6 +64,7 @@ export type HarnessPlanOutcome<TPlan> =
       choices?: HarnessClarificationChoice[];
       resolvedGoal: string;
       summary: string;
+      thinking?: string;
       targets?: string[];
     };
 
@@ -68,21 +74,24 @@ export type HarnessGatherOutcome<TEvidence> =
       evidence: TEvidence;
       sources: string[];
       summary: string;
+      thinking?: string;
     }
   | {
       status: "needs_data";
       missingSource?: string;
       summary: string;
+      thinking?: string;
     };
 
 export interface HarnessSynthesizeOutcome<TCandidate = unknown> {
   candidate: TCandidate;
   summary?: string;
+  thinking?: string;
 }
 
 export type HarnessVerifyOutcome<TOutput> =
-  | { ok: true; output: TOutput; summary?: string }
-  | { ok: false; violations: string[] };
+  | { ok: true; output: TOutput; summary?: string; thinking?: string }
+  | { ok: false; violations: string[]; thinking?: string };
 
 export interface HarnessContext {
   harnessRunId: string;
@@ -217,10 +226,12 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
   const planStart = Date.now();
   const planOutcome = await spec.plan(ctx);
   const targets = planOutcome.targets ?? [];
+  const topThinking = planOutcome.thinking?.trim().slice(0, 360);
   stages.push({
     stage: "plan",
     status: planOutcome.status === "ready" ? "ok" : planOutcome.status,
     summary: planOutcome.summary.slice(0, 200),
+    ...(topThinking ? { thinking: topThinking } : {}),
     durationMs: Date.now() - planStart,
   });
 
@@ -229,12 +240,14 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
       stage: "clarify",
       status: "needs_clarification",
       summary: planOutcome.question.slice(0, 200),
+      thinking: "Paused before fetching or composing so you can confirm what to show.",
       durationMs: 0,
     });
     const trace: HarnessTrace = {
       harnessRunId,
       kind: spec.kind,
       resolvedGoal: planOutcome.resolvedGoal.slice(0, 220),
+      ...(topThinking ? { thinking: topThinking } : {}),
       fetchedSources: [],
       visualTargets: targets.slice(0, 6),
       repaired: false,
@@ -261,6 +274,7 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
       harnessRunId,
       kind: spec.kind,
       resolvedGoal: planOutcome.resolvedGoal.slice(0, 220),
+      ...(topThinking ? { thinking: topThinking } : {}),
       fetchedSources: [],
       visualTargets: targets.slice(0, 6),
       repaired: false,
@@ -284,12 +298,14 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
       stage: "fetch",
       status: "needs_data",
       summary: gathered.summary.slice(0, 200),
+      ...(gathered.thinking ? { thinking: gathered.thinking.slice(0, 360) } : {}),
       durationMs: Date.now() - gatherStart,
     });
     const trace: HarnessTrace = {
       harnessRunId,
       kind: spec.kind,
       resolvedGoal: planOutcome.resolvedGoal.slice(0, 220),
+      ...(topThinking ? { thinking: topThinking } : {}),
       fetchedSources: [],
       visualTargets: targets.slice(0, 6),
       repaired: false,
@@ -308,6 +324,7 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
     stage: "fetch",
     status: "ok",
     summary: gathered.summary.slice(0, 200),
+    ...(gathered.thinking ? { thinking: gathered.thinking.slice(0, 360) } : {}),
     durationMs: Date.now() - gatherStart,
   });
 
@@ -323,6 +340,7 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
     summary: (firstCheck.ok
       ? (synth.summary ?? "Synthesized candidate output")
       : `Draft needed repair: ${firstCheck.violations[0] ?? "verification failed"}`).slice(0, 200),
+    ...(synth.thinking ? { thinking: synth.thinking.slice(0, 360) } : {}),
     durationMs: Date.now() - synthStart,
   });
 
@@ -332,11 +350,13 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
       stage: "verify",
       status: "ok",
       summary: (firstCheck.summary ?? "Verified schema and grounding constraints").slice(0, 200),
+      ...(firstCheck.thinking ? { thinking: firstCheck.thinking.slice(0, 360) } : {}),
     });
     const trace: HarnessTrace = {
       harnessRunId,
       kind: spec.kind,
       resolvedGoal: planOutcome.resolvedGoal.slice(0, 220),
+      ...(topThinking ? { thinking: topThinking } : {}),
       fetchedSources: gathered.sources.slice(0, 8),
       visualTargets: targets.slice(0, 6),
       repaired: false,
@@ -366,12 +386,14 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
           stage: "repair",
           status: "repaired",
           summary: (repairedSynth.summary ?? `Auto-repaired output on attempt ${attempt}`).slice(0, 200),
+          ...(repairedSynth.thinking ? { thinking: repairedSynth.thinking.slice(0, 360) } : {}),
           durationMs: Date.now() - repairStart,
         });
         const trace: HarnessTrace = {
           harnessRunId,
           kind: spec.kind,
           resolvedGoal: planOutcome.resolvedGoal.slice(0, 220),
+          ...(topThinking ? { thinking: topThinking } : {}),
           fetchedSources: gathered.sources.slice(0, 8),
           visualTargets: targets.slice(0, 6),
           repaired: true,
@@ -405,12 +427,14 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
       stage: "repair",
       status: "repaired",
       summary: "Applied deterministic grounded fallback after repair check",
+      thinking: `Repaired after violation: ${lastViolations[0] ?? "schema mismatch"}`,
       durationMs: Date.now() - fallbackStart,
     });
     const trace: HarnessTrace = {
       harnessRunId,
       kind: spec.kind,
       resolvedGoal: planOutcome.resolvedGoal.slice(0, 220),
+      ...(topThinking ? { thinking: topThinking } : {}),
       fetchedSources: gathered.sources.slice(0, 8),
       visualTargets: targets.slice(0, 6),
       repaired: true,
@@ -430,6 +454,7 @@ export async function runAgenticHarness<TPlan, TEvidence, TOutput, TCandidate = 
     harnessRunId,
     kind: spec.kind,
     resolvedGoal: planOutcome.resolvedGoal.slice(0, 220),
+    ...(topThinking ? { thinking: topThinking } : {}),
     fetchedSources: gathered.sources.slice(0, 8),
     visualTargets: targets.slice(0, 6),
     repaired: false,

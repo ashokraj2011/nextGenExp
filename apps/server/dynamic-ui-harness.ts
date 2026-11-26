@@ -36,6 +36,14 @@ export type HarnessVisualType =
 
 const planSchema = z.object({
   resolvedGoal: z.string().trim().min(1).max(220),
+  thinking: z.string().trim().max(360).optional(),
+  needsClarification: z.boolean().optional(),
+  clarificationQuestion: z.string().trim().max(220).optional(),
+  clarificationChoices: z.array(z.object({
+    id: z.string().trim().min(1).max(64),
+    label: z.string().trim().min(1).max(120),
+    prompt: z.string().trim().min(1).max(240).optional(),
+  }).strict()).max(6).optional(),
   neededSources: z.array(z.enum([
     "portfolio_snapshot",
     "stock_holdings",
@@ -121,6 +129,8 @@ export function extractRequiredVisuals(prompt: string): HarnessVisualType[] {
   return visuals;
 }
 
+const ambiguousVisualOnlyPrompt = /^\s*(?:please\s+)?(?:can\s+you\s+)?(?:show|make|build|create|generate|draw|give|render|design)\s+(?:me\s+)?(?:a\s+|an\s+|some\s+)?(?:custom\s+|interactive\s+|dynamic\s+)?(?:pie\s*chart|donut\s*chart|bar\s*chart|chart|graph|table|comparison\s+table|dashboard|widget|view|breakdown|visuali[sz]ation|report|summary)\s*(?:of\s+(?:my\s+)?(?:data|stuff|things|account|numbers|everything))?[\s.!?]*$/i;
+
 export function inferDeterministicPlan(prompt: string, recentContext?: string): DynamicUiPlan {
   const clean = prompt.trim();
   const requiredVisuals = extractRequiredVisuals(clean);
@@ -132,9 +142,37 @@ export function inferDeterministicPlan(prompt: string, recentContext?: string): 
     const match = clean.match(explicitUnconnectedWord)?.[0] ?? "that external dataset";
     return {
       resolvedGoal: clean.slice(0, 200),
+      thinking: `Detected external dataset "${match}", which is not connected to CEP's Customer 360 or Portfolio providers. Stopping before synthesis to avoid fabricated records.`,
       neededSources: ["missing_external_source"],
       missingSourceName: match,
       requiredVisuals,
+    };
+  }
+
+  // If the user asks for a generic chart/table/dashboard/widget with NO dataset mentioned and NO prior context to inherit,
+  // pause at Stage 1 with a focused clarifying question + one-tap options.
+  const hasAnyDomainCue = portfolioWord.test(clean) || holdingsWord.test(clean) || goalWord.test(clean) || balanceWord.test(clean);
+  if (!hasAnyDomainCue && !isFollowUp && ambiguousVisualOnlyPrompt.test(clean)) {
+    const formatWord = requiredVisuals.includes("piechart")
+      ? "pie chart"
+      : requiredVisuals.includes("barchart")
+        ? "bar chart"
+        : requiredVisuals.includes("table")
+          ? "table"
+          : "view";
+    const visualSuffix = formatWord === "view" ? "breakdown" : formatWord;
+    return {
+      resolvedGoal: `Clarify which connected dataset to render as a ${formatWord}`,
+      thinking: `You asked for a ${formatWord} without specifying which dataset to visualize, and there is no active topic to inherit. Asking one quick clarifying question before fetching data.`,
+      needsClarification: true,
+      clarificationQuestion: `What would you like this ${formatWord} to show?`,
+      clarificationChoices: [
+        { id: "portfolio_alloc", label: `Portfolio allocation (Stocks, Fixed Income, Cash)`, prompt: `Show my portfolio allocation as a ${visualSuffix}` },
+        { id: "stock_holdings", label: `Individual stock holdings by ticker`, prompt: `Show my stock holdings as a ${visualSuffix}` },
+        { id: "home_goal", label: `Home savings goal & cash reserve`, prompt: `Show my home savings goal and cash balances as a ${visualSuffix}` },
+      ],
+      neededSources: ["portfolio_snapshot"],
+      requiredVisuals: requiredVisuals.length ? requiredVisuals : ["piechart"],
     };
   }
 
@@ -170,6 +208,7 @@ export function inferDeterministicPlan(prompt: string, recentContext?: string): 
   if (needed.size === 0) {
     return {
       resolvedGoal: clean.slice(0, 200),
+      thinking: `No connected CEP provider matches "${clean.slice(0, 80)}". Stopping cleanly so the user can identify which data source should supply the records.`,
       neededSources: ["missing_external_source"],
       missingSourceName: "that dataset",
       requiredVisuals,
@@ -180,9 +219,13 @@ export function inferDeterministicPlan(prompt: string, recentContext?: string): 
   const resolvedGoal = isFollowUp
     ? `Update the prior view to display the customer's live data as ${visualText} (per request: "${clean.slice(0, 110)}")`
     : `Display the customer's live data as ${visualText}: ${clean.slice(0, 140)}`;
+  const thinking = isFollowUp
+    ? `Recognized follow-up/correction ("${clean.slice(0, 80)}") against the previous turn. Selected ${[...needed].join(", ")} and locked required visual(s) to ${visualText}.`
+    : `Interpreted request against connected CEP sources (${[...needed].join(", ")}) and locked required visual(s) to ${visualText}.`;
 
   return {
     resolvedGoal: resolvedGoal.slice(0, 220),
+    thinking: thinking.slice(0, 360),
     neededSources: [...needed],
     requiredVisuals: requiredVisuals.length ? requiredVisuals : ["metrics", "table"],
     ...(isFollowUp ? { correctionNote: `User follow-up/correction: "${clean.slice(0, 140)}"` } : {}),
@@ -190,8 +233,8 @@ export function inferDeterministicPlan(prompt: string, recentContext?: string): 
 }
 
 const plannerSystemPrompt = [
-  "You are Stage 1 (Planner) of the CEP Multi-Step Dynamic UI Harness.",
-  "Your job is to clarify EXACTLY what the user wants BEFORE any UI is generated — handling typos (e.g., 'protfolio' = portfolio) and resolving multi-turn follow-ups or corrections (e.g., 'this is not a pie chart', 'make it a table instead', 'show your last answer as a comparison table').",
+  "You are Stage 1 (Planner) of the sfield Multi-Step Agentic Harness.",
+  "Your job is to think through and clarify EXACTLY what the user wants BEFORE any data fetch or UI generation — handling typos (e.g., 'protfolio' = portfolio), resolving multi-turn follow-ups/corrections (e.g., 'this is not a pie chart', 'make it a table instead'), and asking a brief clarifying question when the request is genuinely ambiguous.",
   "Available CONNECTED CEP data sources:",
   "- portfolio_snapshot: live total portfolio value, stocks, fixed income, and cash allocation",
   "- stock_holdings: live individual stock tickers, shares, avg cost, market value, unrealized P/L",
@@ -208,9 +251,17 @@ const plannerSystemPrompt = [
   "- checklist (concise bullet summary / action checklist)",
   "- comparison (2-column side-by-side comparison)",
   "- sliders (interactive what-if calculator)",
+  "WHEN TO CLARIFY (needsClarification: true):",
+  "- Ask ONE crisp clarifying question with 2-4 clickable choices ONLY when the user asks for a generic chart/table/dashboard/view without specifying which dataset or angle AND there is no clear topic in RECENT CONVERSATION (e.g., 'make me a pie chart', 'build a dashboard', 'visualize my data').",
+  "- Do NOT ask for clarification when the dataset & visual are clear (e.g., 'show the protfolio as pie chart') or when the user asks for an unconnected external system (use neededSources: ['missing_external_source'] instead).",
+  "Always include a concise 1-2 sentence 'thinking' explaining your reasoning for the user to inspect.",
   "Return ONE valid JSON object:",
   JSON.stringify({
     resolvedGoal: "Clear 1-sentence goal after resolving typos and prior context",
+    thinking: "1-2 sentences explaining how you interpreted the prompt, what sources/visuals you chose, or why clarification is needed.",
+    needsClarification: false,
+    clarificationQuestion: "Optional 1-sentence question only when needsClarification is true",
+    clarificationChoices: [{ id: "portfolio_alloc", label: "Portfolio allocation", prompt: "Show my portfolio allocation as a pie chart" }],
     neededSources: ["portfolio_snapshot"],
     missingSourceName: "Optional name only if neededSources includes missing_external_source",
     requiredVisuals: ["piechart", "metrics"],
@@ -605,6 +656,7 @@ function toCanvasTrace(trace: HarnessTrace): DynamicHarnessTrace {
   return {
     harnessRunId: trace.harnessRunId,
     resolvedGoal: trace.resolvedGoal,
+    ...(trace.thinking ? { thinking: trace.thinking } : {}),
     fetchedSources: trace.fetchedSources,
     visualTargets: trace.visualTargets,
     repaired: trace.repaired,
@@ -640,7 +692,9 @@ export async function runDynamicUiHarness(input: {
       const detPlan = inferDeterministicPlan(input.prompt, input.recentContext);
       let plan: DynamicUiPlan = detPlan;
 
-      const shouldUseLlmPlanner = Boolean(input.gateway) && !explicitUnconnectedWord.test(input.prompt);
+      const shouldUseLlmPlanner = Boolean(input.gateway)
+        && !explicitUnconnectedWord.test(input.prompt)
+        && (!detPlan.needsClarification || Boolean(input.recentContext?.trim()));
       if (shouldUseLlmPlanner && input.gateway) {
         const plannerPrompt = [
           input.recentContext?.trim() ? `RECENT CONVERSATION:\n${input.recentContext.trim().slice(0, 1400)}` : "RECENT CONVERSATION: (none)",
@@ -670,12 +724,26 @@ export async function runDynamicUiHarness(input: {
         }
       }
 
+      if (plan.needsClarification && plan.clarificationQuestion) {
+        return {
+          status: "needs_clarification",
+          plan,
+          question: plan.clarificationQuestion,
+          choices: plan.clarificationChoices,
+          resolvedGoal: plan.resolvedGoal,
+          thinking: plan.thinking ?? detPlan.thinking,
+          targets: plan.requiredVisuals,
+          summary: `Request needs clarification before fetching data`,
+        };
+      }
+
       if (plan.neededSources.includes("missing_external_source")) {
         return {
           status: "needs_data",
           plan,
           missingSource: plan.missingSourceName,
           resolvedGoal: plan.resolvedGoal,
+          thinking: plan.thinking ?? detPlan.thinking,
           targets: plan.requiredVisuals,
           summary: `Identified unconnected data request (${plan.missingSourceName ?? "external source"})`,
         };
@@ -685,6 +753,7 @@ export async function runDynamicUiHarness(input: {
         status: "ready",
         plan,
         resolvedGoal: plan.resolvedGoal,
+        thinking: plan.thinking ?? detPlan.thinking,
         targets: plan.requiredVisuals,
         summary: `Goal resolved · visuals: ${plan.requiredVisuals.join(", ") || "auto"} · sources: ${plan.neededSources.join(", ")}`,
       };
@@ -701,10 +770,14 @@ export async function runDynamicUiHarness(input: {
         recentContext: input.recentContext,
         signal: input.signal,
       });
+      const portfolioNote = fetched.portfolio
+        ? `Loaded live portfolio (${fmtUsd(fetched.portfolio.totalCents)}: ${pct1(fetched.portfolio.equityCents, fetched.portfolio.totalCents)}% stocks, ${pct1(fetched.portfolio.fixedIncomeCents, fetched.portfolio.totalCents)}% fixed income, ${pct1(fetched.portfolio.cashCents, fetched.portfolio.totalCents)}% cash).`
+        : "Loaded live profile and conversation context.";
       return {
         status: "ok",
         evidence: fetched,
         sources: fetched.sourceLabels,
+        thinking: portfolioNote,
         summary: fetched.sourceLabels.length
           ? `Fetched grounded data from ${fetched.sourceLabels.join(", ")}`
           : "Loaded session context",

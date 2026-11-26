@@ -609,7 +609,63 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
         </div>
       </header>
 
-      {props.choices?.length ? <div className="composer-starters" aria-label="Matching records">{props.choices.map((r) => <button key={r.id} type="button" className="starter" disabled={!props.onFollowUp} onClick={() => props.onFollowUp?.("Show " + r.id)}>{r.label} · {r.id}</button>)}</div> : null}
+      {props.harnessTrace && (
+        <details
+          className="dyn-harness-trace"
+          open={props.harnessTrace.repaired || props.harnessTrace.stages.some((s) => s.stage === "clarify")}
+        >
+          <summary>
+            <span className="dyn-harness-summary-main">
+              <Sparkles size={12} aria-hidden="true" />
+              <strong>Thinking</strong>
+              <span className="dyn-harness-chain">
+                sfield Harness · {props.harnessTrace.stages.map((s) => s.stage.charAt(0).toUpperCase() + s.stage.slice(1)).join(" → ")}
+                {props.harnessTrace.repaired ? " (auto-repaired)" : ""}
+              </span>
+            </span>
+            {props.harnessTrace.thinking && (
+              <span className="dyn-harness-preview">{props.harnessTrace.thinking}</span>
+            )}
+          </summary>
+          <div className="dyn-harness-body">
+            {props.harnessTrace.thinking && (
+              <p className="dyn-harness-thought">{props.harnessTrace.thinking}</p>
+            )}
+            <p className="dyn-harness-goal">
+              <strong>Goal:</strong> {props.harnessTrace.resolvedGoal}
+              {props.harnessTrace.harnessRunId && <small style={{ marginLeft: 8, opacity: 0.7 }}>({props.harnessTrace.harnessRunId})</small>}
+            </p>
+            <ol className="dyn-harness-steps">
+              {props.harnessTrace.stages.map((step, idx) => (
+                <li key={idx} className={"is-" + step.status}>
+                  <span className="dyn-harness-stage">{step.stage}</span>
+                  <span>
+                    {step.summary}
+                    {step.thinking && <small className="dyn-harness-step-thought">{step.thinking}</small>}
+                  </span>
+                  {step.durationMs !== undefined && <small>{step.durationMs}ms</small>}
+                </li>
+              ))}
+            </ol>
+          </div>
+        </details>
+      )}
+
+      {props.choices?.length ? (
+        <div className="composer-starters" aria-label="Choose an option">
+          {props.choices.map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              className="starter"
+              disabled={!props.onFollowUp}
+              onClick={() => props.onFollowUp?.(r.prompt ?? ("Show " + r.id))}
+            >
+              {r.prompt ? r.label : `${r.label} · ${r.id}`}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="dyn-canvas-nodes">
         {props.nodes.map((node, idx) => {
           if (node.type === "metrics") {
@@ -713,32 +769,6 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
           );
         })}
       </div>
-
-      {props.harnessTrace && (
-        <details className="dyn-harness-trace">
-          <summary>
-            <span>
-              sfield Harness · {props.harnessTrace.stages.map((s) => s.stage.charAt(0).toUpperCase() + s.stage.slice(1)).join(" → ")}
-              {props.harnessTrace.repaired ? " (auto-repaired)" : ""}
-            </span>
-          </summary>
-          <div className="dyn-harness-body">
-            <p className="dyn-harness-goal">
-              <strong>Resolved goal:</strong> {props.harnessTrace.resolvedGoal}
-              {props.harnessTrace.harnessRunId && <small style={{ marginLeft: 8, opacity: 0.7 }}>({props.harnessTrace.harnessRunId})</small>}
-            </p>
-            <ol className="dyn-harness-steps">
-              {props.harnessTrace.stages.map((step, idx) => (
-                <li key={idx} className={"is-" + step.status}>
-                  <span className="dyn-harness-stage">{step.stage}</span>
-                  <span>{step.summary}</span>
-                  {step.durationMs !== undefined && <small>{step.durationMs}ms</small>}
-                </li>
-              ))}
-            </ol>
-          </div>
-        </details>
-      )}
 
       <footer className="dyn-canvas-footer">
         <p className="disclosure">{props.disclaimer}</p>

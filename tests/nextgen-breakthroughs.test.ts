@@ -372,7 +372,23 @@ test("4-Stage Dynamic UI Harness: handles pie chart typos, follow-up corrections
   assert.equal(repairedOut.canvas.harnessTrace?.repaired, true);
   assert.ok(repairedOut.canvas.harnessTrace?.stages.some((s) => s.stage === "repair"));
 
-  // 5. Unconnected external data source still stops cleanly at Stage 2 with zero fabricated numbers
+  // 5. Ambiguous request ("show me a pie chart" without specifying dataset) asks a clarifying question with clickable choices + thinking
+  const clarifyOut = await generateDynamicUi({
+    prompt: "show me a pie chart",
+    personaId: "demo-learner",
+    dataDir: dir,
+  });
+  assert.equal(clarifyOut.canvas.title, "Quick clarification");
+  assert.match(clarifyOut.intro, /what would you like this pie chart to show/i);
+  assert.ok((clarifyOut.canvas.choices?.length ?? 0) >= 3, "expected clickable clarification choices");
+  assert.ok(clarifyOut.canvas.choices?.[0].prompt, "expected clickable choice prompt");
+  assert.ok(clarifyOut.canvas.harnessTrace?.thinking, "expected thinking text in harnessTrace");
+  assert.deepEqual(
+    clarifyOut.canvas.harnessTrace?.stages.map((s) => s.stage),
+    ["plan", "clarify"],
+  );
+
+  // 6. Unconnected external data source still stops cleanly at Stage 2 with zero fabricated numbers
   const jiraOut = await generateDynamicUi({
     prompt: "Show all my Jira tickets as a table",
     personaId: "demo-learner",

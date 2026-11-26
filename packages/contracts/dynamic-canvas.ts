@@ -200,12 +200,14 @@ export const harnessTraceStepSchema = z.object({
   stage: z.enum(["plan", "clarify", "fetch", "compose", "verify", "repair"]),
   status: z.enum(["ok", "repaired", "skipped", "needs_data", "needs_clarification"]),
   summary: z.string().trim().min(1).max(200),
+  thinking: z.string().trim().max(360).optional(),
   durationMs: z.number().int().min(0).optional(),
 }).strict();
 
 export const harnessTraceSchema = z.object({
   harnessRunId: z.string().trim().min(1).max(64).optional(),
   resolvedGoal: z.string().trim().min(1).max(220),
+  thinking: z.string().trim().max(360).optional(),
   fetchedSources: z.array(z.string().trim().min(1).max(64)).max(8),
   visualTargets: z.array(z.string().trim().min(1).max(32)).max(6),
   repaired: z.boolean(),
@@ -224,7 +226,11 @@ export const dynamicCanvasSchema = z.object({
   prompt: z.string().trim().max(600).optional(),
   nodes: z.array(dynamicNodeSchema).min(1).max(6),
   disclaimer: z.string().trim().min(1).max(240),
-  choices: z.array(z.object({ id: z.string().min(1).max(64), label: z.string().min(1).max(120) }).strict()).max(12).optional(),
+  choices: z.array(z.object({
+    id: z.string().min(1).max(64),
+    label: z.string().min(1).max(120),
+    prompt: z.string().trim().min(1).max(240).optional(),
+  }).strict()).max(12).optional(),
   suggestedFollowUp: z.string().trim().max(160).optional(),
   harnessTrace: harnessTraceSchema.optional(),
 }).strict();

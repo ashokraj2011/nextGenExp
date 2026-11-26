@@ -1185,21 +1185,44 @@
   font-weight: 700;
 }
 .dyn-harness-trace {
-  margin-top: 12px;
-  padding: 8px 12px;
-  border-radius: 10px;
-  border: 1px dashed var(--line-strong);
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
   background: var(--paper);
-  font-size: .76rem;
+  font-size: .77rem;
   color: var(--muted);
 }
 .dyn-harness-trace summary {
   cursor: pointer;
-  font-weight: 650;
-  color: var(--teal-dark);
   list-style: none;
+  display: grid;
+  gap: 3px;
 }
 .dyn-harness-trace summary::-webkit-details-marker {
+  display: none;
+}
+.dyn-harness-summary-main {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--teal-dark);
+}
+.dyn-harness-summary-main strong {
+  font-weight: 700;
+}
+.dyn-harness-chain {
+  font-weight: 550;
+  color: var(--muted);
+}
+.dyn-harness-preview {
+  color: var(--ink);
+  opacity: .82;
+  font-size: .76rem;
+  line-height: 1.4;
+}
+.dyn-harness-trace[open] .dyn-harness-preview {
   display: none;
 }
 .dyn-harness-body {
@@ -1207,24 +1230,35 @@
   padding-top: 8px;
   border-top: 1px solid var(--line);
   display: grid;
-  gap: 6px;
+  gap: 7px;
+}
+.dyn-harness-thought {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.45;
 }
 .dyn-harness-goal {
   margin: 0;
-  color: var(--ink);
+  color: var(--muted);
 }
 .dyn-harness-steps {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 4px;
+  gap: 5px;
 }
 .dyn-harness-steps li {
   display: grid;
-  grid-template-columns: 62px minmax(0, 1fr) auto;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
   gap: 8px;
   align-items: baseline;
+}
+.dyn-harness-step-thought {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: .72rem;
 }
 .dyn-harness-stage {
   text-transform: uppercase;
@@ -1235,6 +1269,9 @@
 }
 .dyn-harness-steps li.is-repaired .dyn-harness-stage {
   color: #b45309;
+}
+.dyn-harness-steps li.is-needs_clarification .dyn-harness-stage {
+  color: #2563eb;
 }
 .dyn-harness-steps li.is-needs_data .dyn-harness-stage {
   color: #64748b;
