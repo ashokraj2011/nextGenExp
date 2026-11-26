@@ -871,6 +871,7 @@ export class ExperienceService {
         const generatedRaw = await generateDynamicUi({
           prompt: scopedPrompt,
           profileSummary,
+          recentContext: recentSummary,
           gateway: domainTools.gateway,
           dataDir: domainTools.dataDir,
           opsStore: domainTools.opsStore,

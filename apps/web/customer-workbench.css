@@ -712,7 +712,7 @@
 /* Avatar-Aligned Chat Stream */
 .editorial-thread .messages {
   width: min(100%, var(--thread-width));
-  padding: 20px 28px 136px;
+  padding: 20px 28px 36px;
   gap: 22px;
 }
 
@@ -1771,11 +1771,11 @@
 /* Floating Composer Dock */
 .composer-dock {
   position: relative;
-  background: linear-gradient(to top, var(--paper) 74%, rgba(249, 247, 245, 0));
-  border-top: 0;
-  margin-top: -54px;
-  padding: 24px 0 max(14px, env(safe-area-inset-bottom));
-  pointer-events: none;
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+  margin-top: 0;
+  padding: 12px 0 max(14px, env(safe-area-inset-bottom));
+  pointer-events: auto;
 }
 .composer-dock .composer-inner {
   pointer-events: auto;

@@ -437,7 +437,8 @@
 
 /* Composer Dock, Input, Pills & Send Button */
 :root[data-theme="dark"] .composer-dock {
-  background: linear-gradient(to top, #0f1311 76%, rgba(15, 19, 17, 0));
+  background: #0f1311;
+  border-top-color: var(--line);
 }
 
 :root[data-theme="dark"] .composer-area {

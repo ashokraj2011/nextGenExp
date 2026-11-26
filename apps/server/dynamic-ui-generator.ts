@@ -1,7 +1,8 @@
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { matchingDeals, matchingIncidents } from "./record-context";
-import { type DynamicCanvasNode, type DynamicCanvasProps } from "../../packages/contracts/dynamic-canvas";
+import { dynamicCanvasSchema, type DynamicCanvasNode, type DynamicCanvasProps } from "../../packages/contracts/dynamic-canvas";
+import { findProfileById } from "../../packages/customer-profiles";
 import { widgetDraftSchema, type WidgetDraft } from "../../packages/contracts/widget";
 import { runCopilotPrompt } from "./copilot-acp-client";
 import { getLlmEgressContext, rehydrateObjectStrings, scrubJsonSafeText, type LlmEgressContext } from "./pii-firewall";
@@ -18,7 +19,7 @@ import { parseStockTradePrompt, type SettlementCallback, type TradeStore } from 
 import { connectorInvokeToolRef, domainWriteToolRef } from "./runtime";
 import { generateWidgetFromText } from "./widget-library";
 
-const dynamicUiTrigger = /\b(widget|table|bar chart|chart|graph|dashboard|visuali[sz]e|visuali[sz]ation|calculator|simulator|matrix|breakdown|dynamic ui|custom ui|interactive|approval\s+(?:card|flow|form|workflow|request|queue)|pending\s+approvals?|show\s+(?:my\s+)?approvals?|review\s+approvals?|hitl\s+queue|pagerduty|external\s+connector|invoke\s+connector|run\s+connector|trigger\s+webhook|timeline|roadmap|triage|incident\s+(?:triage|dashboard|timeline|queue|status|report|response)|rollback|deal\s+desk|sales\s+pipeline|discount\s+approval|close[- ]plan|intake\s+form|(?:sell|buy|purchase|trim|trade)\b.*\b(?:shares?|stocks?|aapl|apple|msft|microsoft|nvda|nvidia|intc|intel|boeing|pfizer|voo)\b|tax[- ]?loss\s+harvest(?:ing)?|(?:show|list|view|all|what|see)\b.*\b(?:my\s+)?(?:stocks?|holdings?|shares?|positions?|equities)\b|\bmy\s+(?:stocks?|holdings?|shares?|positions?)\b|stock\s+(?:holdings?|positions?|list)|build\s+(?:me\s+)?a\b|design\s+(?:me\s+)?a\b|generate\s+(?:me\s+)?a\b|create\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist|workflow)|make\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist))\b/i;
+const dynamicUiTrigger = /\b(widget|table|bar chart|chart|graph|dashboard|visuali[sz]e|visuali[sz]ation|calculator|simulator|matrix|breakdown|dynamic ui|custom ui|interactive|summarize\s+(?:your\s+)?last\s+answer|in\s+\d+\s+bullet\s+points?|approval\s+(?:card|flow|form|workflow|request|queue)|pending\s+approvals?|show\s+(?:my\s+)?approvals?|review\s+approvals?|hitl\s+queue|pagerduty|external\s+connector|invoke\s+connector|run\s+connector|trigger\s+webhook|timeline|roadmap|triage|incident\s+(?:triage|dashboard|timeline|queue|status|report|response)|rollback|deal\s+desk|sales\s+pipeline|discount\s+approval|close[- ]plan|intake\s+form|(?:sell|buy|purchase|trim|trade)\b.*\b(?:shares?|stocks?|aapl|apple|msft|microsoft|nvda|nvidia|intc|intel|boeing|pfizer|voo)\b|tax[- ]?loss\s+harvest(?:ing)?|(?:show|list|view|all|what|see)\b.*\b(?:my\s+)?(?:stocks?|holdings?|shares?|positions?|equities)\b|\bmy\s+(?:stocks?|holdings?|shares?|positions?)\b|stock\s+(?:holdings?|positions?|list)|build\s+(?:me\s+)?a\b|design\s+(?:me\s+)?a\b|generate\s+(?:me\s+)?a\b|create\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist|workflow)|make\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist))\b/i;
 const nonDynamicGuard = /\b(weather|stock price|tomorrow|create a? ?rule)\b/i;
 const opsIncidentTrigger = /\b(incidents?|triage|rollback|sre|sev\s*[0-3]|p[1-3]\b|latency|5xx|error rate|it ops|operations dashboard|post-incident|production alert|inc-\d+)\b/i;
 const salesDealTrigger = /\b(deals?|deal\s*desk|deal-\d+|sales\s*pipeline|pipeline\s*(?:breakdown|chart|table|forecast)|revops|discount\s*approval|pricing\s*exception|mutual\s*action\s*plan|close[- ]plan|acme\s*cloud|enterprise\s*renewal)\b/i;
@@ -213,12 +214,331 @@ export function isRecordTimeline(prompt: string, capability: "ops_incident" | "s
     : /\b(timeline|close[- ]plan|mutual\s*action)\b/i.test(prompt);
 }
 
+const groundedCustomerDataTrigger = /\b(portfolio|summary|allocation|asset\s+mix|balance|balances|cash|invested|stocks?|equit(?:y|ies)|fixed\s+income|bonds?|holdings?|shares?|positions?|goal|home\s+(?:goal|plan|savings?)|down\s+payment|savings?|retirement|beneficiar(?:y|ies)|funding|last\s+answer|previous\s+answer|prior\s+answer|your\s+answer|above|bullet\s+points?|summarize|reframe)\b/i;
+
+const unconnectedExternalSourceTrigger = /\b(jira|confluence|snowflake|databricks|bigquery|sap|erp|workday|bamboohr|zendesk|freshdesk|hubspot|marketo|shopify|stripe\s+invoices|github\s+issues|linear\s+tickets|datadog|splunk|weather|sports\s+scores)\b/i;
+
+function fmtUsdCents(cents: number): string {
+  return `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function buildGroundedCustomerContext(
+  personaId?: string,
+  tradeStore?: TradeStore,
+  profileSummary?: string,
+  recentContext?: string,
+): { hasCustomerData: boolean; hasRecentContext: boolean; text: string } {
+  const sections: string[] = [];
+  const persona = personaId ? findProfileById(personaId) : undefined;
+  let hasCustomerData = false;
+
+  if (persona) {
+    hasCustomerData = true;
+    const totalCents = persona.cashCents + persona.equityCents + persona.fixedIncomeCents;
+    const investedCents = persona.equityCents + persona.fixedIncomeCents;
+    const pct = (part: number) => totalCents > 0 ? `${((part / totalCents) * 100).toFixed(1)}%` : "0%";
+    const goalPct = persona.homeGoalTargetCents > 0
+      ? Math.min(100, Math.round((persona.homeGoalSavedCents / persona.homeGoalTargetCents) * 100))
+      : 0;
+    const lines = [
+      `Customer: ${persona.displayName} (${persona.segment || "Member"})`,
+      `Account Funding Status: ${persona.accountFundingStatus}`,
+      `Beneficiary Status: ${persona.beneficiaryStatus}`,
+      `Total Portfolio Value: ${fmtUsdCents(totalCents)}`,
+      `- Stocks / Equities: ${fmtUsdCents(persona.equityCents)} (${pct(persona.equityCents)})`,
+      `- Fixed Income: ${fmtUsdCents(persona.fixedIncomeCents)} (${pct(persona.fixedIncomeCents)})`,
+      `- Invested Subtotal: ${fmtUsdCents(investedCents)} (${pct(investedCents)})`,
+      `- Cash: ${fmtUsdCents(persona.cashCents)} (${pct(persona.cashCents)})`,
+      `Current Balance: ${fmtUsdCents(persona.currentBalanceCents)} | Available Balance: ${fmtUsdCents(persona.availableBalanceCents)}`,
+    ];
+    if (persona.homeGoalTargetCents > 0) {
+      lines.push(
+        `Home Savings Goal: ${fmtUsdCents(persona.homeGoalSavedCents)} saved of ${fmtUsdCents(persona.homeGoalTargetCents)} target (${goalPct}% funded, ${fmtUsdCents(Math.max(0, persona.homeGoalTargetCents - persona.homeGoalSavedCents))} remaining)`,
+      );
+    }
+    if (persona.customAttributes?.length) {
+      lines.push(`Custom Attributes: ${persona.customAttributes.map((a) => `${a.label}=${a.value}`).join("; ")}`);
+    }
+    if (tradeStore) {
+      const snap = tradeStore.snapshotFor(persona.personaId);
+      const active = snap.holdings.filter((h) => h.shares > 0);
+      if (active.length) {
+        lines.push("Live Stock Holdings:");
+        for (const h of active.slice(0, 8)) {
+          const mv = h.shares * h.priceCents;
+          const pl = (h.priceCents - h.avgCostCents) * h.shares;
+          lines.push(`- ${h.symbol} (${h.name}): ${h.shares} sh, avg ${fmtUsdCents(h.avgCostCents)}, price ${fmtUsdCents(h.priceCents)}, value ${fmtUsdCents(mv)}, P/L ${pl >= 0 ? "+" : ""}${fmtUsdCents(pl)}`);
+        }
+      }
+    }
+    sections.push(`GROUNDED CUSTOMER 360 & PORTFOLIO DATA:\n${lines.join("\n")}`);
+  } else if (profileSummary?.trim()) {
+    hasCustomerData = true;
+    sections.push(`GROUNDED CUSTOMER SUMMARY:\n${profileSummary.trim()}`);
+  }
+
+  const hasRecentContext = Boolean(recentContext?.trim());
+  if (hasRecentContext) {
+    sections.push(`RECENT CONVERSATION CONTEXT:\n${recentContext!.trim().slice(0, 2600)}`);
+  }
+
+  return { hasCustomerData, hasRecentContext, text: sections.join("\n\n") };
+}
+
+function synthesizeGroundedCustomerCanvas(
+  prompt: string,
+  personaId?: string,
+  tradeStore?: TradeStore,
+  recentContext?: string,
+): { intro: string; canvas: DynamicCanvasProps } | null {
+  const lower = prompt.toLowerCase();
+  if (unconnectedExternalSourceTrigger.test(lower)) return null;
+  const persona = personaId ? findProfileById(personaId) : undefined;
+  if (!persona) return null;
+  if (!groundedCustomerDataTrigger.test(lower)) return null;
+
+  const totalCents = persona.cashCents + persona.equityCents + persona.fixedIncomeCents;
+  const investedCents = persona.equityCents + persona.fixedIncomeCents;
+  const pctNum = (part: number) => totalCents > 0 ? Math.round((part / totalCents) * 1000) / 10 : 0;
+  const stocksPct = pctNum(persona.equityCents);
+  const fixedPct = pctNum(persona.fixedIncomeCents);
+  const cashPct = pctNum(persona.cashCents);
+  const hasGoal = persona.homeGoalTargetCents > 0;
+  const goalPct = hasGoal
+    ? Math.min(100, Math.round((persona.homeGoalSavedCents / Math.max(1, persona.homeGoalTargetCents)) * 100))
+    : 0;
+
+  const isBulletSummary = /\b(bullet\s+points?|summarize|summary\s+in\s+\d+|tl;dr|key\s+takeaways?)\b/i.test(lower)
+    && !/\b(table|matrix|chart|bar\s+chart)\b/i.test(lower);
+  const wantsHoldings = /\b(holdings?|stocks?|tickers?|positions?|shares?)\b/i.test(lower) && Boolean(tradeStore);
+
+  const nodes: DynamicCanvasNode[] = [
+    {
+      type: "metrics",
+      items: [
+        { label: "Total Portfolio", value: fmtUsdCents(totalCents), delta: persona.accountFundingStatus === "funded" ? "Funded" : "Unfunded" },
+        { label: "Invested", value: fmtUsdCents(investedCents), delta: `${(stocksPct + fixedPct).toFixed(1)}% of total` },
+        { label: "Cash", value: fmtUsdCents(persona.cashCents), delta: `${cashPct.toFixed(1)}% liquid` },
+        ...(hasGoal
+          ? [{ label: "Home Goal", value: `${goalPct}%`, delta: `${fmtUsdCents(persona.homeGoalSavedCents)} / ${fmtUsdCents(persona.homeGoalTargetCents)}` }]
+          : [{ label: "Available Balance", value: fmtUsdCents(persona.availableBalanceCents), delta: `Current ${fmtUsdCents(persona.currentBalanceCents)}` }]),
+      ],
+    },
+  ];
+
+  if (isBulletSummary) {
+    const bullets: string[] = [
+      `Total portfolio is ${fmtUsdCents(totalCents)}: ${fmtUsdCents(investedCents)} invested (${stocksPct}% stocks, ${fixedPct}% fixed income) and ${fmtUsdCents(persona.cashCents)} (${cashPct}%) held in cash.`,
+      hasGoal
+        ? `Home savings goal is ${goalPct}% funded (${fmtUsdCents(persona.homeGoalSavedCents)} of ${fmtUsdCents(persona.homeGoalTargetCents)}, with ${fmtUsdCents(Math.max(0, persona.homeGoalTargetCents - persona.homeGoalSavedCents))} remaining).`
+        : `Available balance is ${fmtUsdCents(persona.availableBalanceCents)} versus ${fmtUsdCents(persona.currentBalanceCents)} current balance.`,
+      cashPct >= 20
+        ? `Cash is ${cashPct}% of your portfolio (${fmtUsdCents(persona.cashCents)}) — consider exploring investing options or modeling cash deployment.`
+        : persona.beneficiaryStatus === "missing"
+          ? "Beneficiary designations are currently missing and ready to update."
+          : "Account funding and beneficiary designations are up to date.",
+    ];
+    nodes.push({
+      type: "checklist",
+      title: "3-Point Portfolio Summary",
+      items: bullets,
+    });
+    return {
+      intro: `Here is a concise 3-point summary of ${persona.displayName}'s live portfolio and account status.`,
+      canvas: {
+        title: "Portfolio & Account Summary",
+        badge: "Dynamic Summary",
+        subtitle: `${persona.displayName} · Grounded in Customer 360`,
+        generatedBy: "synthesizer",
+        dataSource: "Customer 360 + Live Portfolio Snapshot",
+        prompt: prompt.slice(0, 600),
+        nodes,
+        disclaimer: "Figures reflect live Customer 360 balances and portfolio snapshot data.",
+        suggestedFollowUp: "Show my portfolio summary as a comparison table",
+      },
+    };
+  }
+
+  const rows: string[][] = [
+    ["Stocks / Equities", fmtUsdCents(persona.equityCents), `${stocksPct}%`, "Long-term growth allocation"],
+    ["Fixed Income", fmtUsdCents(persona.fixedIncomeCents), `${fixedPct}%`, "Stability & income allocation"],
+    ["Cash", fmtUsdCents(persona.cashCents), `${cashPct}%`, cashPct >= 20 ? "Above target — ready to deploy" : "Liquid reserve"],
+    ["Available vs Current", fmtUsdCents(persona.availableBalanceCents), `Current ${fmtUsdCents(persona.currentBalanceCents)}`, persona.accountFundingStatus === "funded" ? "Funded & active" : "Awaiting deposit"],
+  ];
+  if (hasGoal) {
+    rows.push([
+      "Home Savings Goal",
+      fmtUsdCents(persona.homeGoalSavedCents),
+      `${goalPct}% of ${fmtUsdCents(persona.homeGoalTargetCents)}`,
+      `${fmtUsdCents(Math.max(0, persona.homeGoalTargetCents - persona.homeGoalSavedCents))} remaining`,
+    ]);
+  }
+  rows.push([
+    "Beneficiaries",
+    persona.beneficiaryStatus === "on_file" ? "On file" : "Missing",
+    persona.segment || "Member",
+    persona.beneficiaryStatus === "on_file" ? "Complete" : "Action recommended",
+  ]);
+
+  nodes.push({
+    type: "table",
+    caption: `${persona.displayName} — Live Portfolio & Account Comparison`,
+    columns: ["Category", "Amount / Value", "Share / Progress", "Status & Role"],
+    rows,
+  });
+
+  if (totalCents > 0) {
+    nodes.push({
+      type: "barchart",
+      title: "Live Asset Allocation Breakdown",
+      unit: "usd",
+      bars: [
+        { label: `Stocks (${stocksPct}%)`, value: Math.round(persona.equityCents / 100), displayValue: fmtUsdCents(persona.equityCents), highlight: true },
+        { label: `Cash (${cashPct}%)`, value: Math.round(persona.cashCents / 100), displayValue: fmtUsdCents(persona.cashCents) },
+        { label: `Fixed Income (${fixedPct}%)`, value: Math.round(persona.fixedIncomeCents / 100), displayValue: fmtUsdCents(persona.fixedIncomeCents) },
+      ],
+    });
+  }
+
+  if (wantsHoldings && tradeStore) {
+    const snap = tradeStore.snapshotFor(persona.personaId);
+    const active = snap.holdings.filter((h) => h.shares > 0).slice(0, 6);
+    if (active.length) {
+      nodes.push({
+        type: "table",
+        caption: "Top Equity Positions",
+        columns: ["Symbol", "Shares", "Market Value", "Unrealized P/L"],
+        rows: active.map((h) => {
+          const mv = h.shares * h.priceCents;
+          const pl = (h.priceCents - h.avgCostCents) * h.shares;
+          return [h.symbol, String(h.shares), fmtUsdCents(mv), `${pl >= 0 ? "+" : ""}${fmtUsdCents(pl)}`];
+        }),
+      });
+    }
+  } else if (hasGoal) {
+    nodes.push({
+      type: "progress",
+      label: "Home down-payment goal",
+      current: Math.round(persona.homeGoalSavedCents / 100),
+      target: Math.round(persona.homeGoalTargetCents / 100),
+      currentDisplay: fmtUsdCents(persona.homeGoalSavedCents),
+      targetDisplay: fmtUsdCents(persona.homeGoalTargetCents),
+    });
+  }
+
+  return {
+    intro: `Here is ${persona.displayName}'s live portfolio summary organized as a structured comparison table (${fmtUsdCents(totalCents)} total value: ${stocksPct}% stocks, ${fixedPct}% fixed income, ${cashPct}% cash).`,
+    canvas: {
+      title: "Portfolio Summary Comparison Table",
+      badge: "Dynamic Table",
+      subtitle: `${persona.displayName} · Grounded in live Customer 360 balances`,
+      generatedBy: "synthesizer",
+      dataSource: "Customer 360 + Live Portfolio Snapshot",
+      prompt: prompt.slice(0, 600),
+      nodes,
+      disclaimer: "Figures reflect live Customer 360 balances and portfolio snapshot data.",
+      suggestedFollowUp: "Simulate deploying cash into my portfolio",
+    },
+  };
+}
+
+const groundedCanvasSystemPrompt = [
+  "You are CEP Dynamic UI Composer. Compose a clean, grounded, schema-valid interactive UI canvas from the user's request and the provided GROUNDED DATA / RECENT CONVERSATION.",
+  "STRICT GROUNDING RULES:",
+  "1. Use ONLY exact numbers, holdings, balances, and facts present in GROUNDED CUSTOMER 360 & PORTFOLIO DATA or RECENT CONVERSATION CONTEXT. Never fabricate external enterprise records.",
+  "2. If the user asks for records from an external system that is NOT connected in the provided data (e.g., Jira tickets, Snowflake warehouse rows, Salesforce contacts, SAP invoices, live weather), return ONLY: { \"needsDataSource\": true, \"missingSource\": \"short name of missing system\" }.",
+  "3. Otherwise, compose the best visual layout matching the user's request (e.g., a crisp comparison 'table' when asked for a table, 'barchart' when asked for a chart, 'checklist' when asked for bullet points/summary, 'comparison' for 2-column tradeoffs, 'sliders' for calculators/simulators, 'metrics' for key KPIs).",
+  "4. Never mention any external brokerage or company names; refer to the platform only as CEP.",
+  "Return ONE JSON object matching this exact shape:",
+  JSON.stringify({
+    intro: "1-2 concise sentences summarizing what the dynamic view shows.",
+    canvas: {
+      title: "Short headline (max 90 chars)",
+      badge: "Short badge like 'Dynamic Table' or 'Portfolio Comparison' (max 40 chars)",
+      subtitle: "Optional concise subtitle (max 200 chars)",
+      generatedBy: "llm",
+      dataSource: "Customer 360 + Live Portfolio Snapshot",
+      nodes: [
+        "1 to 5 nodes using ONLY these exact shapes:",
+        "{ type: 'metrics', items: [{ label, value, delta? }] } (1-4 items)",
+        "{ type: 'table', caption?, columns: [2..5 strings], rows: [[2..5 strings matching columns length]] } (1-10 rows)",
+        "{ type: 'barchart', title?, unit?: 'usd'|'percent'|'number', bars: [{ label, value: number>=0, displayValue, highlight?: boolean }] } (2-8 bars)",
+        "{ type: 'progress', label, current: number>=0, target: number>0, currentDisplay, targetDisplay }",
+        "{ type: 'sliders', title?, formula: 'compound_monthly'|'annual_yield'|'simple_total', resultLabel, inputs: [{ id: 'amount'|'monthly'|'rate'|'years', label, min, max, step, value, unit: 'usd'|'percent'|'years' }] }",
+        "{ type: 'comparison', columns: [{ title, points: [1..6 strings] }, { title, points: [1..6 strings] }] }",
+        "{ type: 'checklist', title?, items: [1..8 strings] }",
+        "{ type: 'callout', tone: 'info'|'highlight'|'caution', title?, body }",
+      ],
+      disclaimer: "Grounded in live Customer 360 balances and recent conversation context.",
+      suggestedFollowUp: "Optional short follow-up prompt",
+    },
+  }),
+].join("\n");
+
+async function composeDynamicCanvasWithLlm(input: {
+  prompt: string;
+  groundedContext: string;
+  gateway: GatewaySettings;
+  dataDir: string;
+  signal?: AbortSignal;
+}): Promise<{ intro: string; canvas: DynamicCanvasProps } | { needsDataSource: true; missingSource?: string } | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 14_000);
+  timer.unref();
+  const onParentAbort = () => controller.abort();
+  input.signal?.addEventListener("abort", onParentAbort, { once: true });
+
+  try {
+    const userPrompt = input.groundedContext
+      ? `${input.groundedContext}\n\nUSER VIEW REQUEST:\n${input.prompt}`
+      : `USER VIEW REQUEST:\n${input.prompt}`;
+    const raw = await callConfiguredLlmJson(
+      input.gateway,
+      input.dataDir,
+      groundedCanvasSystemPrompt,
+      userPrompt,
+      controller.signal,
+      undefined,
+      { ...(getLlmEgressContext(input.dataDir) ?? {}), operation: "dynamic_ui_compose" },
+    );
+    if (!raw || typeof raw !== "object") return null;
+    const obj = raw as Record<string, unknown>;
+    if (obj.needsDataSource === true) {
+      return { needsDataSource: true, missingSource: typeof obj.missingSource === "string" ? obj.missingSource : undefined };
+    }
+    const rawCanvas = obj.canvas && typeof obj.canvas === "object" ? (obj.canvas as Record<string, unknown>) : null;
+    if (!rawCanvas) return null;
+    const candidate = {
+      ...rawCanvas,
+      generatedBy: "llm",
+      prompt: input.prompt.slice(0, 600),
+      disclaimer: typeof rawCanvas.disclaimer === "string" && rawCanvas.disclaimer.trim()
+        ? rawCanvas.disclaimer.trim().slice(0, 240)
+        : "Grounded in live Customer 360 data and conversation context.",
+    };
+    const parsed = dynamicCanvasSchema.safeParse(candidate);
+    if (!parsed.success) return null;
+    const intro = typeof obj.intro === "string" && obj.intro.trim()
+      ? obj.intro.trim().slice(0, 400)
+      : `Here is your dynamically composed view for "${parsed.data.title}".`;
+    return { intro, canvas: parsed.data };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+    input.signal?.removeEventListener("abort", onParentAbort);
+  }
+}
+
 export function synthesizeDynamicCanvas(
   prompt: string,
   profileSummary?: string,
   opsStore?: OpsIncidentStore,
   salesStore?: SalesDealStore,
   capabilityId?: string,
+  personaId?: string,
+  tradeStore?: TradeStore,
+  recentContext?: string,
 ): { intro: string; canvas: DynamicCanvasProps } {
   const widget = generateWidgetFromText(prompt);
   const lower = prompt.toLowerCase();
@@ -427,6 +747,8 @@ export function synthesizeDynamicCanvas(
       })),
     });
   } else {
+    const grounded = synthesizeGroundedCustomerCanvas(prompt, personaId, tradeStore, recentContext);
+    if (grounded) return grounded;
     const intro = "I don’t have a connected data source for that view. Which source should supply the records?";
     return { intro, canvas: { title: "Data source needed", badge: "Data availability", generatedBy: "synthesizer",
       nodes: [{ type: "callout", tone: "info", body: intro }], disclaimer: "No records were loaded." } };
@@ -891,6 +1213,7 @@ function buildStockHoldingsCanvas(
 export async function generateDynamicUi(input: {
   prompt: string;
   profileSummary?: string;
+  recentContext?: string;
   gateway?: GatewaySettings | null;
   dataDir: string;
   opsStore?: OpsIncidentStore;
@@ -916,8 +1239,8 @@ export async function generateDynamicUi(input: {
   signal?: AbortSignal;
 }): Promise<{ intro: string; canvas: DynamicCanvasProps }> {
   const {
-    prompt, profileSummary, gateway, dataDir, opsStore, salesStore, connectorStore, approvalStore,
-    tradeStore, matchedActionFlow, personaId, conversationId, principalId, onTradeSettle, requesterName, semanticRoute, tradeContinuation,
+    prompt, profileSummary, recentContext, gateway, dataDir, opsStore, salesStore, connectorStore, approvalStore,
+    tradeStore, matchedActionFlow, personaId, conversationId, principalId, onTradeSettle, requesterName, semanticRoute, tradeContinuation, signal,
   } = input;
 
   if (matchedActionFlow) {
@@ -1048,7 +1371,41 @@ export async function generateDynamicUi(input: {
   if (connectorStore && approvalStore && (capId === "external_connector" || (!capId && isConnectorActionPrompt(prompt)))) {
     return buildConnectorActionCanvas(connectorStore, approvalStore, prompt, requesterName);
   }
-  return synthesizeDynamicCanvas(prompt, profileSummary, opsStore, salesStore, capId);
+  const isDedicatedDomain = (opsStore && (capId === "ops_incident" || isOpsIncidentPrompt(prompt)))
+    || (salesStore && (capId === "sales_deal_desk" || isSalesDealPrompt(prompt)));
+
+  if (!isDedicatedDomain && gateway && groundedCustomerDataTrigger.test(prompt) && !unconnectedExternalSourceTrigger.test(prompt)) {
+    const grounded = buildGroundedCustomerContext(personaId, tradeStore, profileSummary, recentContext);
+    if (grounded.hasCustomerData || grounded.hasRecentContext) {
+      const llmComposed = await composeDynamicCanvasWithLlm({
+        prompt,
+        groundedContext: grounded.text,
+        gateway,
+        dataDir,
+        signal,
+      });
+      if (llmComposed) {
+        if ("needsDataSource" in llmComposed) {
+          const intro = llmComposed.missingSource
+            ? `I don’t have a connected data source for ${llmComposed.missingSource}. Which source should supply the records?`
+            : "I don’t have a connected data source for that view. Which source should supply the records?";
+          return {
+            intro,
+            canvas: {
+              title: "Data source needed",
+              badge: "Data availability",
+              generatedBy: "synthesizer",
+              nodes: [{ type: "callout", tone: "info", body: intro }],
+              disclaimer: "No external records were loaded.",
+            },
+          };
+        }
+        return llmComposed;
+      }
+    }
+  }
+
+  return synthesizeDynamicCanvas(prompt, profileSummary, opsStore, salesStore, capId, personaId, tradeStore, recentContext);
 }
 
 const widgetStudioSystemPrompt = [

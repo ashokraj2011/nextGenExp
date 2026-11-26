@@ -9,6 +9,7 @@ import { testClient, testProject } from "./client";
 import { startFixtureGateway } from "./gateway-fixture";
 import type { HandoffTicket } from "../packages/contracts/handoff";
 import type { AgentDelegationPass, NegotiationSession, Watchcard } from "../packages/contracts/nextgen-chat";
+import { generateDynamicUi } from "../apps/server/dynamic-ui-generator";
 
 test("#1 Multiplayer Live Glass Co-Browse: SSE slider sync, Advisor-Proposed card, and customer cryptographic sign-off", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "cep-ng-1-"));
@@ -238,4 +239,37 @@ test("#6 Consumer A2A Delegated Negotiation: scoped pass, live A2A/MCP negotiati
   });
   const denied = (await deniedRes.json()) as { session: NegotiationSession };
   assert.equal(denied.session.status, "denied");
+});
+
+test("Grounded Dynamic UI: generates live comparison table & 3-point summary from Customer 360 while guarding unconnected external sources", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "cep-dyn-ui-"));
+  t.after(async () => { await rm(dir, { recursive: true, force: true }); });
+
+  // 1. Comparison table for portfolio summary (exact prompt sent by 'As table' button)
+  const tableOut = await generateDynamicUi({
+    prompt: 'Show your last answer about "Let me know my portfolio summary." as a clear comparison table.',
+    personaId: "demo-learner",
+    dataDir: dir,
+    recentContext: JSON.stringify({ message: "Let me know my portfolio summary.", reply: "Here's your summary." }),
+  });
+  assert.notEqual(tableOut.canvas.title, "Data source needed");
+  assert.ok(tableOut.canvas.nodes.some((n) => n.type === "table"), "expected dynamic table node");
+  assert.ok(tableOut.canvas.nodes.some((n) => n.type === "metrics"), "expected metrics node");
+  assert.match(tableOut.canvas.dataSource ?? "", /Customer 360/i);
+
+  // 2. 3-bullet summary ('Summarize' button)
+  const summaryOut = await generateDynamicUi({
+    prompt: 'Summarize your last answer about "Let me know my portfolio summary." in 3 bullet points.',
+    personaId: "demo-learner",
+    dataDir: dir,
+  });
+  assert.ok(summaryOut.canvas.nodes.some((n) => n.type === "checklist"), "expected checklist summary node");
+
+  // 3. Unconnected external data source still honestly asks for a data source
+  const jiraOut = await generateDynamicUi({
+    prompt: "Show all my Jira tickets as a table",
+    personaId: "demo-learner",
+    dataDir: dir,
+  });
+  assert.equal(jiraOut.canvas.title, "Data source needed");
 });
