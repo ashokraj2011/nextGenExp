@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Activity, Bell, Bot, CheckCircle2, Eye, GitCompare, KeyRound, Layers,
+  Activity, Bell, Bot, Brain, CheckCircle2, ChevronDown, Eye, GitCompare, Headphones, KeyRound, Layers,
   Play, Plus, Radio, ShieldAlert, ShieldCheck, Sliders, Sparkles, Terminal, Trash2, X, Zap,
 } from "lucide-react";
 import type { DemoPersona, TurnView } from "../../packages/contracts/api";
@@ -864,6 +864,131 @@ export function ConsumerA2aDrawer({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ============================================================================
+ * Compact Single-Button "Tools" Menu (keeps the top bar clean & uncluttered)
+ * ========================================================================== */
+
+export function ChatToolsMenu({
+  expertiseMode,
+  onChangeExpertise,
+  futuresOpen,
+  onToggleFutures,
+  watchCount,
+  watchTriggered,
+  onToggleWatch,
+  onOpenDelegate,
+  gatewayConfigured,
+  memoryCount,
+  onOpenMemory,
+  handoffActive,
+  onStartHandoff,
+}: {
+  expertiseMode: ExpertiseMode;
+  onChangeExpertise: (next: ExpertiseMode) => void;
+  futuresOpen: boolean;
+  onToggleFutures: () => void;
+  watchCount: number;
+  watchTriggered: boolean;
+  onToggleWatch: () => void;
+  onOpenDelegate: () => void;
+  gatewayConfigured: boolean;
+  memoryCount: number;
+  onOpenMemory: () => void;
+  handoffActive: boolean;
+  onStartHandoff: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const activeBadgeCount = (watchTriggered ? 1 : 0) + (handoffActive ? 1 : 0);
+
+  return (
+    <div className="tools-menu-wrap" ref={wrapRef}>
+      <button
+        type="button"
+        className={"topbar-rich-btn" + (open || futuresOpen || handoffActive || watchTriggered ? " is-active" : "")}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Assistant tools & display settings (or type / in chat)"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Sparkles size={14} aria-hidden="true" />
+        <span>Tools</span>
+        {activeBadgeCount > 0 && <span className="topbar-rich-count">{activeBadgeCount}</span>}
+        <ChevronDown size={13} aria-hidden="true" />
+      </button>
+
+      {open && (
+        <div className="tools-menu-popover" role="menu" aria-label="Assistant tools">
+          <div className="tools-menu-section">
+            <span className="tools-menu-label">View detail</span>
+            <ExpertiseMorphDial mode={expertiseMode} onChange={onChangeExpertise} />
+          </div>
+          <div className="tools-menu-divider" />
+          <button type="button" role="menuitem" className="tools-menu-item" onClick={() => { setOpen(false); onToggleFutures(); }}>
+            <GitCompare size={15} aria-hidden="true" />
+            <div>
+              <strong>Parallel Futures</strong>
+              <small>Compare two plans side-by-side</small>
+            </div>
+            {futuresOpen && <span className="tools-menu-tag">Open</span>}
+          </button>
+          <button type="button" role="menuitem" className="tools-menu-item" onClick={() => { setOpen(false); onToggleWatch(); }}>
+            <Bell size={15} aria-hidden="true" />
+            <div>
+              <strong>Living Watchcards</strong>
+              <small>Auto-stage actions on balance alerts</small>
+            </div>
+            {watchCount > 0 && <span className="tools-menu-tag">{watchCount}</span>}
+          </button>
+          <button type="button" role="menuitem" className="tools-menu-item" onClick={() => { setOpen(false); onOpenDelegate(); }}>
+            <Bot size={15} aria-hidden="true" />
+            <div>
+              <strong>Personal AI (A2A)</strong>
+              <small>Delegate a scoped pass to your AI</small>
+            </div>
+          </button>
+          {gatewayConfigured && (
+            <button type="button" role="menuitem" className="tools-menu-item" onClick={() => { setOpen(false); onOpenMemory(); }}>
+              <Brain size={15} aria-hidden="true" />
+              <div>
+                <strong>Personal Memory</strong>
+                <small>View or forget saved preferences</small>
+              </div>
+              {memoryCount > 0 && <span className="tools-menu-tag">{memoryCount}</span>}
+            </button>
+          )}
+          <div className="tools-menu-divider" />
+          <button type="button" role="menuitem" className="tools-menu-item" onClick={() => { setOpen(false); onStartHandoff(); }}>
+            <Headphones size={15} aria-hidden="true" />
+            <div>
+              <strong>{handoffActive ? "Live Advisor Active" : "Talk to an Advisor"}</strong>
+              <small>Share live card with a human specialist</small>
+            </div>
+            {handoffActive && <span className="tools-menu-tag is-live">Live</span>}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

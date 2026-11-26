@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useAui, useAuiState, useExternalStoreRuntime, type ThreadMessageLike } from "@assistant-ui/react";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import {
-  ArrowLeft, ArrowUp, ArrowUpRight, Bell, BookOpenText, Bot, Brain, ChevronDown, ChevronRight, Columns2, Eye, GitCompare, GraduationCap, Headphones, House, LayoutDashboard,
+  ArrowLeft, ArrowUp, ArrowUpRight, BookOpenText, ChevronDown, ChevronRight, Columns2, Eye, GraduationCap, House, LayoutDashboard,
   ListChecks, LogIn, LogOut, MapPin, MessageSquare, Mic, MicOff, PanelLeft, PanelLeftClose, Paperclip, Plus, RotateCcw, Sparkles,
   Square, ThumbsDown, ThumbsUp, X,
 } from "lucide-react";
@@ -43,7 +43,7 @@ import {
 } from "./chat-rich-ux";
 import type { ExpertiseMode, Watchcard } from "../../packages/contracts/nextgen-chat";
 import {
-  ConsumerA2aDrawer, ExpertiseMorphDial, ExpertiseTurnBanner, LivingWatchcardsStrip, ParallelFuturesPane,
+  ChatToolsMenu, ConsumerA2aDrawer, ExpertiseTurnBanner, LivingWatchcardsStrip, ParallelFuturesPane,
 } from "./nextgen-chat-features";
 import "./customer-workbench.css";
 
@@ -1511,63 +1511,22 @@ function App() {
             </div>
           )}
           <div className="topbar-actions">
-            {!adminChat && <ExpertiseMorphDial mode={expertiseMode} onChange={changeExpertiseMode} />}
             {!adminChat && (
-              <button
-                type="button"
-                className={"topbar-rich-btn" + (futuresOpen ? " is-active" : "")}
-                title="Compare two parallel financial futures side-by-side & commit"
-                onClick={() => setFuturesOpen((v) => !v)}
-              >
-                <GitCompare size={14} aria-hidden="true" />
-                <span>Futures</span>
-              </button>
-            )}
-            {!adminChat && (
-              <button
-                type="button"
-                className={"topbar-rich-btn" + (watchCreatorOpen || watchcards.some((w) => w.status === "triggered") ? " is-active" : "")}
-                title="Living Threads: create autonomous watchcards that wake up when reality changes"
-                onClick={() => setWatchCreatorOpen((v) => !v)}
-              >
-                <Bell size={14} aria-hidden="true" />
-                <span>Watch</span>
-                {watchcards.length > 0 && <span className="topbar-rich-count">{watchcards.length}</span>}
-              </button>
-            )}
-            {!adminChat && (
-              <button
-                type="button"
-                className={"topbar-rich-btn" + (delegateOpen ? " is-active" : "")}
-                title="Delegate a scoped A2A pass to your personal AI agent"
-                onClick={() => setDelegateOpen(true)}
-              >
-                <Bot size={14} aria-hidden="true" />
-                <span>Personal AI</span>
-              </button>
-            )}
-            {!adminChat && configuration?.gatewayConfigured && (
-              <button
-                type="button"
-                className={"topbar-rich-btn" + (memoryOpen ? " is-active" : "")}
-                title="View or manage what CEP remembers for you"
-                onClick={() => { setMemoryOpen(true); void loadMemory(); }}
-              >
-                <Brain size={14} aria-hidden="true" />
-                <span>Memory</span>
-                {memoryItems.length > 0 && <span className="topbar-rich-count">{memoryItems.length}</span>}
-              </button>
-            )}
-            {!adminChat && (
-              <button
-                type="button"
-                className={"topbar-rich-btn" + (activeHandoff ? " is-active" : "")}
-                title="Escalate to a live human specialist with Multiplayer Live Glass co-browsing"
-                onClick={() => void startHandoff()}
-              >
-                <Headphones size={14} aria-hidden="true" />
-                <span>{activeHandoff ? "Live Glass" : "Advisor"}</span>
-              </button>
+              <ChatToolsMenu
+                expertiseMode={expertiseMode}
+                onChangeExpertise={changeExpertiseMode}
+                futuresOpen={futuresOpen}
+                onToggleFutures={() => setFuturesOpen((v) => !v)}
+                watchCount={watchcards.length}
+                watchTriggered={watchcards.some((w) => w.status === "triggered")}
+                onToggleWatch={() => setWatchCreatorOpen((v) => !v)}
+                onOpenDelegate={() => setDelegateOpen(true)}
+                gatewayConfigured={Boolean(configuration?.gatewayConfigured)}
+                memoryCount={memoryItems.length}
+                onOpenMemory={() => { setMemoryOpen(true); void loadMemory(); }}
+                handoffActive={Boolean(activeHandoff)}
+                onStartHandoff={() => void startHandoff()}
+              />
             )}
             <ThemeToggle compact />
             {adminChat && configuration && (

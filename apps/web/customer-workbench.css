@@ -236,8 +236,10 @@
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
-  max-width: 100%;
-  overflow-x: auto;
+  overflow: visible;
+}
+.workspace-crumb {
+  white-space: nowrap;
 }
 .topbar-actions > * { flex-shrink: 0; }
 .model-status {
