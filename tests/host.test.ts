@@ -18,7 +18,7 @@ import {
 } from "../packages/contracts/funding-workflow";
 import { beneficiaryReviewWorkflow } from "../packages/contracts/customer-workflows";
 import type { GlossaryCondition } from "../packages/contracts/rule-glossary";
-import { demoExperiencesQuestion, leavingWorkQuestion, portfolioSummaryQuestion, retirementQuestion } from "../packages/contracts/routing-intents";
+import { demoExperiencesQuestion, formatUnsupportedReply, leavingWorkQuestion, portfolioSummaryQuestion, retirementQuestion } from "../packages/contracts/routing-intents";
 import {
   defaultToolSetup, type MockCcreRule, type ToolSetup, type ToolSetupView, type TreatmentPreview, type TreatmentPreviewInput,
 } from "../packages/contracts/tool-setup";
@@ -1208,8 +1208,14 @@ test("vague and unsupported questions show the available demo experiences", asyn
 
   const unsupported = await client.ask(chat.id, "What is the weather tomorrow?");
   assert.equal(unsupported.trace.routeOutcome, "no_match");
-  assert.equal(unsupported.turn.experience?.intro, demoExperiencesQuestion);
+  assert.equal(unsupported.turn.experience?.intro, formatUnsupportedReply("What is the weather tomorrow?"));
+  assert.match(unsupported.turn.experience?.intro ?? "", /can’t .*here are the things we can chat about/i);
   assert.equal(unsupported.trace.tsScopeId, null);
+
+  assert.match(
+    formatUnsupportedReply("i want to setup another goal"),
+    /can’t set up a new goal right now.*here are the things we can chat about/i,
+  );
 });
 
 test("a misspelled retirement request reaches Learning and shows the beneficiary action only when eligible", async (t) => {

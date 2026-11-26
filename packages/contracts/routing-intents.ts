@@ -77,6 +77,24 @@ export const retirementQuestion = "Are you looking for general retirement planni
 export const leavingWorkQuestion = "Would you like general retirement planning information as you leave your job?";
 export const portfolioSummaryQuestion = "Did you mean your portfolio summary?";
 export const demoExperiencesQuestion = host.clarificationQuestions[0];
+export const unsupportedTopicsSummary = "reviewing your portfolio (including pie charts or comparison tables), tracking your home-buying goal, checking stock holdings or trades, comparing balances, learning about retirement, or walking through an address change or transfer";
+
+export function formatUnsupportedReply(userMessage: string): string {
+  const clean = userMessage.trim();
+  if (/\b(?:set\s*up|setup|create|add|start|open|new)\b.*\bgoals?\b|\banother\s+goal\b/i.test(clean)) {
+    return `I can’t set up a new goal right now — currently I can track your existing home-buying goal. Here are the things we can chat about: ${unsupportedTopicsSummary}. What would you like to explore?`;
+  }
+  if (/\b(?:weather|forecast|temperature)\b/i.test(clean)) {
+    return `I can’t check live weather right now, but here are the things we can chat about: ${unsupportedTopicsSummary}. What would you like to explore?`;
+  }
+  if (/\b(?:stock\s+price|market\s+prediction|which\s+stock\s+should|pick\s+a\s+stock)\b/i.test(clean)) {
+    return `I can’t give live market quotes or stock picks right now, but here are the things we can chat about: ${unsupportedTopicsSummary}. What would you like to explore?`;
+  }
+  if (/\b(?:mortgage\s+rate|loan\s+application|apply\s+for\s+a\s+loan)\b/i.test(clean)) {
+    return `I can’t process loan applications or quote live mortgage rates right now, but here are the things we can chat about: ${unsupportedTopicsSummary}. What would you like to explore?`;
+  }
+  return `I can’t do that right now, but here are the things we can chat about: ${unsupportedTopicsSummary}. What would you like to explore?`;
+}
 export const routingQuestions = [...host.clarificationQuestions, retirementQuestion, leavingWorkQuestion, portfolioSummaryQuestion];
 export const ROUTING_HISTORY_TURNS = 4;
 export const ROUTING_HISTORY_REQUEST_LENGTH = 350;

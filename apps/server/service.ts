@@ -18,7 +18,7 @@ import type { ContextRoutingInput, ExperienceCompositionInput } from "../../pack
 import { isPortfolioSummary, portfolioSnapshotSchema } from "../../packages/contracts/portfolio";
 import { ruleGlossarySchema } from "../../packages/contracts/rule-glossary";
 import {
-  availableRoutingIntents, demoExperiencesQuestion, explicitBalanceComparison, resolveInvestMoreFallback, resolveSummaryFollowUp, routingQuestions,
+  availableRoutingIntents, demoExperiencesQuestion, explicitBalanceComparison, formatUnsupportedReply, resolveInvestMoreFallback, resolveSummaryFollowUp, routingQuestions,
 } from "../../packages/contracts/routing-intents";
 import { FOLLOW_UP_EVENT, type DisplayExperience } from "../../packages/contracts/surface";
 import { normalizedIdsSchema, treatmentOverride } from "../../packages/contracts/tool-setup";
@@ -1109,12 +1109,16 @@ export class ExperienceService {
               profileSummary,
               gateway: domainTools.gateway,
               dataDir: domainTools.dataDir,
+              harness: runtime.harness,
+              portfolioSnapshots: domainTools.portfolioSnapshots,
+              goalProgressProvider: domainTools.goalProgressProvider,
               opsStore: domainTools.opsStore,
               salesStore: domainTools.salesStore,
               connectorStore: domainTools.connectorStore,
               approvalStore: domainTools.approvalStore,
               tradeStore: domainTools.tradeStore,
               personaId: conversation.personaId,
+              principalId: initial.scope.principalId,
               requesterName: initial.operatorName ?? persona?.displayName,
               signal,
             });
@@ -1129,7 +1133,9 @@ export class ExperienceService {
             return;
           }
           const now = this.now();
-          const text = proposal.status === "reply" ? proposal.replyText : demoExperiencesQuestion;
+          const text = proposal.status === "reply"
+            ? proposal.replyText
+            : formatUnsupportedReply(initial.public.message);
           const result = compileChatReply(text, proposal.status, now);
           this.store.update(id, (row) => {
             row.public.actionMode = proposal.status === "reply" ? "plain_chat" : "clarify";
