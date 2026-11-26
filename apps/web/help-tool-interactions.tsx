@@ -107,7 +107,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 1,
         title: "Open scoped sfield run",
-        wireLabel: "1. Agent run",
+        wireLabel: "Agent\nrun",
         from: "host",
         to: "allowlist",
         whatHappens: "CEP Turn Controller starts the context-router agent inside sfield with the authenticated Principal and domain scope.",
@@ -117,7 +117,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 2,
         title: "Apply agent allowlist & hooks",
-        wireLabel: "2. ctx.exposed",
+        wireLabel: "Scoped\nexposed",
         from: "allowlist",
         to: "narrow",
         whatHappens: "sfield passes only ctx.exposed (empty for router, balances only for composer) through beforeModelDispatch and the PII Firewall.",
@@ -127,7 +127,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 3,
         title: "Dispatch narrowed prompt to LLM",
-        wireLabel: "3. Prompt (0 tools)",
+        wireLabel: "Prompt\n(0 tools)",
         from: "narrow",
         to: "llm",
         whatHappens: "The LLM receives the user message, conversation summary/history, and the allowed intent catalog — with tools: [].",
@@ -137,7 +137,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 4,
         title: "Verify intent proposal",
-        wireLabel: "4. Verified intent",
+        wireLabel: "Verified intent proposal",
         from: "proposal",
         to: "gate",
         whatHappens: "The LLM returns the inferred intent ID (or clarification). sfield's contextSelection verifier validates it before CEP maps the intent to data tools.",
@@ -147,7 +147,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 5,
         title: "Authorize & prepare scoped tool call",
-        wireLabel: "5. Auth + prepare",
+        wireLabel: "Auth &\nprepare",
         from: "gate",
         to: "executor",
         whatHappens: "CEP requests the exact read tools needed for the verified intent (e.g. TS eligibility + portfolio/goal read). Authorizer verifies Principal and read effect.",
@@ -157,7 +157,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 6,
         title: "Execute read & record audit trail",
-        wireLabel: "6. Read & audit",
+        wireLabel: "Read &\naudit",
         from: "executor",
         to: "systems",
         whatHappens: "Scoped adapters query Treatment Selector / CCRE and live customer stores, returning typed records to compile the A2UI card.",
@@ -243,7 +243,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 1,
         title: "Match multi-step goal",
-        wireLabel: "1. Goal journey",
+        wireLabel: "Goal\njourney",
         from: "host",
         to: "allowlist",
         whatHappens: "ExperienceAgent.shouldHandle() detects a multi-step goal or published capability and opens an experience-agent run.",
@@ -253,7 +253,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 2,
         title: "Progressively narrow meta-tools",
-        wireLabel: "2. Turn-gated narrow",
+        wireLabel: "Turn-gated\nnarrow",
         from: "allowlist",
         to: "narrow",
         whatHappens: "beforeModelDispatch calls ExperienceAgent.narrow(): Turn 1 exposes ONLY discover; describe and plan unlock only after discovery succeeds.",
@@ -263,7 +263,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 3,
         title: "LLM discovers & proposes plan",
-        wireLabel: "3. Meta-tool calls",
+        wireLabel: "Meta-tool\ncalls",
         from: "narrow",
         to: "llm",
         whatHappens: "The LLM searches capabilities by goal text, optionally reads a capability's contract via describe, and submits a capability plan.",
@@ -273,7 +273,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 4,
         title: "Submit capability plan to runtime",
-        wireLabel: "4. Capability plan",
+        wireLabel: "Capability plan",
         from: "proposal",
         to: "gate",
         whatHappens: "sfield routes the axe.plan tool call back into the host's AgenticExecution planner.",
@@ -283,7 +283,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 5,
         title: "Authorize underlying sfield tools",
-        wireLabel: "5. Scoped reads",
+        wireLabel: "Scoped\nreads",
         from: "gate",
         to: "executor",
         whatHappens: "AgenticExecution resolves each planned capability to its registered sfield tool ref and checks Authorizer + Treatment Selector eligibility.",
@@ -293,7 +293,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 6,
         title: "Run business tools & persist journey",
-        wireLabel: "6. Execute & trace",
+        wireLabel: "Execute\n& trace",
         from: "executor",
         to: "systems",
         whatHappens: "Verified reads execute against live providers; results save to the Journey and compile into the interactive A2UI experience.",
@@ -380,7 +380,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 1,
         title: "Bind workflow to TS recommendation",
-        wireLabel: "1. Workflow run",
+        wireLabel: "Workflow\nrun",
         from: "host",
         to: "allowlist",
         whatHappens: "CEP opens or resumes the funding-agent run, bound to the earlier Treatment Selector recommendation and turn scope.",
@@ -390,7 +390,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 2,
         title: "Compute legal tools from evidence",
-        wireLabel: "2. State filter",
+        wireLabel: "State\nfilter",
         from: "allowlist",
         to: "narrow",
         whatHappens: "beforeModelDispatch inspects succeeded CallRecords in sfield.sqlite and narrows request.tools down to only the 1–2 legal next steps.",
@@ -400,7 +400,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 3,
         title: "Dispatch single-step choice to LLM",
-        wireLabel: "3. 1–2 legal tools",
+        wireLabel: "1–2 legal\ntools",
         from: "narrow",
         to: "llm",
         whatHappens: "The LLM chooses the next tool or calls ask_user to clarify which funding method the customer prefers.",
@@ -410,7 +410,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 4,
         title: "Validate tool call or final outcome",
-        wireLabel: "4. Call / outcome",
+        wireLabel: "Tool call / verified outcome",
         from: "proposal",
         to: "gate",
         whatHappens: "Tool calls enter prepareTool; final outcomes pass through verifiers.fundingPreview to verify evidence matches the claimed methodId.",
@@ -420,7 +420,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 5,
         title: "Inject verified turnRef & authorize",
-        wireLabel: "5. prepareTool",
+        wireLabel: "prepare\nTool",
         from: "gate",
         to: "executor",
         whatHappens: "prepareTool enforces single-tool batches, re-verifies legality, and injects the authenticated root turnRef before execution.",
@@ -430,7 +430,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 6,
         title: "Execute & checkpoint to SQLite",
-        wireLabel: "6. Run & checkpoint",
+        wireLabel: "Run &\ncheckpoint",
         from: "executor",
         to: "systems",
         whatHappens: "Runs the funding adapter and persists durable checkpoints so ask_user pauses survive restarts.",
@@ -519,7 +519,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 1,
         title: "Enter sf.harness or host write flow",
-        wireLabel: "1. Plan / Action",
+        wireLabel: "Plan /\nAction",
         from: "host",
         to: "allowlist",
         whatHappens: "Visual/analytical prompts enter sf.harness; confirmed button/approval clicks enter a host-owned bounded_auto write scope.",
@@ -529,7 +529,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 2,
         title: "Stage 1: Plan provider or clarify",
-        wireLabel: "2. Plan / Clarify",
+        wireLabel: "Plan /\nClarify",
         from: "allowlist",
         to: "narrow",
         whatHappens: "sf.harness matches the prompt to connected CEP providers. If unclear (e.g. 'as pie chart') it pauses with clickable clarification choices instead of guessing.",
@@ -539,7 +539,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 3,
         title: "Stage 3: Compose grounded UI (0 tools)",
-        wireLabel: "3. Compose (0 tools)",
+        wireLabel: "Compose\n(0 tools)",
         from: "narrow",
         to: "llm",
         whatHappens: "After Stage 2 fetches verified records server-side, Stage 3 asks the LLM to compose a visual layout solely from those grounded facts.",
@@ -549,7 +549,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 4,
         title: "Stage 4: Verify & auto-repair output",
-        wireLabel: "4. Verify / Repair",
+        wireLabel: "Verify & auto-repair",
         from: "proposal",
         to: "gate",
         whatHappens: "Deterministic verifier validates structure, requested chart type, and data grounding; runs bounded repair if a rule fails.",
@@ -559,7 +559,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 5,
         title: "Host-only Authorizer & approval check",
-        wireLabel: "5. !agentId + digest",
+        wireLabel: "!agentId\n+ digest",
         from: "gate",
         to: "executor",
         whatHappens: "For Stage 2 reads or confirmed writes: Authorizer enforces !agentId on all write/destructive effects and checks digest-bound approval receipts.",
@@ -569,7 +569,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       {
         number: 6,
         title: "Fetch / commit & persist audit proof",
-        wireLabel: "6. Execute & audit",
+        wireLabel: "Execute\n& audit",
         from: "executor",
         to: "systems",
         whatHappens: "Reads return grounded data to Dynamic Canvas; approved writes commit to stores/connectors and append an immutable Write Audit entry.",
@@ -606,12 +606,12 @@ const NODE_META: Record<NodeId, { title: string; Icon: typeof Server; tone: "def
 };
 
 const STEP_WIRES: { path: string; badge: [number, number]; labelPos: [number, number]; returnWire?: boolean }[] = [
-  { path: "M262 122 H322", badge: [292, 122], labelPos: [292, 102] },
-  { path: "M546 122 H606", badge: [576, 122], labelPos: [576, 102] },
-  { path: "M828 122 H904", badge: [866, 122], labelPos: [866, 102] },
-  { path: "M904 291 H868 V232 H463 V294", badge: [686, 232], labelPos: [686, 214], returnWire: true },
-  { path: "M576 396 H630", badge: [603, 396], labelPos: [603, 376] },
-  { path: "M828 468 H904", badge: [866, 468], labelPos: [866, 448] },
+  { path: "M262 122 H322", badge: [292, 122], labelPos: [292, 92] },
+  { path: "M546 122 H606", badge: [576, 122], labelPos: [576, 92] },
+  { path: "M828 122 H904", badge: [866, 122], labelPos: [866, 92] },
+  { path: "M904 291 H868 V232 H463 V294", badge: [686, 232], labelPos: [686, 212], returnWire: true },
+  { path: "M576 396 H630", badge: [603, 396], labelPos: [603, 366] },
+  { path: "M828 468 H904", badge: [866, 468], labelPos: [866, 438] },
 ];
 
 function downloadSvg(svg: SVGSVGElement, modeId: ModeId) {
@@ -645,7 +645,7 @@ const inlineSvgStyles = `
   .ti-wire-active { stroke: #166534; stroke-width: 3; }
   .ti-wire-return.ti-wire-active { stroke: #1d4ed8; stroke-width: 3; }
   .ti-hit { fill: none; stroke: transparent; stroke-width: 18; cursor: pointer; }
-  .ti-label { fill: #2d4a3e; font-size: 11.5px; font-weight: 620; text-anchor: middle; paint-order: stroke; stroke: #f8fbf9; stroke-width: 4px; stroke-linejoin: round; }
+  .ti-label { fill: #2d4a3e; font-size: 10.5px; font-weight: 640; text-anchor: middle; paint-order: stroke; stroke: #f8fbf9; stroke-width: 4px; stroke-linejoin: round; }
   .ti-blocked-pill rect { fill: #fef2f2; stroke: #dc2626; stroke-width: 1.2; }
   .ti-blocked-pill text { fill: #991b1b; font-size: 10.5px; font-weight: 700; text-anchor: middle; }
   .ti-llm-pill rect { fill: #ede9fe; stroke: #7c3aed; stroke-width: 1.2; }
@@ -809,7 +809,7 @@ export function ToolInteractionDiagram() {
               <path className="ti-wire ti-wire-return" d="M1021 216 V244" markerEnd={`url(#${idPrefix}-ret)`} />
             </g>
 
-            {/* Interactive numbered interaction wires (Steps 1-6) */}
+            {/* Interactive numbered interaction wires (paths behind nodes) */}
             {mode.steps.map((step, idx) => {
               const wire = STEP_WIRES[idx];
               const isSelected = selection.kind === "step" && selection.index === idx;
@@ -817,47 +817,22 @@ export function ToolInteractionDiagram() {
                 ? (isSelected ? `${idPrefix}-retActive` : `${idPrefix}-ret`)
                 : (isSelected ? `${idPrefix}-callActive` : `${idPrefix}-call`);
               return (
-                <g key={step.number}>
-                  <g
-                    onClick={() => setSelection({ kind: "step", index: idx })}
-                    style={{ cursor: "pointer" }}
-                  >
-                    <title>{`${step.number}. ${step.title}`}</title>
-                    <path className="ti-hit" d={wire.path} />
-                    <path
-                      className={
-                        "ti-wire"
-                        + (wire.returnWire ? " ti-wire-return" : "")
-                        + (isSelected ? " ti-wire-active" : "")
-                      }
-                      d={wire.path}
-                      markerEnd={`url(#${marker})`}
-                    />
-                    <text className="ti-label" x={wire.labelPos[0]} y={wire.labelPos[1]}>
-                      {step.wireLabel}
-                    </text>
-                  </g>
-                  <g
-                    className="ti-step"
-                    data-return={wire.returnWire ? "true" : undefined}
-                    transform={`translate(${wire.badge[0]} ${wire.badge[1]})`}
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`Step ${step.number}: ${step.title}`}
-                    aria-pressed={isSelected}
-                    aria-controls={detailId}
-                    onClick={() => setSelection({ kind: "step", index: idx })}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setSelection({ kind: "step", index: idx });
-                      }
-                    }}
-                  >
-                    <title>{`Step ${step.number}: ${step.title}`}</title>
-                    <circle r="11.5" />
-                    <text y="4">{step.number}</text>
-                  </g>
+                <g
+                  key={"wire-" + step.number}
+                  onClick={() => setSelection({ kind: "step", index: idx })}
+                  style={{ cursor: "pointer" }}
+                >
+                  <title>{`${step.number}. ${step.title}`}</title>
+                  <path className="ti-hit" d={wire.path} />
+                  <path
+                    className={
+                      "ti-wire"
+                      + (wire.returnWire ? " ti-wire-return" : "")
+                      + (isSelected ? " ti-wire-active" : "")
+                    }
+                    d={wire.path}
+                    markerEnd={`url(#${marker})`}
+                  />
                 </g>
               );
             })}
@@ -942,6 +917,51 @@ export function ToolInteractionDiagram() {
                       )}
                     </>
                   )}
+                </g>
+              );
+            })}
+
+            {/* Step labels & numbered badges rendered ABOVE nodes so labels never clip */}
+            {mode.steps.map((step, idx) => {
+              const wire = STEP_WIRES[idx];
+              const isSelected = selection.kind === "step" && selection.index === idx;
+              const lines = step.wireLabel.split("\n");
+              return (
+                <g key={"badge-" + step.number}>
+                  <text
+                    className="ti-label"
+                    x={wire.labelPos[0]}
+                    y={wire.labelPos[1]}
+                    style={{ cursor: "pointer" }}
+                    onClick={() => setSelection({ kind: "step", index: idx })}
+                  >
+                    {lines.map((line, lineIdx) => (
+                      <tspan key={line} x={wire.labelPos[0]} dy={lineIdx === 0 ? 0 : 12}>
+                        {line}
+                      </tspan>
+                    ))}
+                  </text>
+                  <g
+                    className="ti-step"
+                    data-return={wire.returnWire ? "true" : undefined}
+                    transform={`translate(${wire.badge[0]} ${wire.badge[1]})`}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Step ${step.number}: ${step.title}`}
+                    aria-pressed={isSelected}
+                    aria-controls={detailId}
+                    onClick={() => setSelection({ kind: "step", index: idx })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setSelection({ kind: "step", index: idx });
+                      }
+                    }}
+                  >
+                    <title>{`Step ${step.number}: ${step.title}`}</title>
+                    <circle r="11.5" />
+                    <text y="4">{step.number}</text>
+                  </g>
                 </g>
               );
             })}
