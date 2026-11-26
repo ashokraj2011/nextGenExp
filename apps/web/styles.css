@@ -327,6 +327,11 @@ button { color: inherit; }
 .composer-hint { margin: 7px 2px 0; color: var(--muted); font-size: .76rem; line-height: 1.4; }
 .composer-hint span { margin: 0 3px; }
 .request-notice, .submit-status { margin: 0 0 8px; color: var(--muted); font-size: .85rem; line-height: 1.5; }
+.inline-stop-link {
+  margin-left: 8px; padding: 0; border: 0; background: transparent; color: #b91c1c;
+  font: inherit; font-size: .82rem; font-weight: 620; text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+}
+.inline-stop-link:hover { color: #991b1b; }
 .request-notice { padding: 7px 10px; background: #f9f3e9; border: 1px solid #ebdcc6; border-radius: 10px; color: #654914; }
 .secondary-button {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 38px;

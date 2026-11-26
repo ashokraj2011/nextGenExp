@@ -446,7 +446,14 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
       )}
       {activeNotice && <div className="request-notice" role="status">{activeNotice}</div>}
       {running && !pending && !activeNotice && (
-        <div className="submit-status" role="status">Task running in this thread — you can send your next question anytime.</div>
+        <div className="submit-status" role="status">
+          Task running in this thread — you can send your next question anytime.
+          {canSubmit && (
+            <button type="button" className="inline-stop-link" onClick={() => aui.thread().cancelRun()}>
+              End running task
+            </button>
+          )}
+        </div>
       )}
       {pending && !running && !activeNotice && <div className="submit-status" role="status">Sending your request…</div>}
       <div className="composer-slash-wrap">
@@ -535,7 +542,7 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
             >
               {voice.listening ? <MicOff size={16} aria-hidden="true" /> : <Mic size={16} aria-hidden="true" />}
             </button>
-            {running && (
+            {running && !canSubmit ? (
               <button
                 className="send-button stop-button"
                 type="button"
@@ -546,16 +553,17 @@ function Composer({ draft, onDraft, running, pending, disabled, notice, input, s
               >
                 <Square size={12} fill="currentColor" aria-hidden="true" />
               </button>
+            ) : (
+              <button
+                className="send-button play-button"
+                type="submit"
+                disabled={!canSubmit}
+                aria-label="Send message"
+                title="Send message"
+              >
+                <Play size={14} fill="currentColor" aria-hidden="true" />
+              </button>
             )}
-            <button
-              className="send-button play-button"
-              type="submit"
-              disabled={!canSubmit}
-              aria-label="Send message"
-              title="Send message"
-            >
-              <Play size={14} fill="currentColor" aria-hidden="true" />
-            </button>
           </div>
         </div>
       </form>
