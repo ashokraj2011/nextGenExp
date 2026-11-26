@@ -127,7 +127,7 @@ export function deterministicCapabilityRoute(prompt: string): SemanticRouteDecis
     };
   }
   if (isDynamicUiRequest(clean)) {
-    const explicitFormatOrCorrection = /\b(pie\s*chart|donut\s*chart|bar\s*chart|comparison\s+table|as\s+a\s+(?:clear\s+)?(?:comparison\s+)?table|summarize\s+(?:your\s+)?last\s+answer|in\s+\d+\s+bullet\s+points?|not\s+a\s+(?:pie|bar|donut)\s*chart)\b/i.test(clean);
+    const explicitFormatOrCorrection = /\b(pie\s*chart|donut\s*chart|bar\s*chart|bubble\s*chart|scatter\s*plot|radar\s*chart|heat\s*map|comparison\s+table|as\s+a\s+(?:clear\s+)?(?:comparison\s+)?table|summarize\s+(?:your\s+)?last\s+answer|in\s+\d+\s+bullet\s+points?|not\s+a\s+(?:pie|bar|donut)\s*chart)\b|^\s*as\s+(?:a\s+|an\s+)?[\w\s-]{2,24}(?:chart|table|graph|plot)\s*$/i.test(clean);
     return {
       capabilityId: "custom_dynamic_ui",
       capabilityLabel: capabilityLabelFor("custom_dynamic_ui"),

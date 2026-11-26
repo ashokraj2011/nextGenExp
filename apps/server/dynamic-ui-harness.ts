@@ -101,7 +101,8 @@ const portfolioWord = /\b(port?f[oa]l?io|protfolio|portfoilo|portofolio|porfolio
 const holdingsWord = /\b(holdings?|stocks?|tickers?|equities|shares?|positions?|tax[- ]?loss)\b/i;
 const goalWord = /\b(goal|home\s+(?:goal|plan|savings?|purchase)|down\s*payment|savings?\s+target)\b/i;
 const balanceWord = /\b(balance|balances|cash|available|current\s+balance|beneficiar(?:y|ies)|funding|account\s+status)\b/i;
-const followUpOrCorrectionWord = /\b(this\s+is\s+not|that\s+is\s+not|not\s+a\s+(?:pie|bar|donut|table|chart)|instead|make\s+it|change\s+it|turn\s+(?:it|that|this)\s+into|show\s+(?:it|that|this)\s+as|last\s+answer|previous\s+answer|prior\s+answer|your\s+answer|above|reframe|try\s+again)\b/i;
+const followUpOrCorrectionWord = /\b(this\s+is\s+not|that\s+is\s+not|not\s+a\s+(?:pie|bar|donut|table|chart)|instead|make\s+it|change\s+it|turn\s+(?:it|that|this)\s+into|show\s+(?:it|that|this)\s+as|last\s+answer|previous\s+answer|prior\s+answer|your\s+answer|above|reframe|try\s+again)\b|^\s*(?:as|in|into|like|switch\s+to|convert\s+to)\s+(?:a\s+|an\s+)?[\w\s-]{2,28}(?:chart|graph|table|plot|diagram|map|view|summary|list|matrix|bullets?)\s*[.!?]*$/i;
+const unsupportedVisualTypeRegex = /\b(bubble\s*chart|scatter\s*(?:plot|chart)|heat\s*map|radar\s*chart|spider\s*chart|tree\s*map|sankey(?:\s*diagram)?|waterfall\s*chart|gantt\s*chart|candlestick(?:\s*chart)?|box\s*plot|funnel\s*chart|3d\s*chart)\b/i;
 const explicitUnconnectedWord = /\b(jira|confluence|snowflake|databricks|bigquery|sap|erp|workday|bamboohr|zendesk|freshdesk|hubspot|marketo|shopify|stripe\s+invoices|github\s+issues|linear\s+tickets|datadog|splunk|warehouse|shipments?|inventory|weather|sports\s+scores|flights?|hotels?)\b/i;
 
 function fmtUsd(cents: number): string {
@@ -129,12 +130,13 @@ export function extractRequiredVisuals(prompt: string): HarnessVisualType[] {
   return visuals;
 }
 
-const ambiguousVisualOnlyPrompt = /^\s*(?:please\s+)?(?:can\s+you\s+)?(?:show|make|build|create|generate|draw|give|render|design)\s+(?:me\s+)?(?:a\s+|an\s+|some\s+)?(?:custom\s+|interactive\s+|dynamic\s+)?(?:pie\s*chart|donut\s*chart|bar\s*chart|chart|graph|table|comparison\s+table|dashboard|widget|view|breakdown|visuali[sz]ation|report|summary)\s*(?:of\s+(?:my\s+)?(?:data|stuff|things|account|numbers|everything))?[\s.!?]*$/i;
+const ambiguousVisualOnlyPrompt = /^\s*(?:please\s+)?(?:can\s+you\s+)?(?:(?:show|make|build|create|generate|draw|give|render|design|display|convert|switch)\s+(?:me\s+|it\s+|this\s+|that\s+)?)?(?:as\s+|in\s+|into\s+|to\s+)?(?:a\s+|an\s+|some\s+)?(?:custom\s+|interactive\s+|dynamic\s+|clear\s+)?(?:(?:pie|donut|bar|line|area|bubble|scatter|radar|funnel|waterfall|comparison)\s+)?(?:chart|graph|plot|table|dashboard|widget|view|breakdown|visuali[sz]ation|report|summary|matrix|checklist)\s*(?:of\s+(?:my\s+)?(?:data|stuff|things|account|numbers|everything))?(?:\s+please)?[\s.!?]*$/i;
 
 export function inferDeterministicPlan(prompt: string, recentContext?: string): DynamicUiPlan {
   const clean = prompt.trim();
   const requiredVisuals = extractRequiredVisuals(clean);
   const isFollowUp = followUpOrCorrectionWord.test(clean);
+  const unsupportedVisual = clean.match(unsupportedVisualTypeRegex)?.[1]?.trim();
 
   // If the prompt explicitly asks about an unconnected external dataset (e.g. Jira, warehouse shipments),
   // never fabricate numbers — flag missing_external_source immediately.
@@ -149,10 +151,35 @@ export function inferDeterministicPlan(prompt: string, recentContext?: string): 
     };
   }
 
-  // If the user asks for a generic chart/table/dashboard/widget with NO dataset mentioned and NO prior context to inherit,
-  // pause at Stage 1 with a focused clarifying question + one-tap options.
   const hasAnyDomainCue = portfolioWord.test(clean) || holdingsWord.test(clean) || goalWord.test(clean) || balanceWord.test(clean);
-  if (!hasAnyDomainCue && !isFollowUp && ambiguousVisualOnlyPrompt.test(clean)) {
+  const hasRecentContext = Boolean(recentContext?.trim());
+
+  // 1. Unsupported visual primitive (e.g. "as bubble chart", "radar chart", "scatter plot"):
+  //    Never say "Data source needed" — explain honestly what visual primitives ARE supported and ask what they want to show!
+  if (unsupportedVisual) {
+    const topicLabel = hasAnyDomainCue || hasRecentContext ? "your portfolio or stock holdings" : "your account data";
+    const question = hasAnyDomainCue || hasRecentContext
+      ? `I don't have a native ${unsupportedVisual.toLowerCase()} renderer yet, though I have your live data ready. What would you like shown and which supported visual should I use?`
+      : `I don't have a native ${unsupportedVisual.toLowerCase()} renderer yet, and you didn't specify which dataset to plot. What would you like to visualize?`;
+    return {
+      resolvedGoal: `Clarify dataset and supported chart format instead of ${unsupportedVisual.toLowerCase()}`,
+      thinking: `Requested "${unsupportedVisual}", which is not in the supported visual catalog (piechart, barchart, table, metrics, progress, checklist, comparison, sliders)${hasRecentContext ? ", while referencing prior conversation context" : " and no dataset was named"}. Asking a clarifying question with supported options instead of failing.`,
+      needsClarification: true,
+      clarificationQuestion: question,
+      clarificationChoices: [
+        { id: "portfolio_pie", label: "Portfolio allocation as a Pie Chart", prompt: "Show my portfolio allocation as a pie chart" },
+        { id: "holdings_bar", label: "Stock holdings by value as a Bar Chart", prompt: "Show my stock holdings as a bar chart" },
+        { id: "portfolio_table", label: "Portfolio & balances as a Comparison Table", prompt: "Show my portfolio summary as a comparison table" },
+        { id: "home_goal_view", label: "Home savings goal & cash breakdown", prompt: "Show my home savings goal and cash balances as a table" },
+      ],
+      neededSources: ["portfolio_snapshot"],
+      requiredVisuals: ["piechart"],
+    };
+  }
+
+  // 2. Underspecified visual-only prompt with NO dataset mentioned and NO prior context to inherit:
+  //    Pause at Stage 1 with a focused clarifying question + one-tap options.
+  if (!hasAnyDomainCue && !hasRecentContext && ambiguousVisualOnlyPrompt.test(clean)) {
     const formatWord = requiredVisuals.includes("piechart")
       ? "pie chart"
       : requiredVisuals.includes("barchart")
@@ -167,9 +194,9 @@ export function inferDeterministicPlan(prompt: string, recentContext?: string): 
       needsClarification: true,
       clarificationQuestion: `What would you like this ${formatWord} to show?`,
       clarificationChoices: [
-        { id: "portfolio_alloc", label: `Portfolio allocation (Stocks, Fixed Income, Cash)`, prompt: `Show my portfolio allocation as a ${visualSuffix}` },
-        { id: "stock_holdings", label: `Individual stock holdings by ticker`, prompt: `Show my stock holdings as a ${visualSuffix}` },
-        { id: "home_goal", label: `Home savings goal & cash reserve`, prompt: `Show my home savings goal and cash balances as a ${visualSuffix}` },
+        { id: "portfolio_alloc", label: "Portfolio allocation (Stocks, Fixed Income, Cash)", prompt: `Show my portfolio allocation as a ${visualSuffix}` },
+        { id: "stock_holdings", label: "Individual stock holdings by ticker", prompt: `Show my stock holdings as a ${visualSuffix}` },
+        { id: "home_goal", label: "Home savings goal & cash reserve", prompt: `Show my home savings goal and cash balances as a ${visualSuffix}` },
       ],
       neededSources: ["portfolio_snapshot"],
       requiredVisuals: requiredVisuals.length ? requiredVisuals : ["piechart"],
@@ -177,7 +204,9 @@ export function inferDeterministicPlan(prompt: string, recentContext?: string): 
   }
 
   const needed = new Set<HarnessSourceId>();
-  const combinedForSources = isFollowUp && recentContext ? `${clean}\n${recentContext}` : clean;
+  const combinedForSources = (isFollowUp || ambiguousVisualOnlyPrompt.test(clean)) && recentContext
+    ? `${clean}\n${recentContext}`
+    : clean;
 
   if (portfolioWord.test(combinedForSources)) {
     needed.add("portfolio_snapshot");
@@ -195,9 +224,9 @@ export function inferDeterministicPlan(prompt: string, recentContext?: string): 
     needed.add("customer_balances");
     needed.add("portfolio_snapshot");
   }
-  if (isFollowUp && recentContext?.trim()) {
+  if ((isFollowUp || ambiguousVisualOnlyPrompt.test(clean)) && hasRecentContext) {
     needed.add("conversation_history");
-    // If the user gave a short correction like "this is not a pie chart" after any wealth turn, ensure portfolio data is available.
+    // If the user gave a short visual follow-up ("as pie chart", "this is not a pie chart") after a turn, inherit portfolio data.
     if (needed.size === 1) {
       needed.add("portfolio_snapshot");
       needed.add("customer_balances");
@@ -694,7 +723,7 @@ export async function runDynamicUiHarness(input: {
 
       const shouldUseLlmPlanner = Boolean(input.gateway)
         && !explicitUnconnectedWord.test(input.prompt)
-        && (!detPlan.needsClarification || Boolean(input.recentContext?.trim()));
+        && !detPlan.needsClarification;
       if (shouldUseLlmPlanner && input.gateway) {
         const plannerPrompt = [
           input.recentContext?.trim() ? `RECENT CONVERSATION:\n${input.recentContext.trim().slice(0, 1400)}` : "RECENT CONVERSATION: (none)",

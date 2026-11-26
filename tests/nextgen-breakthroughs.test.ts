@@ -388,6 +388,27 @@ test("4-Stage Dynamic UI Harness: handles pie chart typos, follow-up corrections
     ["plan", "clarify"],
   );
 
+  // 5b. Unsupported chart shorthand ("as bubble chart") asks a clarifying question instead of "Data source needed"!
+  const bubbleOut = await generateDynamicUi({
+    prompt: "as bubble chart",
+    personaId: "demo-learner",
+    dataDir: dir,
+    recentContext: JSON.stringify({ message: "show the protfolio as pie chart", reply: "Here's your pie chart." }),
+  });
+  assert.equal(bubbleOut.canvas.title, "Quick clarification");
+  assert.match(bubbleOut.intro, /bubble chart/i);
+  assert.ok((bubbleOut.canvas.choices?.length ?? 0) >= 3);
+  assert.deepEqual(bubbleOut.canvas.harnessTrace?.stages.map((s) => s.stage), ["plan", "clarify"]);
+
+  // 5c. Supported shorthand follow-up ("as bar chart") inherits prior portfolio context and renders a barchart!
+  const shorthandBarOut = await generateDynamicUi({
+    prompt: "as bar chart",
+    personaId: "demo-learner",
+    dataDir: dir,
+    recentContext: JSON.stringify({ message: "show the protfolio as pie chart", reply: "Here's your pie chart." }),
+  });
+  assert.ok(shorthandBarOut.canvas.nodes.some((n) => n.type === "barchart"), "expected barchart on terse follow-up");
+
   // 6. Unconnected external data source still stops cleanly at Stage 2 with zero fabricated numbers
   const jiraOut = await generateDynamicUi({
     prompt: "Show all my Jira tickets as a table",

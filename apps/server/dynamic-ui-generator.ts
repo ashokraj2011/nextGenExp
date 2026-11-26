@@ -34,9 +34,9 @@ const stockHoldingsTrigger = /\b((?:show|list|view|see|all|what)\b.*\b(?:my\s+)?
 
 export function isDynamicUiRequest(message: string): boolean {
   const clean = message.trim();
-  if (clean.length < 8 || nonDynamicGuard.test(clean)) return false;
-  // Explicit visual formats (pie/donut/bar chart, comparison table) always enter the Dynamic UI Harness.
-  if (/\b(pie\s*chart|donut\s*chart|bar\s*chart|comparison\s+table|as\s+a\s+(?:clear\s+)?(?:comparison\s+)?table|not\s+a\s+(?:pie|bar|donut)\s*chart)\b/i.test(clean)) return true;
+  if (clean.length < 5 || nonDynamicGuard.test(clean)) return false;
+  // Explicit visual formats (pie/donut/bar/bubble chart, comparison table) always enter the Dynamic UI Harness.
+  if (/\b(pie\s*chart|donut\s*chart|bar\s*chart|bubble\s*chart|scatter\s*plot|radar\s*chart|heat\s*map|comparison\s+table|as\s+a\s+(?:clear\s+)?(?:comparison\s+)?table|not\s+a\s+(?:pie|bar|donut)\s*chart)\b|^\s*as\s+(?:a\s+|an\s+)?[\w\s-]{2,24}(?:chart|table|graph|plot)\s*$/i.test(clean)) return true;
   // Generic portfolio allocation queries use the verified Portfolio Snapshot card.
   if (/\bportfolio\b/i.test(clean) && /\b(?:allocation|asset mix)\b/i.test(clean) && !/\b(?:simulat\w*|project\w*|forecast\w*|histor\w*|trend\w*|model)\b/i.test(clean)) return false;
   return dynamicUiTrigger.test(clean);
