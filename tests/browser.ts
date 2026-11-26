@@ -77,6 +77,20 @@ try {
   assert.equal(new URL(page.url()).pathname, "/wealth");
   await openAdmin(page, "help");
   await page.getByRole("heading", { name: "How CEP works", exact: true, level: 1 }).waitFor();
+  const journeyMap = page.getByRole("region", { name: "Customer interaction map", exact: true });
+  const journeyNav = journeyMap.getByRole("navigation", { name: "Customer journey stages" });
+  for (const label of ["Sign in", "Find the intent", "Check eligibility", "Build the reply", "Follow up", "Return later"]) {
+    const stage = journeyNav.getByRole("link", { name: new RegExp(label, "i") });
+    await stage.click();
+    await journeyMap.getByRole("table", { name: "Exchanges for " + label, exact: true }).waitFor();
+    assert.equal(await stage.getAttribute("aria-current"), "step");
+  }
+  await journeyMap.getByRole("link", { name: "building the UI", exact: true }).click();
+  await page.reload();
+  await journeyMap.getByRole("table", { name: "Exchanges for Build the reply" }).getByText(/assembled by server code/).waitFor();
+  assert.equal(new URL(page.url()).hash, "#interaction-render");
+  await page.goBack();
+  await journeyMap.getByRole("table", { name: "Exchanges for Return later" }).waitFor();
   const systemMap = page.getByRole("region", { name: "System architecture", exact: true });
   await page.getByRole("link", { name: "System architecture", exact: true }).click();
   assert.equal(new URL(page.url()).hash, "#system-architecture");
@@ -666,6 +680,11 @@ try {
   await liveDiagram.screenshot({ path: resolve(screenshots, "ts-sfield-handoff.png") });
   const recordedMap = portfolioPage.getByRole("region", { name: "System architecture", exact: true });
   const fundingClick = savedRun.clicks.find((click) => click.kind === "workflow" && click.id === "account.funding.preview")!;
+  const recordedJourney = portfolioPage.getByRole("region", { name: "Customer interaction map" });
+  await recordedJourney.getByRole("link", { name: /Find the intent/ }).click();
+  assert.equal(new URL((await recordedJourney.getByRole("link", { name: "Marcus’s saved message in Logs" }).getAttribute("href"))!, preview.url).searchParams.get("turn"), savedRun.turnId);
+  await recordedJourney.getByRole("link", { name: /Follow up/ }).click();
+  assert.equal(new URL((await recordedJourney.getByRole("link", { name: "Marcus’s saved click in Logs" }).getAttribute("href"))!, preview.url).searchParams.get("turn"), fundingClick.turnId);
   const fundingLog = await readLog(fundingClick.turnId);
   for (const [opening, receipts, submission] of [
     ["Chat message", sourceLog, await addressSubmission], ["After a funding click", fundingLog, await fundingSubmission],
@@ -805,6 +824,10 @@ try {
   const mobileMenu = mobile.getByRole("button", { name: "Show conversations" });
   await openAdmin(mobile, "help");
   await mobile.getByRole("heading", { name: "How CEP works", exact: true }).waitFor();
+  const mobileJourney = mobile.getByRole("region", { name: "Customer interaction map" });
+  await mobileJourney.getByRole("link", { name: /Build the reply/ }).press("Enter");
+  await mobileJourney.getByRole("table", { name: "Exchanges for Build the reply" }).waitFor();
+  assert.equal(await mobile.evaluate(() => window.scrollY), 0);
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   const phoneMap = mobile.getByRole("region", { name: "System architecture", exact: true });
   await phoneMap.locator(".sa-canvas.sa-compact").waitFor();

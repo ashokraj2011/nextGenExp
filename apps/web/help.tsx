@@ -10,6 +10,7 @@ import { contractList, helpContracts, type ContractFile } from "./help-contracts
 import { addressUpdateExample, helpFlows, treatmentDecisionExamples, type FlowStep, type HandoffExample, type PayloadExample } from "./help-flow";
 import { RecordedEvidence, useMarcusRun, type MarcusRun } from "./help-run-evidence";
 import { SystemArchitecture } from "./help-system-architecture";
+import { InteractionMap } from "./help-interactions";
 import { SfieldHelp } from "./help-sfield";
 import "./help.css";
 
@@ -220,6 +221,7 @@ export function Help() {
     <header className="help-topbar">
       <div className="help-width help-topbar-inner">
         <nav aria-label="Help sections">
+          <a href="#interactions">Interaction map</a>
           <a href="#system-architecture">System architecture</a>
           <a href="#architecture">Chat sequence</a>
           <a href="#proposal">Treatment Selector’s role</a>
@@ -235,13 +237,14 @@ export function Help() {
     <main className="help-width help-main">
       <div className="help-intro">
         <h1>How CEP works</h1>
-        <p>Follow a customer’s question from chat to a recommendation. Treatment Selector checks which choices apply to that customer, and sfield runs the tools behind the choice they make.</p>
+        <p>The app chooses a chat flow. Inside the app server, sfield asks the language model what the customer means and Treatment Selector which recommendations apply. The app builds the reply, and the browser displays it.</p>
       </div>
+      <InteractionMap run={run} />
       <div id="cep-blueprint">
         <SystemArchitecture run={run} selectContract={setContractId} />
         <details className="sa-configuration">
           <summary>Routing options and administration</summary>
-          <p>The diagram follows a verified customer experience. The turn controller can also return a conversational reply, ask a clarifying question, or use a domain-specific agent or dynamic layout.</p>
+          <p>The diagram follows an account-help request. A goal with several tasks can use the <a href="#goal-planning">multi-step planning flow</a>. Domains can also ask sfield to <a href="#providers">combine recommendations from several sources</a>, or use the <a href="#interaction-render">custom UI flow</a> for an interactive view.</p>
           <div className="help-control-plane" aria-label="Admin master data control plane">
             <a className="help-cp-card" href={adminPaths.customers}>
               <span className="help-entity-icon"><UsersRound size={17} aria-hidden="true" /></span>
