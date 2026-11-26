@@ -119,3 +119,14 @@
   .admin-tool input { appearance: auto; }
   .admin-tool input::before { content: none; }
 }
+.routing-flow-setup { margin-bottom: 24px; }
+.routing-flow-setup fieldset { border: 0; margin: 16px 0 0; padding: 0; min-width: 0; }
+.flow-scope-bar, .flow-save { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; }
+.flow-scope-bar { margin-bottom: 8px; }
+.flow-scope-bar label, .flow-options details label { display: grid; gap: 5px; font-size: .85rem; font-weight: 600; }
+.flow-options { padding: 0; margin: 12px 0; list-style: none; }
+.flow-options > li { padding-bottom: 9px; border-bottom: 1px solid var(--line); }
+.flow-options details summary, .flow-reset { color: var(--teal-dark); font-size: .82rem; cursor: pointer; }
+.flow-options details label { margin: 10px 0; }
+.flow-options textarea { width: 100%; font: inherit; font-weight: 400; resize: vertical; }
+.flow-reset { padding: 4px 0; margin-top: 4px; border: 0; background: none; text-decoration: underline; }

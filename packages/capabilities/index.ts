@@ -241,7 +241,7 @@ export const builtinCapabilities = [
     tools: toolsFor(educationId), components: ["Content"], completion: "content",
   }),
   defineCapability({
-    id: beneficiaryId, title: "Review beneficiary details", description: "Offer beneficiary review guidance when Treatment Selector identifies a missing designation during a retirement request.",
+    id: beneficiaryId, title: "Review beneficiary details", description: "Show beneficiary review guidance when Treatment Selector identifies a missing designation during a retirement request.",
     goals: ["review beneficiaries"], phrases: ["review my beneficiary", "my beneficiary details"], keywords: ["beneficiary", "beneficiaries", "retirement"],
     tools: toolsFor(beneficiaryId), components: ["Content"], completion: "content",
   }),

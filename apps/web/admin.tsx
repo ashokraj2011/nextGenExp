@@ -16,6 +16,7 @@ import {
   type MockCcreRule, type MockOutput, type ToolSetup, type ToolSetupView, type TreatmentPreview, type TreatmentPreviewInput,
 } from "../../packages/contracts/tool-setup";
 import { api, toolSetupErrorMessage as messageFor } from "./api";
+import { RoutingFlowSetup } from "./routing-flow-setup";
 import { CcreRuleEditor } from "./ccre-rule-editor";
 import { rememberActiveConversation } from "./conversation-storage";
 import { adminPaths } from "../../packages/contracts/admin-paths";
@@ -106,7 +107,7 @@ function FundingWorkflowEditor({ definition, issue, change }: {
           value={definition.maxToolCalls ?? defaultAgentFundingWorkflow.maxToolCalls}
           onChange={(event) => change({ ...definition, maxToolCalls: event.target.valueAsNumber || undefined })} />
       </div>
-      <p>Check funding status and Funding options are required before the agent offers a method.</p>
+      <p>Check funding status and Funding options are required before the agent lists funding methods.</p>
       <label className="admin-tool">
         <strong>Allow building a funding preview</strong>
         <input type="checkbox" role="switch" checked={steps.includes(fundingToolRef("fundingPreview"))}
@@ -197,16 +198,16 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
       setSaving(false);
     }
   }
-  async function testInChat() {
+  async function openInChat() {
     if (!personaId || startingChat) return;
     setStartingChat(true);
     setChatError("");
     try {
-      if (!await save()) {
-        setChatError("Save the settings before starting a test chat.");
+      if (invalidDraft) {
+        setChatError("Complete the tool settings before testing.");
         return;
       }
-      const conversation = await api.newAdminConversation(personaId, scenarioId);
+      const conversation = await api.testToolSetup(setup, personaId, scenarioId);
       rememberActiveConversation(conversation.id, true);
       location.assign(adminPaths.chat);
     } catch (error) {
@@ -231,11 +232,13 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
   return <form noValidate onSubmit={(event) => { event.preventDefault(); void save(); }}>
     <div className="admin-heading">
       <div>
-        <h1>Tool setup</h1>
-        <p>Saved settings apply to new chat requests in this browser.</p>
+        <h2>Wealth tools</h2>
+        <p>Save settings publishes the rules and workflow to Wealth chats. Open in chat uses a private copy of these settings.</p>
       </div>
       <div className="admin-save">
         <p role="status">{saveNotice || saveHint}</p>
+        {data.privateDraft && !dirty && JSON.stringify(data.privateDraft) !== JSON.stringify(saved.setup) &&
+          <button type="button" className="secondary-button" onClick={() => edit(data.privateDraft!)}>Load private draft</button>}
         <button className="send-button" type="submit" disabled={!dirty || invalidDraft || saving || startingChat}>{saving ? "Saving…" : "Save settings"}</button>
       </div>
       {saveError && <p className="admin-error" role="alert">{saveError}</p>}
@@ -297,7 +300,7 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
           change={(contentIds) => changeOutput({ mode: "ranked", contentIds })} />}
 
         <CcreRuleEditor key={scenarioId + "/" + contextId} scope={{ scenarioId, contextId }}
-          rules={ccreRules} personas={personas} content={data.content} glossary={data.glossary} limitReached={allCcreRules.length >= MAX_CCRE_RULES}
+          rules={ccreRules} defaults={data.defaultCcreRules} personas={personas} content={data.content} glossary={data.glossary} limitReached={allCcreRules.length >= MAX_CCRE_RULES}
           change={(next) => edit({ ...setup, ccreRules: [...allCcreRules.filter((entry) => !inSelectedScope(entry)), ...next] })} />
 
         <div className="admin-preview">
@@ -320,11 +323,11 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
               <FlaskConical size={16} aria-hidden="true" />{previewing ? "Testing…" : "Run preview"}
             </button>
             <button type="button" className="secondary-button" disabled={!personaId || invalidDraft || startingChat}
-              aria-describedby="test-chat-note" onClick={() => void testInChat()}>
-              <MessageSquare size={16} aria-hidden="true" />{startingChat ? "Opening chat…" : dirty ? "Save and test in chat" : "Test in chat"}
+              aria-describedby="open-chat-note" onClick={() => void openInChat()}>
+              <MessageSquare size={16} aria-hidden="true" />{startingChat ? "Opening chat…" : dirty ? "Open draft in chat" : "Open in chat"}
             </button>
           </div>
-          <p id="test-chat-note" className="admin-test-note">Test in chat opens a new chat with this profile and test case.</p>
+          <p id="open-chat-note" className="admin-test-note">Open in chat opens a new chat with this profile and scenario.</p>
           {chatError && <p className="admin-error" role="alert">{chatError}</p>}
           {previewResult && ("error" in previewResult
             ? <p className="admin-error" role="alert">{previewResult.error}</p>
@@ -665,9 +668,10 @@ export function AdminPage() {
 
   return <div className="admin-page">
     <main className="admin-main">
+      <header className="admin-heading"><h1>Tool setup</h1></header>
+      <RoutingFlowSetup />
       {loaded ? <ToolSetupForm {...loaded} /> : <div className="admin-heading">
-        <h1>Tool setup</h1>
-        {error ? <p role="alert">{error}</p> : <p role="status">Loading tool settings…</p>}
+        {error ? <p role="status">{error}</p> : <p role="status">Loading Wealth tools…</p>}
       </div>}
       {loaded && <RecommendationProvidersCard key={`rp-${providerTick}`} />}
       {loaded && <ExternalConnectorsCard key={`ec-${providerTick}`} onUpdated={() => setProviderTick((n) => n + 1)} />}

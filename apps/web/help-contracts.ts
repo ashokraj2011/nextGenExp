@@ -5,6 +5,8 @@ import routingSource from "../../packages/contracts/routing-intents.ts?raw";
 import domainSource from "../../packages/contracts/domain.ts?raw";
 import fundingWorkflowSource from "../../packages/contracts/funding-workflow.ts?raw";
 import { defaultAgentFundingWorkflow, defaultFundingWorkflow } from "../../packages/contracts/funding-workflow";
+import flowSettingsSource from "../../packages/contracts/routing-flows.ts?raw";
+import registeredFlowsSource from "../../packages/contracts/capabilities-catalog.ts?raw";
 import toolSetupSource from "../../packages/contracts/tool-setup.ts?raw";
 import glossarySource from "../../packages/contracts/rule-glossary.ts?raw";
 import portfolioSource from "../../packages/contracts/portfolio.ts?raw";
@@ -14,9 +16,12 @@ import inspectorSource from "../../packages/contracts/inspector.ts?raw";
 import recommendationProviderContractSource from "../../packages/contracts/recommendation-provider.ts?raw";
 import recommendationArbitratorSource from "../../packages/recommendations/index.ts?raw";
 import treatmentAdapterSource from "../../packages/ts-adapter/index.ts?raw";
+import treatmentFormatsSource from "../../packages/ts-adapter/recommendations.ts?raw";
+import customerWorkflowsSource from "../../packages/contracts/customer-workflows.ts?raw";
 import contentBundleSource from "../../packages/experience/content.ts?raw";
 import portfolioProviderSource from "../../packages/portfolio-snapshot/index.ts?raw";
 import goalProviderSource from "../../packages/goal-progress/index.ts?raw";
+import { retirementAccountsResultSchema } from "../../packages/contracts/model-schemas";
 import contextFixtureSource from "../../fixtures/contexts.json?raw";
 import propensityFixtureSource from "../../fixtures/propensity.json?raw";
 import treatmentFixtureSource from "../../fixtures/treatment-scenarios.json?raw";
@@ -24,7 +29,7 @@ import sfieldModelSource from "../../vendor/sfield/packages/core/src/types/model
 import traceSource from "./api.ts?raw";
 import {
   routingOutputSchema, compositionOutputSchema, turnInputSchema, contextResultSchema, propensityInputSchema,
-  propensityResultSchema, treatmentInputSchema, treatmentResultSchema, glossaryInputSchema, glossaryResultSchema,
+  propensityResultSchema, treatmentInputSchema, treatmentResultSchema, treatmentDecisionResultSchema, glossaryInputSchema, glossaryResultSchema,
   portfolioInputSchema, portfolioResultSchema, balanceInputSchema, balanceResultSchema,
   goalProgressInputSchema, goalProgressResultSchema,
   treatmentRecommendationsResultSchema, fundingAgentResultSchema, fundingOptionsResultSchema,
@@ -76,6 +81,17 @@ export const helpContracts = [
         files: [{ name: "http-inputs.ts", source: httpInputsSource }, { name: "api.ts", source: apiSource }],
       },
       {
+        id: "flow-selection",
+        title: "Chat flow selection",
+        description: "The app resolves registered flows for the tenant, domain and chat audience. When it calls the model, it sends their IDs, descriptions and examples with the message and recent chat. It checks the returned capabilityId against the saved list.",
+        endpoints: [
+          ["GET /api/admin/routing-flows?scope=wealth", "Read inherited settings and overrides for Wealth. Use scope=tenant for tenant defaults."],
+          ["POST /api/admin/routing-flows?scope=wealth", "Save domain overrides. The editor sends the revision in If-Match."],
+          ["GET /api/admin/logs/:turnId", "Read the captured flow-selection request, response and ordered list for that turn."],
+        ],
+        files: [{ name: "routing-flows.ts", source: flowSettingsSource }, { name: "capabilities-catalog.ts", source: registeredFlowsSource }],
+      },
+      {
         id: "discovery",
         title: "Supported topics and relevance scores",
         description: "The mock Treatment Selector loads active topics from contexts.json. It uses the member ID and test case to return scores from propensity.json for the requested topics.",
@@ -92,7 +108,7 @@ export const helpContracts = [
       {
         id: "router",
         title: "Context Router",
-        description: "The first model call gets the message, recent chat, supported requests, and approved questions. It identifies the request, asks a question, replies directly, or asks to open the rule editor.",
+        description: "Inside account help, sfield sends the Context Router the message, recent chat, supported intents, topics and member scores. It identifies the request, asks a question, replies directly, or asks to open the rule editor.",
         files: [
           { name: "model-inputs.ts", source: modelInputsSource },
           jsonFile("context-selection-proposal.schema.json", routingOutputSchema),
@@ -102,7 +118,7 @@ export const helpContracts = [
       {
         id: "gateway",
         title: "Model gateway",
-        description: "sfield sends the chat messages and expected response format to the model. Test mode supplies sample responses. You can configure extra request details for an office gateway.",
+        description: "sfield sends the chat messages and expected response format to the model. You can configure extra request details for an office gateway.",
         endpoints: [["POST /chat/completions", "Send a request to the configured model."]],
         files: [{ name: "sfield-model.ts", source: sfieldModelSource }, { name: "gateway.env.example", source: gatewaySettingsExample }],
       },
@@ -126,10 +142,13 @@ export const helpContracts = [
       {
         id: "treatment",
         title: "Treatment Selector",
-        description: "The tool sends Treatment Selector a demo member ID and the checked topic. Address updates and next-step questions use version 2 to return content and any eligible workflow.",
+        description: "The sfield tool takes turnRef and routeDecisionId. The server uses them to send TS the member ID and verified topic, plus accountId for a selected retirement account. V1 returns ordered content IDs. V2.0 adds workflows linked to eligible cards. Chat requests v2.1, which also allows independently eligible actions with an ID and version. The multi-step planner uses a separate v3 format that can also carry ranked capabilities.",
         files: [
           jsonFile("treatment-selector.tool.json", { input: treatmentInputSchema, output: treatmentResultSchema }),
           jsonFile("treatment-recommendations.tool.json", { input: treatmentInputSchema, output: treatmentRecommendationsResultSchema }),
+          jsonFile("treatment-decisions.tool.json", { input: treatmentInputSchema, output: treatmentDecisionResultSchema }),
+          { name: "recommendations.ts", source: treatmentFormatsSource },
+          { name: "customer-workflows.ts", source: customerWorkflowsSource },
           { name: "ts-adapter.ts", source: treatmentAdapterSource },
           { name: "treatment-scenarios.json", source: treatmentFixtureSource },
         ],
@@ -142,6 +161,12 @@ export const helpContracts = [
           jsonFile("demo-balance.tool.json", { input: balanceInputSchema, output: balanceResultSchema }),
           { name: "domain.ts", source: domainSource },
         ],
+      },
+      {
+        id: "retirement-accounts",
+        title: "Retirement account records",
+        description: "Alice asks for her retirement accounts and then asks about the second one. The account service reads her Rollover IRA ending in 6105. Treatment Selector receives her member ID, the learning context and the selected account ID. Its beneficiary rule determines whether the reminder appears.",
+        files: [jsonFile("retirement-accounts.tool.json", { input: portfolioInputSchema, output: retirementAccountsResultSchema })],
       },
       {
         id: "portfolio",
@@ -175,7 +200,7 @@ export const helpContracts = [
       {
         id: "funding",
         title: "Funding preview workflow",
-        description: "The app resolves the workflow ID and version in Tool setup. The agent uses funding results to choose a next tool, ask for a method, or finish the preview.",
+        description: "After the customer clicks, the app looks up the workflow by ID and version. In saved tool order, sfield runs the configured steps in sequence. Agent-guided mode can ask the customer to choose a funding method.",
         files: [
           jsonFile("funding-preview.tools.json", {
             "funding.options.read": { input: turnInputSchema, output: fundingOptionsResultSchema },
@@ -191,7 +216,7 @@ export const helpContracts = [
       {
         id: "rules",
         title: "Rule authoring and Tool setup",
-        description: "These formats cover tool settings, sample rules, and previews. The demo checks the conditions entered in the form and saves any optional CCRE rule text.",
+        description: "A rule can attach a versioned customer workflow to its content. Preview shows which content and workflows pass for the chosen member. Saving applies the rule to subsequent decisions.",
         endpoints: [
           ["GET /api/admin/tools", "Load tool settings, rule fields, and available content."],
           ["POST /api/admin/tools", "Save tool settings and check that nobody else edited them first."],
@@ -208,7 +233,7 @@ export const helpContracts = [
       {
         id: "composer",
         title: "Experience Composer",
-        description: "The second model call gets the checked request and matching content. It can choose a layout and follow-up buttons or continue in plain text when no content fits.",
+        description: "After TS checks eligibility, sfield sends the Experience Composer the verified intent and eligible content. It can choose a layout and follow-up buttons or continue in plain text when no content fits.",
         files: [
           { name: "model-inputs.ts", source: modelInputsSource },
           jsonFile("experience-proposal.schema.json", compositionOutputSchema),

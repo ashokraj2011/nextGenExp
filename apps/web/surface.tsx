@@ -15,7 +15,7 @@ import type { FundingOptions, FundingPreview } from "../../packages/contracts/fu
 import { formatPortfolioAmount } from "../../packages/contracts/portfolio";
 import {
   PZN_CATALOG_ID, FOLLOW_UP_EVENT, boundWidget, contentCard, comparison, stepList, metricSummary, experienceRoot, followUpButton, ruleCreation, portfolioSnapshot,
-  capabilityForm, customForm, factSummary, layoutText, dynamicCanvas, savingsChart, savingsMetric, fundingOptions, fundingPreview, goalProgressCard, validatePznSurface, type DisplayBlock, type DisplayExperience,
+  capabilityForm, customForm, factSummary, layoutText, dynamicCanvas, savingsChart, savingsMetric, fundingOptions, fundingPreview, goalProgressCard, retirementAccounts, validatePznSurface, type DisplayBlock, type DisplayExperience,
 } from "../../packages/contracts/surface";
 import { DynamicCanvasBlock } from "./dynamic-canvas";
 import { PortfolioSnapshotBlock } from "./portfolio-snapshot";
@@ -105,11 +105,14 @@ function CustomFormBlock({ title, description, submitLabel, writeBack = true, fi
     setSubmitting(true);
     let savedFields: string[] = [];
     try {
-      if (updateKeys.length > 0 && controls.onWriteBack) {
+      if (updateKeys.length > 0) {
+        if (!controls.onWriteBack) throw new Error("Saving is unavailable for this form.");
         savedFields = await controls.onWriteBack(updates);
+        if (updateKeys.some((key) => !savedFields.includes(key))) throw new Error("The changes were not confirmed.");
       }
-    } catch {
-      savedFields = [];
+    } catch (error) {
+      setMissingError((error instanceof Error ? error.message + " " : "") + "Your entries are still here. Review them and try saving again.");
+      return;
     } finally {
       setSubmitting(false);
     }
@@ -196,7 +199,7 @@ function CustomFormBlock({ title, description, submitLabel, writeBack = true, fi
           {missingError && <p className="pzn-cf-error" role="alert">{missingError}</p>}
           {fields.length > 0 && (
             <div className="pzn-cf-actions">
-              <button type="submit" className="axe-primary-button" disabled={!preview && !enabled}>
+              <button type="submit" className="axe-primary-button" disabled={submitting || (!preview && !enabled)}>
                 {submitLabel || "Submit"}
               </button>
             </div>
@@ -299,6 +302,25 @@ function FundingPreviewBlock({ amountCents, method }: FundingPreview) {
   </section>;
 }
 
+function RetirementAccountsCard(view: z.infer<typeof retirementAccounts.schema>) {
+  const { enabled } = useContext(SurfaceActions);
+  const { askPrompt } = useContext(ExperienceControls);
+  const { selected } = view;
+  return <section className="content-card retirement-accounts-card" aria-label={view.title}>
+    <h3>{view.title}</h3>
+    {selected ? <>
+      <p className="retirement-account-ending">Account ending in {selected.id.slice(-4)}</p>
+      <dl className="retirement-designation"><dt>Primary beneficiary</dt><dd>{selected.beneficiary ?? "No beneficiary on file"}</dd></dl>
+    </> : view.accounts.length ? <ol aria-label="Retirement accounts in display order">
+      {view.accounts.map((account) => <li key={account.id}>
+        <button type="button" disabled={!enabled || !askPrompt} onClick={() => askPrompt?.(`Who's the beneficiary on my ${account.label} ending in ${account.id.slice(-4)}?`)}>
+          <span><strong>{account.label}</strong><small>Ending in {account.id.slice(-4)}</small></span><ArrowUpRight size={16} aria-hidden="true" />
+        </button>
+      </li>)}
+    </ol> : <p>Your retirement accounts will appear here when one is linked.</p>}
+  </section>;
+}
+
 function FundingOptionsBlock({ methods }: FundingOptions) {
   return <section className="content-card" aria-label="Funding options">
     <h3>Funding options</h3>
@@ -316,6 +338,7 @@ function FundingOptionsBlock({ methods }: FundingOptions) {
 
 function ContentBlock({ block, form }: { block: DisplayBlock; form?: { experienceId: string; componentId: string; enabled: boolean } }) {
   const controls = useContext(ExperienceControls);
+  if (block.component === retirementAccounts.name) return <RetirementAccountsCard {...block.props} />;
   if (block.component === savingsChart.name) return <SavingsChart {...block.props} />;
   if (block.component === savingsMetric.name) return <SavingsMetric {...block.props} />;
   if (block.component === factSummary.name) return <FactSummary {...block.props} />;
@@ -423,6 +446,7 @@ const pznCatalog = new Catalog<ReactCatalogComponent>(PZN_CATALOG_ID, "1.0", [
   createComponentImplementation(comparison, ({ props }) => <ContentBlock block={{ component: comparison.name, props }} />),
   createComponentImplementation(stepList, ({ props }) => <ContentBlock block={{ component: stepList.name, props }} />),
   createComponentImplementation(metricSummary, ({ props }) => <ContentBlock block={{ component: metricSummary.name, props }} />),
+  createComponentImplementation(retirementAccounts, ({ props }) => <RetirementAccountsCard {...props} />),
   createComponentImplementation(goalProgressCard, ({ props }) => <ContentBlock block={{ component: goalProgressCard.name, props }} />),
   createComponentImplementation(portfolioSnapshot, ({ props }) => {
     const controls = useContext(ExperienceControls);
@@ -461,11 +485,11 @@ function PlainText({ markdown }: { markdown: string }) {
   return <span>{renderInlineMarkdown(markdown)}</span>;
 }
 
-function MountedSurface({ input, id, onAction, smoke, onRendered }: {
+export function MountedSurface({ input, id, onAction, basic, onRendered }: {
   input: unknown;
   id: string;
   onAction: (action: ActionMessage) => void;
-  smoke?: boolean;
+  basic?: boolean;
   onRendered?: () => void;
 }) {
   const [surface, setSurface] = useState<SurfaceModel<ReactCatalogComponent>>();
@@ -475,11 +499,11 @@ function MountedSurface({ input, id, onAction, smoke, onRendered }: {
   useEffect(() => {
     let message: CreateSurfaceMessage;
     const processor = new MessageProcessor<ReactCatalogComponent>(
-      smoke ? [basicCatalog] : [pznCatalog],
+      basic ? [basicCatalog] : [pznCatalog],
       (action) => { callbacks.current.onAction(ActionMessageSchema.parse({ version: "1.0", action })); },
     );
     try {
-      message = smoke ? CreateSurfaceMessageSchema.parse(input) : validatePznSurface(input, id);
+      message = basic ? CreateSurfaceMessageSchema.parse(input) : validatePznSurface(input, id);
       processor.processMessages([message]);
       const created = processor.getSurface(id);
       if (!created) throw new Error("A2UI surface is missing");
@@ -493,7 +517,7 @@ function MountedSurface({ input, id, onAction, smoke, onRendered }: {
       try { processor.processMessages([{ version: "1.0", deleteSurface: { surfaceId: id } }]); }
       finally { processor.dispose(); }
     };
-  }, [id, input, smoke]);
+  }, [id, input, basic]);
 
   useEffect(() => {
     if (surface) callbacks.current.onRendered?.();
@@ -570,14 +594,3 @@ export function ExperienceLayoutPreview({ data }: { data: DisplayExperience }) {
 }
 
 export const ExperienceDataUI = makeAssistantDataUI<DisplayExperience>({ name: "experience-surface", render: ExperiencePart });
-
-export function BasicSmoke({ input }: { input: CreateSurfaceMessage }) {
-  const [action, setAction] = useState<ActionMessage>();
-  return <main className="smoke-page">
-    <p className="test-label">Automated test mode</p>
-    <SurfaceBoundary fallback={<p role="alert">Smoke render failed.</p>}>
-      <MountedSurface id={input.createSurface.surfaceId} input={input} smoke onAction={setAction} />
-    </SurfaceBoundary>
-    {action && <output data-testid="a2ui-action"><ArrowUpRight aria-hidden="true" size={14} />{JSON.stringify(action)}</output>}
-  </main>;
-}

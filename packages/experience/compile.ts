@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import type { AgentAction } from "../contracts/agentic";
+import type { AgentAction, CapabilityManifest } from "../contracts/agentic";
 import host from "../../fixtures/host.json";
 import type { BalanceProof, IntroKey } from "../contracts/domain";
-import { fundingPreviewWorkflow, type FundingOptions, type FundingPreview, type WorkflowRecommendation } from "../contracts/funding-workflow";
+import { customerWorkflow } from "../contracts/customer-workflows";
+import { type ActionRecommendation, type FundingOptions, type FundingPreview, type WorkflowRecommendation } from "../contracts/funding-workflow";
 import type { GoalProgress } from "../contracts/goal-progress";
 import { formatPortfolioAmount, type PortfolioSnapshot } from "../contracts/portfolio";
 import type { RuleGlossary } from "../contracts/rule-glossary";
@@ -15,6 +16,7 @@ import type { VerifiedExperience } from "./verify";
 export const makeId = (prefix: string) => prefix + "_" + randomUUID().replaceAll("-", "");
 export type IssuedAction = DisplayExperience["actions"][number] & {
   userMessage: string; followUpId: string; workflow?: WorkflowRecommendation; agentAction?: AgentAction;
+  standaloneAction?: ActionRecommendation; offerSourceId?: string;
 };
 export type CompiledExperience = { display: DisplayExperience; issued: IssuedAction[] };
 type ExperienceInput = {
@@ -28,11 +30,14 @@ type ExperienceInput = {
   proof?: BalanceProof | null;
   portfolio?: PortfolioSnapshot;
   goalProgress?: GoalProgress;
-  workflow?: WorkflowRecommendation;
+  workflows?: WorkflowRecommendation[];
+  standaloneActions?: { recommendation: ActionRecommendation; manifest: CapabilityManifest }[];
 };
 
 export function compileExperience(input: ExperienceInput): CompiledExperience {
-  const intro = input.portfolio ? host.introCopy.summary
+  const actionOnly = Boolean(input.standaloneActions?.length) && !input.approved?.blocks.length;
+  const ready = Boolean(input.portfolio) || actionOnly;
+  const intro = input.portfolio ? host.introCopy.summary : actionOnly ? host.introCopy.next_step
     : input.approved?.proposal.replyText?.trim() || host.introCopy[input.introKey];
   const blocks: DisplayBlock[] = (input.approved?.blocks ?? []).map(({ proposal, content }) => {
     const primary = content[0];
@@ -78,17 +83,24 @@ export function compileExperience(input: ExperienceInput): CompiledExperience {
       }
     }
   });
-  const workflow = input.workflow && {
-    followUpId: input.workflow.id, label: fundingPreviewWorkflow.label,
-    userMessage: fundingPreviewWorkflow.label, workflow: input.workflow,
-  };
-  const issued = [...(workflow ? [workflow] : []), ...(input.approved?.followUps ?? [])].slice(0, 3).map((action, index) => ({
+  const workflows = (input.workflows ?? []).flatMap((workflow) => {
+    const registered = customerWorkflow(workflow);
+    return registered ? [{ followUpId: workflow.id, label: registered.label, userMessage: registered.label, workflow }] : [];
+  });
+  const issued: IssuedAction[] = [...workflows, ...(input.approved?.followUps ?? [])].slice(0, 3).map((action, index) => ({
     ...action, actionId: makeId("action"), componentId: "follow_up_" + (index + 1),
   }));
   if (input.portfolio) blocks.unshift({ component: portfolioSnapshot.name, props: input.portfolio });
+  for (const { recommendation, manifest } of input.standaloneActions ?? []) {
+    const actionId = makeId("action");
+    issued.push({ actionId, componentId: "block_" + (blocks.length + 1), label: manifest.title,
+      userMessage: manifest.title, followUpId: recommendation.id, standaloneAction: recommendation });
+    blocks.push({ component: "PznCapabilityForm", props: { title: manifest.title, submitLabel: manifest.title,
+      actionId, fields: manifest.inputs.map((field) => ({ field })) } });
+  }
   return buildSurface({
-    status: input.portfolio ? "ready" : input.status, outcome: input.portfolio ? "ready" : input.outcome,
-    intro, question: input.portfolio ? null : input.question, partial: input.partial, expiresAt: input.expiresAt,
+    status: ready ? "ready" : input.status, outcome: ready ? "ready" : input.outcome,
+    intro, question: ready ? null : input.question, partial: input.partial, expiresAt: input.expiresAt,
   }, blocks, issued);
 }
 
@@ -139,7 +151,7 @@ export function buildSurface(
 ): CompiledExperience {
   const { experienceId, messageId } = identity ?? { experienceId: makeId("exp"), messageId: makeId("msg") };
   const { intro, question, partial } = displayFields;
-  const actions = issued.filter(({ agentAction }) => !agentAction).map(({ actionId, componentId, label }) => ({ actionId, componentId, label }));
+  const actions = issued.filter((item) => !item.agentAction && !item.standaloneAction).map(({ actionId, componentId, label }) => ({ actionId, componentId, label }));
   const nodes = [
     ...blocks.map((block, index) => ({ id: "block_" + (index + 1), component: block.component, ...block.props })),
     ...actions.map(({ actionId, componentId, label }) => ({ id: componentId, component: "PznFollowUp", actionId, label })),

@@ -13,6 +13,7 @@ const progressDetails: Record<Progress, string> = {
   routing: "Extracted customer intent using Customer 360 signals.",
   glossary: "Loaded CCRE rule glossary and eligibility attributes.",
   eligibility: "Ran Treatment Selector (TS) and CCRE eligibility rules.",
+  retirementAccounts: "Read the retirement records for the account holder.",
   portfolio: "Synchronized live portfolio balances and allocation.",
   goal: "Loaded savings milestones and target horizon.",
   workflow: "Staged funding preview workflow and options.",

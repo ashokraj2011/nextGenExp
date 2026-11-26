@@ -1,6 +1,7 @@
 import { Catalog, ChildListSchema, CreateSurfaceMessageSchema, DynamicStringSchema, PayloadValidator } from "@a2ui/web_core/v1_0";
 import type { CreateSurfaceMessage } from "@a2ui/web_core/v1_0";
 import { z } from "zod";
+import { retirementViewSchema } from "./retirement-accounts";
 import { comparisonFieldSchema, metricValueSchema, stepSchema } from "./domain";
 import { fundingOptionsSchema, fundingPreviewSchema } from "./funding-workflow";
 import { goalProgressSchema } from "./goal-progress";
@@ -54,6 +55,7 @@ export const ruleCreation = { name: "PznRuleCreation", schema: z.object({
   scenarioId: demoKey, personaId: demoKey, glossary: ruleGlossarySchema.optional(),
 }).strict() } as const;
 export type RuleCreationProps = z.infer<typeof ruleCreation.schema>;
+export const retirementAccounts = { name: "PznRetirementAccounts", schema: retirementViewSchema } as const;
 export const portfolioSnapshot = { name: "PznPortfolioSnapshot", schema: portfolioSnapshotSchema } as const;
 export const fundingPreview = { name: "PznFundingPreview", schema: fundingPreviewSchema } as const;
 export const fundingOptions = { name: "PznFundingOptions", schema: fundingOptionsSchema } as const;
@@ -79,11 +81,11 @@ export const dynamicCanvas = { name: "PznDynamicCanvas", schema: dynamicCanvasSc
 export type { DynamicCanvasProps };
 
 export const catalogApis = [
-  experienceRoot, contentCard, comparison, stepList, metricSummary, goalProgressCard, portfolioSnapshot,
+  experienceRoot, contentCard, comparison, stepList, metricSummary, goalProgressCard, portfolioSnapshot, retirementAccounts,
   fundingPreview, fundingOptions, followUpButton, ruleCreation, savingsChart, savingsMetric, factSummary, capabilityForm, layoutText, customForm, boundWidget, dynamicCanvas,
 ] as const;
 type BlockApi = typeof contentCard | typeof comparison | typeof stepList | typeof metricSummary | typeof goalProgressCard
-  | typeof portfolioSnapshot | typeof fundingPreview | typeof fundingOptions
+  | typeof retirementAccounts | typeof portfolioSnapshot | typeof fundingPreview | typeof fundingOptions
   | typeof savingsChart | typeof savingsMetric | typeof factSummary | typeof capabilityForm | typeof layoutText | typeof customForm | typeof boundWidget | typeof dynamicCanvas;
 type ShapeFor<T extends BlockApi> = T extends BlockApi ? { component: T["name"]; props: z.infer<T["schema"]> } : never;
 export type DisplayBlock = ShapeFor<BlockApi> | { component: typeof ruleCreation.name; props: RuleCreationProps };

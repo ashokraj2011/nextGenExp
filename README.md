@@ -1,8 +1,8 @@
 # CEP — Customer Engagement Platform
 
-A governed, multi-domain **Customer Engagement Platform (CEP)** built on **`sfield`** (tool governance, zero-trust authorization, durable checkpoints), **A2UI v1.0** (deterministic, schema-verified UI rendering), **assistant-ui**, and **Copilot ACP / OpenAI / Enterprise Gateway** LLM adapters.
+An investment customer can ask which retirement accounts they hold, point to the second one, and see who is named as its beneficiary. The account service supplies the record, Treatment Selector checks which follow-up applies, and `sfield` runs the tools and keeps the conversation. The app renders the result in chat using A2UI. [Try the retirement account review](#try-a-retirement-account-review).
 
-> **Presenting live?** See the ready-to-run **[5-Minute Executive Demo Script](./DEMO_SCRIPT.md)** (also available in-app at `/admin/help#demo-playbook`).
+> Follow the five-minute [investment customer walkthrough](./DEMO_SCRIPT.md), also available in Help at `/admin/help#demo-playbook`.
 
 ---
 
@@ -10,7 +10,7 @@ A governed, multi-domain **Customer Engagement Platform (CEP)** built on **`sfie
 
 | Pillar | Capabilities Included |
 | :--- | :--- |
-| **Unified Semantic Routing** | Declarative 8-capability catalog (`packages/contracts/capabilities-catalog.ts`) + live LLM Semantic Capability Router (`apps/server/semantic-router.ts`) with parameter extraction and transparent routing traces inside **Advisory Reasoning** in admin test chat. |
+| **Chat flow selection** | In **Tool setup → Chat routing flows**, choose tenant defaults and domain overrides for the registered flows. Each turn uses the enabled flows available to its audience. In **Logs → Flows in the model request**, inspect the ordered list and the recorded request and response. |
 | **Governed Wealth & Single-Source-of-Truth Ledger** | Verified A2UI experiences (Portfolio Snapshot, Balances, Home Goal, Retirement, Beneficiaries, Address Update, Funding Preview) + **Live Stock Holdings & Tax-Lot Ledger** (`apps/server/trade-store.ts`) synchronized penny-for-penny with Customer 360 (`Portfolio snapshot` = `SUM(shares × price)` + Cash + Fixed Income). |
 | **Conversational Trade & Tax-Loss Harvesting Engine** | Simulate buying/selling shares by count or `%`, run **Tax-Loss Harvesting Analysis** with editable loss-offset recommendations and a real **30-day Wash-Sale Ledger**, drive drafts conversationally (`"yes"`, `"change to 50%"`, `"execute bundle"`), and execute **durable SSE-streamed timed jobs** with mid-flight **Cancel** and automatic `sfield` settlement. |
 | **Multi-Domain Reusability** | Declarative Domain Packs (**Wealth Advisory**, **IT Operations & SRE**, **Sales & Revenue Ops**) with sidebar Domain Pack Switcher, live operational HUDs, persisted JSON/SQLite stores (`incidents.json`, `deals.json`, `customer-profiles.json`), and full Admin Entity CRUD at `/admin/customers`. |
@@ -48,13 +48,16 @@ npm run start:openai
 
 Opens on port `4175` with `gpt-4.1-mini` (override via `OPENAI_MODEL`).
 
-### 3. Run Deterministic Offline Test Preview (No API Keys Required)
+### 3. Run the local app on port 4174
+
+Configure a model provider in the environment or in `.env`, then run:
 
 ```sh
-npm run test:preview
+npm run build
+npm run preview
 ```
 
-Opens on `http://127.0.0.1:4174` using deterministic fixture gateway responses through real `sfield`, SQLite, host verifiers, assistant-ui, and A2UI v1.0.
+Open [chat](http://127.0.0.1:4174/) or [admin Logs](http://127.0.0.1:4174/admin/logs). Chat and the command-line harness use the configured provider. For a local presentation, `PZN_OPERATOR_AUTH=off` opens the admin pages directly. The preview keeps chats and logs in `.pzn-data/preview` between restarts. Set `PZN_DATA_DIR` to use an existing data directory.
 
 ### 4. Run with an Enterprise Gateway
 Copy `.env.example` to `.env` and set `LLM_PROVIDER=gateway`, `LLM_BASE_URL`, `LLM_MODEL`, and `LLM_API_KEY` (or custom headers via `LLM_GATEWAY_HEADERS_JSON` and body fields via `LLM_GATEWAY_BODY_JSON`), then run `npm start`.
@@ -69,6 +72,12 @@ Copy `.env.example` to `.env` and set `LLM_PROVIDER=gateway`, `LLM_BASE_URL`, `L
 2. **Activate** is enabled only after a passing test of exactly those settings (within 30 minutes). It saves the configuration to `llm-gateway.json` in the data directory (mode 600; a stored key is never sent back to the browser) and restarts the app in place so sfield re-binds the model. Pending approvals resume after the restart.
 3. A saved configuration overrides the launch environment on every start. **Use environment settings instead** removes it. If a saved configuration can't start, the server falls back to the environment settings.
 
+### Try a retirement account review
+
+Sign in as **Alice Morgan** and select **Retirement accounts** in the chat sidebar. Her workplace 401(k) appears first and her rollover IRA second. Ask **“Who’s the beneficiary on the second one?”** The account record shows that her IRA ending in **6105** has no designation. Treatment Selector evaluates the rule for that MID and account, and returns **Update your beneficiaries**. Ask about the workplace plan to see Jamie Morgan on file.
+
+Try the same questions as **Jordan Lee**. His second account is a Roth IRA ending in **9281**, with Casey Lee on file. In **Administration → Logs**, open the follow-up turn to see the router’s recent chat context, the retirement account read, and Treatment Selector’s request, returned IDs and rule outcome.
+
 ### Tenants, domains and shared designs
 
 A tenant is one organization running the app. Inside it, a user can belong to more than one domain. Wealth, IT Operations and Sales each have a design library at `/admin/ui?view=library`. A domain owner can publish from **Administration → UI Builder** at `/admin/ui`. Choose the domain, attach the design to an intent or capability, and select **Publish**. **Design library** shows the published revision. Another owner with access can choose **Use as template**, select a domain they own and attach the copy to its own intent.
@@ -76,11 +85,15 @@ A tenant is one organization running the app. Inside it, a user can belong to mo
 | Scope | What belongs there |
 | --- | --- |
 | Tenant | The app process, model configuration and data directory |
-| Domain | Memberships, published layouts, widgets and their attachments |
+| Domain | Published layouts, attached intents, widgets and published tool settings, including Treatment Selector rules and the funding workflow |
 | User | The customer profile in Wealth or the signed-in operator in IT and Sales |
-| Session and thread | Chat messages and follow-up context in sfield |
+| Thread | sfield keeps messages, displayed record IDs and their order for the user and domain. A signed-in user can reopen the thread in another browser. |
 
-When Alice and Jordan compare balances, both can receive one Wealth design. The server fills its fields from the profile on each chat. A new draft stays with its author until published. A turn records the published revision it used, so a later edit leaves earlier answers intact.
+When Alice and Jordan compare balances, both can receive the same Wealth design. A turn records the published revision and uses the readings from that turn to fill its cards. For example, the cash figure in a custom widget and in the portfolio summary comes from the same portfolio snapshot.
+
+In UI Builder, **Layout preview** shows a sample for the current attachment. Expand **Try a chat turn**, enter a customer message and run it to see the actual reply and whether the draft applied. The chat uses the configured model and published domain rules. In IT Operations and Sales you can attach different layouts to a record list, detail or timeline. **Create a named intent** attaches your own phrases to one of those views. New record sources and operations still need a registered implementation.
+
+In Tool setup, **Save settings** publishes to the domain. **Open draft in chat** uses the current settings in a private admin chat. Use **Load private draft** to recover different settings from this browser, including settings saved before domain publishing was introduced. Existing sessions see a publication on their next turn.
 
 Set `PZN_TENANT_ID` on the server. A named tenant stores its files under `PZN_DATA_DIR/tenants/<tenant-id>`. Use a separate process and port per tenant. The default `pzn-local` tenant keeps the existing installation path. On upgrade, an original browser session can reclaim its older drafts by saving them under a signed-in owner. If legacy publications overlap, the most recently updated layout keeps the attachment and the others remain drafts.
 
@@ -96,7 +109,7 @@ Without a membership map, the local app retains open profile selection and exist
 
 ### Operator sign-in
 
-Customer chat opens at `/`. The admin, integration, sales and operations workspaces prompt for an operator account. On first start the server saves the local operator username and generated password in `operator-credentials.json` inside the active data directory. For Copilot on port 4180 the default path is `.pzn-data/copilot/operator-credentials.json`. To use separate identities for approvals, set `PZN_OPERATORS_JSON` to a JSON object mapping two or more usernames to passwords of at least 12 characters each. Customer sign-in uses the local profile picker.
+Customer chat opens at `/`. With operator sign-in enabled, the admin, integration, sales and operations workspaces prompt for an operator account. On first start the server saves the local operator username and generated password in `operator-credentials.json` inside the active data directory. For Copilot on port 4180 the default path is `.pzn-data/copilot/operator-credentials.json`. To use separate identities for approvals, set `PZN_OPERATORS_JSON` to a JSON object mapping two or more usernames to passwords of at least 12 characters each. Customer sign-in uses the local profile picker.
 
 For local demos you can skip the prompt with `PZN_OPERATOR_AUTH=off`. Admin pages then open without a password and actions are attributed to `local-operator`; signing in still works and takes precedence (useful for testing dual control). The server refuses this setting under `NODE_ENV=production`, and it only listens on `127.0.0.1`/`localhost`.
 
@@ -115,7 +128,7 @@ In `/integrations`, the **Customer chat** settings on a read task map the record
 | `/admin/ui` | **UI Builder** (drag-and-drop multi-namespace `customer.*` / `incident.*` / `deal.*` / `custom.*` bindings + starter templates) and **Widget Studio**. |
 | `/admin/logs` | **Chat calls**, **Pending actions**, **Approvals (HITL)** (`?source=approvals`), **Write audit (sfield)** (`?source=write_audit`), and **Engagement analytics** (`?source=analytics`). |
 | `/admin/inspector` | Deep turn decision trace, verified Experience IR, and `sfield` run inspection. |
-| `/admin/help` | **Architecture & Playbook**: 14-step clickable sequence diagram (showing host A2UI compilation & SSE delivery), **`sfield` Runtime Architecture**, downloadable contracts, and **5-Minute Demo Playbook**. |
+| `/admin/help` | **Architecture & Playbook**: a clickable diagram from tenant and domain flow selection through intent, recommendations and A2UI delivery, **`sfield` Runtime Architecture**, downloadable contracts, and **5-Minute Demo Playbook**. |
 
 ---
 

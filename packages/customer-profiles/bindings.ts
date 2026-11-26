@@ -1,7 +1,9 @@
 import type { DataBindingValues } from "../contracts/data-bindings";
 import type { IncidentRecord } from "../contracts/ops";
 import type { DealRecord } from "../contracts/sales";
-import { formatPortfolioAmount } from "../contracts/portfolio";
+import { formatPortfolioAmount, type PortfolioSnapshot } from "../contracts/portfolio";
+import type { GoalProgress } from "../contracts/goal-progress";
+import type { MetricReading } from "../contracts/domain";
 import { findProfileById } from "./registry";
 
 function centsToPlainDollars(cents: number): string {
@@ -9,22 +11,28 @@ function centsToPlainDollars(cents: number): string {
   return Number.isInteger(val) ? String(val) : val.toFixed(2);
 }
 
+type TurnReadings = { portfolio?: PortfolioSnapshot; goal?: GoalProgress; balances?: MetricReading["values"] };
+
 export function resolveCustomerBindings(
   personaId: string,
   effectiveFundingStatus?: "funded" | "unfunded",
+  readings: TurnReadings = {},
 ): DataBindingValues | undefined {
   const profile = findProfileById(personaId);
   if (!profile) return undefined;
 
+  const { cashCents, equityCents, fixedIncomeCents } = readings.portfolio ?? profile;
+  const targetCents = readings.goal?.targetCents ?? profile.homeGoalTargetCents;
+  const savedCents = readings.goal?.history.at(-1)?.savedCents ?? profile.homeGoalSavedCents;
   const funding = effectiveFundingStatus ?? profile.accountFundingStatus;
-  const totalCents = profile.cashCents + profile.equityCents + profile.fixedIncomeCents;
-  const investedCents = profile.equityCents + profile.fixedIncomeCents;
-  const cashPct = totalCents > 0 ? Math.round((profile.cashCents / totalCents) * 100) : 0;
-  const equitiesPct = totalCents > 0 ? Math.round((profile.equityCents / totalCents) * 100) : 0;
+  const totalCents = cashCents + equityCents + fixedIncomeCents;
+  const investedCents = equityCents + fixedIncomeCents;
+  const cashPct = totalCents > 0 ? Math.round((cashCents / totalCents) * 100) : 0;
+  const equitiesPct = totalCents > 0 ? Math.round((equityCents / totalCents) * 100) : 0;
   const fixedIncomePct = totalCents > 0 ? Math.max(0, 100 - cashPct - equitiesPct) : 0;
-  const goalRemainingCents = Math.max(0, profile.homeGoalTargetCents - profile.homeGoalSavedCents);
-  const goalPct = profile.homeGoalTargetCents > 0
-    ? Math.min(100, Math.round((profile.homeGoalSavedCents / profile.homeGoalTargetCents) * 100))
+  const goalRemainingCents = Math.max(0, targetCents - savedCents);
+  const goalPct = targetCents > 0
+    ? Math.min(100, Math.round((savedCents / targetCents) * 100))
     : 0;
 
   const result: DataBindingValues = {
@@ -55,27 +63,27 @@ export function resolveCustomerBindings(
       rawInput: centsToPlainDollars(investedCents),
     },
     "portfolio.cash": {
-      display: formatPortfolioAmount(profile.cashCents),
-      rawInput: centsToPlainDollars(profile.cashCents),
+      display: formatPortfolioAmount(cashCents),
+      rawInput: centsToPlainDollars(cashCents),
     },
     "portfolio.equities": {
-      display: formatPortfolioAmount(profile.equityCents),
-      rawInput: centsToPlainDollars(profile.equityCents),
+      display: formatPortfolioAmount(equityCents),
+      rawInput: centsToPlainDollars(equityCents),
     },
     "portfolio.fixedIncome": {
-      display: formatPortfolioAmount(profile.fixedIncomeCents),
-      rawInput: centsToPlainDollars(profile.fixedIncomeCents),
+      display: formatPortfolioAmount(fixedIncomeCents),
+      rawInput: centsToPlainDollars(fixedIncomeCents),
     },
     "portfolio.cashPct": { display: `${cashPct}%`, rawInput: String(cashPct), percent: cashPct },
     "portfolio.equitiesPct": { display: `${equitiesPct}%`, rawInput: String(equitiesPct), percent: equitiesPct },
     "portfolio.fixedIncomePct": { display: `${fixedIncomePct}%`, rawInput: String(fixedIncomePct), percent: fixedIncomePct },
     "goal.target": {
-      display: formatPortfolioAmount(profile.homeGoalTargetCents),
-      rawInput: centsToPlainDollars(profile.homeGoalTargetCents),
+      display: formatPortfolioAmount(targetCents),
+      rawInput: centsToPlainDollars(targetCents),
     },
     "goal.saved": {
-      display: formatPortfolioAmount(profile.homeGoalSavedCents),
-      rawInput: centsToPlainDollars(profile.homeGoalSavedCents),
+      display: formatPortfolioAmount(savedCents),
+      rawInput: centsToPlainDollars(savedCents),
     },
     "goal.remaining": {
       display: formatPortfolioAmount(goalRemainingCents),
@@ -83,6 +91,11 @@ export function resolveCustomerBindings(
     },
     "goal.percentFunded": { display: `${goalPct}%`, rawInput: String(goalPct), percent: goalPct },
   };
+
+  for (const reading of readings.balances ?? []) {
+    const cents = Math.round(Number(reading.displayValue) * 100);
+    result[`balances.${reading.metricKey}`] = { display: formatPortfolioAmount(cents), rawInput: reading.displayValue };
+  }
 
   for (const attr of profile.customAttributes ?? []) {
     const key = `custom.${attr.key}`;
@@ -114,13 +127,13 @@ export function resolveCustomerBindings(
 
 export function resolveMultiDomainBindings(
   personaId: string | undefined,
-  options?: {
+  options?: TurnReadings & {
     effectiveFundingStatus?: "funded" | "unfunded";
     incident?: IncidentRecord;
     deal?: DealRecord;
   },
 ): DataBindingValues | undefined {
-  const base = personaId ? resolveCustomerBindings(personaId, options?.effectiveFundingStatus) : undefined;
+  const base = personaId ? resolveCustomerBindings(personaId, options?.effectiveFundingStatus, options) : undefined;
   if (!base && !options?.incident && !options?.deal) return undefined;
   const result: DataBindingValues = { ...(base ?? {}) };
 

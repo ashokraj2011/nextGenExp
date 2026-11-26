@@ -29,7 +29,7 @@ test("sfield reloads the transcript and scopes it by user, browser session, and 
     await gateway.close();
     await rm(dataDir, { recursive: true, force: true });
   });
-  const start = () => startApp({ projectRoot, dataDir, gateway: gateway.settings, mode: "test" });
+  const start = () => startApp({ projectRoot, dataDir, gateway: gateway.settings });
   app = await start();
   const alice = await testClient(app.url);
   const thread = await alice.conversation();

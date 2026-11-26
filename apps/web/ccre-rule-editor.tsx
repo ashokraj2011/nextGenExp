@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { formatGlossaryCondition, type RuleGlossary } from "../../packages/contracts/rule-glossary";
-import type { MockCcreCondition, MockCcreRule, ToolSetupView } from "../../packages/contracts/tool-setup";
+import { effectiveCcreRules, type MockCcreCondition, type MockCcreRule, type ToolSetupView } from "../../packages/contracts/tool-setup";
 import { CcreRuleForm, conditionLabels } from "./ccre-rule-form";
 
 type Props = {
   scope: Pick<MockCcreRule, "scenarioId" | "contextId">;
   rules: MockCcreRule[];
+  defaults: Omit<MockCcreRule, "scenarioId">[];
   personas: ToolSetupView["personas"];
   content: ToolSetupView["content"];
   glossary: RuleGlossary;
@@ -14,10 +15,14 @@ type Props = {
   change: (rules: MockCcreRule[]) => void;
 };
 
-export function CcreRuleEditor({ scope, rules, personas, content, glossary, limitReached, change }: Props) {
+export function CcreRuleEditor({ scope, rules, defaults, personas, content, glossary, limitReached, change }: Props) {
   const [editor, setEditor] = useState<{ rule?: MockCcreRule }>();
   const replacing = editor?.rule;
-  const targets = content.filter(({ contentId }) => contentId === replacing?.contentId || !rules.some((rule) => rule.contentId === contentId));
+  const base = defaults.filter((rule) => rule.contextId === scope.contextId);
+  const effective = effectiveCcreRules(scope.scenarioId, scope.contextId, base, rules);
+  const editingDefault = base.some((rule) => rule.contentId === replacing?.contentId);
+  const targets = content.filter(({ contentId }) => contentId === replacing?.contentId
+    || (!editingDefault && !effective.some((rule) => rule.contentId === contentId)));
   function describe(condition: MockCcreCondition) {
     if (condition.kind === "attribute") return formatGlossaryCondition(condition);
     const label = conditionLabels[condition.kind];
@@ -26,7 +31,8 @@ export function CcreRuleEditor({ scope, rules, personas, content, glossary, limi
     return label;
   }
   function saveRule(rule: MockCcreRule) {
-    change(replacing ? rules.map((entry) => entry === replacing ? rule : entry) : [...rules, rule]);
+    const index = rules.findIndex((entry) => entry.contentId === replacing?.contentId);
+    change(index < 0 ? [...rules, rule] : rules.map((entry, i) => i === index ? rule : entry));
     setEditor(undefined);
   }
 
@@ -41,15 +47,16 @@ export function CcreRuleEditor({ scope, rules, personas, content, glossary, limi
       </button>}
     </div>
     {limitReached && <p className="admin-muted">The setup has reached its rule limit.</p>}
-    {!!rules.length && <ul className="rank-list admin-rule-list" aria-label="CCRE rules for this context">
-      {rules.map((rule) => <li key={rule.contentId}>
-        <span className="rank-item"><strong>{rule.name}</strong><code>{rule.contentId}</code><small>{describe(rule.condition)}</small></span>
+    {!!effective.length && <ul className="rank-list admin-rule-list" aria-label="CCRE rules for this context">
+      {effective.map((rule) => <li key={rule.contentId}>
+        <span className="rank-item"><strong>{rule.name}</strong><code>{rule.contentId}</code><small>{describe(rule.condition)}</small>{rule.workflow && <small>On click · {rule.workflow.id}@{rule.workflow.version}</small>}</span>
         <span className="rank-actions">
-          <button type="button" className="icon-button" aria-label={`Edit rule ${rule.name}`} disabled={Boolean(editor)} onClick={() => setEditor({ rule })}>
+          <button type="button" className="icon-button" aria-label={`Edit rule ${rule.name}`} disabled={Boolean(editor) || (limitReached && !rules.some((r) => r.contentId === rule.contentId))} onClick={() => setEditor({ rule })}>
             <Pencil size={16} aria-hidden="true" />
           </button>
-          <button type="button" className="icon-button" aria-label={`Remove rule ${rule.name}`} disabled={Boolean(editor)}
-            onClick={() => change(rules.filter((entry) => entry !== rule))}><Trash2 size={16} aria-hidden="true" /></button>
+          {rules.some((entry) => entry.contentId === rule.contentId) &&
+            <button type="button" className="icon-button" aria-label={`${base.some((r) => r.contentId === rule.contentId) ? "Restore default for" : "Remove rule"} ${rule.name}`} disabled={Boolean(editor)}
+              onClick={() => change(rules.filter((entry) => entry.contentId !== rule.contentId))}><Trash2 size={16} aria-hidden="true" /></button>}
         </span>
       </li>)}
     </ul>}

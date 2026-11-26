@@ -31,10 +31,11 @@ const grants = {
 async function startTenant(base: string, tenantId: string) {
   const script = `
     import { startApp } from "./apps/server/http.ts";
+    import { isolatedServices } from "./tests/operator-fixture.ts";
     import { startFixtureGateway } from "./tests/gateway-fixture.ts";
     const gateway = await startFixtureGateway();
     const app = await startApp({ projectRoot: process.cwd(), dataDir: process.env.PZN_DATA_DIR,
-      operators: JSON.parse(process.env.PZN_OPERATORS_JSON), mode: "test", gateway: gateway.settings });
+      operators: JSON.parse(process.env.PZN_OPERATORS_JSON), ...isolatedServices, gateway: gateway.settings });
     process.on("disconnect", async () => { await app.close(); await gateway.close(); });
     process.send(app.url);
   `;
@@ -99,7 +100,9 @@ test("a published domain design reaches independent members with their own data 
   const aliceThread = await publicChat.conversation();
   await publicChat.request("/api/profile-session", { personaId: "demo-returning" });
   await publicChat.request("/api/conversations/" + aliceThread.id, undefined, 403);
-  assert.deepEqual((await publicChat.request<Bootstrap>("/api/bootstrap")).conversations, []);
+  const returningThreads = (await publicChat.request<Bootstrap>("/api/bootstrap")).conversations;
+  assert.ok(returningThreads.length);
+  assert.ok(returningThreads.every((thread) => thread.userId === "demo-returning"));
   await publicChat.request("/api/profile-session", { personaId: null });
   assert.deepEqual((await publicChat.request<Bootstrap>("/api/bootstrap")).personas, []);
 
@@ -128,6 +131,12 @@ test("a published domain design reaches independent members with their own data 
   assert.deepEqual((await southOwner.request<UiLayoutCatalog>(path)).library, []);
   await southOwner.request("/api/conversations/" + ops.id, undefined, 404);
   await southOwner.request(path, { operation: "publish", domainId: "wealth", design });
+  const flowSettings = "/api/admin/routing-flows?scope=wealth";
+  await owner.request(flowSettings, { stock_trade: { enabled: false } });
+  await reader.request(flowSettings, {}, 403, readerHeaders);
+  await reader.request("/api/admin/routing-flows?scope=tenant", {}, 403, readerHeaders);
+  assert.deepEqual((await southOwner.request<{ overrides: object }>(flowSettings)).overrides, {});
+  assert.deepEqual((await owner.request<{ overrides: object }>(flowSettings)).overrides, { stock_trade: { enabled: false } });
   const southChat = await southOwner.conversation();
   assert.equal(southChat.tenantId, "south");
 });

@@ -183,6 +183,20 @@ export class ExperienceAgent {
   }
 
   async respond(turn: TurnRecord, principal: Principal, recent: RoutingHistoryEntry[], signal: AbortSignal) {
+    const launch = turn.agentLaunch;
+    if (launch && "capability" in launch && launch.sourceExperienceId) {
+      const source = this.store.experience(launch.sourceExperienceId, turn.scope.principalId).turn;
+      const ref = capabilityRef(launch.capability);
+      const manifest = this.registry.get(turn.scope.principalId, ref);
+      requireCheck(source.scope.conversationId === turn.scope.conversationId && source.scope.personaId === turn.scope.personaId
+        && (source.public.experience?.expiresAt ?? 0) > this.now() && manifest?.eligibility.kind === "capability"
+        && source.decision?.actionRecommendations?.some((item) => capabilityRef(item) === ref), "ACTION_NOT_OFFERED");
+      const plan = { objective: manifest.title, intentType: "action", steps: [
+        { id: "requested_action", capabilityId: manifest.id, version: manifest.version, required: true, dependsOn: [] },
+      ] };
+      const journey = await this.execution.execute(turn, plan, principal, signal, new Map([[ref, manifest]]), undefined, undefined, launch.values);
+      return this.compile(turn, journey, undefined);
+    }
     const prior = this.selectPrior(turn);
     if (prior === "ambiguous") {
       return compileChatReply("You have more than one open plan. Open the conversation for the plan you want to continue.", "reply", this.now());

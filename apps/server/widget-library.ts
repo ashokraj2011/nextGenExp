@@ -444,12 +444,12 @@ export class WidgetLibraryStore {
     return { widget: saved, widgets: next.slice().sort((a, b) => b.updatedAt - a.updatedAt) };
   }
 
-  renderPublishedWidget(principalId: string, prompt: string, personaName?: string) {
-    const widget = this.matchCustomWidget(principalId, prompt);
+  renderPublishedWidget(principalId: string, prompt: string, personaName?: string, exactOnly = false) {
+    const widget = this.matchCustomWidget(principalId, prompt, exactOnly);
     return widget && { widget, ...compileSavedWidgetToCanvas(widget, prompt, personaName) };
   }
 
-  matchCustomWidget(principalId: string, prompt: string): SavedWidget | undefined {
+  matchCustomWidget(principalId: string, prompt: string, exactOnly = false): SavedWidget | undefined {
     const trimmed = prompt.trim();
     if (trimmed.length < 3 || /\bcreate\s+(?:a\s+)?rule\b/i.test(trimmed)) return undefined;
     const tokens = extractWidgetTokens(trimmed);
@@ -471,8 +471,9 @@ export class WidgetLibraryStore {
       }
     }
 
-    const exact = candidates.find((w) => w.prompt.trim().toLowerCase() === trimmed.toLowerCase());
-    if (exact) return exact;
+    const query = trimmed.toLowerCase();
+    const exact = candidates.find((w) => w.prompt.trim().toLowerCase() === query || w.name.toLowerCase() === query);
+    if (exact || exactOnly) return exact;
     if (!tokens.length) return undefined;
     let best: { widget: SavedWidget; score: number } | undefined;
     for (const w of candidates) {

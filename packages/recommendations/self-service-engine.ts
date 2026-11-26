@@ -1,7 +1,9 @@
+import { customerWorkflow, type RuleWorkflowMatch } from "../contracts/customer-workflows";
 import { randomUUID } from "node:crypto";
 import type { ContentEntry, ContextCatalog } from "../contracts/domain";
 import {
   pznOperatorLabels,
+  recommendationContextLabel,
   type PznAttribute,
   type PznClauseEvalResult,
   type PznContentEvalResult,
@@ -46,9 +48,12 @@ export function indexDictionaryAttributes(dictionary: PznDataDictionary): Map<st
   return map;
 }
 
-export function validateRuleAgainstDictionary(rule: Pick<PznRule, "rootGroup">, dictionary: PznDataDictionary): string[] {
+export function validateRuleAgainstDictionary(rule: Pick<PznRule, "rootGroup" | "workflow"> & Partial<Pick<PznRule, "effect">>, dictionary: PznDataDictionary): string[] {
   const attrs = indexDictionaryAttributes(dictionary);
   const errors: string[] = [];
+  if (rule.workflow && (!customerWorkflow(rule.workflow) || rule.effect === "exclude_when_true")) {
+    errors.push("Choose a registered customer workflow for an inclusion rule.");
+  }
 
   function walk(node: PznRuleGroup | PznRuleClause) {
     if (node.kind === "group") {
@@ -514,14 +519,22 @@ export function evaluateTreatmentSelector(params: {
 
   const durationMs = Math.max(1, Math.round((performance.now() - start) * 100) / 100);
   const allRuleResults = Array.from(evalCache.values());
+  const workflowMatches: RuleWorkflowMatch[] = eligibleContents.flatMap((card) =>
+    [...new Set([...context.contextRuleIds, ...card.attachedRuleIds])].flatMap((id) => {
+      const rule = ruleMap.get(id);
+      const result = evalCache.get(id);
+      return rule?.workflow && result?.matched && result.effectiveAllow
+        ? [{ name: rule.name, contentId: card.contentId, workflow: rule.workflow }] : [];
+    }));
 
   return {
+    ...(workflowMatches.length && { workflowMatches }),
     evaluationId: "ts_eval_" + randomUUID().replaceAll("-", "").slice(0, 14),
     mid,
     customerDisplayName,
     personaId,
     contextId: context.contextId,
-    contextDisplayName: context.displayName,
+    contextDisplayName: recommendationContextLabel(context.contextId, context.displayName),
     sourceMode,
     publicationVersion,
     dictionaryVersion: dictionary.version,

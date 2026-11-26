@@ -404,6 +404,15 @@ button { color: inherit; }
   font-size: .79rem; line-height: 1.46; white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .trace-payload pre code { font-size: inherit; }
+.ts-comparison { margin-block: 1rem; padding: 1rem; border: 1px solid var(--line); border-radius: 10px; background: var(--white); }
+.ts-comparison h3 { color: var(--ink); }
+.ts-comparison p { margin-block: .5rem; }
+.ts-response-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.ts-response-pair .trace-payload { margin: .5rem 0; min-width: 0; }
+.ts-response-pair .trace-payload pre { max-height: 30rem; }
+.workflow-call-order { padding-left: 1.8rem; }
+.workflow-call-order li::marker { font-weight: 650; color: var(--ink); }
+@media (max-width: 720px) { .ts-response-pair { grid-template-columns: 1fr; } }
 .trace-stages { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 8px 0; }
 .trace-stage, .trace-view .trace-stage + .trace-stage { min-width: 0; padding: 5px 8px; margin: 0; border: 1px solid var(--line); border-radius: 8px; background: #f8faf9; }
 .trace-stage h4 { font-weight: 640; font-size: .83rem; }
@@ -449,3 +458,10 @@ button { color: inherit; }
 @media (max-width: 480px) {
   .profile-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
 }
+
+.ts-rule-evidence { margin-top: 16px; display: grid; gap: 10px; }
+.ts-rule-evidence h4, .ts-rule-evidence p { margin: 0; }
+.ts-rule-evidence > div { padding: 10px 14px; border-inline-start: 3px solid #62957d; background: #f3f7f4; }
+.ts-rule-evidence span, .ts-rule-evidence strong { display: block; }
+.ts-rule-evidence span { font-size: .76rem; color: #365b45; }
+.ts-rule-evidence code { overflow-wrap: anywhere; }

@@ -2,18 +2,37 @@ import { z } from "zod";
 import { pendingActionsContext } from "./workspace";
 
 export const treatmentRecommendationsVersion = "2.0.0";
+export const treatmentDecisionVersion = "2.1.0";
+export const actionRecommendationSchema = z.object({
+  kind: z.literal("action"), id: z.string().min(1), version: z.string().min(1),
+}).strict();
+export type ActionRecommendation = z.infer<typeof actionRecommendationSchema>;
 export const workflowRecommendationSchema = z.object({
   kind: z.literal("workflow"), id: z.string().min(1), version: z.string().min(1),
 }).strict();
 export type WorkflowRecommendation = z.infer<typeof workflowRecommendationSchema>;
+export const workflowCandidateSchema = workflowRecommendationSchema.extend({
+  forContentIds: z.array(z.string().min(1)).min(1).max(12).optional(),
+});
+export type WorkflowCandidate = z.infer<typeof workflowCandidateSchema>;
 export const treatmentRecommendationsSchema = z.object({
   schemaVersion: z.literal("2.0"),
   recommendations: z.array(z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("content"), id: z.string().min(1) }).strict(),
-    workflowRecommendationSchema,
+    workflowCandidateSchema,
   ])).max(24),
 }).strict();
 export type TreatmentRecommendations = z.infer<typeof treatmentRecommendationsSchema>;
+
+export const treatmentDecisionSchema = treatmentRecommendationsSchema.extend({
+  schemaVersion: z.literal("2.1"),
+  recommendations: z.array(z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("content"), id: z.string().min(1) }).strict(),
+    actionRecommendationSchema, workflowCandidateSchema,
+  ])).max(24),
+});
+export type TreatmentDecision = z.infer<typeof treatmentDecisionSchema>;
+export const chatTreatmentSchema = z.discriminatedUnion("schemaVersion", [treatmentRecommendationsSchema, treatmentDecisionSchema]);
 
 export const fundingPreviewWorkflow = {
   recommendation: { kind: "workflow", id: "account.funding.preview", version: "1.0.0" },

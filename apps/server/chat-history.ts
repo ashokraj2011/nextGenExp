@@ -4,6 +4,8 @@ import {
   ROUTING_HISTORY_TURNS, ROUTING_HISTORY_REQUEST_LENGTH, ROUTING_HISTORY_REPLY_LENGTH,
   type RoutingHistoryEntry, type RoutingIntentId,
 } from "../../packages/contracts/routing-intents";
+import { displayedRecordChoices } from "./record-context";
+import { dynamicCanvasSchema } from "../../packages/contracts/dynamic-canvas";
 import type { DisplayBlock } from "../../packages/contracts/surface";
 import type { ConversationRecord, Store, TurnRecord } from "./store";
 
@@ -54,7 +56,7 @@ export class PznChatHistory {
     const { id, message, createdAt, status, experience } = turn.public;
     await thread.append({
       id: messageId(id, "user"), role: "user", text: message, createdAt: new Date(createdAt).toISOString(),
-      data: { turnId: id },
+      data: { turnId: id, sessionId: turn.requestSessionId ?? turn.scope.principalId },
     });
     if (status !== "completed" || !experience) return;
     await thread.append({
@@ -63,6 +65,7 @@ export class PznChatHistory {
       data: {
         turnId: id, question: experience.question, intro: experience.intro,
         contextId: turn.route?.contextId ?? null, intentId: turn.trace.intentId ?? null,
+        displayedChoices: displayedRecordChoices(experience.blocks),
         displayedContent: experience.blocks.flatMap((block) => {
           const title = displayTitle(block);
           return title ? [title] : [];
@@ -122,13 +125,16 @@ export class PznChatHistory {
         const displayedContent = Array.isArray(data.displayedContent) ? data.displayedContent.filter(
           (title): title is string => typeof title === "string",
         ) : [];
+        const stored = dynamicCanvasSchema.shape.choices.safeParse(data.displayedChoices);
+        const choices = (stored.success && stored.data) || displayedRecordChoices(turn.experience?.blocks);
+        const context = [...displayedContent, ...choices.map(({ id, label }, index) => `${index + 1}. ${id} · ${label}`)];
         return {
           request: request.text.slice(0, ROUTING_HISTORY_REQUEST_LENGTH),
           contextId: typeof data.contextId === "string" ? data.contextId : null,
           intentId: typeof data.intentId === "string" ? data.intentId as RoutingIntentId : null,
           clarificationQuestion,
           assistantReply: clarificationQuestion ? undefined : text.slice(0, ROUTING_HISTORY_REPLY_LENGTH),
-          displayedContent: displayedContent.length ? displayedContent : undefined,
+          displayedContent: context.length ? context : undefined,
         };
       });
   }

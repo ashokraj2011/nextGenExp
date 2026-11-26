@@ -1,5 +1,16 @@
 /* Warm-Cream Wealth Editorial Chat Workbench */
 
+.retirement-accounts-card ol { margin: .85rem 0 0; padding-inline-start: 1.6rem; }
+.retirement-accounts-card li { padding-inline-start: .2rem; }
+.retirement-accounts-card li + li { border-top: 1px solid var(--line); }
+.retirement-accounts-card li::marker, .retirement-account-ending, .retirement-designation dt { color: var(--muted); font-size: .85rem; }
+.retirement-accounts-card li button { display: flex; align-items: center; justify-content: space-between; text-align: left; gap: 1rem; padding: .8rem .2rem; width: 100%; background: transparent; border: 0; color: inherit; cursor: pointer; }
+.retirement-accounts-card li button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.retirement-accounts-card li small { display: block; color: var(--muted); margin-top: .2rem; }
+.retirement-designation { padding-top: .8rem; margin: .8rem 0 0; border-top: 1px solid var(--line); }
+.retirement-designation dd { margin: .25rem 0 0; font-weight: 600; }
+
+
 .app-layout {
   --ink: #141414;
   --soft-ink: #363534;

@@ -10,7 +10,7 @@ import { startApp } from "./operator-fixture";
 import { startFixtureGateway } from "./gateway-fixture";
 import { testClient, testProject } from "./client";
 import type { TurnPayloads } from "../packages/contracts/inspector";
-import type { TurnView, RecordUpdate } from "../packages/contracts/api";
+import type { ConversationView, TurnView, RecordUpdate } from "../packages/contracts/api";
 
 function canvas(turn: TurnView) {
   assert.equal(turn.status, "completed", JSON.stringify(turn));
@@ -23,21 +23,23 @@ test("deal and incident questions use the selected record and unavailable charts
   const app = await startTestPreview();
   t.after(() => app.close());
   const client = await testClient(app.url);
-  const chat = await client.conversation();
-  const ask = async (message: string) => (await client.ask(chat.id, message)).turn;
-  const deals = canvas(await ask("Show my deals"));
+  const sales = await client.request<ConversationView>("/api/conversations", { domainId: "sales_revops" }, 201);
+  const operations = await client.request<ConversationView>("/api/conversations", { domainId: "it_ops" }, 201);
+  const wealth = await client.conversation();
+  const ask = async (chat: ConversationView, message: string) => (await client.ask(chat.id, message)).turn;
+  const deals = canvas(await ask(sales, "Show my deals"));
   assert.ok(deals.choices?.some((r) => r.id === "DEAL-887"));
-  const northstar = canvas(await ask("Show Northstar DEAL-887"));
+  const northstar = canvas(await ask(sales, "Show Northstar DEAL-887"));
   assert.equal(northstar.recordId, "DEAL-887");
   assert.ok(northstar.subtitle?.includes("Security Review"));
   assert.ok(!northstar.nodes.some((n) => n.type === "approval"));
-  assert.equal(canvas(await ask("What is blocking this deal?")).recordId, "DEAL-887");
-  assert.match((await ask("Tell me when I can send the quote")).experience!.intro, /DEAL-887.*Commit/);
-  assert.equal(canvas(await ask("Show DEAL-00000")).recordId, undefined);
-  assert.equal(canvas(await ask("Show INC-4821")).recordId, "INC-4821");
-  const available = await ask("Show a chart of my portfolio allocation");
+  assert.equal(canvas(await ask(sales, "What is blocking this deal?")).recordId, "DEAL-887");
+  assert.match((await ask(sales, "Tell me when I can send the quote")).experience!.intro, /DEAL-887.*Commit/);
+  assert.equal(canvas(await ask(sales, "Show DEAL-00000")).recordId, undefined);
+  assert.equal(canvas(await ask(operations, "Show INC-4821")).recordId, "INC-4821");
+  const available = await ask(wealth, "Show a chart of my portfolio allocation");
   assert.ok(available.experience?.blocks.some((b) => b.component === "PznPortfolioSnapshot"));
-  const missing = await ask("Show a chart of warehouse shipments by region");
+  const missing = await ask(wealth, "Show a chart of warehouse shipments by region");
   assert.match(missing.experience!.intro, /data source/i);
   assert.doesNotMatch(JSON.stringify(missing.experience), /Core Equities|55%|barchart/);
 });
@@ -45,7 +47,7 @@ test("deal and incident questions use the selected record and unavailable charts
 test("customer reads use the scoped MID and a delivered order updates its original thread after restart", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "customer-orders-"));
   const gateway = await startFixtureGateway();
-  const open = () => startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: gateway.settings, mode: "test" });
+  const open = () => startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: gateway.settings });
   let app = await open();
   t.after(async () => { await app.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
   let client = await testClient(app.url);

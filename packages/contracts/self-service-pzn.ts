@@ -1,5 +1,20 @@
 import { z } from "zod";
+import { workflowRecommendationSchema } from "./funding-workflow";
+import type { RuleWorkflowMatch } from "./customer-workflows";
 import type { ApprovalRecord } from "./approval";
+
+// The published topic ID is referenced by rules, integrations and saved decisions.
+export const wealthRecommendationsTopic = {
+  contextId: "wealth-next-best-offers",
+  displayName: "Wealth Next-Best Recommendations",
+} as const;
+
+export function recommendationContextLabel(contextId: string, displayName?: string): string {
+  if (contextId === wealthRecommendationsTopic.contextId && (displayName === undefined || displayName === "Wealth Next-Best Offers")) {
+    return wealthRecommendationsTopic.displayName;
+  }
+  return displayName ?? contextId;
+}
 
 export const pznDataTypes = ["enum", "boolean", "number", "currency_usd", "string", "string_list"] as const;
 export type PznDataType = typeof pznDataTypes[number];
@@ -145,6 +160,7 @@ export const pznRuleInputSchema = z.object({
   businessDescription: z.string().trim().min(1).max(400),
   effect: z.enum(["include_when_true", "exclude_when_true"]).default("include_when_true"),
   rootGroup: pznRuleGroupSchema,
+  workflow: workflowRecommendationSchema.nullable().optional(),
   status: z.enum(["draft", "published"]).default("published"),
 }).strict();
 export type PznRuleInput = z.infer<typeof pznRuleInputSchema>;
@@ -275,6 +291,7 @@ export type PznTsEvaluationResult = {
   contextRuleResults: PznRuleEvalResult[];
   ruleResults: PznRuleEvalResult[];
   eligibleContents: PznContentEvalResult[];
+  workflowMatches?: RuleWorkflowMatch[];
   filteredOutContents: PznContentEvalResult[];
   experiencePayload: {
     schemaVersion: "1.0";

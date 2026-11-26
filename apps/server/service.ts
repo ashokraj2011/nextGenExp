@@ -1,6 +1,8 @@
+import { retirementAccountRequest, retirementBeneficiaryIntent, retirementListIntent, retirementViewSchema } from "../../packages/contracts/retirement-accounts";
+import { compileRetirementView } from "../../packages/experience/retirement-accounts";
 import { getDomainPack } from "../../packages/contracts/domain-packs";
 import { uiIntentHints } from "../../packages/contracts/ui-layout";
-import { inputValuesSchema, type AgentLaunch } from "../../packages/contracts/agentic";
+import { capabilityRef, inputValuesSchema, type AgentLaunch } from "../../packages/contracts/agentic";
 import { fieldValueValid } from "./agentic-inputs";
 import { digestJson, type ChatHarness, type RunResult } from "@sfield/core";
 import demo from "../../fixtures/host.json";
@@ -9,7 +11,7 @@ import { findProfileById } from "../../packages/customer-profiles";
 import { DECISION_TTL, TURN_DEADLINE, contextCatalogSchema, propensitySchema, type SelectionMode, type PropensityResult } from "../../packages/contracts/domain";
 import {
   fundingOptionsSchema, fundingPreviewSchema, fundingPreviewWorkflow, fundingStatusSchema, fundingToolKey,
-  fundingWorkflowIssue, resolveFundingWorkflow, treatmentRecommendationsSchema, type WorkflowLaunch,
+  fundingWorkflowIssue, resolveFundingWorkflow, chatTreatmentSchema, treatmentRecommendationsSchema, type WorkflowLaunch,
 } from "../../packages/contracts/funding-workflow";
 import { goalProgressSchema, isHomeGoalSummary } from "../../packages/contracts/goal-progress";
 import type { ContextRoutingInput, ExperienceCompositionInput } from "../../packages/contracts/model-inputs";
@@ -29,9 +31,12 @@ import { ApiError, presentConversation, Store, type ConversationRecord, type Sta
 import type { IntegrationTaskService } from "./integration-tasks";
 import type { StoredWatch } from "./store";
 import { answerCustomerLookup, watchRequest } from "./customer-record-chat";
-import { matchingDeals, recordPrompt } from "./record-context";
+import { normalizedIntentPhrase, recordIntentId } from "../../packages/contracts/ui-layout";
+import { isRecordTimeline } from "./dynamic-ui-generator";
+import { displayedRecordChoices, matchingDeals, recordChoiceIndex, recordPrompt } from "./record-context";
 import { generateDynamicUi, isApprovalQueuePrompt, isConnectorActionPrompt, isDynamicUiRequest, isOpsIncidentPrompt, isSalesDealPrompt } from "./dynamic-ui-generator";
 import { routeCapabilityUnified } from "./semantic-router";
+import type { CepCapabilityId } from "../../packages/contracts/capabilities-catalog";
 import { recommendationArbitrateToolRef } from "../../packages/contracts/recommendation-provider";
 import type { ProviderArbitrationTrace } from "../../packages/contracts/api";
 import { createOpsRunbookProvider, createSalesDealDeskProvider, RecommendationArbitrator } from "../../packages/recommendations";
@@ -50,7 +55,8 @@ import type { Customer360Service } from "./customer-360";
 import type { GatewaySettings } from "./gateway";
 import type { GoalProgressProvider } from "../../packages/goal-progress";
 import type { PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
-import { fundingOfferExpiry, fundingRecommendation, nextStepRecommendation } from "./funding-offer";
+import { beneficiaryReviewWorkflow } from "../../packages/contracts/customer-workflows";
+import { workflowOfferSource, offeredWorkflows, nextStepRecommendation } from "./funding-offer";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import { principalFor, type Runtime } from "./runtime";
 import { PznChatHistory } from "./chat-history";
@@ -116,9 +122,7 @@ export class ExperienceService {
     readonly store: Store, private readonly runtime: Runtime | null, readonly selectionMode: SelectionMode, private readonly now: () => number,
     private readonly canCreateRule: boolean, private readonly offlineHistory?: { chat: ChatHarness; close(): Promise<void> },
     private readonly dynamicUi?: {
-      restrictedDomains?: boolean;
       isTenantAdmin?: (operatorName: string) => boolean;
-      mode?: "live" | "test";
       gateway?: GatewaySettings | null;
       dataDir: string;
       integrationService?: IntegrationTaskService;
@@ -143,10 +147,10 @@ export class ExperienceService {
     this.history = new PznChatHistory(store, chat);
   }
 
-  createConversation(principalId: string, personaId: string, scenarioId: string, audience?: Conversation["audience"], domainId: Conversation["domainId"] = "wealth", operatorName?: string) {
+  createConversation(principalId: string, personaId: string, scenarioId: string, audience?: Conversation["audience"], domainId: Conversation["domainId"] = "wealth", operatorName?: string, preview?: ConversationRecord["preview"]) {
     const allowed = domainId === "wealth" ? findProfileById(personaId)?.allowedScenarios.includes(scenarioId) : Boolean(operatorName) && scenarioId === demo.defaultScenarioId;
     if (!allowed) throw new ApiError(400, "demo_scope_invalid", "Select an available profile and scenario.");
-    return this.store.createConversation(principalId, personaId, scenarioId, this.now(), audience, domainId, domainId === "wealth" ? personaId : operatorName);
+    return this.store.createConversation(principalId, personaId, scenarioId, this.now(), audience, domainId, domainId === "wealth" ? personaId : operatorName, preview);
   }
 
   conversationTurns(conversation: ConversationRecord) {
@@ -161,35 +165,37 @@ export class ExperienceService {
     return current;
   }
 
-  submit(conversation: ConversationRecord, message: string, requestId: string, origin = "message", retry?: TurnRecord, workflow?: WorkflowLaunch, agentLaunch?: AgentLaunch, operatorName?: string) {
+  submit(conversation: ConversationRecord, message: string, requestId: string, origin = "message", retry?: TurnRecord, workflow?: WorkflowLaunch, agentLaunch?: AgentLaunch, operatorName?: string, requestSessionId?: string) {
     if (conversation.audience === "admin" && !this.canCreateRule) {
       throw new ApiError(404, "not_found", "This conversation is unavailable.");
     }
+    const actor = conversation.domainId === "wealth" && conversation.audience !== "admin" ? undefined : operatorName;
     const { turn, created } = this.store.accept({
-      conversation, message, requestId, origin, retry, workflow, agentLaunch, operatorName, selectionMode: this.selectionMode, now: this.now(),
+      conversation, message, requestId, origin, retry, workflow, agentLaunch, operatorName: actor, requestSessionId,
+      tenantOperator: Boolean(actor && this.dynamicUi?.isTenantAdmin?.(actor)), selectionMode: this.selectionMode, now: this.now(),
     });
     if (created) this.schedule(turn);
     return this.accepted(turn);
   }
 
-  async retry(turn: TurnRecord, requestId: string, currentOperator?: string) {
+  async retry(turn: TurnRecord, requestId: string, currentOperator?: string, requestSessionId?: string) {
     const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
     const { message } = await this.turnView(turn);
     const origin = workspaceFundingContext(turn.origin) ? turn.origin : "retry:" + turn.public.id;
-    return this.submit(conversation, message, requestId, origin, turn, undefined, undefined, currentOperator);
+    return this.submit(conversation, message, requestId, origin, turn, undefined, undefined, currentOperator, requestSessionId);
   }
 
-  previewWorkspaceFunding(conversation: ConversationRecord, requestId: string, source?: typeof pendingActionsContext) {
+  previewWorkspaceFunding(conversation: ConversationRecord, requestId: string, source?: typeof pendingActionsContext, requestSessionId?: string) {
     if (!this.runtime) throw new ApiError(409, "model_unavailable", "Connect a model to preview funding in chat.");
     if (conversation.scenarioId !== demo.defaultScenarioId) {
       throw new ApiError(409, "workspace_scope_invalid", "Open Overview to start a funding preview.");
     }
     if (conversation.domainId !== "wealth") throw new ApiError(403, "domain_access_denied", "Funding belongs to the Wealth workspace.");
     const origin = source === pendingActionsContext ? pendingActionsFundingOrigin : overviewFundingOrigin;
-    return this.submit(conversation, fundingPreviewWorkflow.label, requestId, origin);
+    return this.submit(conversation, fundingPreviewWorkflow.label, requestId, origin, undefined, undefined, undefined, undefined, requestSessionId);
   }
 
-  followUp(principalId: string, experienceId: string, envelope: ActionMessage, requestId: string, operatorName?: string) {
+  followUp(principalId: string, experienceId: string, envelope: ActionMessage, requestId: string, operatorName?: string, requestSessionId?: string) {
     const { action } = envelope;
     const { turn, actions } = this.store.experience(experienceId, principalId);
     const signed = actions.find((entry) => entry.actionId === action.context.actionId && entry.componentId === action.sourceComponentId);
@@ -200,14 +206,16 @@ export class ExperienceService {
     if (!operatorName && (conversation.audience === "admin" || this.store.hasOperatorContent(conversation.id))) {
       throw new ApiError(403, "operator_required", "Sign in with your operator account to continue this turn.");
     }
-    const origin = (signed.agentAction ? "experience_action:" : signed.workflow ? "workflow:" : "follow_up:") + signed.actionId;
+    const origin = (signed.standaloneAction ? "standalone_action:" : signed.agentAction ? "experience_action:" : signed.workflow ? "workflow:" : "follow_up:") + signed.actionId;
     const submit = (launch?: AgentLaunch, actionOrigin = origin) => this.submit(conversation, signed.userMessage, requestId, actionOrigin, undefined,
-      signed.workflow && { recommendation: signed.workflow, sourceExperienceId: experienceId }, launch, operatorName);
+      signed.workflow && { recommendation: signed.workflow, sourceExperienceId: signed.offerSourceId ?? experienceId }, launch, operatorName, requestSessionId);
     const agentAction = signed.agentAction;
-    if (agentAction) {
+    const standalone = signed.standaloneAction;
+    if (agentAction || standalone) {
       const values = inputValuesSchema.safeParse(action.context.values);
-      const manifest = this.runtime?.experiences.registry.get(principalId, agentAction.capability);
-      if (!values.success || !manifest || Object.keys(values.data).some((key) => !agentAction.fieldIds.includes(key))) {
+      const manifest = this.runtime?.experiences.registry.get(principalId, standalone ? capabilityRef(standalone) : agentAction!.capability);
+      const fields = agentAction?.fieldIds ?? manifest?.inputs.map(({ id }) => id) ?? [];
+      if (!values.success || !manifest || Object.keys(values.data).some((key) => !fields.includes(key))) {
         throw new ApiError(400, "action_input_invalid", "Review the form values and try again.");
       }
       const invalidField = manifest.inputs.some((field) => field.type !== "choice"
@@ -219,6 +227,14 @@ export class ExperienceService {
       const actionOrigin = origin + ":" + digest;
       const existing = this.store.existingRequest(conversation.id, requestId, signed.userMessage, actionOrigin);
       if (existing) return this.accepted(existing);
+      if (standalone) {
+        if (this.store.latestTurn(conversation.id)?.public.id !== turn.public.id || (turn.public.experience?.expiresAt ?? 0) <= this.now()) {
+          throw new ApiError(409, "action_stale", "Ask again to get an updated response.");
+        }
+        return submit({ capability: { id: standalone.id, version: standalone.version },
+          sourceExperienceId: signed.offerSourceId ?? experienceId, values: values.data }, actionOrigin);
+      }
+      if (!agentAction) throw new ApiError(400, "action_invalid", "This follow-up is unavailable.");
       const journey = this.store.axe.get("journeys", turn.scope, agentAction.journeyId);
       if (turn.public.experience?.expiresAt === undefined || turn.public.experience.expiresAt <= this.now()
         || this.store.latestTurn(conversation.id)?.public.id !== turn.public.id || journey?.threadId !== conversation.id
@@ -284,20 +300,26 @@ export class ExperienceService {
     if (this.closing || initial?.public.status !== "working") return;
     const workspaceContext = workspaceFundingContext(initial.origin);
     const domain = initial.scope.domainId ?? "wealth";
-    const scoped = Boolean(this.dynamicUi?.restrictedDomains || domain !== "wealth");
     const tenantTools = Boolean(initial.operatorName && this.dynamicUi?.isTenantAdmin?.(initial.operatorName));
-    const domainTools = !scoped || !this.dynamicUi ? this.dynamicUi : {
+    const flowCatalog = initial.flowCatalog ?? this.store.routingFlows(this.store.conversation(initial.scope.conversationId, initial.scope.principalId), tenantTools);
+    if (!initial.flowCatalog) this.store.update(id, (row) => { row.flowCatalog = flowCatalog; });
+    const capabilities = flowCatalog.flows;
+    const allows = (id: CepCapabilityId) => capabilities.some((flow) => flow.id === id);
+    const accountHelp = allows("verified_experience");
+    const priorAccountView = domain === "wealth" && this.store.previousCompletedTurn(initial.scope.conversationId, initial.ordinal)?.retirementAccounts;
+    const accountRequest = accountHelp && domain === "wealth" && retirementAccountRequest(initial.public.message, Boolean(priorAccountView));
+    const domainTools = this.dynamicUi && {
       ...this.dynamicUi,
-      opsStore: domain === "it_ops" ? this.dynamicUi.opsStore : undefined,
-      salesStore: domain === "sales_revops" ? this.dynamicUi.salesStore : undefined,
-      tradeStore: domain === "wealth" ? this.dynamicUi.tradeStore : undefined,
-      connectorStore: tenantTools ? this.dynamicUi.connectorStore : undefined,
-      approvalStore: tenantTools ? this.dynamicUi.approvalStore : undefined,
-      workflowEngine: tenantTools ? this.dynamicUi.workflowEngine : undefined,
-      actionFlowStore: tenantTools ? this.dynamicUi.actionFlowStore : undefined,
-      knowledgeBase: tenantTools ? this.dynamicUi.knowledgeBase : undefined,
+      opsStore: allows("ops_incident") ? this.dynamicUi.opsStore : undefined,
+      salesStore: allows("sales_deal_desk") ? this.dynamicUi.salesStore : undefined,
+      tradeStore: allows("stock_holdings") || allows("stock_trade") ? this.dynamicUi.tradeStore : undefined,
+      connectorStore: allows("external_connector") ? this.dynamicUi.connectorStore : undefined,
+      approvalStore: allows("hitl_approvals") || allows("external_connector") || allows("stock_trade") ? this.dynamicUi.approvalStore : undefined,
+      workflowEngine: allows("external_connector") ? this.dynamicUi.workflowEngine : undefined,
+      actionFlowStore: allows("external_connector") ? this.dynamicUi.actionFlowStore : undefined,
+      knowledgeBase: tenantTools && accountHelp ? this.dynamicUi.knowledgeBase : undefined,
     };
-    const goalTurn = domain === "wealth" && !workspaceContext && !initial.workflow && this.runtime?.experiences.shouldHandle(initial);
+    const goalTurn = accountHelp && domain === "wealth" && !accountRequest && !workspaceContext && !initial.workflow && this.runtime?.experiences.shouldHandle(initial);
     const deadline = initial.public.createdAt + (goalTurn ? this.runtime!.goalBudget.activeSeconds * 1_000 : TURN_DEADLINE);
     const remains = deadline - this.now();
     if (remains <= 0) {
@@ -330,7 +352,28 @@ export class ExperienceService {
       this.store.update(id, (row) => { row.public.actionMode = status === "clarify" ? "clarify" : "plain_chat"; });
       this.store.finish(id, { type: "completed", result }, this.now());
     };
+    const showSavedWidget = (exactOnly = true) => {
+      if (!allows("custom_dynamic_ui")) return false;
+      const name = domain === "wealth" ? findProfileById(initial.scope.personaId)?.displayName : undefined;
+      const match = domainTools?.widgetLibraries?.[domain].renderPublishedWidget(initial.scope.principalId, initial.public.message, name, exactOnly);
+      if (!match) return false;
+      current();
+      stage = "compose";
+      const now = this.now();
+      const result = compileDynamicCanvas(match.intro, match.canvas, now + DECISION_TTL);
+      this.store.update(id, (row) => {
+        row.public.actionMode = "dynamic_ui";
+        row.trace.components = result.display.blocks.map((block) => block.component);
+      });
+      this.store.finish(id, { type: "completed", result }, now);
+      return true;
+    };
     try {
+      if (!capabilities.length && !initial.workflow && !workspaceContext && !initial.agentLaunch) {
+        const reply = `There are no chat flows available in ${getDomainPack(domain).label} right now.`;
+        this.store.finish(id, { type: "completed", result: compileChatReply(reply, "reply", this.now() + DECISION_TTL) }, this.now());
+        return;
+      }
       runtime.experiences.execution.world.rememberPreference(initial);
       if (workspaceContext) {
         stage = "ts";
@@ -342,7 +385,7 @@ export class ExperienceService {
           return;
         }
         stage = "workflow";
-        if (!await this.runFundingPreview(runtime, current(), launch, signal)) throw new TurnFailure("workflow_unavailable");
+        if (!await this.runCustomerWorkflow(runtime, current(), launch, signal)) throw new TurnFailure("workflow_unavailable");
         return;
       }
       if (goalTurn && !hasAttachedDocumentBlock(initial.public.message)) {
@@ -361,7 +404,7 @@ export class ExperienceService {
         }
         stage = "catalog";
       }
-      if (!initial.workflow && !initial.route && domainTools) {
+      if (!initial.workflow && !initial.route && domainTools && !accountRequest) {
         const conversation = this.store.conversation(initial.scope.conversationId, initial.scope.principalId);
         const persona = domain === "wealth" ? findProfileById(conversation.personaId) : undefined;
 
@@ -384,8 +427,29 @@ export class ExperienceService {
           this.store.finish(id, { type: "completed", result }, this.now());
           return;
         }
-        const scopedPrompt = recordPrompt(message, previous?.recordId, initial.operatorName ? domainTools.salesStore?.list() ?? [] : [], initial.operatorName ? domainTools.opsStore?.list() ?? [] : []);
-        if (watchRequest.test(message) && initial.operatorName && /\bquote\b/i.test(message)) {
+        const choices = displayedRecordChoices(previous?.public.experience?.blocks);
+        const choice = recordChoiceIndex(message, choices.length);
+        const displayed = previous?.public.experience?.blocks.find((block) => block.component === "PznDynamicCanvas");
+        if (choice !== undefined && !choices[choice] && displayed) {
+          this.store.update(id, (row) => {
+            row.requestedRecordIntent = previous?.requestedRecordIntent;
+            row.trace.intentId = previous?.trace.intentId;
+          });
+          const answer = compileDynamicCanvas(`Choose one of the ${choices.length} records listed here.`, displayed.props, this.now() + DECISION_TTL);
+          this.store.finish(id, { type: "completed", result: answer }, this.now());
+          return;
+        }
+        const picked = choice === undefined ? undefined : choices[choice];
+        const referenceMessage = picked ? message + " (" + picked.id + ")" : message;
+        const phrase = normalizedIntentPhrase(message.replace(/\b(?:DEAL|INC)-[\w-]+\b/gi, ""));
+        const declaredIntents = initial.uiLayouts?.flatMap(({ design }) => design.recordIntent ? [design.recordIntent] : []) ?? [];
+        const namedIntent = domain !== "wealth" ? declaredIntents.find((item) => item.phrases.some((example) => normalizedIntentPhrase(example) === phrase)
+          || (choice !== undefined && item.id === previous?.requestedRecordIntent)) : undefined;
+        const subject = domain === "it_ops" ? "incident" : "deal";
+        const request = namedIntent ? "Show " + subject + (namedIntent.view === "timeline" ? " timeline " : " ") +
+          (referenceMessage.match(/\b(?:DEAL|INC)-[\w-]+\b/gi)?.join(" ") ?? (namedIntent.view === "list" ? "list" : previous?.recordId ?? "details")) : referenceMessage;
+        const scopedPrompt = recordPrompt(request, previous?.recordId, initial.operatorName ? domainTools.salesStore?.list() ?? [] : [], initial.operatorName ? domainTools.opsStore?.list() ?? [] : []);
+        if (domainTools.salesStore && watchRequest.test(message) && initial.operatorName && /\bquote\b/i.test(message)) {
           const matches = matchingDeals(scopedPrompt, domainTools.salesStore?.list() ?? []);
           if (matches.length !== 1) {
             const question = "Which deal should I watch? Include its deal ID with your request.";
@@ -409,7 +473,7 @@ export class ExperienceService {
         // Run Visual PII Firewall inspection (toggleable ON/OFF in Admin)
         let activePiiTokenMap = new Map<string, string>();
         let scrubbedProfileSummaryOverride: string | undefined;
-        if (domainTools.piiFirewall && domainTools.mode !== "test") {
+        if (domainTools.piiFirewall) {
           const contextSeed = persona
             ? `${persona.displayName} (Account ${persona.syntheticMid}, Cash $${((persona.cashCents ?? 0) / 100).toLocaleString("en-US")}, Equities $${((persona.equityCents ?? 0) / 100).toLocaleString("en-US")})`
             : undefined;
@@ -435,7 +499,7 @@ export class ExperienceService {
           const extracted = await extractDocumentAction({
             fileName: attachedDoc.fileName,
             content: attachedDoc.body,
-            gateway: domainTools.mode === "test" ? null : domainTools.gateway,
+            gateway: domainTools.gateway,
             dataDir: domainTools.dataDir,
             signal,
           });
@@ -493,7 +557,7 @@ export class ExperienceService {
               this.store.finish(id, { type: "completed", result: dynamicResult }, now);
               return;
             }
-            if (extracted.actionType === "stock_trade" && domainTools.tradeStore) {
+            if (extracted.actionType === "stock_trade" && allows("stock_trade") && domainTools.tradeStore) {
               const syntheticPrompt = `${extracted.extractedFields.side} ${
                 extracted.extractedFields.percent ? `${extracted.extractedFields.percent}%` : `${extracted.extractedFields.shares ?? 10} shares`
               } of ${extracted.extractedFields.symbol}`;
@@ -537,7 +601,7 @@ export class ExperienceService {
               this.store.finish(id, { type: "completed", result: dynamicResult }, now);
               return;
             }
-            if (extracted.actionType === "ops_incident") {
+            if (extracted.actionType === "ops_incident" && allows("ops_incident")) {
               const canvas = {
                 title: `Document-to-Action · Outage Log Triage (${extracted.extractedFields.serviceName})`,
                 badge: `Parsed ${extracted.fileName}`,
@@ -617,7 +681,7 @@ export class ExperienceService {
         const matchedActionFlow = initial.operatorName && domainTools.actionFlowStore?.matchPrompt(initial.public.message);
 
         // 1. Conversational continuation for an active stock trade draft in this thread
-        if (activeDraft && domainTools.tradeStore) {
+        if (activeDraft && allows("stock_trade") && domainTools.tradeStore) {
           const msg = initial.public.message.trim();
           const wantsTax = /^(?:yes|yeah|yep|sure|ok|please)\b/i.test(msg)
             || /\b(?:analyze|run|check|do|show)\s+(?:tax|tlh|loss|harvest)/i.test(msg);
@@ -753,42 +817,29 @@ export class ExperienceService {
           return;
         }
 
-        // 2b. Saved Custom Widget Library match (e.g. "Birthday Celebration" widget)
-        const built = !/\b(?:DEAL|INC)-[A-Z0-9]+\b/i.test(scopedPrompt) && domainTools.widgetLibraries?.[conversation.domainId].renderPublishedWidget(initial.scope.principalId, initial.public.message, persona?.displayName);
-        if (built) {
-          const matchedWidget = built.widget;
-          stage = "compose";
-          this.store.progress(id, "composition", this.now());
-          const now = this.now();
-          const dynamicResult = compileDynamicCanvas(built.intro, built.canvas, now + DECISION_TTL);
-          this.store.update(id, (row) => {
-            row.public.actionMode = "dynamic_ui";
-            row.public.semanticRoute = {
-              capabilityId: "verified_experience",
-              capabilityLabel: `Saved Widget · ${matchedWidget.name}`,
-              method: "deterministic",
-              confidence: 0.97,
-              reasoning: `Matched custom saved widget "${matchedWidget.name}" (${matchedWidget.id}) from Widget Library.`,
-            };
-            row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
-          });
-          this.store.finish(id, { type: "completed", result: dynamicResult }, now);
-          return;
-        }
-
         const recentForRoute = await this.history.recent(conversation, initial.ordinal);
-        const recentSummary = recentForRoute.length > 0
-          ? recentForRoute.slice(-2).map((r) => `User: "${r.request}" -> ${r.intentId ?? r.contextId ?? "reply"}`).join(" | ")
-          : undefined;
+        const recentSummary = recentForRoute.slice(-2).map((turn) => JSON.stringify({
+          message: turn.request, intent: turn.intentId ?? turn.contextId,
+          reply: turn.clarificationQuestion ?? turn.assistantReply,
+          displayed: turn.displayedContent,
+        })).join("\n");
         const semanticRoute = await routeCapabilityUnified({
+          capabilities,
           prompt: scopedPrompt,
-          mode: domainTools.mode ?? "live",
           gateway: domainTools.gateway,
+          onExchange: (operation, request, response) => runtime.captureTurnExchange(id, "flowRouting", operation, request, response),
           dataDir: domainTools.dataDir,
           recentSummary,
           signal,
         });
         current();
+        if (!allows(semanticRoute.capabilityId)) {
+          if (semanticRoute.capabilityId === "verified_experience" && showSavedWidget()) return;
+          const example = capabilities.find((flow) => flow.examples.length)?.examples[0];
+          const reply = `You're in ${getDomainPack(domain).label}. This request is outside its available chat flows.` + (example ? ` Try asking “${example}”.` : "");
+          this.store.finish(id, { type: "completed", result: compileChatReply(reply, "reply", this.now() + DECISION_TTL) }, this.now());
+          return;
+        }
         this.store.update(id, (row) => {
           row.public.semanticRoute = {
             capabilityId: semanticRoute.capabilityId,
@@ -798,16 +849,7 @@ export class ExperienceService {
             reasoning: semanticRoute.reasoning,
           };
         });
-        if (scoped && (
-          (semanticRoute.capabilityId === "ops_incident" && domain !== "it_ops")
-          || (semanticRoute.capabilityId === "sales_deal_desk" && domain !== "sales_revops")
-          || (["verified_experience", "stock_holdings", "stock_trade"].includes(semanticRoute.capabilityId) && domain !== "wealth")
-          || (["hitl_approvals", "external_connector"].includes(semanticRoute.capabilityId) && !tenantTools)
-        )) {
-          const pack = getDomainPack(domain);
-          this.store.finish(id, { type: "completed", result: compileChatReply(`You're in ${pack.label}. Try asking “${pack.quickPrompts[0].prompt}”.`, "reply", this.now() + DECISION_TTL) }, this.now());
-          return;
-        }
+        if (semanticRoute.capabilityId === "custom_dynamic_ui" && showSavedWidget(false)) return;
         if (!initial.operatorName && ["hitl_approvals", "external_connector", "ops_incident", "sales_deal_desk"].includes(semanticRoute.capabilityId)) {
           this.store.finish(id, { type: "completed", result: compileChatReply("That workspace requires an operator sign-in.", "reply", this.now() + DECISION_TTL) }, this.now());
           return;
@@ -928,6 +970,11 @@ export class ExperienceService {
           row.public.actionMode = "dynamic_ui";
           if (lookupInfo) row.public.customerLookup = lookupInfo.lookup;
           row.recordId = generated.canvas.recordId;
+          if ((domain === "it_ops" && semanticRoute.capabilityId === "ops_incident") || (domain === "sales_revops" && semanticRoute.capabilityId === "sales_deal_desk")) {
+            const view = generated.canvas.choices ? "list" : isRecordTimeline(scopedPrompt, semanticRoute.capabilityId) ? "timeline" : "detail";
+            row.requestedRecordIntent = namedIntent?.id;
+            row.trace.intentId = namedIntent?.view === view ? namedIntent.id : recordIntentId(domain, view);
+          }
           if (providerArbitration) row.public.providerArbitration = providerArbitration;
           row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
         });
@@ -937,7 +984,7 @@ export class ExperienceService {
       }
       if (initial.workflow) {
         stage = "workflow";
-        if (await this.runFundingPreview(runtime, current(), initial.workflow, signal)) return;
+        if (await this.runCustomerWorkflow(runtime, current(), initial.workflow, signal)) return;
         stage = "catalog";
       }
       if (!initial.catalog || !initial.propensity) await this.discover(runtime, current(), signal);
@@ -1043,9 +1090,11 @@ export class ExperienceService {
           this.store.finish(id, { type: "completed", result: editor }, now);
           return;
         }
+        if ((proposal.status === "reply" || proposal.status === "no_match"
+          || (proposal.status === "clarify" && !proposal.possibleIntentId)) && showSavedWidget()) return;
         if (proposal.status === "reply" || proposal.status === "no_match") {
           const activeTurn = current();
-          if (domainTools && isDynamicUiRequest(activeTurn.public.message) && (initial.operatorName || (!isSalesDealPrompt(activeTurn.public.message) && !isOpsIncidentPrompt(activeTurn.public.message) && !isApprovalQueuePrompt(activeTurn.public.message) && !isConnectorActionPrompt(activeTurn.public.message)))) {
+          if (allows("custom_dynamic_ui") && domainTools && isDynamicUiRequest(activeTurn.public.message) && (initial.operatorName || (!isSalesDealPrompt(activeTurn.public.message) && !isOpsIncidentPrompt(activeTurn.public.message) && !isApprovalQueuePrompt(activeTurn.public.message) && !isConnectorActionPrompt(activeTurn.public.message)))) {
             this.store.progress(id, "composition", this.now());
             const persona = findProfileById(conversation.personaId);
             const profileSummary = persona
@@ -1101,29 +1150,55 @@ export class ExperienceService {
       let turn = current();
       const route = turn.route!;
       verifyRoute(route, catalog, turn.scope, turn.attempts.route?.runId ?? null, this.now());
+      const intentId = turn.trace.intentId ?? "";
+      const accountTurn = domain === "wealth" && (intentId === retirementListIntent || intentId === retirementBeneficiaryIntent
+        || (intentId === "beneficiary_update_steps" && Boolean(accountRequest)));
+      if (accountTurn && !turn.retirementAccounts) {
+        this.store.progress(id, "retirementAccounts", this.now());
+        const read = await runtime.registry(turn, "retirementScopeId", 1, signal, (call) =>
+          call("retirementAccounts", { ...asRef(turn), routeDecisionId: route.routeDecisionId }));
+        current();
+        if (read.status !== "succeeded") throw new TurnFailure("retirement_accounts_unavailable");
+        const view = retirementViewSchema.parse(read.output);
+        this.store.update(id, (row) => { row.retirementAccounts = view; });
+        turn = current();
+      }
+      const accounts = turn.retirementAccounts;
+      const finishAccounts = (answer: ReturnType<typeof compileRetirementView>) => {
+        this.store.update(id, (row) => {
+          row.public.actionMode = "verified_experience";
+          row.trace.components = answer.display.blocks.map((block) => block.component);
+        });
+        this.store.finish(id, { type: "completed", result: answer }, this.now());
+      };
+      if (accounts && !accounts.selected) {
+        finishAccounts(compileRetirementView(accounts, intentId, route.expiresAt));
+        return;
+      }
       const showBalance = turn.trace.intentId === "show_balance";
       const showPortfolio = isPortfolioSummary(route);
       const showGoal = isHomeGoalSummary(route);
       if (!turn.decision) {
         this.store.progress(id, "eligibility", this.now());
-        const withWorkflows = fundingPreviewWorkflow.contexts.some(({ contextId }) => contextId === route.contextId);
-        const result = await runtime.registry(turn, "tsScopeId", 1, signal, async (call) => (
-          call(withWorkflows ? "recommendations" : "selection", { ...asRef(turn), routeDecisionId: route.routeDecisionId })
-        ));
+        const result = await runtime.registry(turn, "tsScopeId", 1, signal, (call) =>
+          call("decisions", { ...asRef(turn), routeDecisionId: route.routeDecisionId }));
         current();
         if (result.status !== "succeeded") {
           this.store.update(id, (row) => { row.trace.failures.push({ stage: "ts", code: result.error?.code ?? "TS_UNAVAILABLE" }); });
+          if (accounts) {
+            finishAccounts(compileRetirementView(accounts, intentId, route.expiresAt, { recommendationsUnavailable: true }));
+            return;
+          }
           throw new TurnFailure("ts_unavailable");
         }
 
-        const recommendations = withWorkflows ? treatmentRecommendationsSchema.parse(result.output).recommendations : undefined;
-        const ids = normalizedIdsSchema.parse(recommendations
-          ? recommendations.flatMap((item) => item.kind === "content" ? [item.id] : [])
-          : result.output);
+        const { recommendations } = chatTreatmentSchema.parse(result.output);
+        const ids = normalizedIdsSchema.parse(recommendations.flatMap((item) => item.kind === "content" ? [item.id] : []));
         const { candidates: resolved, rejections } = resolveCandidates(ids, current().treatmentEntries);
         const noPromotions = runtime.experiences.execution.world.exclusions(turn);
         const candidates = resolved.filter((candidate) => {
           const content = lookupContent(candidate);
+          if (accounts?.selected) return accounts.selected.beneficiary === null && content?.contentId === "beneficiary_update";
           return (!noPromotions || content?.kind !== "promotion") && Boolean(content?.portfolioData) === showPortfolio
             && Boolean(content?.allowedComponents.includes("PznGoalProgress")) === showGoal
             && (!content?.metricSpec || showBalance);
@@ -1146,13 +1221,18 @@ export class ExperienceService {
             decisionId: makeId("decision"), scope: row.scope, routeDecisionId: route.routeDecisionId, contextId: route.contextId,
             catalogVersion: contentCatalog.catalogVersion, issuedAt: now, expiresAt: now + DECISION_TTL,
             selectionMode: row.selectionMode, partial, candidates, composerRunId: null,
-            workflowRecommendations: recommendations?.filter((item) => item.kind === "workflow"),
+            workflowRecommendations: recommendations.flatMap((item) => item.kind === "workflow" ? [item] : []),
+            actionRecommendations: recommendations.flatMap((item) => item.kind === "action" ? [item] : []),
           };
         });
       }
       turn = current();
       const decision = turn.decision!;
       const expiresAt = Math.min(decision.expiresAt, route.expiresAt);
+      if (accounts && !decision.candidates.length) {
+        finishAccounts(compileRetirementView(accounts, intentId, expiresAt));
+        return;
+      }
       if (showPortfolio && !turn.portfolioSnapshot) {
         stage = "portfolio";
         this.store.progress(id, "portfolio", this.now());
@@ -1173,9 +1253,14 @@ export class ExperienceService {
       }
       const portfolio = showPortfolio ? turn.portfolioSnapshot : undefined;
       emptyEligibility = decision.candidates.length === 0;
-      if (emptyEligibility && portfolio) {
+      const standaloneActions = (decision.actionRecommendations ?? []).flatMap((recommendation) => {
+        const manifest = runtime.experiences.registry.get(turn.scope.principalId, capabilityRef(recommendation));
+        return manifest?.eligibility.kind === "capability" && manifest.discovery.contexts.includes(route.contextId)
+          && manifest.inputs.length > 0 && manifest.inputs.every((field) => field.type !== "choice") ? [{ recommendation, manifest }] : [];
+      });
+      if (emptyEligibility && (portfolio || standaloneActions.length)) {
         const result = compileExperience({
-          status: "ready", outcome: "ready", introKey: "summary", question: null, portfolio, expiresAt, partial: decision.partial,
+          status: "ready", outcome: "ready", introKey: standaloneActions.length ? "next_step" : "summary", question: null, portfolio, standaloneActions, expiresAt, partial: decision.partial,
         });
         this.store.update(id, (row) => { row.trace.components = result.display.blocks.map((block) => block.component); });
         this.store.finish(id, { type: "completed", result }, this.now());
@@ -1228,12 +1313,18 @@ export class ExperienceService {
       if (unsuccessfulRead) throw new TurnFailure("metric_unavailable");
       current();
       const { status } = verified.proposal;
-      const resultForDisplay = compileExperience({
+      const compilerInput = {
         status, outcome: emptyEligibility && status === "no_match" ? "eligible_empty" : status, introKey: verified.proposal.introKey,
         question: verified.proposal.clarificationQuestion, partial: decision.partial && Boolean(portfolio || status === "ready"),
         expiresAt, approved: verified, proof, portfolio, goalProgress,
-        workflow: fundingRecommendation(latest, verified.contentOrder),
-      });
+        workflows: offeredWorkflows(latest, verified.contentOrder), standaloneActions,
+      } satisfies Parameters<typeof compileExperience>[0];
+      const composed = compileExperience(compilerInput);
+      runtime.captureTurnExchange(id, "compiler", "compileExperience", compilerInput, composed);
+      const resultForDisplay = accounts ? compileRetirementView(accounts, intentId, expiresAt, {
+        composed, reminder: decision.candidates.map(lookupContent).find((entry) => entry?.contentId === "beneficiary_update"),
+        steps: /\bsteps?\b/i.test(turn.public.message),
+      }) : composed;
       let lookupSummary: typeof latest.public.customerLookup;
       let companionNba: typeof latest.public.nextBestAction;
       if (domainTools?.customer360) {
@@ -1332,6 +1423,23 @@ export class ExperienceService {
           return;
         }
       }
+      const saved = this.store.turn(id);
+      if (stage === "compose" && (mapped === "gateway_unavailable" || mapped === "verification_failed")
+        && saved?.retirementAccounts?.selected && saved.route && saved.decision && !signal.aborted) {
+        const expiresAt = Math.min(saved.route.expiresAt, saved.decision.expiresAt);
+        if (now < Math.min(deadline, expiresAt)) {
+          const reminder = saved.decision.candidates.map(lookupContent).find((entry) => entry?.contentId === "beneficiary_update");
+          const answer = compileRetirementView(saved.retirementAccounts, saved.trace.intentId ?? "", expiresAt, {
+            reminder, steps: /\bsteps?\b/i.test(saved.public.message),
+          });
+          this.store.update(id, (row) => {
+            row.public.actionMode = "verified_experience";
+            row.trace.components = answer.display.blocks.map((block) => block.component);
+          });
+          this.store.finish(id, { type: "completed", result: answer }, now);
+          return;
+        }
+      }
       if (emptyEligibility && stage === "compose" && !signal.aborted && now < deadline) {
         const result = compileChatReply(demo.introCopy.no_match, "eligible_empty", now);
         this.store.finish(id, { type: "completed", result }, now);
@@ -1360,7 +1468,7 @@ export class ExperienceService {
     );
     const current = runtime.current(id);
     const now = this.now();
-    const launch = workflow && { recommendation: workflow, sourceOverviewTurnId: id };
+    const launch = workflow && { recommendation: fundingPreviewWorkflow.recommendation, sourceOverviewTurnId: id };
     this.store.update(id, (row) => {
       row.trace.intentId = "suggest_next_step";
       row.trace.ts = {
@@ -1386,12 +1494,26 @@ export class ExperienceService {
     return launch;
   }
 
-  private async runFundingPreview(runtime: Runtime, turn: TurnRecord, launch: WorkflowLaunch, signal: AbortSignal) {
-    const definition = resolveFundingWorkflow(launch.recommendation, turn.toolSetup?.fundingWorkflow);
-    requireCheck(definition && !fundingWorkflowIssue(definition), "FUNDING_WORKFLOW_NOT_OFFERED");
-    const expiry = fundingOfferExpiry(this.store, turn, launch, this.now());
+  private async runCustomerWorkflow(runtime: Runtime, turn: TurnRecord, launch: WorkflowLaunch, signal: AbortSignal) {
+    const { source, expiry } = workflowOfferSource(this.store, turn, launch, this.now());
     const id = turn.public.id;
     this.store.progress(id, "workflow", this.now());
+    if (launch.recommendation.id === beneficiaryReviewWorkflow.recommendation.id) {
+      const routeDecisionId = source.route?.routeDecisionId;
+      requireCheck(routeDecisionId, "WORKFLOW_SOURCE_REQUIRED");
+      const read = await runtime.registry(turn, "workflowScopeId", 1, signal, (call) =>
+        call("retirementAccounts", { ...asRef(turn), routeDecisionId }));
+      requireCheck(read.status === "succeeded", "RETIREMENT_ACCOUNTS_UNAVAILABLE");
+      const view = retirementViewSchema.parse(read.output);
+      runtime.current(id);
+      const now = this.now();
+      const result = compileRetirementView(view, retirementBeneficiaryIntent, now + DECISION_TTL);
+      this.store.update(id, (row) => { row.retirementAccounts = view; row.trace.components = result.display.blocks.map(({ component }) => component); });
+      this.store.finish(id, { type: "completed", result }, now);
+      return true;
+    }
+    const definition = resolveFundingWorkflow(launch.recommendation, turn.toolSetup?.fundingWorkflow);
+    requireCheck(definition && !fundingWorkflowIssue(definition), "FUNDING_WORKFLOW_NOT_OFFERED");
     if (definition.mode === "agent") {
       const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
       const recent = await this.history.recent(conversation, turn.ordinal);
@@ -1435,6 +1557,7 @@ export class ExperienceService {
     runtime.current(id);
     const now = this.now();
     const result = compileFundingPreview(preview, now + DECISION_TTL);
+    runtime.captureTurnExchange(id, "compiler", "compileFundingPreview", { preview, expiresAt: now + DECISION_TTL }, result);
     this.store.update(id, (row) => { row.trace.components = result.display.blocks.map(({ component }) => component); });
     this.store.finish(id, { type: "completed", result }, now);
     return true;

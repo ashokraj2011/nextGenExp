@@ -131,7 +131,7 @@ function Evaluation() {
     <p>Up to 40 recent chat turns in this session.</p>
     {status && <p role="status">{status}</p>}
     {data?.rows.some(({ turns }) => turns) ? <div className="axe-evaluation-table">
-      <table aria-label={data.mode === "test" ? "Test mode results" : "Live model results"}>
+      <table aria-label="Model results">
         <thead><tr><th>Path</th><th>Completed</th><th>Median time</th><th>Model calls</th><th>Tool calls</th><th>Tokens</th></tr></thead>
         <tbody>{data.rows.map(({ path, turns, completed, medianMs, modelCalls, toolCalls, tokens }) => (
           <tr key={path}><th scope="row">{path === "fast" ? "Simple" : "Multi-step"}</th><td>{completed} / {turns}</td>

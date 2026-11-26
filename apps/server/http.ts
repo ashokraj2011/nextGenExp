@@ -1,6 +1,7 @@
 import { domainPackIds } from "../../packages/contracts/domain-packs";
 import { domainMemberships, serverTenantId, tenantCookie, tenantDataDirectory } from "./tenant";
-import { layoutTargetDomain, uiDesignSchema, uiLayoutChangeSchema } from "../../packages/contracts/ui-layout";
+import { flowOverridesSchema, flowScopeSchema, type FlowScope } from "../../packages/contracts/routing-flows";
+import { recordIntentOption, layoutTargetDomain, uiDesignSchema, uiLayoutChangeSchema } from "../../packages/contracts/ui-layout";
 import { widgetGenerateRequestSchema, widgetLibraryChangeSchema } from "../../packages/contracts/widget";
 import { previewUiLayout, uiTargetOptions, validateUiDesign } from "./ui-layouts";
 import { Customer360Service } from "./customer-360";
@@ -130,7 +131,8 @@ type Options = {
   projectRoot: string;
   port?: number;
   dev?: boolean;
-  mode?: "live" | "test";
+  startScheduledJobs?: boolean;
+  piiEnabledByDefault?: boolean;
   selectionMode?: SelectionMode;
   inspectorEnabled?: boolean;
   portfolioSnapshots?: PortfolioSnapshotProvider;
@@ -143,7 +145,7 @@ const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".woff2": "font/woff2", ".woff": "font/woff", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml",
 };
-const pagePaths = new Set(["/", "/chat", "/wealth", "/it-ops", "/revops", "/recommendations", "/integrations", "/embed", "/login", "/planning", "/__test/a2ui", ...Object.values(adminPaths)]);
+const pagePaths = new Set(["/", "/chat", "/wealth", "/it-ops", "/revops", "/recommendations", "/integrations", "/embed", "/login", "/planning", ...Object.values(adminPaths)]);
 
 function visibleTurn(turn: TurnView, operator?: string): TurnView {
   if (operator) return turn;
@@ -233,13 +235,13 @@ export async function startApp(options: Options) {
   const sessionPattern = new RegExp("(?:^|;\\s*)" + sessionCookie + "=(local_[a-f0-9]{32})(?:;|$)");
   const portfolioSnapshots = options.portfolioSnapshots ?? fixturePortfolioSnapshotProvider;
   const goalProgressProvider = options.goalProgressProvider ?? fixtureGoalProgressProvider;
-  async function loadBootstrapPersonas(principalId: string, allowed: (id: string) => boolean): Promise<Bootstrap["personas"]> {
+  async function loadBootstrapPersonas(principalId: string, allowed: (id: string) => boolean, selected?: string): Promise<Bootstrap["personas"]> {
     return Promise.all(profileStore.list().filter(({ personaId }) => allowed(personaId)).map(async ({
       personaId, displayName, allowedScenarios, beneficiaryStatus, accountFundingStatus, syntheticMid,
     }) => {
       const [portfolio, homeGoal] = await Promise.all([
-        fixturePortfolioSnapshotProvider.read(syntheticMid),
-        fixtureGoalProgressProvider.read(syntheticMid),
+        (personaId === selected ? portfolioSnapshots : fixturePortfolioSnapshotProvider).read(syntheticMid),
+        (personaId === selected ? goalProgressProvider : fixtureGoalProgressProvider).read(syntheticMid),
       ]);
       return {
         personaId, displayName, allowedScenarios,
@@ -323,14 +325,14 @@ export async function startApp(options: Options) {
   const proactiveStore = new ProactiveEventStore(options.dataDir);
   const knowledgeBase = new KnowledgeBaseStore(options.dataDir);
   const verticalFactory = new VerticalPackStore(options.dataDir);
-  const piiFirewall = new PiiFirewallStore(options.dataDir, (options.mode ?? "live") !== "test");
+  const piiFirewall = new PiiFirewallStore(options.dataDir, options.piiEnabledByDefault);
   const uxEvolution = new UxEvolutionStore(options.dataDir);
   const evalRunner = new EvalRunnerStore(options.dataDir);
   const tradeStore = new TradeStore(options.dataDir, profileStore);
   const scheduledJobs = new ScheduledJobStore(options.dataDir, {
     profileStore, tradeStore, opsStore, salesStore, proactiveStore,
   });
-  if ((options.mode ?? "live") !== "test") scheduledJobs.startTicker();
+  if (options.startScheduledJobs !== false) scheduledJobs.startTicker();
   setActiveEquityLedger(tradeStore);
   const writeAudit = new WriteAuditStore(options.dataDir);
   store.setDomainBindingContext((id) => ({ incident: opsStore.findById(id), deal: salesStore.list().find((deal) => deal.id === id) }));
@@ -349,7 +351,6 @@ export async function startApp(options: Options) {
     store.close();
     throw error;
   }
-  const mode = options.mode ?? "live";
   const makeTradeSettler = (principalId: string): SettlementCallback => async (settlement) => {
     const toDollars = (cents: number) => (Math.max(0, cents) / 100).toFixed(2);
     const profile = profileStore.findByPersonaId(settlement.personaId);
@@ -393,8 +394,8 @@ export async function startApp(options: Options) {
   const experience = new ExperienceService(store, runtime, selectionMode, now, inspectorEnabled, offline && {
     chat: new ChatHarness(offline), close: () => offline.close(),
   }, {
-    restrictedDomains: membership.restricted, isTenantAdmin: membership.isTenantAdmin,
-    mode, gateway: options.gateway, dataDir: options.dataDir, customer360, portfolioSnapshots, goalProgressProvider,
+    isTenantAdmin: membership.isTenantAdmin,
+    gateway: options.gateway, dataDir: options.dataDir, customer360, portfolioSnapshots, goalProgressProvider,
     opsStore, salesStore, connectorStore, approvalStore, tradeStore, actionFlowStore, workflowEngine, knowledgeBase, widgetLibraries, piiFirewall,
     integrationService, onTradeSettle: makeTradeSettler,
   });
@@ -574,7 +575,8 @@ export async function startApp(options: Options) {
       summary = `${updated.id} (${updated.accountName}) → ${updated.stage} (${updated.discountStatus}, ${updated.winProbabilityPct}% prob.)`;
     } else if (updates) {
       const applied = profileStore.applyBindings(record.recordId, updates, now());
-      summary = `Updated Customer 360 bindings: ${applied.updatedFields.join(", ") || "none"}`;
+      if (!applied.updatedFields.length) throw new ApiError(422, "fields_not_saved", "Check the fields and values, then save again.");
+      summary = `Updated Customer 360 bindings: ${applied.updatedFields.join(", ")}`;
     }
     const audit = writeAudit.record({
       sfieldRunId: "offline",
@@ -689,7 +691,8 @@ export async function startApp(options: Options) {
 
     const token = req.headers.cookie?.match(sessionPattern)?.[1];
     const { id: principalId, created } = store.session(token);
-    if (customerSession) selectedProfile = store.selectedProfile(principalId);
+    selectedProfile = store.selectedProfile(principalId);
+    const viewer = { customer: selectedProfile, operator };
     if (created) res.setHeader("Set-Cookie", sessionCookie + "=" + principalId + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000");
 
     const [resource, id, operation, extra] = pathname.slice(5).split("/");
@@ -709,14 +712,17 @@ export async function startApp(options: Options) {
       if (personaId && (!profileStore.findByPersonaId(personaId) || !membership.chat("wealth", personaId))) {
         throw new ApiError(403, "domain_access_denied", "This profile is unavailable.");
       }
-      if (membership.restricted) store.selectProfile(principalId, personaId);
+      store.selectProfile(principalId, personaId);
       return json(res, { personaId });
     }
     const createChat = async (audience?: "admin") => {
-      const input = await body(req, createBody);
+      const test = audience && url.searchParams.get("scope") === "preview" ? await body(req,
+        z.object({ conversation: createBody, setup: toolSetupSchema }).strict(), 768 * 1024) : undefined;
+      if (test) validateToolSetup(test.setup);
+      const input = test?.conversation ?? await body(req, createBody);
       const personaId = input.domainId === "wealth" ? input.personaId : requireOperator();
       requireChatDomain(input.domainId, personaId);
-      const thread = experience.createConversation(principalId, personaId, input.scenarioId ?? demo.defaultScenarioId, audience, input.domainId, operator);
+      const thread = experience.createConversation(principalId, personaId, input.scenarioId ?? demo.defaultScenarioId, audience, input.domainId, operator, test && { tools: test.setup });
       return json(res, { ...presentConversation(thread), turns: [] }, 201);
     };
     const internalApi = ["admin", "debug", "pzn", "approvals", "connectors", "ops", "ops-incidents", "sales", "sales-deals", "workflows", "workflow-runs"].includes(resource)
@@ -724,8 +730,8 @@ export async function startApp(options: Options) {
       || (resource === "proactive" && id === "trigger");
     if (internalApi) {
       const actor = requireOperator();
-      const domainAdmin = resource === "admin" && ["ui-layouts", "ui-layout-preview", "ui-layout-generate", "widgets", "widget-generate",
-        "customers", "bootstrap", "conversations", "logs", "inspector"].includes(id);
+      const domainAdmin = resource === "admin" && ["routing-flows", "ui-layouts", "ui-layout-preview", "ui-layout-test", "ui-layout-generate", "widgets", "widget-generate",
+        "customers", "bootstrap", "conversations", "logs", "inspector", "tools", "ccre-rules", "treatment-preview", "treatment-runs"].includes(id);
       const domainApi = domainAdmin || ["debug", "ops", "ops-incidents", "sales", "sales-deals"].includes(resource);
       if (!domainApi && !membership.isTenantAdmin(actor)) throw new ApiError(403, "tenant_admin_required", "This setting requires a tenant administrator.");
     }
@@ -746,14 +752,14 @@ export async function startApp(options: Options) {
       if (!parsedDomain.success) throw new ApiError(400, "domain_invalid", "Choose an available domain.");
       const activeDomain = parsedDomain.data;
       const personas: Bootstrap["personas"] = activeDomain === "wealth"
-        ? await loadBootstrapPersonas(principalId, (personaId) => (!customerSession || personaId === selectedProfile) && membership.chat("wealth", personaId, operator))
+        ? await loadBootstrapPersonas(principalId, (personaId) => (!customerSession || personaId === selectedProfile) && membership.chat("wealth", personaId, operator), selectedProfile)
         : operator && membership.chat(activeDomain, "", operator) ? [{
           personaId: operator, displayName: operator, allowedScenarios: [demo.defaultScenarioId],
         }] : [];
       const state: Bootstrap = {
         tenantId: serverTenantId,
         ...(activeDomain === "wealth" && customerSession && !personas.length && { requiresProfile: true }),
-        conversations: store.conversations(principalId, Boolean(operator)).filter((conversation) =>
+        conversations: store.conversations(principalId, Boolean(operator), viewer).filter((conversation) =>
           (adminBootstrap || conversation.audience !== "admin")
           && ((adminBootstrap && domain === null) || conversation.domainId === activeDomain)
           && isThreadUser(conversation) && membership.chat(conversation.domainId, conversation.personaId, operator)),
@@ -761,7 +767,7 @@ export async function startApp(options: Options) {
         scenarios: tsFixtures.scenarios.map(({ scenarioId, label }) => ({ scenarioId, label })),
         intentPrompts,
         defaultPersonaId: personas.find((p) => p.personaId === demo.defaultPersonaId)?.personaId ?? personas[0]?.personaId ?? "", defaultScenarioId: demo.defaultScenarioId,
-        gatewayConfigured: Boolean(runtime), mode, selectionMode, inspectorEnabled,
+        gatewayConfigured: Boolean(runtime), mode: "live", selectionMode, inspectorEnabled,
         ...(options.gateway?.profile === "openai" && { openAiModel: options.gateway.model }),
         ...(options.gateway?.profile === "copilot_acp" && { copilotModel: options.gateway.model }),
       };
@@ -802,12 +808,13 @@ export async function startApp(options: Options) {
             updates,
           }, AbortSignal.timeout(5000));
           return json(res, {
-            updatedFields: Object.keys(updates),
+            updatedFields: governed.updatedFields,
             sfieldRunId: governed.sfieldRunId,
             auditId: governed.audit?.auditId,
           });
         }
         const applied = profileStore.applyBindings(personaId, updates, now());
+        if (!applied.updatedFields.length) throw new ApiError(422, "fields_not_saved", "Check the fields and values, then save again.");
         const audit = writeAudit.record({
           sfieldRunId: "offline",
           sfieldToolRef: domainWriteToolRef,
@@ -858,6 +865,14 @@ export async function startApp(options: Options) {
     }
     if (resource === "admin" && inspectorEnabled && !operation) {
       const toolSetupLimit = 768 * 1024;
+      if (id === "treatment-runs" && method === "GET") {
+        const query = z.object({ personaId: z.string().regex(idPattern), context: z.string().regex(idPattern),
+          turn: z.string().regex(idPattern).optional() }).safeParse(Object.fromEntries(url.searchParams));
+        if (!query.success) throw new ApiError(400, "invalid_query", "Choose a customer and topic.");
+        const { personaId, context, turn } = query.data;
+        requireChatDomain("wealth", personaId);
+        return json(res, store.treatmentRuns(principalId, viewer, personaId, context, turn));
+      }
       if (id === "pending-action-logs" && method === "GET") return json(res, store.workspaceActionLogs(principalId));
       if (id === "conversations" && method === "POST") {
         return createChat("admin");
@@ -870,13 +885,17 @@ export async function startApp(options: Options) {
           tenantId: serverTenantId, domains,
           layouts: store.listUiLayouts(principalId, actor).filter((layout) => domains.includes(layout.domainId)),
           library: store.publishedUiLayouts().filter((layout) => visibleDomains.includes(layout.domainId)),
-          targets: uiTargetOptions(registry, principalId).filter(({ target }) => visibleDomains.includes(layoutTargetDomain(target))),
+          targets: [...uiTargetOptions(registry, principalId), ...store.publishedUiLayouts().flatMap(({ design }) =>
+            design.recordIntent ? [recordIntentOption(design.recordIntent)] : [])].filter(({ target }) => visibleDomains.includes(layoutTargetDomain(target))),
         });
       }
       if (id === "ui-layouts" && method === "POST") {
         const change = await body(req, uiLayoutChangeSchema, 32 * 1024);
-        if (change.operation !== "unpublish") validateUiDesign(change.design, uiTargetOptions(registry, principalId), change.operation === "publish");
         const actor = requireOperator();
+        if (change.operation !== "unpublish") {
+          const domain = change.domainId ?? ("id" in change ? store.listUiLayouts(principalId, actor).find((layout) => layout.id === change.id)?.domainId : undefined) ?? "wealth";
+          validateUiDesign(change.design, uiTargetOptions(registry, principalId), change.operation === "publish", change.operation === "publish" ? domain : undefined);
+        }
         return json(res, store.changeUiLayout(principalId, actor, membership.authoring(actor), change, now()));
       }
       if (id === "ui-layout-preview" && method === "POST") {
@@ -886,13 +905,29 @@ export async function startApp(options: Options) {
         ]), 32 * 1024);
         const design = "design" in previewBody ? previewBody.design : previewBody;
         const personaId = "design" in previewBody ? previewBody.personaId : undefined;
-        validateUiDesign(design, uiTargetOptions(registry, principalId), false);
         const domainId = authoringDomain();
+        validateUiDesign(design, uiTargetOptions(registry, principalId), false, domainId);
         return json(res, await previewUiLayout(design, personaId, {
           domainId,
+          portfolioProvider: portfolioSnapshots, goalProvider: goalProgressProvider,
+          opsStore: domainId === "it_ops" ? opsStore : undefined, salesStore: domainId === "sales_revops" ? salesStore : undefined,
           incident: domainId === "it_ops" ? opsStore.primaryIncident() : undefined,
           deal: domainId === "sales_revops" ? salesStore.primaryDeal() : undefined,
         }));
+      }
+      if (id === "ui-layout-test" && method === "POST") {
+        const domainId = authoringDomain();
+        const { design, message, personaId } = await body(req, z.object({
+          design: uiDesignSchema, message: z.string().trim().min(1).max(1600), personaId: z.string().regex(idPattern).optional(),
+        }).strict(), 32 * 1024);
+        validateUiDesign(design, uiTargetOptions(registry, principalId), true, domainId);
+        const draft = { id: makeId("ui"), revision: 1, design };
+        const actor = requireOperator();
+        const profile = domainId === "wealth" ? personaId ?? demo.defaultPersonaId : actor;
+        requireChatDomain(domainId, profile);
+        const thread = experience.createConversation(principalId, profile, demo.defaultScenarioId, "admin", domainId, actor, { layout: draft });
+        const accepted = experience.submit(thread, message, makeId("request"), "layout_preview", undefined, undefined, undefined, actor);
+        return json(res, { ...accepted, layoutId: draft.id }, 202);
       }
       if (id === "ui-layout-generate" && method === "POST") {
         const domainId = authoringDomain();
@@ -987,7 +1022,7 @@ export async function startApp(options: Options) {
         return json(res, buildExperienceRegistryView());
       }
       if (id === "evaluation" && method === "GET") {
-        return json(res, { mode, rows: await runtime?.evaluation(principalId) ?? [] });
+        return json(res, { mode: "live", rows: await runtime?.evaluation(principalId) ?? [] });
       }
       if (id === "capabilities" && method === "GET") {
         return json(res, { manifests: registry.list(principalId),
@@ -1012,23 +1047,44 @@ export async function startApp(options: Options) {
       if (id === "customer-events" && method === "POST") {
         return json(res, simulateCustomerEvent(store, principalId, await body(req, customerEventSchema), now()));
       }
+      if (id === "routing-flows" && (method === "GET" || method === "POST")) {
+        const actor = requireOperator();
+        const editableScopes: FlowScope[] = [...membership.authoring(actor)];
+        if (membership.isTenantAdmin(actor)) editableScopes.push("tenant");
+        const requested = url.searchParams.get("scope") ?? editableScopes[0];
+        const scope = flowScopeSchema.safeParse(requested);
+        if (!editableScopes.length || (scope.success && !editableScopes.includes(scope.data))) {
+          throw new ApiError(403, "domain_access_denied", "Flow settings are unavailable for this scope.");
+        }
+        if (!scope.success) throw new ApiError(400, "domain_invalid", "Choose a valid settings scope.");
+        const result = method === "GET" ? store.flowSetup(scope.data, editableScopes)
+          : store.saveFlowSetup(scope.data, editableScopes, await body(req, flowOverridesSchema, 64 * 1024), req.headers["if-match"]);
+        res.setHeader("ETag", result.revision);
+        return json(res, result.data);
+      }
       if (id === "tools" && method === "GET") {
-        const setup = store.toolSetup(principalId);
-        res.setHeader("ETag", toolSetupTag(setup));
-        return json(res, toolSetupView(setup));
+        const domainId = authoringDomain();
+        const preview = url.searchParams.get("scope") === "preview";
+        const setup = store.toolSetup(domainId, preview ? principalId : undefined);
+        const tag = toolSetupTag(setup);
+        const draft = preview ? undefined : store.toolSetup(domainId, principalId);
+        res.setHeader("ETag", tag);
+        return json(res, { ...toolSetupView(setup), ...(draft && toolSetupTag(draft) !== tag && { privateDraft: draft }) });
       }
       if (id === "tools" && method === "POST") {
+        const domainId = authoringDomain();
+        const previewSession = url.searchParams.get("scope") === "preview" ? principalId : undefined;
         const setup = await body(req, toolSetupSchema, toolSetupLimit);
         validateToolSetup(setup);
         const tag = toolSetupTag(setup);
         const expected = req.headers["if-match"];
         if (expected !== undefined) {
-          const current = toolSetupTag(store.toolSetup(principalId));
+          const current = toolSetupTag(store.toolSetup(domainId, previewSession));
           if (expected !== current && tag !== current) {
             throw new ApiError(412, "tool_setup_changed", "Tool settings changed. Reload Tool setup to review the latest settings.");
           }
         }
-        store.saveToolSetup(principalId, setup);
+        store.saveToolSetup(domainId, setup, previewSession);
         res.setHeader("ETag", tag);
         return json(res, setup);
       }
@@ -1037,9 +1093,10 @@ export async function startApp(options: Options) {
       }
       if (id === "ccre-rules" && method === "POST") {
         const rule = await body(req, mockCcreRuleSchema, toolSetupLimit);
-        const current = store.toolSetup(principalId);
+        const domainId = authoringDomain();
+        const current = store.toolSetup(domainId);
         const updated = addCcreRule(current, rule);
-        if (updated !== current) store.saveToolSetup(principalId, updated);
+        if (updated !== current) store.saveToolSetup(domainId, updated);
         return json(res, rule);
       }
       if (id === "omnichannel" && method === "GET") {
@@ -1057,10 +1114,9 @@ export async function startApp(options: Options) {
         return json(res, evalRunner.view());
       }
       if (id === "eval-run" && method === "POST") {
-        const input = await body(req, z.object({ mode: z.enum(["deterministic", "live_llm"]).optional() }).strict());
-        const evalMode = input.mode ?? "deterministic";
+        await body(req, z.object({ mode: z.literal("live_llm").optional() }).strict());
+        if (!options.gateway) throw new ApiError(503, "gateway_unconfigured", "Connect a model provider to run evaluations.");
         return json(res, await evalRunner.runSuite({
-          mode: evalMode,
           approvedCorrections: uxEvolution.view().proposals.flatMap((p) => p.status === "approved" && p.regression ? [p.regression] : []),
           replayCorrection: async (prompt) => {
             const widget = widgetLibrary.renderPublishedWidget(principalId, prompt);
@@ -1214,7 +1270,7 @@ export async function startApp(options: Options) {
         return createChat();
       }
       if (id) {
-        const conversation = store.conversation(id, principalId);
+        const conversation = store.conversation(id, principalId, viewer);
         requireThread(conversation);
         if (conversation.audience === "admin" || (!operator && store.hasOperatorContent(id))) requireOperator();
         if (method === "GET" && operation === "updates") return json(res, await experience.recordUpdates(conversation, Boolean(operator)));
@@ -1223,29 +1279,33 @@ export async function startApp(options: Options) {
           return json(res, { ...presentConversation(conversation), turns: turns.map((turn) => visibleTurn(turn, operator)) });
         }
         if (method === "POST" && operation === "settings") {
-          return json(res, store.changeConversation(id, principalId, await body(req, conversationChangeBody), now()));
+          return json(res, store.changeConversation(id, conversation.principalId, await body(req, conversationChangeBody), now()));
         }
         if (method === "POST" && operation === "preview-funding") {
           const { clientRequestId, source } = await body(req, previewFundingBody);
-          return json(res, experience.previewWorkspaceFunding(conversation, clientRequestId, source), 202);
+          return json(res, experience.previewWorkspaceFunding(conversation, clientRequestId, source, principalId), 202);
         }
         if (method === "POST" && operation === "turns") {
-          const { message, clientRequestId } = await body(req, messageBody);
-          const fresh = store.conversation(conversation.id, principalId);
-          return json(res, experience.submit(fresh, message, clientRequestId, "message", undefined, undefined, undefined, operator), 202);
+          const input = await body(req, messageBody);
+          const fresh = store.conversation(conversation.id, conversation.principalId);
+          const accepted = experience.submit(fresh, input.message, input.clientRequestId, "message", undefined, undefined, undefined, operator, principalId);
+          if (accepted.turn.status === "working" && accepted.turn.progress === "accepted") {
+            runtime?.captureTurnExchange(accepted.turnId, "submission", "POST " + url.pathname, input, accepted);
+          }
+          return json(res, accepted, 202);
         }
       }
     }
     if (resource === "turns" && id) {
-      const turn = store.ownTurn(id, principalId);
-      const thread = store.conversation(turn.scope.conversationId, principalId);
+      const turn = store.ownTurn(id, principalId, viewer);
+      const thread = store.conversation(turn.scope.conversationId, principalId, viewer);
       requireThread(thread);
       if (thread.audience === "admin" || (!operator && store.hasOperatorContent(thread.id))) requireOperator();
       if (method === "GET" && !operation) return json(res, visibleTurn(await experience.turnView(turn), operator));
       if (method === "POST" && operation === "cancel") return json(res, experience.cancel(turn));
       if (method === "POST" && operation === "retry") {
         const { clientRequestId } = await body(req, retryBody);
-        return json(res, await experience.retry(turn, clientRequestId, operator), 202);
+        return json(res, await experience.retry(turn, clientRequestId, operator, principalId), 202);
       }
       if (method === "GET" && operation === "events") {
         const rawCursor = req.headers["last-event-id"] ?? url.searchParams.get("after") ?? "0";
@@ -1258,7 +1318,7 @@ export async function startApp(options: Options) {
         streams.add(res);
         const flush = () => {
           if (res.writableEnded || res.destroyed) return;
-          const live = store.ownTurn(id, principalId);
+          const live = store.ownTurn(id, principalId, viewer);
           const known = store.replay(live, cursor);
           if (!known) {
             res.end("event: gap\ndata: {}\n\n");
@@ -1279,12 +1339,17 @@ export async function startApp(options: Options) {
       }
     }
     if (resource === "experiences" && id && operation === "actions" && method === "POST") {
-      const { turn } = store.experience(id, principalId);
-      const thread = store.conversation(turn.scope.conversationId, principalId);
+      const { turn } = store.experience(id, principalId, viewer);
+      const thread = store.conversation(turn.scope.conversationId, principalId, viewer);
       requireThread(thread);
       if (thread.audience === "admin" || (!operator && store.hasOperatorContent(thread.id))) requireOperator();
-      const { envelope, clientRequestId } = await body(req, actionBody);
-      return json(res, experience.followUp(principalId, id, envelope, clientRequestId, operator), 202);
+      const input = await body(req, actionBody);
+      const accepted = experience.followUp(thread.principalId, id, input.envelope, input.clientRequestId, operator, principalId);
+      if (accepted.turn.status === "working" && accepted.turn.progress === "accepted"
+        && Object.keys(input.envelope.action.context).every((key) => key === "actionId")) {
+        runtime?.captureTurnExchange(accepted.turnId, "submission", "POST " + url.pathname, input, accepted);
+      }
+      return json(res, accepted, 202);
     }
     if (resource === "admin" && id === "recommendation-providers" && !operation && method === "GET" && inspectorEnabled) {
       return json(res, {
@@ -1457,8 +1522,9 @@ export async function startApp(options: Options) {
         streams.add(res);
         res.write(`event: proactive.connected\ndata: ${JSON.stringify({ ok: true })}\n\n`);
         const personaId = url.searchParams.get("personaId");
+        const retailProfile = customerSession || Boolean(selectedProfile) || !operator;
         const unsubscribe = proactiveStore.subscribe((alert) => {
-          if (alert.principalId === principalId && alert.personaId === personaId && (!customerSession || (alert.domain === "wealth" && selectedProfile === personaId)) && membership.chat(alert.domain, personaId ?? "", operator) && !res.writableEnded) {
+          if (alert.principalId === principalId && alert.personaId === personaId && (!retailProfile || (alert.domain === "wealth" && (!selectedProfile || selectedProfile === personaId))) && membership.chat(alert.domain, personaId ?? "", operator) && !res.writableEnded) {
             res.write(`event: proactive.alert\ndata: ${JSON.stringify(alert)}\n\n`);
           }
         });
@@ -1996,19 +2062,23 @@ export async function startApp(options: Options) {
     }
     if (resource === "events" && !id && method === "POST") {
       const data = await body(req, eventBody);
-      store.analytics(principalId, data.experienceId, data.eventId, data.type, now());
+      const { turn } = store.experience(data.experienceId, principalId, viewer);
+      const thread = store.conversation(turn.scope.conversationId, principalId, viewer);
+      requireThread(thread);
+      if (thread.audience === "admin" || (!operator && store.hasOperatorContent(thread.id))) requireOperator();
+      store.analytics(thread.principalId, data.experienceId, data.eventId, data.type, now());
       return json(res, { received: true });
     }
     const payloadRequest = (resource === "admin" && id === "logs") || (resource === "debug" && id === "payloads");
     const traceRequest = (resource === "admin" && id === "inspector") || (resource === "debug" && id === "turns");
     if (inspectorEnabled && (payloadRequest || traceRequest) && operation && method === "GET") {
-      const turn = store.ownTurn(operation, principalId);
-      const conversation = store.conversation(turn.scope.conversationId, principalId);
+      const turn = store.ownTurn(operation, principalId, viewer);
+      const conversation = store.conversation(turn.scope.conversationId, principalId, viewer);
       requireThread(conversation);
       if (payloadRequest) {
         const payloads = await runtime?.payloads(turn, conversation);
         return json(res, payloads ?? {
-          turnId: turn.public.id, topicScores: null, router: null, glossary: null, treatment: null,
+          turnId: turn.public.id, topicScores: null, router: null, glossary: null, retirementAccounts: null, treatment: null,
           portfolio: null, goal: null, composer: null, workflow: null,
         });
       }

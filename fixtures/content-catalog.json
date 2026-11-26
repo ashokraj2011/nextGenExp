@@ -350,8 +350,8 @@
       "publicationStatus": "published",
       "kind": "education",
       "title": "Update your beneficiaries",
-      "description": "You have no beneficiary details on file.",
-      "body": "You have no beneficiary details on file. Here’s where to review or add a designation.",
+      "description": "Review the missing designation for this account.",
+      "body": "This account has no beneficiary on file. You can review or add a designation in account settings.",
       "allowedComponents": ["PznContentCard", "PznStepList"],
       "comparisonGroup": null,
       "comparisonFields": [],
@@ -519,9 +519,9 @@
       "version": "v1",
       "publicationStatus": "published",
       "kind": "promotion",
-      "title": "Restricted transfer offer",
-      "description": "A transfer offer limited to eligible accounts.",
-      "body": "This offer requires eligibility before it can be shown.",
+      "title": "Restricted transfer recommendation",
+      "description": "A transfer recommendation for eligible accounts.",
+      "body": "Treatment Selector shows this recommendation to eligible customers.",
       "allowedComponents": [
         "PznContentCard"
       ],

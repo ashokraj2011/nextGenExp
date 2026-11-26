@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type DragEvent } from "react";
+import { useEffect, useId, useRef, useState, type DragEvent } from "react";
 import {
   ArrowDown, ArrowRight, ArrowUp, Check, ChevronDown, ChevronRight, Database, FormInput,
   GripVertical, LayoutGrid, LayoutTemplate, List, Plus, SlidersHorizontal, Sparkles, Trash2, Type, X,
@@ -6,7 +6,7 @@ import {
 import { dataDictionary, type DataBindingKey } from "../../packages/contracts/data-bindings";
 import type { Customer360AdminRecord } from "../../packages/contracts/customer-360";
 import {
-  layoutComponents, layoutTargetDomain, maxLayoutDescription, maxLayoutSlots, maxLayoutTargets, maxLayouts, targetKey,
+  bindingDomain, recordIntentOption, type RecordIntent, layoutComponents, layoutTargetDomain, maxLayoutDescription, maxLayoutSlots, maxLayoutTargets, maxLayouts, targetKey,
   type BoundWidgetMetric, type CustomFormField, type CustomFormFieldType, type LayoutComponent, type LayoutSlot, type UiDesign, type UiLayoutCatalog, type UiLayoutChange, type UiLayoutRecord,
 } from "../../packages/contracts/ui-layout";
 import type { DisplayExperience } from "../../packages/contracts/surface";
@@ -99,8 +99,9 @@ const percentBindings = dataDictionary.filter((item) => item.kind === "percent")
 
 type CustomBindingOption = { key: DataBindingKey; label: string; type: "text" | "currency" | "number" | "percent" };
 
-function BindingSelect({ value, onChange, ariaLabel, emptyLabel = "Static value (unbound)", customOptions = [] }: {
+function BindingSelect({ value, onChange, domainId, ariaLabel, emptyLabel = "Static value (unbound)", customOptions = [] }: {
   value?: DataBindingKey;
+  domainId: DomainPackId;
   onChange: (next?: DataBindingKey) => void;
   ariaLabel: string;
   emptyLabel?: string;
@@ -115,7 +116,7 @@ function BindingSelect({ value, onChange, ariaLabel, emptyLabel = "Static value 
       <option value="">{emptyLabel}</option>
       {bindingGroups.map((group) => (
         <optgroup key={group} label={group}>
-          {dataDictionary.filter((d) => d.group === group).map((item) => (
+          {dataDictionary.filter((d) => d.group === group && bindingDomain(d.key) === domainId).map((item) => (
             <option key={item.key} value={item.key}>{item.label}</option>
           ))}
         </optgroup>
@@ -131,7 +132,8 @@ function BindingSelect({ value, onChange, ariaLabel, emptyLabel = "Static value 
   );
 }
 
-function InsertFieldPicker({ onInsert, customOptions }: {
+function InsertFieldPicker({ onInsert, customOptions, domainId }: {
+  domainId: DomainPackId;
   onInsert: (token: string) => void;
   customOptions: CustomBindingOption[];
 }) {
@@ -147,7 +149,7 @@ function InsertFieldPicker({ onInsert, customOptions }: {
       <option value="">+ Insert live field…</option>
       {bindingGroups.map((group) => (
         <optgroup key={group} label={group}>
-          {dataDictionary.filter((d) => d.group === group).map((item) => (
+          {dataDictionary.filter((d) => d.group === group && bindingDomain(d.key) === domainId).map((item) => (
             <option key={item.key} value={item.key}>{item.label}</option>
           ))}
         </optgroup>
@@ -183,11 +185,11 @@ function makeStarterWidgetSlot(id: string): Extract<LayoutSlot, { kind: "widget"
   };
 }
 
-function makeNewMetric(): BoundWidgetMetric {
+function makeNewMetric(domainId: DomainPackId): BoundWidgetMetric {
   return {
     id: "m_" + crypto.randomUUID().replace(/-/g, "").slice(0, 8),
     label: "New metric",
-    binding: "portfolio.total",
+    ...(domainId === "wealth" && { binding: "portfolio.total" }),
     staticValue: "",
     subtext: "",
     tone: "default",
@@ -221,7 +223,7 @@ function makeNewField(): CustomFormField {
 }
 
 function slotMetaSummary(slot: LayoutSlot): string {
-  if (slot.kind === "block") return "Built-in wealth block";
+  if (slot.kind === "block") return "Built-in component";
   if (slot.kind === "text") return slot.tone === "accent" ? "Highlighted callout" : "Text note";
   if (slot.kind === "form") {
     const bound = slot.fields.filter((f) => f.defaultBinding).length;
@@ -229,6 +231,45 @@ function slotMetaSummary(slot: LayoutSlot): string {
   }
   const bound = slot.metrics.filter((m) => m.binding).length;
   return `${slot.metrics.length} metrics${bound ? ` · ${bound} live` : ""}${slot.progressBinding ? " · progress" : ""}`;
+}
+
+function LayoutChatTest({ domainId, design, personaId }: { domainId: DomainPackId; design: UiDesign; personaId?: string }) {
+  const [message, setMessage] = useState("");
+  const [test, setTest] = useState<{ key: string; pending?: boolean; error?: string; result?: DisplayExperience; matched?: boolean }>();
+  const key = JSON.stringify([domainId, personaId, design, message.trim()]);
+  const current = test?.key === key ? test : undefined;
+  const runId = useRef(0);
+  useEffect(() => () => { runId.current++; }, []);
+
+  async function run() {
+    const id = ++runId.current;
+    setTest({ key, pending: true });
+    try {
+      const accepted = await api.testUiLayout(domainId, design, message.trim(), personaId);
+      const events = await fetch(accepted.eventsUrl);
+      if (!events.ok) throw new Error("The admin chat could not be opened.");
+      await events.text();
+      const [turn, trace] = await Promise.all([api.turn(accepted.turnId), api.debug(accepted.turnId)]);
+      if (!turn.experience) throw new Error("The turn ended without a reply. Check the turn in Logs.");
+      if (runId.current === id) setTest({ key, result: turn.experience, matched: trace.uiLayout?.id === accepted.layoutId });
+    } catch (error) {
+      if (runId.current === id) setTest({ key, error: error instanceof Error ? error.message : "The chat test could not finish." });
+    }
+  }
+
+  return <details className="ui-layout-test">
+    <summary>Try a chat turn</summary>
+    <p>Run a message through the configured chat and published rules using this draft.</p>
+    <label>Customer message<input value={message} maxLength={1600} onChange={(e) => setMessage(e.target.value)} /></label>
+    <button className="ui-button" type="button" disabled={!message.trim() || current?.pending} onClick={() => void run()}>
+      {current?.pending ? "Waiting for reply…" : "Send message"}
+    </button>
+    {current?.error && <p role="alert" className="ui-builder-error">{current.error}</p>}
+    {current?.result && <>
+      <p role="status">{current.matched ? "Draft layout applied." : "Chat returned a different experience for this message."}</p>
+      <ExperienceLayoutPreview data={current.result} />
+    </>}
+  </details>;
 }
 
 function LayoutPreview({ domainId, design, customers, previewPersonaId, onChangePreviewPersona, published }: {
@@ -273,8 +314,8 @@ function LayoutPreview({ domainId, design, customers, previewPersonaId, onChange
     <section className="ui-work-card ui-preview" aria-label="Layout preview">
       <header className="ui-preview-head">
         <div>
-          <h2>Live chat preview</h2>
-          <p>{activeCustomerName ? `Hydrated with ${activeCustomerName}` : "Sample data"}</p>
+          <h2>Layout preview</h2>
+          <p>{activeCustomerName ? `Sample layout for ${activeCustomerName}` : "Sample layout"}</p>
         </div>
         <div className="ui-preview-head-right">
           {customers.length > 0 && (
@@ -290,7 +331,7 @@ function LayoutPreview({ domainId, design, customers, previewPersonaId, onChange
             </select>
           )}
           {published && (
-            <a className="ui-chat-link" href="/wealth">
+            <a className="ui-chat-link" href={getDomainPack(domainId).path}>
               Open chat <ArrowRight size={14} aria-hidden="true" />
             </a>
           )}
@@ -301,15 +342,38 @@ function LayoutPreview({ domainId, design, customers, previewPersonaId, onChange
           : error ? <p className="ui-builder-error" role="alert">{error}</p>
           : preview ? <ExperienceLayoutPreview data={preview} /> : <p className="ui-preview-empty" role="status">Preparing preview…</p>}
       </div>
+      {design.slots.length > 0 && <LayoutChatTest domainId={domainId} design={design} personaId={domainId === "wealth" ? previewPersonaId || undefined : undefined} />}
     </section>
   );
 }
 
+function NamedIntentEditor({ domain, value, attach }: {
+  domain: "it_ops" | "sales_revops"; value?: RecordIntent; attach: (intent: RecordIntent) => void;
+}) {
+  const [label, setLabel] = useState(value?.label ?? "");
+  const [examples, setExamples] = useState(value?.phrases.join("\n") ?? "");
+  const [view, setView] = useState<RecordIntent["view"]>(value?.view ?? "detail");
+  const phrases = examples.split("\n").map((phrase) => phrase.trim()).filter(Boolean);
+  const valid = label.trim() && phrases.length > 0 && phrases.length <= 8 && phrases.every((phrase) => phrase.length >= 3 && phrase.length <= 120);
+  return <details className="ui-named-intent">
+    <summary>{value ? "Edit named intent" : "Create a named intent"}</summary>
+    <div className="setup-field"><label>Intent name<input maxLength={60} value={label} onChange={(e) => setLabel(e.target.value)} /></label></div>
+    <div className="setup-field"><label>Record view<select value={view} onChange={(e) => setView(e.target.value as RecordIntent["view"])}>
+      <option value="detail">Record details</option><option value="timeline">Timeline</option><option value="list">Record list</option>
+    </select></label></div>
+    <div className="setup-field"><label>Chat phrases, one per line<textarea rows={2} value={examples} onChange={(e) => setExamples(e.target.value)} /></label></div>
+    <button className="ui-button" type="button" disabled={!valid} onClick={() => attach({
+      id: value?.id ?? domain + "_intent_" + crypto.randomUUID().replaceAll("-", ""),
+      label: label.trim(), view, phrases,
+    })}>{value ? "Update intent" : "Attach named intent"}</button>
+  </details>;
+}
+
 function SlotAccordion({
-  slot, index, count, expanded, onToggle, change, move, remove,
+  slot, domainId, index, count, expanded, onToggle, change, move, remove,
   onDragStart, onDragOver, onDrop, onDragEnd, isDragging, isDragOver, customOptions,
 }: {
-  slot: LayoutSlot; index: number; count: number;
+  slot: LayoutSlot; domainId: DomainPackId; index: number; count: number;
   expanded: boolean;
   onToggle: () => void;
   change: (slot: LayoutSlot) => void;
@@ -422,6 +486,7 @@ function SlotAccordion({
             <input
               type="checkbox"
               checked={slot.writeBack !== false}
+              disabled={domainId !== "wealth" && slot.writeBack === false}
               onChange={(e) => change({ ...slot, writeBack: e.target.checked })}
             />
             Write bound fields back to Customer 360 on submit
@@ -465,7 +530,7 @@ function SlotAccordion({
                 </div>
                 <div className="ui-form-binding-row">
                   <span>Live data binding:</span>
-                  <BindingSelect
+                  <BindingSelect domainId={domainId}
                     ariaLabel={`Field ${fIdx + 1} Customer 360 pre-fill`}
                     value={field.defaultBinding}
                     emptyLabel="None (start blank)"
@@ -496,7 +561,7 @@ function SlotAccordion({
         <div className="ui-slot-fields ui-form-builder">
           <div className="ui-label-with-picker">
             <label htmlFor={id + "-wtitle"}>Title</label>
-            <InsertFieldPicker
+            <InsertFieldPicker domainId={domainId}
               customOptions={customOptions}
               onInsert={(token) => change({ ...slot, title: (slot.title + (slot.title ? " " : "") + token).slice(0, 110) })}
             />
@@ -505,7 +570,7 @@ function SlotAccordion({
             onChange={(e) => change({ ...slot, title: e.target.value })} />
           <div className="ui-label-with-picker">
             <label htmlFor={id + "-wbody"}>Body copy</label>
-            <InsertFieldPicker
+            <InsertFieldPicker domainId={domainId}
               customOptions={customOptions}
               onInsert={(token) => change({ ...slot, body: (slot.body + (slot.body ? " " : "") + token).slice(0, 320) })}
             />
@@ -519,7 +584,7 @@ function SlotAccordion({
               type="button"
               className="ui-mini-add"
               disabled={slot.metrics.length >= 6}
-              onClick={() => change({ ...slot, metrics: [...slot.metrics, makeNewMetric()] })}
+              onClick={() => change({ ...slot, metrics: [...slot.metrics, makeNewMetric(domainId)] })}
             >
               <Plus size={13} aria-hidden="true" /> Add metric
             </button>
@@ -556,7 +621,7 @@ function SlotAccordion({
                 </div>
                 <div className="ui-form-binding-row">
                   <span>Bind data:</span>
-                  <BindingSelect
+                  <BindingSelect domainId={domainId}
                     ariaLabel={`Metric ${mIdx + 1} data binding`}
                     value={metric.binding}
                     customOptions={customOptions}
@@ -599,7 +664,7 @@ function SlotAccordion({
                     onChange={(e) => change({ ...slot, progressBinding: (e.target.value || undefined) as DataBindingKey | undefined })}
                   >
                     <option value="">No progress bar</option>
-                    {percentBindings.map((item) => (
+                    {percentBindings.filter((item) => bindingDomain(item.key) === domainId).map((item) => (
                       <option key={item.key} value={item.key}>{item.label}</option>
                     ))}
                     {customOptions.filter((item) => item.type === "percent").map((item) => (
@@ -717,8 +782,10 @@ function UiWorkspace({ initial, customers }: {
     return () => { active = false; };
   }, [view]);
   const attached = new Set(activeDesign.targets.map(targetKey));
-  const names = new Map(initial.targets.map((option) => [targetKey(option.target), option]));
-  const choices = initial.targets.filter(({ target }) => layoutTargetDomain(target) === domainId && !attached.has(targetKey(target)));
+  const availableTargets = [...initial.targets, ...library.flatMap(({ design }) => design.recordIntent ? [recordIntentOption(design.recordIntent)] : [])];
+  if (activeDesign.recordIntent) availableTargets.push(recordIntentOption(activeDesign.recordIntent));
+  const names = new Map(availableTargets.map((option) => [targetKey(option.target), option]));
+  const choices = [...names.values()].filter(({ target }) => layoutTargetDomain(target) === domainId && !attached.has(targetKey(target)));
   const canPublish = Boolean(activeDesign.name.trim() && activeDesign.targets.length
     && activeDesign.targets.every((target) => layoutTargetDomain(target) === domainId)
     && activeDesign.slots.some(({ kind }) => kind === "block" || kind === "form" || kind === "widget")
@@ -779,8 +846,13 @@ function UiWorkspace({ initial, customers }: {
   function buildSlot(kind: LayoutComponent | "text" | "form" | "widget"): LayoutSlot {
     const id = crypto.randomUUID();
     if (kind === "text") return { id, kind: "text", heading: "Section heading", body: "", tone: "plain" };
-    if (kind === "form") return makeStarterFormSlot(id);
-    if (kind === "widget") return makeStarterWidgetSlot(id);
+    if (kind === "form") return domainId === "wealth" ? makeStarterFormSlot(id) : {
+      id, kind, title: "Record follow-up", description: "", submitLabel: "Continue", writeBack: false, fields: [makeNewField()],
+    };
+    if (kind === "widget") {
+      if (domainId === "wealth") return makeStarterWidgetSlot(id);
+      return { id, kind, title: "Record summary", badge: "", body: "", accentTop: false, metrics: [] };
+    }
     return { id, kind: "block", component: kind };
   }
 
@@ -895,7 +967,7 @@ function UiWorkspace({ initial, customers }: {
                   onChange={(event) => {
                     const next = event.target.value as DomainPackId;
                     setNewDomain(next);
-                    edit({ ...activeDesign, targets: activeDesign.targets.filter((target) => layoutTargetDomain(target) === next) });
+                    edit({ ...activeDesign, recordIntent: undefined, targets: activeDesign.targets.filter((target) => layoutTargetDomain(target) === next) });
                   }}>
                   {initial.domains.map((id) => <option key={id} value={id}>{getDomainPack(id).label}</option>)}
                 </select>
@@ -995,7 +1067,7 @@ function UiWorkspace({ initial, customers }: {
           onOpen={(id) => { select(id); setView("editor"); }}
           onCopy={(item) => {
             setNewDomain(initial.domains.includes(item.domainId) ? item.domainId : initial.domains[0]);
-            setEdits((prior) => ({ ...prior, new: { ...item.design, name: (item.design.name + " copy").slice(0, 72), targets: [] } }));
+            setEdits((prior) => ({ ...prior, new: { ...item.design, recordIntent: undefined, name: (item.design.name + " copy").slice(0, 72), targets: [] } }));
             select("new"); setShowDetails(true); setView("editor");
             setNotice("Choose the domain and attach an intent or capability for your copy.");
           }} />
@@ -1119,7 +1191,7 @@ function UiWorkspace({ initial, customers }: {
                         <button
                           type="button"
                           aria-label={"Remove " + label}
-                          onClick={() => edit({ ...activeDesign, targets: activeDesign.targets.filter((i) => targetKey(i) !== key) })}
+                          onClick={() => edit({ ...activeDesign, recordIntent: activeDesign.recordIntent?.id === target.id ? undefined : activeDesign.recordIntent, targets: activeDesign.targets.filter((i) => targetKey(i) !== key) })}
                         >
                           <X size={12} />
                         </button>
@@ -1153,6 +1225,11 @@ function UiWorkspace({ initial, customers }: {
                   )}
                 </div>
 
+                {domainId !== "wealth" && (activeDesign.recordIntent || activeDesign.targets.length < maxLayoutTargets) &&
+                  <NamedIntentEditor key={selected + domainId + (activeDesign.recordIntent?.id ?? "")} domain={domainId} value={activeDesign.recordIntent}
+                    attach={(intent) => edit({ ...activeDesign, recordIntent: intent,
+                      targets: [...activeDesign.targets.filter((target) => target.id !== intent.id), { kind: "intent", id: intent.id }] })} />}
+
                 <div className="ui-blocks-bar">
                   <h3>Blocks ({activeDesign.slots.length})</h3>
                   <div className="ui-blocks-bar-actions">
@@ -1184,7 +1261,8 @@ function UiWorkspace({ initial, customers }: {
                             <Type size={14} aria-hidden="true" /> Text / callout section
                           </button>
                           <div className="ui-popover-group">Built-In Wealth Blocks</div>
-                          {layoutComponents.map((comp) => (
+                          {layoutComponents.filter((comp) => activeDesign.targets.length ? activeDesign.targets.every((target) => names.get(targetKey(target))?.components?.includes(comp.id))
+                            : domainId === "wealth" ? comp.id !== "PznDynamicCanvas" : comp.id === "PznDynamicCanvas").map((comp) => (
                             <button key={comp.id} type="button" onClick={() => insertSlotAt(buildSlot(comp.id))}>
                               <LayoutTemplate size={14} aria-hidden="true" /> {comp.label}
                             </button>
@@ -1228,7 +1306,7 @@ function UiWorkspace({ initial, customers }: {
                       count={activeDesign.slots.length}
                       expanded={expandedSlotId === slot.id}
                       onToggle={() => setExpandedSlotId((curr) => (curr === slot.id ? null : slot.id))}
-                      customOptions={customBindingOptions}
+                      domainId={domainId} customOptions={domainId === "wealth" ? customBindingOptions : []}
                       isDragging={dragIndex === index}
                       isDragOver={dropTargetIndex === index}
                       onDragStart={(e) => {

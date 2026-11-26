@@ -1,7 +1,7 @@
 import { amountCentsMax, type InputField, type InputValues, type Journey } from "../../packages/contracts/agentic";
 import { fundingOptionsSchema } from "../../packages/contracts/funding-workflow";
 
-const exclusion = /\b(?:no\s+(?:promotions?|offers?|sales pitches)|(?:without|exclude|skip|avoid)\s+(?:any\s+)?(?:promotions?|offers?|recommendations?)|(?:don['’]t|do not)\s+(?:show|include|recommend)(?:\s+me)?\s+(?:any\s+)?(?:promotions?|offers?))\b/i;
+const exclusion = /\b(?:no\s+(?:promotions?|offers?|recommendations?|sales pitches)|(?:without|exclude|skip|avoid)\s+(?:any\s+)?(?:promotions?|offers?|recommendations?)|(?:don['’]t|do not)\s+(?:show|include|recommend)(?:\s+me)?\s+(?:any\s+)?(?:promotions?|offers?|recommendations?))\b/i;
 export const excludesPromotions = (message: string) => exclusion.test(message);
 export const resumesJourney = (message: string) => /^(?:please )?(?:continue|resume)(?: (?:where we (?:left off|stopped)|(?:my|the|that) (?:goal|journey|preview|plan)))?[.!?]*$/i.test(message.trim());
 export const cancelsJourney = (message: string) => /^(?:please )?(?:stop|cancel|forget|never mind|nevermind)(?: (?:it|this|the|my|that))?(?: (?:plan|journey|transfer|preview|funding|deposit|goal))?[.!?]*$/i.test(message.trim());

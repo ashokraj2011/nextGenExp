@@ -7,6 +7,8 @@ import {
   pznAttributeInputSchema,
   pznContextInputSchema,
   pznNamespaceInputSchema,
+  recommendationContextLabel,
+  wealthRecommendationsTopic,
   pznRegisteredSfieldTools,
   pznRuleInputSchema,
   pznRuleTestRequestSchema,
@@ -47,6 +49,13 @@ function nowIso() {
 }
 
 const DICTIONARY_VERSION = "cep-dict-v2";
+const unfundedDefinition = "An account with no settled deposits qualifies for a first-deposit recommendation.";
+
+function readContext(record: string): PznContext {
+  const context = JSON.parse(record) as PznContext;
+  context.displayName = recommendationContextLabel(context.contextId, context.displayName);
+  return context;
+}
 
 function seedNamespaces(ts: string): PznNamespace[] {
   return [
@@ -156,7 +165,7 @@ function seedAttributes(ts: string): PznAttribute[] {
       dataType: "enum",
       allowedOperators: ["eq", "ne", "in", "not_in"],
       enumOptions: [
-        { value: "unfunded", label: "Unfunded", definition: "Zero settled deposits; eligible for first-deposit onboarding offers." },
+        { value: "unfunded", label: "Unfunded", definition: unfundedDefinition },
         { value: "funded", label: "Funded", definition: "At least one settled deposit has posted to the account." },
       ],
       unit: "",
@@ -421,8 +430,7 @@ function seedRules(ts: string): PznRule[] {
 function seedContexts(ts: string): PznContext[] {
   return [
     {
-      contextId: "wealth-next-best-offers",
-      displayName: "Wealth Next-Best Offers",
+      ...wealthRecommendationsTopic,
       description: "Personalized text recommendations for cash optimization, beneficiary protection, home-buying acceleration, and first-deposit onboarding.",
       channel: "all",
       contextRuleIds: [],
@@ -561,6 +569,10 @@ export class SelfServicePznStore implements ActiveSelfServicePznProvider {
     const attributes = attrRows.map((r) => JSON.parse(r.record) as PznAttribute);
     const byNs = new Map<string, PznAttribute[]>();
     for (const a of attributes) {
+      if (a.builtIn && a.namespaceId === "account" && a.id === "funding_status") {
+        const unfunded = a.enumOptions.find((option) => option.value === "unfunded");
+        if (unfunded?.definition === "Zero settled deposits; eligible for first-deposit onboarding offers.") unfunded.definition = unfundedDefinition;
+      }
       const list = byNs.get(a.namespaceId) ?? [];
       list.push(a);
       byNs.set(a.namespaceId, list);
@@ -742,12 +754,12 @@ export class SelfServicePznStore implements ActiveSelfServicePznProvider {
 
   listContexts(): PznContext[] {
     return this.db.all<{ record: string }>("SELECT record FROM pzn_contexts ORDER BY updated_at DESC, context_id")
-      .map((r) => JSON.parse(r.record) as PznContext);
+      .map((r) => readContext(r.record));
   }
 
   getContext(contextId: string): PznContext | undefined {
     const row = this.db.one<{ record: string }>("SELECT record FROM pzn_contexts WHERE context_id = ?", contextId);
-    return row ? JSON.parse(row.record) as PznContext : undefined;
+    return row ? readContext(row.record) : undefined;
   }
 
   upsertContext(raw: PznContextInput | unknown): PznContext {

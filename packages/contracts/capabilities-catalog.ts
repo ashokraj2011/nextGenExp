@@ -112,8 +112,8 @@ export const CEP_CAPABILITIES: readonly CepCapabilityDefinition[] = [
     description: "Build a bespoke ad-hoc interactive visualization, slider calculator, comparison matrix, intake form, checklist, roadmap, or custom dashboard not covered by the specific domain tools above.",
     examples: [
       "Build a compound interest savings calculator with sliders",
-      "Create an employee onboarding intake form",
-      "Design a release readiness checklist",
+      "Build a form for a savings goal",
+      "Compare two savings scenarios in a chart",
     ],
   },
 ] as const;

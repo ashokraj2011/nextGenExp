@@ -21,6 +21,7 @@ import {
   ThumbsUp,
   X,
 } from "lucide-react";
+import { wealthRecommendationsTopic } from "../../packages/contracts/self-service-pzn";
 import { adminPaths } from "../../packages/contracts/admin-paths";
 import type {
   PznCopilotActionLog,
@@ -112,7 +113,7 @@ const RAIL_TOPICS = [
   { id: "context_matrix", label: "Contexts & Attached Contents", prompt: "Show all contexts with attached contents and rules", Icon: Layers },
   { id: "rules_list", label: "All Rules Catalog", prompt: "Show all rules", Icon: FileText },
   { id: "dictionary", label: "Data Dictionary", prompt: "Show all Data Dictionary namespaces and business definitions", Icon: BookOpen },
-  { id: "live_ts", label: "Run Live TS (Alice & Jordan)", prompt: "Test wealth-next-best-offers for Alice Morgan and Jordan Lee", Icon: Play },
+  { id: "live_ts", label: "Run Live TS (Alice & Jordan)", prompt: `Test ${wealthRecommendationsTopic.displayName} for Alice Morgan and Jordan Lee`, Icon: Play },
 ];
 
 export function RecommendationWorkspace() {
@@ -278,7 +279,7 @@ export function RecommendationWorkspace() {
     return [
       { label: "Open Rule Builder Widget", prompt: "Open the interactive rule builder widget" },
       { label: "Contexts & Attached Contents", prompt: "Show all contexts with attached contents and rules" },
-      { label: `Run Live TS for ${activeCustomer?.displayName ?? "Alice"}`, prompt: `Test wealth-next-best-offers for ${activeCustomer?.displayName ?? "Alice Morgan"} and Jordan Lee` },
+      { label: `Run Live TS for ${activeCustomer?.displayName ?? "Alice"}`, prompt: `Test ${wealthRecommendationsTopic.displayName} for ${activeCustomer?.displayName ?? "Alice Morgan"} and Jordan Lee` },
     ];
   }, [latestAssistant, activeCustomer]);
 
@@ -292,9 +293,9 @@ export function RecommendationWorkspace() {
         ];
       case "contexts":
         return [
-          { label: "Create & Publish Treasury Offer", prompt: "Create a Treasury Ladder offer for cash over $20,000, attach to context treasury_nudge, and publish it" },
+          { label: "Create & Publish Treasury Recommendation", prompt: "Create a Treasury Ladder recommendation for cash over $20,000, attach to context treasury_nudge, and publish it" },
           { label: "Show Contexts & Attachments", prompt: "Show all contexts with attached contents and rules" },
-          { label: "Compare Alice vs Jordan TS", prompt: "Test wealth-next-best-offers for Alice Morgan and Jordan Lee" },
+          { label: "Compare Alice vs Jordan TS", prompt: `Test ${wealthRecommendationsTopic.displayName} for Alice Morgan and Jordan Lee` },
         ];
       case "dictionary":
         return [
@@ -304,21 +305,21 @@ export function RecommendationWorkspace() {
         ];
       case "live_ts":
         return [
-          { label: "Compare Alice & Jordan MIDs", prompt: "Test wealth-next-best-offers for Alice Morgan and Jordan Lee" },
-          { label: "What-if Alice Cash = $5,000", prompt: "Simulate wealth-next-best-offers for Alice Morgan with portfolio.cash_usd = 5000" },
+          { label: "Compare Alice & Jordan MIDs", prompt: `Test ${wealthRecommendationsTopic.displayName} for Alice Morgan and Jordan Lee` },
+          { label: "What-if Alice Cash = $5,000", prompt: `Simulate ${wealthRecommendationsTopic.displayName} for Alice Morgan with portfolio.cash_usd = 5000` },
           { label: "Show Context Matrix", prompt: "Show all contexts with attached contents and rules" },
         ];
       case "approvals":
         return [
           { label: "Show Pending Approvals", prompt: "Show pending approvals" },
-          { label: "Publish wealth-next-best-offers", prompt: "Publish wealth-next-best-offers" },
+          { label: `Publish ${wealthRecommendationsTopic.displayName}`, prompt: `Publish ${wealthRecommendationsTopic.displayName}` },
           { label: "Show Context Matrix", prompt: "Show all contexts with attached contents and rules" },
         ];
       default:
         return [
           { label: "Define a Rule (Widget)", prompt: "Open the interactive rule builder widget" },
           { label: "Contexts & Attached Contents", prompt: "Show all contexts with attached contents and rules" },
-          { label: "Run Live TS (Alice & Jordan)", prompt: "Test wealth-next-best-offers for Alice Morgan and Jordan Lee" },
+          { label: "Run Live TS (Alice & Jordan)", prompt: `Test ${wealthRecommendationsTopic.displayName} for Alice Morgan and Jordan Lee` },
         ];
     }
   }, [section]);

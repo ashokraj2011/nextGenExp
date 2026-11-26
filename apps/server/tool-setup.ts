@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import host from "../../fixtures/host.json";
 import { findProfileById, listAllProfiles } from "../../packages/customer-profiles";
+import { customerWorkflow } from "../../packages/contracts/customer-workflows";
 import { fundingWorkflowIssue } from "../../packages/contracts/funding-workflow";
 import { glossaryAllowsCondition } from "../../packages/contracts/rule-glossary";
 import {
@@ -30,7 +31,7 @@ export function toolSetupTag(setup: ToolSetup) {
 
 export function toolSetupView(setup: ToolSetup): ToolSetupView {
   return {
-    setup, content: availableToolContent(), contexts, glossary: mockRuleGlossary,
+    setup, defaultCcreRules: tsFixtures.defaultCcreRules, content: availableToolContent(), contexts, glossary: mockRuleGlossary,
     defaultPersonaId: host.defaultPersonaId,
     defaultScenarioId: host.defaultScenarioId,
     personas: listAllProfiles().map(({ personaId, displayName, allowedScenarios }) => ({ personaId, displayName, allowedScenarios })),
@@ -55,8 +56,11 @@ function validateMock(scenarioId: string, contextId: string, output: MockOutput 
 function validateCcreRule(rule: MockCcreRule) {
   validateScope(rule.scenarioId, rule.contextId);
   const contentIds = new Set(availableToolContent().map(({ contentId }) => contentId));
-  if (!contentIds.has(rule.contentId)) {
+  if (!contentIds.has(rule.contentId) || rule.workflowRequiresContentIds?.some((id) => !contentIds.has(id))) {
     throw new ApiError(400, "invalid_ccre_treatment", "Choose a rule target from the eligible demo catalog.");
+  }
+  if (rule.workflow && !customerWorkflow(rule.workflow)) {
+    throw new ApiError(400, "unknown_rule_workflow", "Choose a registered customer workflow and version.");
   }
   const { condition } = rule;
   if (condition.kind === "attribute" && !glossaryAllowsCondition(mockRuleGlossary, condition)) {
@@ -107,8 +111,9 @@ export async function previewTreatmentSelector(input: TreatmentPreviewInput, por
   const source = output ? "override" : "fixture";
   const adapter = new FixtureTsAdapter({ scenarioId, ordinal }, output ? [{ scenarioId, contextId, output }] : [], ccreRules, portfolios);
   try {
-    const { contentIds, ccre } = await adapter.selectEligibleContent({ mid: persona.syntheticMid, context: contextId });
-    return { status: contentIds.length ? "ranked" : "empty", source, contentIds, ccre };
+    const { contentIds, ccre, recommendations, actionMatches } = await adapter.selectEligibleContent({ mid: persona.syntheticMid, context: contextId });
+    const workflows = recommendations.recommendations.filter((item) => item.kind === "workflow");
+    return { status: contentIds.length ? "ranked" : "empty", source, contentIds, ccre, ...(actionMatches.length && { actions: actionMatches.map((rule) => rule.action) }), ...(workflows.length && { workflows }) };
   } catch (error) {
     if (error instanceof TreatmentSelectorTimeout) return { status: "timeout", source };
     throw error;

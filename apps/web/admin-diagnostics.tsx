@@ -495,7 +495,7 @@ export function AdminDiagnostics({ view, selectThread }: { view: "logs" | "inspe
           {configuration?.conversations.map(({ id, title: name, personaId, audience, archivedAt }) => (
             <option key={id} value={id}>
               {name} · {configuration.personas.find((profile) => profile.personaId === personaId)?.displayName ?? personaId}
-              {audience === "admin" ? " · Test chat" : ""}{archivedAt !== undefined ? " · Archived" : ""}
+              {audience === "admin" ? " · Admin chat" : ""}{archivedAt !== undefined ? " · Archived" : ""}
             </option>
           ))}
         </select>

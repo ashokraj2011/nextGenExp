@@ -4,7 +4,6 @@
   { "context": "goals", "id": "goal.progress", "requiresContentIds": ["home_down_payment_progress"] },
   { "context": "goals", "id": "goal.savings.simulate", "requiresContentIds": ["home_down_payment_progress"] },
   { "context": "goals", "id": "goal.savings.required-contribution", "requiresContentIds": ["home_down_payment_progress"] },
-  { "context": "address-update", "id": "account.address.prepare", "requiresContentIds": ["address_update_guide"] },
   { "context": "learning", "id": "retirement.education", "requiresContentIds": ["retirement_learning"] },
   { "context": "learning", "id": "beneficiary.review", "requiresContentIds": ["beneficiary_update"] }
 ]

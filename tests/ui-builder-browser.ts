@@ -36,6 +36,11 @@ try {
   await page.getByRole("button", { name: "Remove Show balances", exact: true }).click();
   await page.getByRole("button", { name: "Save draft", exact: true }).click();
   await page.getByText("Draft saved.", { exact: true }).waitFor();
+  await preview.getByText("Try a chat turn", { exact: true }).click();
+  await preview.getByLabel("Customer message").fill("Compare available and current balances.");
+  await preview.getByRole("button", { name: "Send message" }).click();
+  await preview.getByText("Draft layout applied.", { exact: true }).waitFor();
+  await preview.getByText("Try a chat turn", { exact: true }).click();
   await page.getByRole("button", { name: "Publish", exact: true }).click();
   await page.getByText("Published to the shared design library.", { exact: true }).waitFor();
   await preview.getByRole("heading", { name: "Understanding your balances" }).waitFor({ state: "hidden" });
@@ -58,6 +63,53 @@ try {
   await customerInput.fill("Compare available and current balances.");
   await customerInput.press("Enter");
   await customer.getByRole("heading", { name: "Read both balances", exact: true }).waitFor();
+  const retirementPage = await browser.newPage({ viewport: { width: 1360, height: 1000 }, reducedMotion: "reduce" });
+  await retirementPage.goto(app.url + "/login");
+  await retirementPage.getByRole("button", { name: "Sign in as Alice Morgan", exact: true }).click();
+  await retirementPage.getByRole("button", { name: "Retirement accounts", exact: true }).click();
+  const heldAccounts = retirementPage.getByRole("region", { name: "Your retirement accounts", exact: true });
+  await heldAccounts.getByRole("button", { name: /Rollover IRA.*6105/ }).waitFor();
+  const accountQuestion = retirementPage.getByRole("textbox", { name: "Your question" });
+  await accountQuestion.fill("Who's the beneficiary on the second one?");
+  await accountQuestion.press("Enter");
+  await retirementPage.getByRole("region", { name: "Rollover IRA", exact: true }).getByText("No beneficiary on file", { exact: true }).waitFor();
+  await retirementPage.getByRole("heading", { name: "Update your beneficiaries", exact: true }).waitFor();
+  const retirementShots = resolve(process.env.PZN_TEST_SCREENSHOTS ?? "test-results");
+  await mkdir(retirementShots, { recursive: true });
+  await retirementPage.getByRole("heading", { name: "Update your beneficiaries" }).evaluate((heading) => heading.scrollIntoView({ block: "center", behavior: "instant" }));
+  await retirementPage.screenshot({ path: resolve(retirementShots, "retirement-account-review.png"), animations: "disabled" });
+  assert.doesNotMatch(await retirementPage.locator("main").innerText(), /deal desk|sales pipeline|revops/i);
+  await retirementPage.getByRole("button", { name: "See beneficiary update steps", exact: true }).click();
+  await retirementPage.getByText("Open beneficiary settings", { exact: true }).waitFor();
+  await accountQuestion.fill("Show the sales pipeline for DEAL-904.");
+  await accountQuestion.press("Enter");
+  await retirementPage.getByText(/You're in Wealth Advisory/).waitFor();
+  await retirementPage.close();
+  const formDesign = {
+    name: "Adjust savings target", description: "Edit the savings target while reviewing balances.", layout: "stack",
+    targets: [{ kind: "intent", id: "show_balance" }],
+    slots: [{ kind: "form", id: "goal", title: "Savings target", description: "", submitLabel: "Save target", writeBack: true,
+      fields: [{ id: "amount", label: "New target", type: "currency", placeholder: "", required: true, options: [], defaultBinding: "goal.target" }] }],
+  };
+  const publication = await page.request.post(app.url + "/api/admin/ui-layouts", { data: { operation: "publish", design: formDesign } });
+  assert.equal(publication.status(), 200);
+  await customerInput.fill("Show my available and current balance amounts.");
+  await customerInput.press("Enter");
+  const form = customer.getByRole("region", { name: "Savings target" });
+  const amount = form.getByRole("spinbutton");
+  await amount.fill("82000");
+  const writeUrl = "**/api/workspace/*/apply-bindings";
+  await customer.route(writeUrl, (route) => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "Temporarily unavailable" }) }));
+  await form.getByRole("button", { name: "Save target" }).click();
+  await form.getByRole("alert").waitFor();
+  assert.equal(await amount.inputValue(), "82000");
+  assert.equal(await customer.getByText(/^Submitted "Savings target"/).count(), 0);
+  await customer.unroute(writeUrl);
+  await form.getByRole("button", { name: "Save target" }).click();
+  await form.getByText("Saved to Customer 360 (goal.target)", { exact: true }).waitFor();
+  const reloaded = await customer.request.get(app.url + "/api/bootstrap");
+  const account = (await reloaded.json()).personas.find((p: { personaId: string }) => p.personaId === "demo-returning");
+  assert.equal(account.overview.homeGoal.targetCents, 8_200_000);
   await customer.close();
 
   const screenshots = process.env.PZN_TEST_SCREENSHOTS;

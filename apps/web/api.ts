@@ -48,10 +48,11 @@ import type { EvaluationRow } from "../../packages/contracts/evaluation";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import type { RecordUpdate, Bootstrap, ProfileChoice, Conversation, ConversationChange, ConversationView, DomainWriteAuditEntry, EngagementAnalyticsView, TurnAccepted, TurnView } from "../../packages/contracts/api";
 import { pendingActionsContext, type WorkspaceActionLog, type WorkspaceNextStep, type WorkspacePendingAction, type WorkspacePin } from "../../packages/contracts/workspace";
-import type { TurnPayloads } from "../../packages/contracts/inspector";
+import type { TreatmentRun, TurnPayloads } from "../../packages/contracts/inspector";
 import type { ContextCatalog, PropensityResult, SelectionMode } from "../../packages/contracts/domain";
 import type { DraftCheck, Integration, IntegrationCopilotRequest, IntegrationCopilotResponse, IntegrationTasksView, McpImportCandidate, TaskContract, TaskContractInput, TaskRun } from "../../packages/contracts/integration-task";
 import type { MockCcreRule, ToolSetup, ToolSetupView, TreatmentPreview, TreatmentPreviewInput, TreatmentSource } from "../../packages/contracts/tool-setup";
+import type { FlowCatalogSetup, FlowOverrides, FlowScope } from "../../packages/contracts/routing-flows";
 import type {
   PznAttribute,
   PznAttributeInput,
@@ -136,7 +137,7 @@ export const api = {
   selectProfile: (personaId: string | null) => request<{ personaId: string | null }>("/api/profile-session", { personaId }),
   bootstrap: (domainId: Conversation["domainId"] = "wealth") => request<Bootstrap>("/api/bootstrap?domain=" + domainId),
   adminBootstrap: (domainId?: Conversation["domainId"]) => request<Bootstrap>("/api/admin/bootstrap" + (domainId ? "?domain=" + domainId : "")),
-  evaluation: () => request<{ mode: "live" | "test"; rows: EvaluationRow[] }>("/api/admin/evaluation"),
+  evaluation: () => request<{ mode: "live"; rows: EvaluationRow[] }>("/api/admin/evaluation"),
   capabilities: () => request<{ manifests: CapabilityManifest[]; tools: { ref: string; label: string; output: OutputKind; invariant: string }[] }>("/api/admin/capabilities"),
   publishCapability: (manifest: unknown, validate: boolean) => request<CapabilityManifest>(
     "/api/admin/" + (validate ? "capability-validation" : "capabilities"), manifest,
@@ -148,6 +149,8 @@ export const api = {
     "/api/admin/customer-events", { personaId, eventId, type: "account.first_deposit.completed" },
   ),
   uiLayouts: () => request<UiLayoutCatalog>("/api/admin/ui-layouts"),
+  testUiLayout: (domain: Conversation["domainId"], design: UiDesign, message: string, personaId?: string) =>
+    request<TurnAccepted & { layoutId: string }>("/api/admin/ui-layout-test?domain=" + domain, { design, message, personaId }),
   saveUiLayout: (change: UiLayoutChange) => request<UiLayoutRecord>("/api/admin/ui-layouts", change),
   previewUiLayout: (design: UiDesign, personaId?: string, domainId: Conversation["domainId"] = "wealth") => request<DisplayExperience>(
     "/api/admin/ui-layout-preview?domain=" + domainId,
@@ -185,7 +188,13 @@ export const api = {
   reorderRegistryNba: (orderedIds: string[]) => request<ExperienceRegistryView>("/api/admin/registry-nba-reorder", { orderedIds }),
   deleteOrResetRegistryNba: (id: string) => request<ExperienceRegistryView>("/api/admin/registry-nba-delete", { id }),
   toolSetup: () => requestJson<ToolSetupView>("/api/admin/tools"),
+  routingFlows: (scope?: FlowScope) => requestJson<FlowCatalogSetup>("/api/admin/routing-flows" + (scope ? "?scope=" + scope : "")),
+  saveRoutingFlows: (scope: FlowScope, changes: FlowOverrides, revision?: string) =>
+    requestJson<FlowCatalogSetup>("/api/admin/routing-flows?scope=" + scope, changes, revision),
   saveToolSetup: (setup: ToolSetup, revision?: string) => requestJson<ToolSetup>("/api/admin/tools", setup, revision),
+  testToolSetup: (setup: ToolSetup, personaId: string, scenarioId: string) => request<ConversationView>(
+    "/api/admin/conversations?scope=preview", { setup, conversation: { personaId, scenarioId } },
+  ),
   createCcreRule: (rule: MockCcreRule) => request<MockCcreRule>("/api/admin/ccre-rules", rule),
   previewTreatmentSelector: (input: TreatmentPreviewInput) => request<TreatmentPreview>("/api/admin/treatment-preview", input),
   recordUpdates: (id: string) => request<RecordUpdate[]>("/api/conversations/" + id + "/updates"),
@@ -259,7 +268,7 @@ export const api = {
   saveOmnichannel: (config: Partial<OmnichannelConfig>) => request<OmnichannelView>("/api/admin/omnichannel", config),
   testOmnichannel: () => request<{ delivery: OmnichannelDelivery; view: OmnichannelView }>("/api/admin/omnichannel-test", {}),
   evals: () => request<EvalSuiteView>("/api/admin/evals"),
-  runEvals: (mode: "deterministic" | "live_llm" = "deterministic") => request<{ report: EvalRunReport; runs: EvalRunReport[] }>("/api/admin/eval-run", { mode }),
+  runEvals: () => request<{ report: EvalRunReport; runs: EvalRunReport[] }>("/api/admin/eval-run", {}),
   compliancePacket: () => request<ComplianceAuditPacket>("/api/admin/compliance-packet"),
   workflows: () => request<WorkflowsAdminView>("/api/workflows"),
   generateWorkflow: (prompt: string) => request<{ definition: WorkflowDefinitionUpsertInput; generatedBy: "copilot_llm" | "synthesizer"; summary: string }>("/api/workflows/generate", { prompt }),
@@ -329,6 +338,8 @@ export const api = {
   ),
   debug: (id: string) => request<Trace>("/api/admin/inspector/" + id),
   payloads: (id: string) => request<TurnPayloads>("/api/admin/logs/" + id),
+  treatmentRuns: (personaId: string, context: string, turn?: string) =>
+    request<TreatmentRun[]>("/api/admin/treatment-runs?" + new URLSearchParams({ personaId, context, ...(turn && { turn }) })),
   pendingActionLogs: () => request<WorkspaceActionLog[]>("/api/admin/pending-action-logs"),
   pznWorkspace: () => request<PznStudioWorkspaceState>("/api/pzn/workspace"),
   pznSaveNamespace: (input: PznNamespaceInput) => request<{ status?: "pending_approval"; approval?: ApprovalRecord; namespace?: PznNamespace; workspace: PznStudioWorkspaceState }>("/api/pzn/namespaces", input),

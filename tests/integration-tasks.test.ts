@@ -57,7 +57,7 @@ test("contract guards: closed schemas, local refs, approval rules, and semver on
 test("integration tasks run through sfield with native digest-bound approvals, reconciliation, and artifacts", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "cep-int-host-"));
   const gateway = await startFixtureGateway();
-  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: gateway.settings, mode: "test", inspectorEnabled: true });
+  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: gateway.settings, inspectorEnabled: true });
   t.after(async () => { await app.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
   const client = await testClient(app.url);
   const run = (input: Record<string, unknown>, expected = 200, toolRef = CREATE, provenance?: Record<string, string>) =>
@@ -177,7 +177,7 @@ test("integration tasks run through sfield with native digest-bound approvals, r
 test("pending integration approvals survive a server restart and still execute exactly once", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "cep-int-restart-"));
   const gateway = await startFixtureGateway();
-  const start = () => startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: gateway.settings, mode: "test", inspectorEnabled: true });
+  const start = () => startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: gateway.settings, inspectorEnabled: true });
   let app = await start();
   t.after(async () => { await app.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
   let client = await testClient(app.url);
@@ -222,7 +222,7 @@ test("pending integration approvals survive a server restart and still execute e
 test("the approval check inside the sfield tool rejects missing, forged, replayed, and mismatched approvals", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "cep-int-forged-"));
   const gateway = await startFixtureGateway();
-  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: gateway.settings, mode: "test", inspectorEnabled: true });
+  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: gateway.settings, inspectorEnabled: true });
   t.after(async () => { await app.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
   const client = await testClient(app.url);
   const runtime = app.internals.runtime!;
@@ -277,7 +277,7 @@ test("the approval check inside the sfield tool rejects missing, forged, replaye
 test("chat authoring: connect an MCP server, import tools, publish, run, and draft tasks — nothing saved without a click", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "cep-int-author-"));
   const gateway = await startFixtureGateway();
-  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: gateway.settings, mode: "test", inspectorEnabled: true });
+  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: gateway.settings, inspectorEnabled: true });
   t.after(async () => { await app.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
   const client = await testClient(app.url);
   type Card = { kind: string; [k: string]: unknown };
@@ -365,8 +365,8 @@ test("chat authoring: connect an MCP server, import tools, publish, run, and dra
 test("operator sign-in can be switched off for local demos; it stays on by default", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "cep-op-auth-"));
   const gateway = await startFixtureGateway();
-  const on = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: join(dir, "on"), gateway: gateway.settings, mode: "test", inspectorEnabled: true });
-  const off = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: join(dir, "off"), gateway: gateway.settings, mode: "test", inspectorEnabled: true, operatorAuth: "off" });
+  const on = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: join(dir, "on"), gateway: gateway.settings, inspectorEnabled: true });
+  const off = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: join(dir, "off"), gateway: gateway.settings, inspectorEnabled: true, operatorAuth: "off" });
   t.after(async () => { await on.close(); await off.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
 
   assert.equal((await fetch(`${on.url}/api/integrations`)).status, 401, "default: sign-in required");

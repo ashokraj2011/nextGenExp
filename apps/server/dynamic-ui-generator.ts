@@ -19,7 +19,7 @@ import { generateWidgetFromText } from "./widget-library";
 
 const dynamicUiTrigger = /\b(widget|table|bar chart|chart|graph|dashboard|visuali[sz]e|visuali[sz]ation|calculator|simulator|matrix|breakdown|dynamic ui|custom ui|interactive|approval\s+(?:card|flow|form|workflow|request|queue)|pending\s+approvals?|show\s+(?:my\s+)?approvals?|review\s+approvals?|hitl\s+queue|pagerduty|external\s+connector|invoke\s+connector|run\s+connector|trigger\s+webhook|timeline|roadmap|triage|incident\s+(?:triage|dashboard|timeline|queue|status|report|response)|rollback|deal\s+desk|sales\s+pipeline|discount\s+approval|close[- ]plan|intake\s+form|(?:sell|buy|purchase|trim|trade)\b.*\b(?:shares?|stocks?|aapl|apple|msft|microsoft|nvda|nvidia|intc|intel|boeing|pfizer|voo)\b|tax[- ]?loss\s+harvest(?:ing)?|(?:show|list|view|all|what|see)\b.*\b(?:my\s+)?(?:stocks?|holdings?|shares?|positions?|equities)\b|\bmy\s+(?:stocks?|holdings?|shares?|positions?)\b|stock\s+(?:holdings?|positions?|list)|build\s+(?:me\s+)?a\b|design\s+(?:me\s+)?a\b|generate\s+(?:me\s+)?a\b|create\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist|workflow)|make\s+a\s+.*(?:ui|card|view|table|chart|calculator|tracker|breakdown|form|board|dashboard|timeline|approval|checklist))\b/i;
 const nonDynamicGuard = /\b(weather|stock price|tomorrow|create a? ?rule)\b/i;
-const opsIncidentTrigger = /\b(incident|triage|rollback|sre|sev\s*[0-3]|p[1-3]\b|latency|5xx|error rate|it ops|operations dashboard|post-incident|production alert|inc-\d+)\b/i;
+const opsIncidentTrigger = /\b(incidents?|triage|rollback|sre|sev\s*[0-3]|p[1-3]\b|latency|5xx|error rate|it ops|operations dashboard|post-incident|production alert|inc-\d+)\b/i;
 const salesDealTrigger = /\b(deals?|deal\s*desk|deal-\d+|sales\s*pipeline|pipeline\s*(?:breakdown|chart|table|forecast)|revops|discount\s*approval|pricing\s*exception|mutual\s*action\s*plan|close[- ]plan|acme\s*cloud|enterprise\s*renewal)\b/i;
 const approvalQueueTrigger = /\b(pending\s+approvals?|approval\s+queue|show\s+(?:my\s+)?approvals?|review\s+approvals?|hitl\s+queue)\b/i;
 const connectorActionTrigger = /\b(pagerduty|external\s+connector|invoke\s+connector|run\s+connector|trigger\s+webhook|servicenow\s+webhook)\b/i;
@@ -143,6 +143,11 @@ function recordChoices(prompt: string, title: string, source: string, choices: {
   } };
 }
 
+export function isRecordTimeline(prompt: string, capability: "ops_incident" | "sales_deal_desk") {
+  return capability === "ops_incident" ? /\b(timeline|post-incident|root-cause|history)\b/i.test(prompt)
+    : /\b(timeline|close[- ]plan|mutual\s*action)\b/i.test(prompt);
+}
+
 export function synthesizeDynamicCanvas(
   prompt: string,
   profileSummary?: string,
@@ -171,13 +176,13 @@ export function synthesizeDynamicCanvas(
     recordId = primary.id;
     customBadge = `IT Operations · ${primary.id}`;
     customTitle = `${primary.id}: ${primary.title}`.slice(0, 96);
-    customSubtitle = `${primary.service} · ${primary.environment} · Status: ${statusLabel}`;
+    customSubtitle = `${primary.service} · ${primary.environment} · ${statusLabel} · Owner: ${primary.owner}`.slice(0, 160);
     customDisclaimer = "Source: " + view.summary.sourceLabel;
     customFollowUp = primary.rollbackStatus === "pending"
-      ? "Show the incident timeline and active incident queue"
-      : "Refresh the IT incident triage dashboard with live status";
+      ? `Show the incident timeline for ${primary.id}`
+      : `Show the current status of ${primary.id}`;
 
-    const isTimelineFocus = /\b(timeline|post-incident|root-cause|history)\b/.test(lower);
+    const isTimelineFocus = isRecordTimeline(prompt, "ops_incident");
     nodes.push({
       type: "metrics",
       items: [
@@ -255,12 +260,13 @@ export function synthesizeDynamicCanvas(
     customDisclaimer = "Source: " + view.summary.sourceLabel;
     customFollowUp = "Show the timeline for " + primary.id;
 
-    const isTimelineFocus = /\b(timeline|close[- ]plan|mutual\s*action)\b/.test(lower);
+    const isTimelineFocus = isRecordTimeline(prompt, "sales_deal_desk");
     const isPipelineFocus = /\b(pipeline|bar chart|chart)\b/.test(lower);
     nodes.push({
       type: "metrics",
       items: [
         { label: "Stage", value: primary.stage },
+        { label: "Owner", value: primary.owner.slice(0, 36) },
         { label: "Discount", value: primary.discountPct + "%", delta: primary.discountStatus },
         { label: `${primary.id} ARR`, value: usdFmt(primary.arrUsd), delta: `${primary.winProbabilityPct}% · ${primary.stage}` },
       ],

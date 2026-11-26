@@ -1,0 +1,11 @@
+{
+  "DEMO-MID-1001": [
+    { "id": "RET-1842", "label": "Workplace 401(k)", "beneficiary": "Jamie Morgan" },
+    { "id": "RET-6105", "label": "Rollover IRA", "beneficiary": null }
+  ],
+  "DEMO-MID-1002": [
+    { "id": "RET-3074", "label": "Traditional IRA", "beneficiary": "Taylor Lee" },
+    { "id": "RET-9281", "label": "Roth IRA", "beneficiary": "Casey Lee" }
+  ],
+  "DEMO-MID-1003": []
+}

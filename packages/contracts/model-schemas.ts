@@ -53,13 +53,18 @@ export const propensityResultSchema = closed({
   scores: array(closed({ contextId: string, score }), 24),
 });
 export const treatmentResultSchema = array(string, 12);
-export const treatmentRecommendationsResultSchema = closed({
-  schemaVersion: { type: "string", enum: ["2.0"] },
-  recommendations: array({
-    ...closed({ kind: { type: "string", enum: ["content", "workflow"] }, id: string, version: string }),
-    required: ["kind", "id"],
-  }, 24),
-});
+// The registry accepts a flat item schema. Chat validates each kind with its exact Zod contract.
+function recommendationsResult(version: string, kinds: string[]) {
+  return closed({
+    schemaVersion: { type: "string", enum: [version] },
+    recommendations: array({
+      ...closed({ kind: { type: "string", enum: kinds }, id: string, version: string, forContentIds: array(string, 12) }),
+      required: ["kind", "id"],
+    }, 24),
+  });
+}
+export const treatmentRecommendationsResultSchema = recommendationsResult("2.0", ["content", "workflow"]);
+export const treatmentDecisionResultSchema = recommendationsResult("2.1", ["content", "action", "workflow"]);
 const fundingMethodResult = closed({ methodId: string, label: string, from: string, to: string });
 const fundingAmounts = { amountCents: { type: "integer", minimum: 1 }, currency: { type: "string", enum: ["USD"] } };
 export const fundingOptionsResultSchema = closed({ methods: { ...array(fundingMethodResult, 4), minItems: 1 }, ...fundingAmounts });
@@ -76,6 +81,10 @@ export const fundingAgentResultSchema = closed({
   methodId: { type: ["string", "null"] },
 });
 const cents = { type: "integer", minimum: 0, maximum: 1_000_000_000_000 };
+export const retirementAccountsResultSchema = closed({
+  title: string, accounts: array(closed({ id: string, label: string }), 12),
+  selected: { anyOf: [closed({ id: string, label: string, beneficiary: { type: ["string", "null"] } }), { type: "null" }] },
+});
 export const portfolioResultSchema = closed({
   fixtureVersion: string, asOf: string, currency: { type: "string", enum: ["USD"] },
   cashCents: cents, equityCents: cents, fixedIncomeCents: cents,

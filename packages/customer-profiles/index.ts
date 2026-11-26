@@ -175,8 +175,9 @@ export class CustomerProfileStore {
     };
     const updatedFields: string[] = [];
     const parseDollarsToCents = (raw: string): number | null => {
-      const n = Number(raw.replace(/[^0-9.]/g, ""));
-      return Number.isFinite(n) && n >= 0 ? Math.min(1_000_000_000_00, Math.round(n * 100)) : null;
+      if (!/^\$?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d{1,2})?$/.test(raw)) return null;
+      const cents = Math.round(Number(raw.replace(/[$,]/g, "")) * 100);
+      return Number.isSafeInteger(cents) && cents <= 1_000_000_000_00 ? cents : null;
     };
 
     for (const [key, rawVal] of Object.entries(updates)) {
@@ -186,11 +187,13 @@ export class CustomerProfileStore {
       else if (key === "customer.segment") { next.segment = value.slice(0, 80); updatedFields.push(key); }
       else if (key === "customer.beneficiaryStatus") {
         const lower = value.toLowerCase();
-        next.beneficiaryStatus = (lower === "on_file" || lower === "on file" || lower === "true" || lower === "yes") ? "on_file" : "missing";
+        if (!["on_file", "on file", "true", "yes", "missing", "false", "no"].includes(lower)) continue;
+        next.beneficiaryStatus = ["on_file", "on file", "true", "yes"].includes(lower) ? "on_file" : "missing";
         updatedFields.push(key);
       } else if (key === "customer.fundingStatus") {
         const lower = value.toLowerCase();
-        next.accountFundingStatus = (lower === "funded" || lower === "true" || lower === "yes") ? "funded" : "unfunded";
+        if (!["funded", "true", "yes", "unfunded", "false", "no", "awaiting first deposit"].includes(lower)) continue;
+        next.accountFundingStatus = ["funded", "true", "yes"].includes(lower) ? "funded" : "unfunded";
         updatedFields.push(key);
       } else if (key === "balances.available") {
         const cents = parseDollarsToCents(value);
@@ -209,7 +212,7 @@ export class CustomerProfileStore {
         if (cents !== null) { next.fixedIncomeCents = cents; updatedFields.push(key); }
       } else if (key === "goal.target") {
         const cents = parseDollarsToCents(value);
-        if (cents !== null) { next.homeGoalTargetCents = cents; updatedFields.push(key); }
+        if (cents !== null && cents > 0) { next.homeGoalTargetCents = cents; updatedFields.push(key); }
       } else if (key === "goal.saved") {
         const cents = parseDollarsToCents(value);
         if (cents !== null) { next.homeGoalSavedCents = cents; updatedFields.push(key); }
@@ -227,12 +230,13 @@ export class CustomerProfileStore {
             type: "text",
             value: value.slice(0, 160),
           });
-        }
+        } else continue;
         next.customAttributes = list;
         updatedFields.push(key);
       }
     }
 
+    if (updatedFields.length !== Object.keys(updates).length) return { updatedFields: [] };
     if (updatedFields.length > 0) {
       const map = new Map(this.loadOverrides());
       map.set(personaId, next);

@@ -1,15 +1,17 @@
+import type { RuleWorkflowMatch } from "../contracts/customer-workflows";
 import { z } from "zod";
 import { contextCatalogSchema, type ContextCatalog, type PropensityResult } from "../contracts/domain";
-import { workflowRecommendationSchema, type TreatmentRecommendations } from "../contracts/funding-workflow";
+import { actionRecommendationSchema, type TreatmentDecision, type TreatmentRecommendations, type WorkflowCandidate } from "../contracts/funding-workflow";
 import { portfolioSnapshotSchema } from "../contracts/portfolio";
-import { mockCcreRuleSchema, normalizedIdsSchema, treatmentOverride, type MockCcreRule, type TreatmentOverride } from "../contracts/tool-setup";
+import { effectiveCcreRules, mockCcreConditionSchema, mockCcreRuleSchema, normalizedIdsSchema, treatmentOverride, type MockCcreRule, type TreatmentOverride } from "../contracts/tool-setup";
 import { pendingActionsContext } from "../contracts/workspace";
 import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../portfolio-snapshot";
+import { memberRetirementAccounts } from "../retirement-accounts";
 import { findProfileByMid } from "../customer-profiles";
 import rawCatalog from "../../fixtures/contexts.json";
 import rawScenarios from "../../fixtures/treatment-scenarios.json";
 import host from "../../fixtures/host.json";
-import { applyMockCcreRules } from "./mock-ccre";
+import { applyMockCcreRules, matchesCondition } from "./mock-ccre";
 import { scoreContexts } from "./propensity";
 import { normalizeRecommendations, type Recommendation, type TreatmentV3 } from "./recommendations";
 import { getActiveSelfServicePznProvider, pznTextContentToCatalogEntry } from "../recommendations/self-service-engine";
@@ -30,9 +32,9 @@ const catalog = contextCatalogSchema.parse(rawCatalog);
 export const tsFixtures = z.object({
   fixtureVersion: z.string(),
   base: z.record(normalizedIdsSchema),
-  workflowRecommendations: z.array(z.object({
-    contextId: z.string(), requiresContentIds: normalizedIdsSchema, recommendation: workflowRecommendationSchema,
-  }).strict()).max(12),
+  actionRules: z.array(z.object({
+    contextId: z.string().min(1), name: z.string().min(1), condition: mockCcreConditionSchema, action: actionRecommendationSchema,
+  }).strict()),
   defaultCcreRules: z.array(mockCcreRuleSchema.omit({ scenarioId: true })),
   scenarios: z.array(z.object({ scenarioId: z.string(), label: z.string(), rules: z.array(fixtureRule) }).strict()),
 }).strict().parse(rawScenarios);
@@ -52,7 +54,7 @@ if (new Set(catalog.contexts.map((entry) => entry.contextId)).size !== catalog.c
 }
 
 export type FixtureState = Readonly<{ scenarioId: string; ordinal: number }>;
-type TreatmentRequest = { mid: string; context: string; overrideCashCents?: number };
+type TreatmentRequest = { mid: string; context: string; accountId?: string; overrideCashCents?: number };
 export type ContextScoresRequest = { mid: string; contextIds: string[] };
 export interface TsAdapter {
   listContexts(signal?: AbortSignal): Promise<ContextCatalog>;
@@ -74,6 +76,19 @@ export function fixtureRejections(state: FixtureState, context: string): Rejecti
 
 export class TreatmentSelectorTimeout extends Error {
   constructor() { super("TS_TIMEOUT"); }
+}
+
+function recommendationsFor(contentIds: string[], matches: RuleWorkflowMatch[]): TreatmentRecommendations {
+  const workflows = new Map<string, WorkflowCandidate & { forContentIds: string[] }>();
+  for (const { contentId, workflow } of matches) {
+    const key = JSON.stringify([workflow.id, workflow.version]);
+    const candidate = workflows.get(key);
+    if (!candidate) workflows.set(key, { ...workflow, forContentIds: [contentId] });
+    else if (!candidate.forContentIds.includes(contentId)) candidate.forContentIds.push(contentId);
+  }
+  return { schemaVersion: "2.0", recommendations: [
+    ...contentIds.map((id) => ({ kind: "content" as const, id })), ...workflows.values(),
+  ] };
 }
 
 export class FixtureTsAdapter implements TsAdapter {
@@ -120,14 +135,54 @@ export class FixtureTsAdapter implements TsAdapter {
     return (await this.selectEligibleContent(request, signal)).contentIds;
   }
 
-  async selectEligibleContent({ mid, context, overrideCashCents }: TreatmentRequest, signal?: AbortSignal) {
+  async selectEligibleContent({ mid, context, accountId, overrideCashCents }: TreatmentRequest, signal?: AbortSignal) {
     signal?.throwIfAborted();
     const persona = this.personaFor(mid);
+    const account = accountId ? memberRetirementAccounts(mid).find((item) => item.id === accountId) : undefined;
+    if (accountId && (!account || context !== "learning")) throw new Error("RETIREMENT_ACCOUNT_UNAVAILABLE");
+    const activeRules = effectiveCcreRules(this.state.scenarioId, context, tsFixtures.defaultCcreRules, this.ccreRules);
+    const scopedActionRules = tsFixtures.actionRules.filter((rule) => rule.contextId === context);
+    const evaluate = async (ids: string[], rules: MockCcreRule[], published: RuleWorkflowMatch[] = [], contextAllowed = true) => {
+      const needsPortfolio = rules.some(({ contentId, condition }) => (
+        ids.includes(contentId) && condition.kind === "attribute" && condition.namespaceId === "portfolio"
+      ));
+      const needsActionPortfolio = scopedActionRules.some(({ condition }) => condition.kind === "attribute" && condition.namespaceId === "portfolio");
+      const reading = (needsPortfolio || needsActionPortfolio) && overrideCashCents === undefined ? await this.portfolios.read(mid, signal) : null;
+      signal?.throwIfAborted();
+      const portfolio = reading ? portfolioSnapshotSchema.parse(reading) : null;
+      const effectiveCashCents = overrideCashCents !== undefined ? overrideCashCents : portfolio?.cashCents;
+      const input = {
+        ...this.state, contextId: context, personaId: persona.personaId, portfolioCashCents: effectiveCashCents, fundingStatus: this.fundingStatus,
+        ...(account && { beneficiaryStatus: account.beneficiary === null ? "missing" as const : "on_file" as const }),
+      };
+      const result = applyMockCcreRules([...ids], rules, input);
+      const actionMatches = contextAllowed ? scopedActionRules.filter(({ condition }) => matchesCondition(condition, input)) : [];
+      const workflowMatches = result.contentIds.flatMap((contentId) => {
+        const rule = rules.find((r) => r.contentId === contentId);
+        const matched = result.ccre?.results.some((r) => r.contentId === contentId && r.outcome === "matched");
+        if (rule?.workflow !== undefined) {
+          const ready = rule.workflowRequiresContentIds?.every((id) => result.contentIds.includes(id)) ?? true;
+          return matched && ready && rule.workflow ? [{ contentId, name: rule.name, workflow: rule.workflow, condition: rule.condition, requiresContentIds: rule.workflowRequiresContentIds }] : [];
+        }
+        return published.filter((match) => match.contentId === contentId);
+      });
+      const recommendations = recommendationsFor(result.contentIds, workflowMatches);
+      const decision: TreatmentDecision = { schemaVersion: "2.1", recommendations: [
+        ...recommendations.recommendations.filter((item) => item.kind === "content"),
+        ...actionMatches.map((rule) => rule.action),
+        ...recommendations.recommendations.filter((item) => item.kind === "workflow"),
+      ] };
+      return { ...result, portfolio, workflowMatches, actionMatches, recommendations, decision };
+    };
     const isBuiltInContext = treatmentContexts.some((entry) => entry.contextId === context);
     const selfServiceProvider = getActiveSelfServicePznProvider();
     const selfServicePub = selfServiceProvider?.getPublishedPublication(context);
-    if (selfServicePub && (!isBuiltInContext || selfServicePub.version > 1)) {
-      const overrides = overrideCashCents !== undefined ? { "portfolio.cash_usd": overrideCashCents / 100 } : undefined;
+    if (selfServicePub && (!isBuiltInContext || selfServicePub.version > 1 || selfServicePub.rules.some((rule) => rule.workflow))) {
+      const overrides = {
+        ...(this.fundingStatus && { "account.funding_status": this.fundingStatus }),
+        ...(overrideCashCents !== undefined && { "portfolio.cash_usd": overrideCashCents / 100 }),
+        ...(account && { "customer.beneficiary_status": account.beneficiary === null ? "missing" : "on_file" }),
+      };
       const evalResult = selfServiceProvider!.evaluatePublishedForTs(mid, context, overrides);
       if (evalResult) {
         const contentIds = evalResult.eligibleContents.map((c) => c.contentId);
@@ -147,21 +202,19 @@ export class FixtureTsAdapter implements TsAdapter {
             ...(cashAboveCents !== undefined && { cashAboveCents }),
           };
         });
-        const recommendations: TreatmentRecommendations = {
-          schemaVersion: "2.0",
-          recommendations: contentIds.map((id) => ({ kind: "content" as const, id })),
-        };
+        // Published eligibility is the outer limit. An attached rule can only narrow that set.
+        const overlay = activeRules.filter((rule) => this.ccreRules.some((r) =>
+          r.scenarioId === rule.scenarioId && r.contextId === context && r.contentId === rule.contentId));
+        const evaluated = await evaluate(contentIds, overlay, evalResult.workflowMatches, evalResult.contextGatePassed);
         return {
-          contentIds,
+          ...evaluated,
           renderedEntries: evalResult.eligibleContents.flatMap((card) => {
             const template = selfServicePub.contents.find((entry) => entry.contentId === card.contentId);
-            if (!template) return [];
+            if (!template || !evaluated.contentIds.includes(card.contentId)) return [];
             const entry = pznTextContentToCatalogEntry({ ...template, headline: card.headline, body: card.renderedBody });
             return [{ ...entry, sourceRef: `${entry.sourceRef}@${context}:v${selfServicePub.version}` }];
           }),
-          ccre: { beforeRules, results: ccreResults },
-          portfolio: null,
-          recommendations,
+          ccre: { beforeRules, results: [...ccreResults, ...(evaluated.ccre?.results ?? [])] },
         };
       }
     }
@@ -174,38 +227,13 @@ export class FixtureTsAdapter implements TsAdapter {
     if (override?.mode === "timeout" || fixture?.error) throw new TreatmentSelectorTimeout();
     let ids = override?.mode === "empty" ? [] : (override?.contentIds ?? fixture?.eligible ?? tsFixtures.base[context]);
     if (!override && !fixture && context === "next-step" && this.fundingStatus === "funded") ids = [...ids, "account_first_deposit_complete"];
-    const rules = this.ccreRules.filter((rule) => rule.scenarioId === this.state.scenarioId && rule.contextId === context);
-    const configuredTargets = new Set(rules.map(({ contentId }) => contentId));
-    const defaultRules = tsFixtures.defaultCcreRules
-      .filter((rule) => rule.contextId === context && !configuredTargets.has(rule.contentId))
-      .map((rule) => ({ ...rule, scenarioId: this.state.scenarioId }));
-    const activeRules = [...rules, ...defaultRules];
-    const needsPortfolio = activeRules.some(({ contentId, condition }) => (
-      ids.includes(contentId) && condition.kind === "attribute" && condition.namespaceId === "portfolio"
-    ));
-    const reading = needsPortfolio && overrideCashCents === undefined ? await this.portfolios.read(mid, signal) : null;
-    signal?.throwIfAborted();
-    const portfolio = reading ? portfolioSnapshotSchema.parse(reading) : null;
-    const effectiveCashCents = overrideCashCents !== undefined ? overrideCashCents : portfolio?.cashCents;
-    const result = applyMockCcreRules([...ids], activeRules, {
-      ...this.state, contextId: context, personaId: persona.personaId, portfolioCashCents: effectiveCashCents, fundingStatus: this.fundingStatus,
-    });
-    const recommendations: TreatmentRecommendations = {
-      schemaVersion: "2.0",
-      recommendations: [
-        ...result.contentIds.map((id) => ({ kind: "content" as const, id })),
-        ...tsFixtures.workflowRecommendations.filter(({ contextId, requiresContentIds }) => (
-          contextId === context && requiresContentIds.every((id) => result.contentIds.includes(id))
-        )).map(({ recommendation }) => recommendation),
-      ],
-    };
-    return { ...result, portfolio, recommendations, renderedEntries: undefined };
+    return { ...await evaluate(ids, activeRules), renderedEntries: undefined };
   }
 
   async selectRecommendations(request: TreatmentRequest, signal?: AbortSignal) {
     const selection = await this.selectEligibleContent(request, signal);
     const eligible = new Set(selection.contentIds);
-    const recommendations = normalizeRecommendations(selection.recommendations);
+    const recommendations = normalizeRecommendations(selection.decision);
     const funding = recommendations.find((entry) => entry.kind === "workflow" && entry.id === "account.funding.preview");
     const extensions: Omit<Extract<Recommendation, { kind: "capability" | "workflow" }>, "rank">[] = agenticRecommendations
       .filter(({ context, requiresContentIds }) => context === request.context && requiresContentIds.every((id) => eligible.has(id)))

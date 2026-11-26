@@ -16,7 +16,7 @@ export class CustomerWorldModel {
     const text = turn.public.message;
     if (!remembered.test(text)) return;
     if (excludesPromotions(text)) this.store.axe.setPromotionPreference(turn.scope, false, this.now());
-    else if (/\b(?:allow|show)\s+(?:me\s+)?(?:promotions?|offers?)\b/i.test(text)) this.store.axe.setPromotionPreference(turn.scope, true, this.now());
+    else if (/\b(?:allow|show)\s+(?:me\s+)?(?:promotions?|offers?|recommendations?)\b/i.test(text)) this.store.axe.setPromotionPreference(turn.scope, true, this.now());
   }
 
   rememberFact(turn: TurnRecord, evidence: Evidence) {

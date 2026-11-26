@@ -5,15 +5,16 @@ import { recommendationArbitrateToolRef } from "../../packages/contracts/recomme
 import { sfieldTools, toolKeys, toolVersion, type ToolKey } from "../../packages/contracts/tool-setup";
 
 const usage = {
-  catalog: { caller: "App · Before the first model call", contract: "discovery", description: "Gets the active topics from the mock Treatment Selector." },
-  propensity: { caller: "App · Before the first model call", contract: "discovery", description: "Asks Treatment Selector for the customer’s scores for the active topics." },
-  selection: { caller: "App · Finds eligible treatments", contract: "treatment", description: "Returns eligible content and can recommend the funding workflow for address updates and next-step questions." },
+  catalog: { caller: "App · Before intent selection", contract: "discovery", description: "Gets the active topics from the mock Treatment Selector." },
+  propensity: { caller: "App · Before intent selection", contract: "discovery", description: "Asks Treatment Selector for the customer’s scores for the active topics." },
+  selection: { caller: "App · Finds eligible treatments", contract: "treatment", description: "Gets eligible content, standalone actions and workflows from TS. After a click, sfield runs the registered tools for the selected reference." },
   balances: { caller: "Experience Composer", contract: "balance", description: "Looks up the customer’s sample balances." },
   glossary: { caller: "App · Creates a rule", contract: "glossary", description: "Lists the fields and comparisons you can use in a rule." },
+  retirementAccounts: { caller: "sfield · Reads account records", contract: "retirement-accounts", description: "Lists retirement accounts for the signed-in member and reads the designation on the account selected from the chat." },
   portfolio: { caller: "App · Summarizes a portfolio", contract: "portfolio", description: "Looks up what the demo customer holds in their portfolio." },
   goal: { caller: "App · Shows goal progress", contract: "goal", description: "Looks up the down payment target and monthly savings." },
   fundingOptions: { caller: "Funding preview workflow", contract: "funding", description: "Reads eligible funding methods and the preview amount." },
-  fundingStatus: { caller: "Funding preview workflow", contract: "funding", description: "Checks funding status before the agent offers a method." },
+  fundingStatus: { caller: "Funding preview workflow", contract: "funding", description: "Checks funding status before the agent lists the available methods." },
   fundingPreview: { caller: "Funding preview workflow", contract: "funding", description: "Builds a sample preview using the method read for this turn." },
 } satisfies Record<ToolKey, { caller: string; contract: string; description: string }>;
 

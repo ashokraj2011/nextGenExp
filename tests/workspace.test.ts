@@ -25,7 +25,7 @@ test("pending actions use each customer's MID and save the actual Treatment Sele
   })));
   assert.deepEqual(logs.map((log) => log.status === "succeeded" ? log.response : log.error), [
     { schemaVersion: "2.0", recommendations: [{ kind: "content", id: "beneficiary_update" }] },
-    { schemaVersion: "2.0", recommendations: [{ kind: "content", id: "fund_account" }, fundingPreviewWorkflow.recommendation] },
+    { schemaVersion: "2.0", recommendations: [{ kind: "content", id: "fund_account" }, { ...fundingPreviewWorkflow.recommendation, forContentIds: ["fund_account"] }] },
     { schemaVersion: "2.0", recommendations: [] },
   ]);
   assert.deepEqual((await client.request<Bootstrap>("/api/bootstrap")).conversations, []);

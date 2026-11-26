@@ -19,7 +19,7 @@ import type {
   PznRuleClause,
   PznStudioWorkspaceState,
 } from "../../packages/contracts/self-service-pzn";
-import { pznOperatorLabels } from "../../packages/contracts/self-service-pzn";
+import { pznOperatorLabels, recommendationContextLabel, wealthRecommendationsTopic } from "../../packages/contracts/self-service-pzn";
 import { api, toolSetupErrorMessage } from "./api";
 import { ContextMatrixWidget, RuleBuilderWidget, RulesCatalogWidget } from "./recommendation-widgets";
 import { ApprovalQueueWidget, ApprovalRequestCard } from "./recommendation-approvals";
@@ -40,13 +40,13 @@ const STARTER_PROMPTS = [
     icon: Rocket,
     title: "Create, Rule & Publish End-to-End",
     subtitle: "Define context, attach text content, create Data Dictionary rule, and publish v1",
-    prompt: "Create a Treasury Ladder text offer for customers with cash over $20,000, attach it to a new context treasury-nudge, and publish it",
+    prompt: "Create a Treasury Ladder recommendation for customers with cash over $20,000, attach it to a new context treasury-nudge, and publish it",
   },
   {
     icon: Play,
     title: "Run Live Treatment Selector (MID)",
     subtitle: "Send Alice Morgan & Jordan Lee MIDs to TS and compare Rule Engine outputs",
-    prompt: "Test wealth-next-best-offers for Alice Morgan and Jordan Lee",
+    prompt: `Test ${wealthRecommendationsTopic.displayName} for Alice Morgan and Jordan Lee`,
   },
   {
     icon: BookOpen,
@@ -258,7 +258,7 @@ export function InlineCard({
             </span>
           </div>
         </div>
-        <strong>{ctx.displayName}</strong>
+        <strong>{recommendationContextLabel(ctx.contextId, ctx.displayName)}</strong>
         <p className="pzn-subtitle" style={{ fontSize: "0.83rem" }}>{ctx.description}</p>
         <div className="pzn-list">
           {ctx.attachments.map((att) => {
@@ -283,15 +283,15 @@ export function InlineCard({
         </div>
         <div className="pzn-btn-row" style={{ marginTop: 4 }}>
           {ctx.status !== "published" || ctx.hasUnpublishedChanges ? (
-            <button type="button" className="pzn-btn pzn-btn-primary pzn-btn-sm" disabled={busy} onClick={() => onSendPrompt(`Publish ${ctx.contextId}`)}>
+            <button type="button" className="pzn-btn pzn-btn-primary pzn-btn-sm" disabled={busy} onClick={() => onSendPrompt(`Publish ${recommendationContextLabel(ctx.contextId)}`)}>
               <Rocket size={13} /> Publish to Treatment Selector
             </button>
           ) : (
-            <button type="button" className="pzn-btn pzn-btn-sm" disabled={busy} onClick={() => onSendPrompt(`Unpublish ${ctx.contextId}`)}>
+            <button type="button" className="pzn-btn pzn-btn-sm" disabled={busy} onClick={() => onSendPrompt(`Unpublish ${recommendationContextLabel(ctx.contextId)}`)}>
               Unpublish
             </button>
           )}
-          <button type="button" className="pzn-btn pzn-btn-sm" disabled={busy} onClick={() => onSendPrompt(`Test ${ctx.contextId} for Alice Morgan and Jordan Lee`)}>
+          <button type="button" className="pzn-btn pzn-btn-sm" disabled={busy} onClick={() => onSendPrompt(`Test ${recommendationContextLabel(ctx.contextId)} for Alice Morgan and Jordan Lee`)}>
             <Play size={13} /> Run Live TS (Alice &amp; Jordan)
           </button>
         </div>
@@ -406,7 +406,7 @@ export function InlineCard({
             type="button"
             className="pzn-btn pzn-btn-sm"
             disabled={busy}
-            onClick={() => onSendPrompt(`Simulate ${ev.contextId} for ${ev.customerDisplayName} with portfolio.cash_usd = 5000`)}
+            onClick={() => onSendPrompt(`Simulate ${recommendationContextLabel(ev.contextId)} for ${ev.customerDisplayName} with portfolio.cash_usd = 5000`)}
           >
             What-if: Cash = $5,000
           </button>
@@ -419,7 +419,7 @@ export function InlineCard({
                 type="button"
                 className="pzn-btn pzn-btn-sm"
                 disabled={busy}
-                onClick={() => onSendPrompt(`Test ${ev.contextId} for ${c.displayName}`)}
+                onClick={() => onSendPrompt(`Test ${recommendationContextLabel(ev.contextId)} for ${c.displayName}`)}
               >
                 Run for {c.displayName}
               </button>
@@ -441,7 +441,7 @@ export function InlineCard({
           <div key={ctx.contextId} className="pzn-attr-card">
             <div className="pzn-attr-head">
               <div className="pzn-btn-row">
-                <strong>{ctx.displayName}</strong>
+                <strong>{recommendationContextLabel(ctx.contextId, ctx.displayName)}</strong>
                 <span className="pzn-code">{ctx.contextId}</span>
                 <span className={"pzn-badge " + (ctx.status === "published" ? "is-published" : "is-draft")}>
                   {ctx.status === "published" ? `Published v${ctx.publishedVersion}` : "Draft"}
@@ -449,11 +449,11 @@ export function InlineCard({
               </div>
               <div className="pzn-btn-row">
                 {ctx.status !== "published" && (
-                  <button type="button" className="pzn-btn pzn-btn-primary pzn-btn-sm" disabled={busy} onClick={() => onSendPrompt(`Publish ${ctx.contextId}`)}>
+                  <button type="button" className="pzn-btn pzn-btn-primary pzn-btn-sm" disabled={busy} onClick={() => onSendPrompt(`Publish ${recommendationContextLabel(ctx.contextId)}`)}>
                     Publish
                   </button>
                 )}
-                <button type="button" className="pzn-btn pzn-btn-sm" disabled={busy} onClick={() => onSendPrompt(`Test ${ctx.contextId} for Alice Morgan and Jordan Lee`)}>
+                <button type="button" className="pzn-btn pzn-btn-sm" disabled={busy} onClick={() => onSendPrompt(`Test ${recommendationContextLabel(ctx.contextId)} for Alice Morgan and Jordan Lee`)}>
                   <Play size={12} /> Run TS
                 </button>
               </div>

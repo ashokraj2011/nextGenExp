@@ -1,5 +1,7 @@
 import {
   pznSfieldToolRefs,
+  recommendationContextLabel,
+  wealthRecommendationsTopic,
   type PznAttribute,
   type PznContext,
   type PznContextPublication,
@@ -193,6 +195,7 @@ RETURN STRICT JSON ONLY:
 
 RULES:
 - Every ID (namespace, attribute, contentId, ruleId, contextId) MUST be lowercase slug matching ^[a-z][a-z0-9_-]*$.
+- Call the items returned by Treatment Selector recommendations in replies and suggested prompts. Use the published IDs in tool inputs.
 - When creating a complete recommendation flow (content + rule + context), emit operations in dependency order: upsert_namespace -> upsert_attribute -> upsert_content -> upsert_rule -> upsert_context -> (optional publish_context) -> (optional evaluate_ts).
 - If the user asks to test/simulate for multiple customers (e.g. "Alice and Jordan" or "all customers"), include all requested MIDs in evaluate_ts.mids.
 - Always use exact existing Data Dictionary keys & allowedOperators unless you also emit upsert_attribute first.`;
@@ -200,14 +203,12 @@ RULES:
 
 function deterministicPlan(message: string, ws: PznStudioWorkspaceState, activeContextId?: string): LlmCopilotPlan {
   const lower = message.toLowerCase();
-  const targetCtxId = (() => {
-    for (const c of ws.contexts) {
-      if (lower.includes(c.contextId.toLowerCase()) || lower.includes(c.displayName.toLowerCase())) {
-        return c.contextId;
-      }
-    }
-    return activeContextId ?? ws.contexts[0]?.contextId ?? "wealth-next-best-offers";
-  })();
+  const namesWealthTopic = lower.includes(wealthRecommendationsTopic.displayName.toLowerCase()) || lower.includes(wealthRecommendationsTopic.contextId);
+  const wealthTopic = namesWealthTopic ? ws.contexts.find((c) => c.contextId === wealthRecommendationsTopic.contextId) : undefined;
+  const target = wealthTopic ?? ws.contexts.find((c) => lower.includes(c.contextId.toLowerCase()) || lower.includes(c.displayName.toLowerCase()));
+  const targetCtxId = target?.contextId ?? activeContextId ?? ws.contexts[0]?.contextId ?? wealthRecommendationsTopic.contextId;
+
+  const targetLabel = recommendationContextLabel(targetCtxId);
 
   // 0. Explicit interactive widget requests (define rule widget, show rules, show context matrix)
   if (/(pending approvals?|approval queue|approval policy|approvals?\b.*(show|list|review)|(show|list|review).*approvals?)/i.test(lower)) {
@@ -216,7 +217,7 @@ function deterministicPlan(message: string, ws: PznStudioWorkspaceState, activeC
       operations: [{ op: "show_approvals" }],
       suggestedPrompts: [
         "Show all contexts with attached contents and rules",
-        `Test ${targetCtxId} for Alice Morgan and Jordan Lee`,
+        `Test ${targetLabel} for Alice Morgan and Jordan Lee`,
         "Open the interactive rule builder widget",
       ],
     };
@@ -229,7 +230,7 @@ function deterministicPlan(message: string, ws: PznStudioWorkspaceState, activeC
       suggestedPrompts: [
         "Show all rules and their Data Dictionary clauses",
         "Show all contexts with attached contents and rules",
-        `Test ${targetCtxId} for Alice Morgan and Jordan Lee`,
+        `Test ${targetLabel} for Alice Morgan and Jordan Lee`,
       ],
     };
   }
@@ -240,7 +241,7 @@ function deterministicPlan(message: string, ws: PznStudioWorkspaceState, activeC
       suggestedPrompts: [
         "Open the interactive rule builder widget",
         "Show all contexts with attached contents and rules",
-        `Test ${targetCtxId} for Alice Morgan and Jordan Lee`,
+        `Test ${targetLabel} for Alice Morgan and Jordan Lee`,
       ],
     };
   }
@@ -250,8 +251,8 @@ function deterministicPlan(message: string, ws: PznStudioWorkspaceState, activeC
       operations: [{ op: "show_context_matrix" }],
       suggestedPrompts: [
         "Open the interactive rule builder widget",
-        `Test ${targetCtxId} for Alice Morgan and Jordan Lee`,
-        "Create a Treasury Ladder offer for cash > $20,000, attach to context treasury_nudge, and publish it",
+        `Test ${targetLabel} for Alice Morgan and Jordan Lee`,
+        "Create a Treasury Ladder recommendation for cash > $20,000, attach to context treasury_nudge, and publish it",
       ],
     };
   }
@@ -266,8 +267,8 @@ function deterministicPlan(message: string, ws: PznStudioWorkspaceState, activeC
       operations: [{ op: "show_dictionary", ...(matchedNs ? { namespaceId: matchedNs.id } : {}) }],
       suggestedPrompts: [
         "Add a custom attribute loyalty.vip_tier (gold/platinum) to the Data Dictionary",
-        `Run Live Treatment Selector on ${targetCtxId} for Alice Morgan and Jordan Lee`,
-        "Create a high-cash treasury offer, rule for cash > $20,000, attach to a new context, and publish it",
+        `Run Live Treatment Selector on ${targetLabel} for Alice Morgan and Jordan Lee`,
+        "Create a high-cash treasury recommendation, rule for cash > $20,000, attach to a new context, and publish it",
       ],
     };
   }
@@ -315,7 +316,7 @@ function deterministicPlan(message: string, ws: PznStudioWorkspaceState, activeC
       suggestedPrompts: [
         `Create a rule using ${nsId}.${attrId}`,
         "Show the full Data Dictionary",
-        `Run Live Treatment Selector on ${targetCtxId} for Alice Morgan`,
+        `Run Live Treatment Selector on ${targetLabel} for Alice Morgan`,
       ],
     };
   }
@@ -325,16 +326,16 @@ function deterministicPlan(message: string, ws: PznStudioWorkspaceState, activeC
     const isUnpublish = /^\s*unpublish\b/i.test(lower);
     return {
       reply: isUnpublish
-        ? `Unpublished **\`${targetCtxId}\`** from Treatment Selector.`
-        : `Published an immutable snapshot of **\`${targetCtxId}\`** to Treatment Selector.`,
+        ? `Unpublished **\`${targetLabel}\`** from Treatment Selector.`
+        : `Published an immutable snapshot of **\`${targetLabel}\`** to Treatment Selector.`,
       operations: [
         isUnpublish
           ? { op: "unpublish_context", contextId: targetCtxId }
           : { op: "publish_context", contextId: targetCtxId, notes: "Published via Self-Service Copilot" },
       ],
       suggestedPrompts: [
-        `Test ${targetCtxId} for Alice Morgan and Jordan Lee`,
-        `Simulate ${targetCtxId} for Alice Morgan with portfolio.cash_usd = 5000`,
+        `Test ${targetLabel} for Alice Morgan and Jordan Lee`,
+        `Simulate ${targetLabel} for Alice Morgan with portfolio.cash_usd = 5000`,
         "Show all contexts in the catalog",
       ],
     };
@@ -379,7 +380,7 @@ function deterministicPlan(message: string, ws: PznStudioWorkspaceState, activeC
     const ctxObj = ws.contexts.find((c) => c.contextId === targetCtxId);
     const useDraft = ctxObj ? ctxObj.status !== "published" : false;
     return {
-      reply: `Executed **Live Treatment Selector** for **\`${targetCtxId}\`** across ${mids.length} customer MID${mids.length > 1 ? "s" : ""}${Object.keys(overrides).length ? ` (with what-if override ${Object.entries(overrides).map(([k, v]) => `\`${k} = ${v}\``).join(", ")})` : ""}.`,
+      reply: `Executed **Live Treatment Selector** for **\`${targetLabel}\`** across ${mids.length} customer MID${mids.length > 1 ? "s" : ""}${Object.keys(overrides).length ? ` (with what-if override ${Object.entries(overrides).map(([k, v]) => `\`${k} = ${v}\``).join(", ")})` : ""}.`,
       operations: [{
         op: "evaluate_ts",
         contextId: targetCtxId,
@@ -388,8 +389,8 @@ function deterministicPlan(message: string, ws: PznStudioWorkspaceState, activeC
         ...(Object.keys(overrides).length ? { attributeOverrides: overrides } : {}),
       }],
       suggestedPrompts: [
-        `Compare ${targetCtxId} across Alice Morgan, Jordan Lee, and Marcus Reed`,
-        `Simulate ${targetCtxId} for Alice Morgan with portfolio.cash_usd = 5000`,
+        `Compare ${targetLabel} across Alice Morgan, Jordan Lee, and Marcus Reed`,
+        `Simulate ${targetLabel} for Alice Morgan with portfolio.cash_usd = 5000`,
         "Show the Data Dictionary namespaces and business definitions",
       ],
     };
@@ -403,9 +404,9 @@ function deterministicPlan(message: string, ws: PznStudioWorkspaceState, activeC
     const explicitCtxMatch = message.match(/context\s+[`"']?([a-z][a-z0-9_-]{2,40})[`"']?/i);
     const baseTopic = lower.includes("treasury") ? "treasury_ladder"
       : lower.includes("retirement") ? "retirement_nudge"
-      : lower.includes("mortgage") || lower.includes("home") ? "home_buyer_offer"
-      : lower.includes("tax") ? "tax_harvest_offer"
-      : "custom_cash_offer";
+      : lower.includes("mortgage") || lower.includes("home") ? "home_buyer_recommendation"
+      : lower.includes("tax") ? "tax_harvest_recommendation"
+      : "custom_cash_recommendation";
     const suffix = Date.now().toString(36).slice(-3);
     const contentId = `${baseTopic}_text_${suffix}`;
     const ruleId = `${baseTopic}_rule_${suffix}`;
@@ -485,8 +486,8 @@ function deterministicPlan(message: string, ws: PznStudioWorkspaceState, activeC
     reply: `Here is your live **Recommendation Self-Service Platform** overview. Tell me what you want to create, edit, publish, or simulate by Customer MID.`,
     operations: [{ op: "show_catalog" }],
     suggestedPrompts: [
-      "Create a Treasury Ladder offer for cash > $20,000, attach to context treasury-nudge, and publish it",
-      "Test wealth-next-best-offers for Alice Morgan and Jordan Lee",
+      "Create a Treasury Ladder recommendation for cash > $20,000, attach to context treasury-nudge, and publish it",
+      `Test ${wealthRecommendationsTopic.displayName} for Alice Morgan and Jordan Lee`,
       "Show the Data Dictionary namespaces and business definitions",
       "Add custom attribute loyalty.vip_tier (gold/platinum) to the Data Dictionary",
     ],
@@ -621,7 +622,7 @@ export async function runSelfServicePznCopilot(
         }
         case "upsert_content": {
           const payload = {
-            contentId: slug(op.contentId, "text_offer"),
+            contentId: slug(op.contentId, "text_recommendation"),
             title: op.title,
             headline: op.headline ?? "",
             body: op.body,
@@ -707,7 +708,7 @@ export async function runSelfServicePznCopilot(
           break;
         }
         case "publish_context": {
-          const ctxId = slug(op.contextId, activeContextId ?? "wealth-next-best-offers");
+          const ctxId = slug(op.contextId, activeContextId ?? wealthRecommendationsTopic.contextId);
           const payload = { contextId: ctxId, publishedBy: "Self-Service Copilot", notes: op.notes || "Published via chat" };
           if (gated("context.publish", pznSfieldToolRefs.ruleMetadata, "publish_context", payload)) {
             activeContextId = ctxId;
@@ -735,7 +736,7 @@ export async function runSelfServicePznCopilot(
           break;
         }
         case "unpublish_context": {
-          const ctxId = slug(op.contextId, activeContextId ?? "wealth-next-best-offers");
+          const ctxId = slug(op.contextId, activeContextId ?? wealthRecommendationsTopic.contextId);
           if (gated("context.unpublish", pznSfieldToolRefs.ruleMetadata, "unpublish_context", { contextId: ctxId })) {
             activeContextId = ctxId;
             break;
@@ -753,7 +754,7 @@ export async function runSelfServicePznCopilot(
           break;
         }
         case "evaluate_ts": {
-          const ctxId = slug(op.contextId, activeContextId ?? "wealth-next-best-offers");
+          const ctxId = slug(op.contextId, activeContextId ?? wealthRecommendationsTopic.contextId);
           activeContextId = ctxId;
           const mids = op.mids?.length ? op.mids.slice(0, 4) : [initialWs.customers[0]?.syntheticMid ?? "DEMO-MID-1001"];
           const ctxRecord = store.getContext(ctxId);
@@ -891,9 +892,9 @@ export async function runSelfServicePznCopilot(
     suggestedPrompts: Array.isArray(plan.suggestedPrompts) && plan.suggestedPrompts.length > 0
       ? plan.suggestedPrompts.slice(0, 4)
       : [
-          `Test ${activeContextId ?? workspace.contexts[0]?.contextId ?? "wealth-next-best-offers"} for Alice Morgan and Jordan Lee`,
+          `Test ${recommendationContextLabel(activeContextId ?? workspace.contexts[0]?.contextId ?? wealthRecommendationsTopic.contextId)} for Alice Morgan and Jordan Lee`,
           "Show the Data Dictionary namespaces and business definitions",
-          "Create a new text offer and rule for cash > $25,000 and publish it",
+          "Create a new text recommendation and rule for cash > $25,000 and publish it",
         ],
     activeContextId,
     workspace,

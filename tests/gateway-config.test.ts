@@ -45,7 +45,7 @@ test("model gateway admin: test, activate (restart hook), mask the key, reset", 
   const gw = await fakeGateway("sk-good-key-0001");
   let restarts = 0;
   const app = await startApp({
-    projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: fixture.settings, mode: "test", inspectorEnabled: true,
+    projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: fixture.settings, inspectorEnabled: true,
     onGatewayActivated: () => { restarts++; },
   });
   t.after(async () => { await app.close(); await fixture.close(); await gw.close(); await rm(dir, { recursive: true, force: true }); });

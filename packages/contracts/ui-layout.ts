@@ -7,6 +7,7 @@ import type { RoutingIntentId } from "./routing-intents";
 export const layoutComponents = [
   { id: "PznComparison", label: "Balance comparison", description: "Compare definitions in two columns." },
   { id: "PznMetricSummary", label: "Balance figures", description: "Show the available and current amounts." },
+  { id: "PznRetirementAccounts", label: "Retirement accounts", description: "Show the customer’s accounts or the beneficiary on the selected account." },
   { id: "PznPortfolioSnapshot", label: "Portfolio snapshot", description: "Show portfolio value, cash, and holdings." },
   { id: "PznGoalProgress", label: "Goal progress", description: "Show savings history and progress toward a target." },
   { id: "PznSavingsChart", label: "Savings projection", description: "Chart projected savings over time." },
@@ -17,6 +18,7 @@ export const layoutComponents = [
   { id: "PznFundingPreview", label: "Funding review", description: "Show an amount and method for review." },
   { id: "PznCapabilityForm", label: "Input form", description: "Show inputs supplied by a capability, such as dates and amounts." },
   { id: "PznFactSummary", label: "Result summary", description: "Display the status of a completed or outstanding step." },
+  { id: "PznDynamicCanvas", label: "Record view", description: "Show the selected record, timeline, or list of choices." },
   { id: "PznRuleCreation", label: "Rule editor", description: "Show the rule-building controls." },
 ] as const;
 export type LayoutComponent = typeof layoutComponents[number]["id"];
@@ -34,7 +36,16 @@ export const uiTargetSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("capability"), id: capabilityIdSchema.or(z.enum(recordLayoutCapabilities)) }).strict(),
 ]);
 export type UiTarget = z.infer<typeof uiTargetSchema>;
+export const recordCapabilities = { it_ops: "ops_incident", sales_revops: "sales_deal_desk" } as const;
+export const recordViews = ["list", "detail", "timeline"] as const;
+export type RecordDomain = keyof typeof recordCapabilities;
+export type RecordView = typeof recordViews[number];
+export const recordIntentId = (domain: RecordDomain, view: RecordView) => domain + "_" + view;
 export function layoutTargetDomain(target: UiTarget): DomainPackId {
+  if (target.kind === "intent") {
+    if (target.id.startsWith("it_ops_")) return "it_ops";
+    if (target.id.startsWith("sales_revops_")) return "sales_revops";
+  }
   if (target.kind === "capability" && target.id === "ops_incident") return "it_ops";
   if (target.kind === "capability" && target.id === "sales_deal_desk") return "sales_revops";
   return "wealth";
@@ -46,6 +57,12 @@ export const layoutTextSchema = z.object({
   body: z.string().trim().max(320),
   tone: z.enum(["plain", "accent"]),
 }).strict();
+export function bindingDomain(key: string): DomainPackId {
+  if (key.startsWith("incident.")) return "it_ops";
+  if (key.startsWith("deal.")) return "sales_revops";
+  return "wealth";
+}
+
 const slotId = z.string().regex(/^[a-zA-Z0-9_-]{1,50}$/);
 export const customFormFieldTypeSchema = z.enum(["text", "number", "currency", "select", "date", "checkbox"]);
 export type CustomFormFieldType = z.infer<typeof customFormFieldTypeSchema>;
@@ -121,7 +138,19 @@ export const layoutSlotSchema = z.discriminatedUnion("kind", [
   layoutBoundWidgetSchema.extend({ kind: z.literal("widget"), id: slotId }),
 ]);
 export type LayoutSlot = z.infer<typeof layoutSlotSchema>;
+const recordIntentSchema = z.object({
+  id: z.string().regex(/^(it_ops|sales_revops)_intent_[a-z0-9_]{1,35}$/),
+  label: z.string().trim().min(1).max(60),
+  view: z.enum(recordViews),
+  phrases: z.array(z.string().trim().min(3).max(120)).min(1).max(8),
+}).strict();
+export type RecordIntent = z.infer<typeof recordIntentSchema>;
+export const normalizedIntentPhrase = (phrase: string) => phrase.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+export function recordIntentOption(intent: RecordIntent): UiTargetOption {
+  return { target: { kind: "intent", id: intent.id }, label: intent.label, description: intent.phrases.join(" · "), components: ["PznDynamicCanvas"] };
+}
 export const uiDesignSchema = z.object({
+  recordIntent: recordIntentSchema.optional(),
   name: z.string().trim().min(1).max(72),
   description: z.string().trim().max(maxLayoutDescription),
   layout: z.enum(["stack", "dashboard"]),
@@ -139,7 +168,7 @@ export type UiLayoutRecord = {
   draft: UiDesign;
   published?: UiPublication;
 };
-export type UiTargetOption = { target: UiTarget; label: string; description: string };
+export type UiTargetOption = { target: UiTarget; label: string; description: string; components?: LayoutComponent[] };
 export type UiLayoutCatalog = { tenantId: string; domains: readonly DomainPackId[]; layouts: UiLayoutRecord[]; library: LibraryDesign[]; targets: UiTargetOption[] };
 export type AppliedUiLayout = { id: string; revision: number; name: string; target: UiTarget };
 

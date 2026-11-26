@@ -32,14 +32,15 @@ const design: UiDesign = {
 
 test("approved feedback replays the original request and detects when its card is unpublished", async (t) => {
   const dataDir = await mkdtemp(join(tmpdir(), "layout-corrections-"));
-  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir, gateway: null, mode: "test" });
-  t.after(async () => { await app.close(); await rm(dataDir, { recursive: true, force: true }); });
+  const gateway = await startFixtureGateway();
+  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir, gateway: gateway.settings });
+  t.after(async () => { await app.close(); await gateway.close(); await rm(dataDir, { recursive: true, force: true }); });
   const client = await testClient(app.url);
   const { created } = await client.request<{ created: UxProposal[] }>("/api/admin/ux-evolution-scan", { includeSampleTraffic: true });
   assert.ok(created.length);
   const { proposal } = await client.request<{ proposal: UxProposal }>("/api/admin/ux-evolution-approve", { id: created[0].id });
   assert.equal(proposal.regression?.prompt, created[0].samplePrompts[0]);
-  const check = async () => (await client.request<{ report: EvalRunReport }>("/api/admin/eval-run", { mode: "deterministic" }))
+  const check = async () => (await client.request<{ report: EvalRunReport }>("/api/admin/eval-run", {}))
     .report.results.find((r) => r.id === "correction_" + proposal.shippedWidgetId);
   assert.equal((await check())?.passed, true);
   await client.request("/api/admin/widgets", { operation: "set_availability", id: proposal.shippedWidgetId, availableForConsumption: false });
@@ -49,7 +50,7 @@ test("approved feedback replays the original request and detects when its card i
 test("publishes layouts for scoped chat intents and preserves drafts, snapshots and attachments on restart", async (t) => {
   const dataDir = await mkdtemp(join(tmpdir(), "pzn-ui-layouts-"));
   const gateway = await startFixtureGateway(() => ({ delayMs: 30 }));
-  const start = () => startApp({ projectRoot: fileURLToPath(testProject), dataDir, gateway: gateway.settings, mode: "test" });
+  const start = () => startApp({ projectRoot: fileURLToPath(testProject), dataDir, gateway: gateway.settings });
   let app = await start();
   t.after(async () => { await app.close(); await gateway.close(); await rm(dataDir, { recursive: true, force: true }); });
   let client = await testClient(app.url);

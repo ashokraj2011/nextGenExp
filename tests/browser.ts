@@ -3,14 +3,29 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { createServer as createViteServer } from "vite";
 import { chromium, type Locator } from "playwright";
 import marcusCalls from "../fixtures/marcus-sfield-exchanges.json";
+import type { TreatmentRun, TurnPayloads } from "../packages/contracts/inspector";
+import { defaultToolSetup } from "../packages/contracts/tool-setup";
 import { defaultFundingWorkflow, fundingToolRef } from "../packages/contracts/funding-workflow";
-import { activeContextCatalog } from "../packages/ts-adapter";
+import { beneficiaryReviewWorkflow } from "../packages/contracts/customer-workflows";
+import { activeContextCatalog, FixtureTsAdapter, tsFixtures } from "../packages/ts-adapter";
 import { adminPaths } from "../packages/contracts/admin-paths";
 import { pendingActionsContext } from "../packages/contracts/workspace";
 import { openAdmin, openCustomerChat } from "./browser-navigation";
 import { startTestPreview } from "./preview";
+
+async function assertArchitectureLabelsFit(map: Locator) {
+  const overflow = await map.locator(".sa-node").evaluateAll((nodes) => nodes.flatMap((node) => {
+    const box = node.querySelector<SVGRectElement>(".sa-box")!.getBBox();
+    return [...node.querySelectorAll<SVGTextElement>("text")].filter((text) => {
+      const bounds = text.getBBox();
+      return bounds.x < 0 || bounds.x + bounds.width > box.width - 3 || bounds.y + bounds.height > box.height;
+    }).map((text) => text.textContent);
+  }));
+  assert.deepEqual(overflow, [], "All component labels fit within their boxes");
+}
 
 async function readExchange(drawer: Locator) {
   return {
@@ -33,15 +48,22 @@ try {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
 
-  await page.goto(preview.url + "/__test/a2ui");
-  await page.getByText("A2UI integration smoke example", { exact: true }).waitFor();
-  await page.getByRole("button", { name: "Read demo guide" }).click();
-  const smoke = JSON.parse(await page.getByTestId("a2ui-action").innerText());
-  assert.equal(smoke.version, "1.0");
-  assert.equal(smoke.action.name, "open_content");
-  assert.equal(smoke.action.context.actionId, "smoke-issued-action-001");
-  assert.equal(smoke.action.surfaceId, "integration-smoke-001");
-  assert.equal(smoke.action.sourceComponentId, "open");
+  const renderer = await createViteServer({ server: { host: "127.0.0.1", port: 0 }, logLevel: "error" });
+  try {
+    await renderer.listen();
+    const probe = new URL("renderer-probe.html", renderer.resolvedUrls!.local[0]).href;
+    await page.route(probe, (route) => route.fulfill({ contentType: "text/html",
+      body: '<div id="root"></div><script type="module" src="/tests/renderer-probe.tsx"></script>' }));
+    await page.goto(probe);
+    await page.getByText("A2UI integration smoke example", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Read demo guide" }).click();
+    const smoke = JSON.parse(await page.getByTestId("a2ui-action").innerText());
+    assert.equal(smoke.version, "1.0");
+    assert.equal(smoke.action.name, "open_content");
+    assert.equal(smoke.action.context.actionId, "smoke-issued-action-001");
+    assert.equal(smoke.action.surfaceId, "integration-smoke-001");
+    assert.equal(smoke.action.sourceComponentId, "open");
+  } finally { await renderer.close(); }
   await page.goto(preview.url + "/planning");
   await page.getByRole("heading", { name: "Plan for what’s next.", level: 1 }).waitFor();
   const heroPhoto = page.getByRole("img", { name: "Two women walking together along a coastal path", exact: true });
@@ -55,15 +77,51 @@ try {
   assert.equal(new URL(page.url()).pathname, "/wealth");
   await openAdmin(page, "help");
   await page.getByRole("heading", { name: "How CEP works", exact: true, level: 1 }).waitFor();
+  const systemMap = page.getByRole("region", { name: "System architecture", exact: true });
+  await page.getByRole("link", { name: "System architecture", exact: true }).click();
+  assert.equal(new URL(page.url()).hash, "#system-architecture");
+  const componentDetails = systemMap.getByRole("region", { name: "Selected architecture component" });
+  const nodes = systemMap.locator("svg.sa-canvas .sa-node");
+  assert.equal(await nodes.count(), 10);
+  for (const node of await nodes.all()) {
+    await node.focus();
+    await node.press("Enter");
+    await componentDetails.getByRole("heading", { name: (await node.getAttribute("aria-label"))!, exact: true }).waitFor();
+  }
+  await systemMap.getByRole("button", { name: "Treatment Selector", exact: true }).click();
+  await componentDetails.getByText(/legacy contract returns ranked content IDs/).waitFor();
+  await componentDetails.getByRole("link", { name: /contract/i }).click();
+  assert.equal(new URL(page.url()).hash, "#contracts");
+  await page.getByRole("button", { name: "Download treatment-selector.tool.json", exact: true }).waitFor();
+  await page.getByRole("link", { name: "System architecture", exact: true }).click();
+  await systemMap.getByRole("button", { name: "sfield runtime", exact: true }).click();
+  await assertArchitectureLabelsFit(systemMap);
+  await systemMap.screenshot({ path: resolve(screenshots, "chat-system-architecture.png") });
+  await systemMap.getByRole("button", { name: "After a funding click", exact: true }).click();
+  assert.equal(await systemMap.locator('.sa-node[data-earlier="true"]').count(), 2);
+  await assertArchitectureLabelsFit(systemMap);
+  const exporting = page.waitForEvent("download");
+  await systemMap.getByRole("button", { name: "Download SVG" }).click();
+  const exportedMap = await exporting;
+  assert.equal(exportedMap.suggestedFilename(), "funding-workflow-architecture.svg");
+  const vector = await readFile(await exportedMap.path(), "utf8");
+  assert.match(vector, /Ordered funding workflow architecture/);
+  assert.match(vector, /sfield.sqlite/);
+  assert.equal(await page.evaluate((xml) => {
+    const drawing = new DOMParser().parseFromString(xml, "image/svg+xml");
+    return drawing.querySelectorAll(".sa-number").length === 11 && !drawing.querySelector('[role="button"]');
+  }, vector), true);
+  assert.equal(await page.evaluate((xml) => new DOMParser().parseFromString(xml, "image/svg+xml").querySelector("parsererror") === null, vector), true);
+  await systemMap.getByRole("button", { name: "Chat message", exact: true }).click();
   const architecture = page.getByRole("region", { name: "How chat answers a message", exact: true });
   await architecture.getByRole("heading", { name: "CEP app server", exact: true }).waitFor();
   await architecture.getByRole("heading", { name: "sfield", exact: true }).waitFor();
   const sequence = page.getByRole("list", { name: "Chat interaction sequence" });
-  await sequence.getByText("Matching content and workflow", { exact: true }).waitFor();
-  await sequence.getByText("Form UI: compile A2UI v1.0, UI Builder layouts & live bindings", { exact: true }).waitFor();
-  await sequence.getByText("Send A2UI instructions (experience.ready SSE) → React render", { exact: true }).waitFor();
+  await sequence.getByText("Eligible content, standalone action and workflow", { exact: true }).waitFor();
+  await sequence.getByText("Build the A2UI surface", { exact: true }).waitFor();
+  await sequence.getByText("Send the finished surface to chat", { exact: true }).waitFor();
   const numberedSteps = await sequence.getByRole("button", { name: /^Step \d+ ·/ }).all();
-  assert.equal(numberedSteps.length, 14);
+  assert.equal(numberedSteps.length, 17);
   const exchanges = [];
   const exchangePaths = [];
   for (const [index, button] of numberedSteps.entries()) {
@@ -75,31 +133,38 @@ try {
     await page.keyboard.press("Escape");
     await drawer.waitFor({ state: "hidden" });
   }
-  assert.deepEqual(exchangePaths[3], ["CEP app server", "sfield", "Language model"]);
-  assert.deepEqual(exchangePaths[5], ["CEP app server", "sfield", "Treatment Selector"]);
-  assert.deepEqual(exchangePaths[6], ["Treatment Selector", "sfield", "CEP app server"]);
-  assert.deepEqual(exchangePaths[9], ["CEP app server", "sfield", "Language model"]);
-  assert.deepEqual(exchangePaths[11], ["CEP app server", "CEP app server"]);
+  assert.deepEqual(exchangePaths[1], ["CEP app server", "CEP app server"]);
+  assert.deepEqual(exchangePaths[2], ["CEP app server", "Language model"]);
+  assert.deepEqual(exchangePaths[3], ["Language model", "CEP app server"]);
+  assert.deepEqual(exchanges[1].request, { tenantId: "pzn-local", domainId: "wealth", audience: "customer" });
+  assert.deepEqual(exchanges[1].response, ["verified_experience", "stock_holdings", "stock_trade", "custom_dynamic_ui"]);
+  assert.deepEqual(exchanges[2].request.flows.map((flow: { id: string }) => flow.id), exchanges[1].response);
+  assert.equal(exchanges[3].response.capabilityId, "verified_experience");
+  assert.deepEqual(exchangePaths[6], ["CEP app server", "sfield", "Language model"]);
+  assert.deepEqual(exchangePaths[8], ["CEP app server", "sfield", "Treatment Selector"]);
+  assert.deepEqual(exchangePaths[9], ["Treatment Selector", "sfield", "CEP app server"]);
+  assert.deepEqual(exchangePaths[12], ["CEP app server", "sfield", "Language model"]);
+  assert.deepEqual(exchangePaths[14], ["CEP app server", "CEP app server"]);
   assert.equal(exchanges[0].request.message, "I moved and need to update my address.");
   const topicScores = marcusCalls.scores.response.output;
-  assert.equal(exchanges[2].response.customerContext.fundingStatus, "unfunded");
-  assert.deepEqual(exchanges[3].request.catalog, activeContextCatalog);
-  assert.equal(exchanges[3].request.customerContext.fundingStatus, "unfunded");
-  assert.equal(exchanges[4].response.intentId, "update_address");
-  assert.deepEqual(exchanges[5], exchanges[6]);
-  assert.deepEqual(exchanges[6].request.adapterInput, { mid: "DEMO-MID-1003", context: "address-update" });
-  assert.deepEqual(exchanges[6].response, marcusCalls.treatment.response.output);
-  assert.equal(exchanges[8].response.candidates[1].contentId, "fund_account");
-  assert.equal(exchanges[10].response.blocks[0].component, "PznStepList");
-  assert.equal(exchanges[11].response.a2uiProtocol, "v1.0");
-  assert.equal(exchanges[12].response.type, "experience.ready");
-  assert.equal(exchanges[12].response.actionMode, "verified_experience");
-  assert.equal(exchanges[13].request.envelope.action.name, "request_follow_up");
-  assert.equal(exchanges[13].response.turn.message, "Preview funding");
+  assert.deepEqual(exchanges[5].response.propensity, topicScores);
+  assert.deepEqual(exchanges[6].request.catalog, activeContextCatalog);
+  assert.equal(exchanges[6].request.customerContext.fundingStatus, "unfunded");
+  assert.equal(exchanges[7].response.intentId, "update_address");
+  assert.deepEqual(exchanges[8], exchanges[9]);
+  assert.deepEqual(exchanges[9].request.adapterInput, { mid: "DEMO-MID-1003", context: "address-update" });
+  assert.deepEqual(exchanges[9].response, marcusCalls.treatment.response.output);
+  assert.equal(exchanges[11].response.candidates[1].contentId, "fund_account");
+  assert.equal(exchanges[13].response.blocks[0].component, "PznStepList");
+  assert.equal(exchanges[14].response.a2uiProtocol, "v1.0");
+  assert.equal(exchanges[15].response.type, "experience.ready");
+  assert.equal(exchanges[15].response.actionMode, "verified_experience");
+  assert.equal(exchanges[16].request.envelope.action.name, "request_follow_up");
+  assert.equal(exchanges[16].response.turn.message, "Preview funding");
 
   const handoffs = sequence.getByRole("button", { name: /^App server to sfield handoff · step / });
   assert.equal(await handoffs.count(), 3);
-  for (const [number, call] of [[4, "router"], [6, "treatment"], [10, "composer"]] as const) {
+  for (const [number, call] of [[7, "router"], [9, "treatment"], [13, "composer"]] as const) {
     const button = sequence.getByRole("button", { name: `App server to sfield handoff · step ${number}`, exact: true });
     await button.click();
     const drawer = page.getByRole("dialog", { name: `Step ${number} · App server to sfield`, exact: true });
@@ -119,7 +184,8 @@ try {
   await page.getByRole("link", { name: "sfield", exact: true }).click();
   assert.equal(new URL(page.url()).hash, "#sfield");
   const toolRegistry = page.getByRole("list", { name: "sfield tool registry", exact: true });
-  assert.equal(await toolRegistry.getByRole("listitem").count(), 10);
+  await toolRegistry.getByRole("link", { name: "Retirement accounts", exact: true }).click();
+  await page.getByRole("button", { name: "Download retirement-accounts.tool.json", exact: true }).waitFor();
   await toolRegistry.getByText("Experience Composer", { exact: true }).waitFor();
   await toolRegistry.getByRole("link", { name: "Topic relevance scores", exact: true }).click();
   await page.getByRole("button", { name: "propensity.json", exact: true }).click();
@@ -127,14 +193,38 @@ try {
   await toolRegistry.getByRole("link", { name: "Portfolio Snapshot", exact: true }).click();
   assert.equal(new URL(page.url()).hash, "#contracts");
   await page.getByRole("button", { name: "Download portfolio-snapshot.tool.json", exact: true }).waitFor();
-  await page.getByRole("link", { name: "Proposal", exact: true }).click();
+  await page.getByRole("link", { name: "TS evolution", exact: true }).click();
   assert.equal(new URL(page.url()).hash, "#proposal");
-  const proposal = page.getByRole("region", { name: "Treatment Selector proposal" });
-  await proposal.getByText("Compare content IDs and the workflow response", { exact: true }).click();
-  const contentIds = JSON.parse(await proposal.getByLabel("Content IDs JSON", { exact: true }).innerText());
-  const addressResponse = JSON.parse(await proposal.getByLabel("Address update response JSON", { exact: true }).innerText());
+  const proposal = page.getByRole("region", { name: "How Treatment Selector should evolve" });
+  const diagram = proposal.getByRole("figure", { name: "How TS and sfield work together" });
+  await diagram.getByText(/No Marcus address-update run is available/).waitFor();
+  assert.equal(await diagram.getByRole("button", { name: /^Step \d+ ·/ }).count(), 5);
+  await diagram.getByRole("button", { name: /^Step 3 ·/ }).click();
+  await page.getByRole("dialog").getByText(/No Marcus address-update run is available/).waitFor();
+  await page.keyboard.press("Escape");
+  const diagramLink = await proposal.getByRole("link", { name: "Download diagram" }).getAttribute("href");
+  assert.ok(diagramLink && (await page.request.get(new URL(diagramLink, preview.url).href)).ok());
+  await proposal.getByText("Compare the legacy and current TS responses", { exact: true }).click();
+  const legacyJson = proposal.getByLabel("Content IDs JSON", { exact: true });
+  const workflowJson = proposal.getByLabel("Content, actions and workflows JSON", { exact: true });
+  const requestJson = proposal.getByLabel("Treatment Selector request JSON", { exact: true });
+  const contentIds = JSON.parse(await legacyJson.innerText());
+  const addressResponse = JSON.parse(await workflowJson.innerText());
+  assert.deepEqual(JSON.parse(await requestJson.innerText()), { mid: "DEMO-MID-1003", context: "address-update" });
   assert.deepEqual(contentIds, ["address_update_guide", "fund_account"]);
   assert.deepEqual(addressResponse, marcusCalls.treatment.response.output);
+  await proposal.getByRole("button", { name: "Alice · Retirement", exact: true }).click();
+  const aliceTsRequest = JSON.parse(await requestJson.innerText());
+  assert.deepEqual(aliceTsRequest, { mid: "DEMO-MID-1001", context: "learning" });
+  const missingBeneficiary = tsFixtures.defaultCcreRules.find((rule) => rule.contextId === "learning" && rule.contentId === "beneficiary_update")!;
+  const aliceAdapter = new FixtureTsAdapter({ scenarioId: "normal", ordinal: 1 }, [], [
+    { ...missingBeneficiary, scenarioId: "normal", workflow: beneficiaryReviewWorkflow.recommendation },
+  ]);
+  const aliceDecision = await aliceAdapter.selectEligibleContent(aliceTsRequest);
+  assert.deepEqual(JSON.parse(await legacyJson.innerText()), aliceDecision.contentIds);
+  assert.deepEqual(JSON.parse(await workflowJson.innerText()), aliceDecision.decision);
+  await proposal.getByRole("link", { name: "View TS contracts", exact: true }).click();
+  await page.getByRole("button", { name: "Download treatment-selector.tool.json", exact: true }).waitFor();
   const walkthrough = page.getByRole("group", { name: "Demo walkthrough" });
   const flow = page.getByRole("list", { name: "Turn flow" });
   const stepDetails = page.locator("#step-details");
@@ -309,7 +399,7 @@ try {
     "balance_current_definition",
   ]);
   await page.screenshot({ path: resolve(screenshots, "ccre-rule-preview.png"), fullPage: true });
-  await page.getByRole("button", { name: "Save and test in chat", exact: true }).click();
+  await page.getByRole("button", { name: "Open draft in chat", exact: true }).click();
   if (!await page.getByRole("button", { name: /Compare two terms/ }).isVisible()) await page.getByText("Explore suggested questions", { exact: true }).click();
   await page.getByRole("button", { name: /Compare two terms/ }).click();
   await page.getByText("Available balance is the amount marked ready to use. Current balance is the total recorded in the ledger. Which one would you like to understand better?", { exact: true }).waitFor();
@@ -322,7 +412,7 @@ try {
   author.setDefaultTimeout(12_000);
   author.on("pageerror", (error) => pageErrors.push(error.message));
   await author.goto(preview.url + adminPaths.chat);
-  await author.getByText("Test mode", { exact: true }).waitFor();
+  await author.getByText("Model connected", { exact: true }).waitFor();
   const authorMessage = author.getByLabel("Your question");
   await authorMessage.fill("Create rule");
   await authorMessage.press("Enter");
@@ -381,6 +471,9 @@ try {
   assert.equal(await author.getByLabel("Field group", { exact: true }).inputValue(), "customer");
   assert.equal(await author.getByLabel("Value", { exact: true }).inputValue(), "demo-learner");
 
+  // Start the independent portfolio scenario with its standard shared treatment rules.
+  const restoredDefaults = await author.request.post(preview.url + "/api/admin/tools", { data: defaultToolSetup });
+  assert.equal(restoredDefaults.status(), 200);
   const portfolioPage = await browser.newPage({ httpCredentials: { ...operatorCredentials, origin: preview.url }, viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   portfolioPage.setDefaultTimeout(12_000);
   portfolioPage.on("pageerror", (error) => pageErrors.push(error.message));
@@ -427,7 +520,7 @@ try {
   await portfolioPage.getByRole("button", { name: "Run preview", exact: true }).click();
   await portfolioPage.getByText("Cash above $10,000", { exact: true }).waitFor();
   await portfolioPage.getByText("Filtered out", { exact: true }).waitFor();
-  await portfolioPage.getByRole("button", { name: "Test in chat", exact: true }).click();
+  await portfolioPage.getByRole("button", { name: "Open in chat", exact: true }).click();
   await jordanProfileTrigger.waitFor();
   await portfolioQuestion.fill("Let me know my portfolio summary.");
   await portfolioQuestion.press("Enter");
@@ -436,6 +529,15 @@ try {
   await portfolioPage.screenshot({ path: resolve(screenshots, "portfolio-returning-chat.png") });
   await openAdmin(portfolioPage, "tools");
   const editor = portfolioPage.getByRole("region", { name: "Funding preview workflow", exact: true });
+  await portfolioPage.getByLabel("Topic", { exact: true }).selectOption("address-update");
+  await portfolioPage.getByRole("button", { name: "Edit rule Account is unfunded" }).click();
+  const attachment = portfolioPage.getByRole("combobox", { name: /Workflow on click/ });
+  await attachment.selectOption("");
+  await portfolioPage.getByRole("button", { name: "Update rule", exact: true }).click();
+  await portfolioPage.getByRole("button", { name: "Edit rule Account is unfunded" }).click();
+  assert.equal(await attachment.inputValue(), "");
+  await attachment.selectOption("account.funding.preview@1.0.0");
+  await portfolioPage.getByRole("button", { name: "Update rule", exact: true }).click();
   await editor.getByLabel("How to run funding preview", { exact: true }).selectOption("ordered");
   const editorOrder = editor.getByRole("list", { name: "Funding workflow tool order", exact: true }).locator("code");
   await editor.getByLabel("Add workflow tool", { exact: true }).selectOption(fundingToolRef("fundingStatus"));
@@ -458,6 +560,8 @@ try {
   await marcusProfile.getByText("Awaiting first deposit", { exact: true }).waitFor();
   await marcusProfile.getByRole("button", { name: "Start chat as Marcus Reed", exact: true }).click();
   if (!await portfolioPage.getByRole("button", { name: /Update mailing address/ }).isVisible()) await portfolioPage.getByText("Explore suggested questions", { exact: true }).click();
+  const addressSubmission = portfolioPage.waitForResponse((r) => r.request().method() === "POST" && /\/conversations\/[^/]+\/turns$/.test(r.url()))
+    .then(async (r) => ({ request: r.request().postDataJSON(), response: await r.json() }));
   await portfolioPage.getByRole("button", { name: /Update mailing address/ }).click();
   await portfolioPage.getByRole("heading", { name: "Update your mailing address", exact: true }).waitFor();
   await portfolioPage.getByRole("heading", { name: "Fund your account", exact: true }).waitFor();
@@ -470,17 +574,39 @@ try {
   assert.deepEqual(actualScoresRequest.contextIds, [...marcusCalls.scores.treatmentSelectorInput.contextIds, "wealth-next-best-offers"]);
   const actualScores = JSON.parse(await scoresStage.getByLabel("Topic scores response", { exact: true }).innerText());
   assert.deepEqual(actualScores, { ...topicScores, scores: [...topicScores.scores, { contextId: "wealth-next-best-offers", score: null }] });
+  const compare = portfolioLogs.getByRole("region", { name: "Treatment Selector response comparison" });
+  assert.deepEqual(JSON.parse(await compare.getByLabel("Legacy response · content IDs", { exact: true }).innerText()), contentIds);
+  assert.deepEqual(JSON.parse(await compare.getByLabel("New response · content, actions and workflows", { exact: true }).innerText()), addressResponse);
   await portfolioLogs.getByText("Treatment Selector · succeeded", { exact: true }).click();
   await portfolioLogs.getByText("Mock CCRE evaluation", { exact: true }).click();
   const fundingEvaluation = JSON.parse(await portfolioLogs.locator('pre[aria-label="Mock CCRE evaluation"]').innerText());
   assert.deepEqual(fundingEvaluation.results, [{ name: "Account is unfunded", contentId: "fund_account", outcome: "matched" }]);
   assert.deepEqual(JSON.parse(await portfolioLogs.getByLabel("Tool response", { exact: true }).innerText()), addressResponse);
+  await openAdmin(portfolioPage, "help");
+  const unclicked = portfolioPage.locator("#ts-sfield");
+  await unclicked.getByRole("button", { name: "Preview funding", exact: true }).click();
+  await unclicked.getByText("No click on this recommendation was recorded for this decision.").waitFor();
+  const beforeFunding = portfolioPage.getByRole("region", { name: "System architecture", exact: true });
+  await beforeFunding.getByRole("button", { name: "After a funding click", exact: true }).click();
+  await beforeFunding.getByRole("button", { name: /^Arrow 1 ·/ }).press("Enter");
+  await portfolioPage.getByRole("dialog").getByText(/has no recorded Preview funding click/).waitFor();
+  await portfolioPage.keyboard.press("Escape");
   await openAdmin(portfolioPage, "chat");
-  await portfolioPage.getByRole("button", { name: "Preview funding", exact: true }).click();
+  const addressForm = portfolioPage.getByRole("region", { name: "Prepare an address change", exact: true });
+  for (const [field, value] of Object.entries({ "Street address": "100 Example Lane", City: "Sample City", "State or region": "MA", "ZIP or postal code": "02110" })) {
+    await addressForm.getByLabel(field, { exact: true }).fill(value);
+  }
+  await addressForm.getByRole("button", { name: "Prepare an address change" }).click();
+  await portfolioPage.getByRole("heading", { name: "Address change prepared", exact: true }).waitFor();
+  const fundingSubmission = portfolioPage.waitForResponse((r) => r.request().method() === "POST" && /\/experiences\/[^/]+\/actions$/.test(r.url()))
+    .then(async (r) => ({ request: r.request().postDataJSON(), response: await r.json() }));
+  await portfolioPage.getByRole("button", { name: "Preview funding", exact: true, disabled: false }).click();
   await portfolioPage.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Funding preview", exact: true }).waitFor();
   await portfolioPage.getByText("$250 by bank transfer", { exact: true }).waitFor();
   await openAdmin(portfolioPage, "logs");
   await portfolioLogs.getByText("Funding preview workflow", { exact: true }).waitFor();
+  await portfolioLogs.getByRole("link", { name: /Source message/ }).waitFor();
+  assert.deepEqual(JSON.parse(await compare.getByLabel("New response · content, actions and workflows", { exact: true }).innerText()), addressResponse);
   await portfolioLogs.getByText("Workflow definition", { exact: true }).click();
   assert.deepEqual(JSON.parse(await portfolioLogs.getByLabel("Workflow definition", { exact: true }).innerText()), {
     ...defaultFundingWorkflow, steps: workflowSteps,
@@ -488,13 +614,132 @@ try {
   assert.deepEqual(await portfolioLogs.locator(".payload-stage > summary").allTextContents(), [
     "Funding preview workflow", "Check funding status · succeeded", "Funding options · succeeded", "Build funding preview · succeeded",
   ]);
-  await portfolioLogs.getByText("Funding options · succeeded", { exact: true }).click();
-  await portfolioLogs.getByText("Build funding preview · succeeded", { exact: true }).click();
   const optionsResult = JSON.parse(await portfolioLogs.getByLabel("Funding options tool response", { exact: true }).innerText());
   const previewInput = JSON.parse(await portfolioLogs.getByLabel("Build funding preview tool request", { exact: true }).innerText());
   const previewResult = JSON.parse(await portfolioLogs.getByLabel("Build funding preview tool response", { exact: true }).innerText());
   assert.equal(previewInput.methodId, optionsResult.methods[0].methodId);
   assert.equal(previewResult.amountCents, 25_000);
+
+  const sourceLink = await portfolioLogs.getByRole("link", { name: /Source message/ }).getAttribute("href");
+  const sourceParams = new URL(sourceLink!, preview.url).searchParams;
+  await portfolioPage.goto(preview.url + "/admin/help?" + sourceParams + "#ts-sfield");
+  const liveDiagram = portfolioPage.locator("#ts-sfield");
+  const runId = sourceParams.get("turn")!;
+  const [savedRun] = await (await portfolioPage.request.get(preview.url + "/api/admin/treatment-runs?personaId=demo-new-account&context=address-update&turn=" + runId)).json() as TreatmentRun[];
+  const readLog = async (id: string): Promise<TurnPayloads> => (await portfolioPage.request.get(preview.url + "/api/admin/logs/" + id)).json();
+  const sourceLog = await readLog(runId);
+  const modal = portfolioPage.getByRole("dialog");
+  const readJson = async (scope: Locator, title: string) => JSON.parse(await scope.getByLabel(title, { exact: true }).innerText());
+  for (const step of [1, 2, 3, 4, 5]) {
+    const button = liveDiagram.getByRole("button", { name: new RegExp("^Step " + step + " ·") });
+    await button.click();
+    await modal.getByRole("link", { name: "Open the source turn in Logs" }).waitFor();
+    if (step === 1) assert.equal((await readJson(modal, "Saved customer message")).id, runId);
+    if (step === 2) assert.deepEqual(await readJson(modal, "TS request"), sourceLog.treatment?.mockInput?.data);
+    if (step === 3) assert.deepEqual(await readJson(modal, "TS response returned to sfield"), sourceLog.treatment?.result?.data);
+    if (step === 4) assert.ok((await readJson(modal, "A2UI messages delivered to chat"))[0].createSurface.surfaceId);
+    if (step === 5) assert.equal(await modal.getByRole("button", { name: "Preview funding", exact: true }).count(), 1);
+    await portfolioPage.keyboard.press("Escape");
+    assert.equal(await button.evaluate((element) => element === document.activeElement), true);
+  }
+  for (const click of savedRun.clicks) {
+    await liveDiagram.getByRole("button", { name: click.label, exact: true }).click();
+    const expectedRule = sourceLog.treatment!.comparison!.reasons!.find((r) => r.kind === click.kind && r.id === click.id && r.version === click.version)!;
+    await liveDiagram.getByText(expectedRule.name, { exact: true }).click();
+    assert.deepEqual(await readJson(liveDiagram, "Matched rule and recommendation"), expectedRule);
+    assert.equal(new URL((await liveDiagram.getByRole("link", { name: "Open this click in Logs" }).getAttribute("href"))!, preview.url).searchParams.get("turn"), click.turnId);
+    const childLog = await readLog(click.turnId);
+    const calls = (click.kind === "workflow" ? childLog.workflow?.calls : childLog.agentic?.calls)!;
+    const summaries = liveDiagram.locator(".ts-recorded-calls > li > details > summary");
+    assert.deepEqual(await summaries.allTextContents(), calls.map((call) => call.tool + " · " + call.status));
+    for (const [i, call] of calls.entries()) {
+      await summaries.nth(i).click();
+      assert.deepEqual(await readJson(liveDiagram, call.tool + " tool request"), call.registryInput.data);
+      assert.deepEqual(await readJson(liveDiagram, call.tool + " tool response"), call.result?.data);
+      await summaries.nth(i).click();
+    }
+    await liveDiagram.getByText(expectedRule.name, { exact: true }).click();
+  }
+  await liveDiagram.screenshot({ path: resolve(screenshots, "ts-sfield-handoff.png") });
+  const recordedMap = portfolioPage.getByRole("region", { name: "System architecture", exact: true });
+  const fundingClick = savedRun.clicks.find((click) => click.kind === "workflow" && click.id === "account.funding.preview")!;
+  const fundingLog = await readLog(fundingClick.turnId);
+  for (const [opening, receipts, submission] of [
+    ["Chat message", sourceLog, await addressSubmission], ["After a funding click", fundingLog, await fundingSubmission],
+  ] as const) {
+    await recordedMap.getByRole("button", { name: opening, exact: true }).click();
+    const arrows = recordedMap.getByRole("button", { name: /^Arrow \d+ ·/ });
+    const isChat = opening === "Chat message";
+    assert.equal(await arrows.count(), isChat ? 23 : 11);
+    assert.deepEqual(receipts.handoffs?.submission?.request.data, submission.request);
+    assert.deepEqual(receipts.handoffs?.submission?.response.data, submission.response);
+    for (const [i, arrow] of (await arrows.all()).entries()) {
+      const title = (await arrow.getAttribute("aria-label"))!;
+      assert.ok(title.startsWith("Arrow " + (i + 1) + " ·"));
+      await arrow.click();
+      await modal.getByRole("heading", { name: title, exact: true }).waitFor();
+      await modal.getByRole("link", { name: "Address update in Logs" }).waitFor();
+      if (!isChat || i === 18) {
+        assert.equal(new URL((await modal.getByRole("link", { name: "Funding click in Logs" }).getAttribute("href"))!, preview.url).searchParams.get("turn"), fundingClick.turnId);
+      }
+      if (i === 0 || (isChat && i === 18)) {
+        const captured = isChat && i === 18 ? fundingLog : receipts;
+        assert.deepEqual(await readJson(modal, "Request"), captured.handoffs!.submission!.request.data);
+        assert.deepEqual(await readJson(modal, "Response"), captured.handoffs!.submission!.response.data);
+      }
+      if (isChat && [1, 2, 3].includes(i)) {
+        assert.deepEqual(await modal.getByRole("list", { name: "Flows in the model request" }).getByRole("listitem").allTextContents(),
+          receipts.sentFlowList!.flowIds);
+        if (i === 1) await modal.getByRole("link", { name: "Open chat routing flows in Tool setup" }).waitFor();
+        if (i === 2) assert.deepEqual(await readJson(modal, "Flow selection request"), receipts.handoffs!.flowRouting!.request.data);
+        if (i === 3) assert.deepEqual(await readJson(modal, "Flow selection response"), receipts.handoffs!.flowRouting!.response.data);
+      }
+      if (isChat && [7, 8, 13, 14].includes(i)) {
+        const stage = i < 9 ? receipts.router : receipts.composer;
+        assert.deepEqual(await readJson(modal, "Gateway request body"), stage?.attempts[0].exchange?.request.data);
+        assert.deepEqual(await readJson(modal, "Gateway response"), stage?.attempts[0].exchange?.response?.data);
+        if (i === 7) {
+          await modal.getByText(/^Topics, supported intents and member scores/).click();
+          await modal.getByRole("row").filter({ hasText: /address-update/ }).getByText("0.78").waitFor();
+          await modal.getByRole("cell", { name: /Wealth Next-Best Recommendations/ }).waitFor();
+          assert.equal((await readJson(modal, "Customer fields in the router request")).fundingStatus, "unfunded");
+        }
+      }
+      if (isChat && [9, 10, 21].includes(i)) assert.deepEqual(await readJson(modal, "TS response"), receipts.treatment?.result?.data);
+      if (!isChat && [2, 3].includes(i)) {
+        const tools = modal.getByRole("list", { name: "Recorded tool calls in order" });
+        assert.deepEqual(await tools.locator("li > details > summary").allTextContents(), receipts.workflow!.calls.map((c) => c.tool + " · " + c.status));
+        for (const call of receipts.workflow!.calls) {
+          assert.deepEqual(await readJson(tools, call.tool + " tool request"), call.registryInput.data);
+          assert.deepEqual(await readJson(tools, call.tool + " tool response"), call.result?.data);
+        }
+      }
+      if (i === (isChat ? 16 : 5)) assert.deepEqual(await readJson(modal, "Response"), receipts.handoffs!.compiler!.response.data);
+      if (i === (isChat ? 17 : 6)) assert.deepEqual(await readJson(modal, "Recorded experience.ready event"), receipts.handoffs!.readyEvent!.data);
+      if (!isChat && i === 7) assert.deepEqual(await readJson(modal, "Browser render acknowledgement"), receipts.handoffs!.renderReceipt!.data);
+      await portfolioPage.keyboard.press("Escape");
+      assert.equal(await arrow.evaluate((element) => element === document.activeElement), true);
+    }
+  }
+  await recordedMap.getByRole("button", { name: "Chat message", exact: true }).click();
+  await recordedMap.getByText("Eligible recommendations", { exact: true }).click();
+  await modal.getByRole("heading", { name: "Arrow 11 · Return eligible recommendations" }).waitFor();
+  await portfolioPage.keyboard.press("Escape");
+  await recordedMap.getByRole("button", { name: "Treatment Selector", exact: true }).click();
+  await recordedMap.getByRole("button", { name: "Inspect recorded decision" }).click();
+  assert.deepEqual(await readJson(modal, "TS response returned to sfield"), sourceLog.treatment?.result?.data);
+  await portfolioPage.keyboard.press("Escape");
+  const liveSequence = portfolioPage.getByRole("list", { name: "Chat interaction sequence" });
+  await liveSequence.getByRole("button", { name: /^Step 5 ·/ }).click();
+  assert.deepEqual(await readJson(modal, "Supported topic catalog tool request"), sourceLog.catalogLookup?.registryInput.data);
+  assert.deepEqual(await readJson(modal, "Supported topic catalog tool response"), sourceLog.catalogLookup?.result?.data);
+  await portfolioPage.keyboard.press("Escape");
+  await liveSequence.getByRole("button", { name: /^Step 11 ·/ }).click();
+  assert.ok((await readJson(modal, "Eligible candidates in the composer request")).length > 0);
+  await portfolioPage.keyboard.press("Escape");
+  await liveSequence.getByRole("button", { name: /^Step 10 ·/ }).click();
+  assert.deepEqual(await readJson(modal, "TS response returned to sfield"), sourceLog.treatment?.result?.data);
+  await portfolioPage.keyboard.press("Escape");
   await openAdmin(portfolioPage, "tools");
   await editor.getByLabel("How to run funding preview", { exact: true }).selectOption("agent");
   await editor.getByLabel("Goal", { exact: true }).waitFor();
@@ -558,8 +803,21 @@ try {
   await openAdmin(mobile, "help");
   await mobile.getByRole("heading", { name: "How CEP works", exact: true }).waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  await mobile.getByRole("button", { name: "App server to sfield handoff · step 6", exact: true }).click();
-  const mobileExchange = mobile.getByRole("dialog", { name: "Step 6 · App server to sfield", exact: true });
+  const phoneMap = mobile.getByRole("region", { name: "System architecture", exact: true });
+  await phoneMap.locator(".sa-canvas.sa-compact").waitFor();
+  const phoneArrow = phoneMap.getByRole("button", { name: "Arrow 11 · Return eligible recommendations" });
+  await phoneArrow.press("Space");
+  await mobile.getByRole("dialog", { name: "Arrow 11 · Return eligible recommendations" }).waitFor();
+  await mobile.keyboard.press("Escape");
+  await phoneMap.getByRole("button", { name: "sfield runtime", exact: true }).click();
+  await assertArchitectureLabelsFit(phoneMap);
+  await phoneMap.locator(".sa-canvas").screenshot({ path: resolve(screenshots, "chat-system-architecture-mobile.png") });
+  await phoneMap.getByRole("button", { name: "After a funding click", exact: true }).click();
+  await assertArchitectureLabelsFit(phoneMap);
+  const mobileBounds = await phoneMap.boundingBox();
+  assert.ok(mobileBounds && mobileBounds.width <= 360);
+  await mobile.getByRole("button", { name: "App server to sfield handoff · step 9", exact: true }).click();
+  const mobileExchange = mobile.getByRole("dialog", { name: "Step 9 · App server to sfield", exact: true });
   await mobileExchange.getByText("Marcus Reed", { exact: true }).waitFor();
   assert.deepEqual(await readExchange(mobileExchange), marcusCalls.treatment);
   const exchangeBox = await mobileExchange.boundingBox();
@@ -568,8 +826,10 @@ try {
   await mobile.getByRole("link", { name: "sfield", exact: true }).click();
   await mobile.getByRole("heading", { name: "Registered tools", exact: true }).waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  await mobile.getByRole("link", { name: "Proposal", exact: true }).click();
-  await mobile.getByText("Compare content IDs and the workflow response", { exact: true }).click();
+  await mobile.getByRole("link", { name: "TS evolution", exact: true }).click();
+  await mobile.getByRole("button", { name: "Alice · Retirement", exact: true }).click();
+  await mobile.getByText("Compare the legacy and current TS responses", { exact: true }).click();
+  assert.deepEqual(JSON.parse(await mobile.getByLabel("Content, actions and workflows JSON", { exact: true }).innerText()), aliceDecision.decision);
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await mobile.getByLabel("Select a contract", { exact: true }).selectOption("render");
   await mobile.getByRole("heading", { name: "A2UI surfaces and actions", exact: true }).waitFor();
@@ -609,7 +869,7 @@ try {
   await mobileGoal.getByRole("img", { name: /Down payment savings/ }).waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await openAdmin(mobile, "chat");
-  await mobile.getByText("Test mode", { exact: true }).waitFor();
+  await mobile.getByText("Model connected", { exact: true }).waitFor();
   await mobileMessage.fill("Create a rule");
   await mobileMessage.press("Enter");
   const mobileRule = mobile.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Create a CCRE rule" });
@@ -738,7 +998,7 @@ try {
 
   await openAdmin(signInPage, "tools");
   await signInPage.getByLabel("Demo profile", { exact: true }).selectOption("demo-new-account");
-  await signInPage.getByRole("button", { name: "Test in chat", exact: true }).click();
+  await signInPage.getByRole("button", { name: "Open in chat", exact: true }).click();
   await currentProfile("Marcus Reed").waitFor();
   assert.doesNotMatch(await history.innerText(), /portfolio summary/i);
   await openCustomerChat(signInPage);

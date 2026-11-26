@@ -1,6 +1,9 @@
 import { serverTenantId } from "./tenant";
+import { digestJson } from "@sfield/core";
+import { inheritedFlows, resolveTurnFlows, type FlowCatalogSetup, type FlowOverrides, type FlowScope, type TurnFlowCatalog } from "../../packages/contracts/routing-flows";
+import type { RuleWorkflowMatch } from "../../packages/contracts/customer-workflows";
 import type { DomainPackId } from "../../packages/contracts/domain-packs";
-import { layoutTargetDomain, maxLayouts, targetKey, type LibraryDesign, type AppliedUiLayout, type UiLayoutChange, type UiLayoutRecord, type UiPublication, type UiTarget } from "../../packages/contracts/ui-layout";
+import { normalizedIntentPhrase, layoutTargetDomain, maxLayouts, targetKey, type LibraryDesign, type AppliedUiLayout, type UiLayoutChange, type UiLayoutRecord, type UiPublication, type UiTarget } from "../../packages/contracts/ui-layout";
 import { applyPublishedUi } from "../../packages/experience/ui-layout";
 import { resolveMultiDomainBindings } from "../../packages/customer-profiles/bindings";
 import type { IncidentRecord } from "../../packages/contracts/ops";
@@ -13,16 +16,16 @@ import { SqliteDatabase } from "@sfield/store-sqlite";
 import type { UsageSummary } from "@sfield/core";
 import type { ContentEntry, CatalogSnapshot, ContentDecision, PropensityResult, RouteDecision, BalanceProof, Scope, SelectionMode } from "../../packages/contracts/domain";
 import type { Conversation, ConversationChange, FailureCode, Progress, PublicEvent, PublicEventType, TurnStatus, TurnView } from "../../packages/contracts/api";
-import type { GatewayExchange } from "../../packages/contracts/inspector";
+import type { GatewayExchange, OfferClick, TreatmentRun, TurnExchange, TurnExchangeStage } from "../../packages/contracts/inspector";
 import type { GoalProgress } from "../../packages/contracts/goal-progress";
 import {
-  asksAboutFunding, defaultAgentFundingWorkflow, type WorkflowLaunch,
+  asksAboutFunding, defaultAgentFundingWorkflow, fundingPreviewWorkflow, type ActionRecommendation, type TreatmentRecommendations, type WorkflowLaunch,
 } from "../../packages/contracts/funding-workflow";
 import type { PortfolioSnapshot } from "../../packages/contracts/portfolio";
 import type { RoutingIntentId } from "../../packages/contracts/routing-intents";
-import { defaultToolSetup, type MockCcreEvaluation, type ToolSetup, type TreatmentSource } from "../../packages/contracts/tool-setup";
+import { defaultToolSetup, type MockCcreCondition, type MockCcreEvaluation, type ToolSetup, type TreatmentSource } from "../../packages/contracts/tool-setup";
 import type { CompiledExperience, IssuedAction } from "../../packages/experience/compile";
-import { makeId } from "../../packages/experience/compile";
+import { buildSurface, makeId } from "../../packages/experience/compile";
 import type { ContextScoresRequest, Rejection } from "../../packages/ts-adapter";
 import { defaultWorkspacePins, workspaceFundingContext, workspacePinsSchema, type WorkspaceActionLog, type WorkspacePin } from "../../packages/contracts/workspace";
 
@@ -59,9 +62,14 @@ export type TurnTrace = {
   uiLayout?: AppliedUiLayout;
 };
 
+type ThreadViewer = { customer?: string; operator?: string };
+const accessibleThreads = `(principal_id=? OR id IN (SELECT thread_id FROM user_threads WHERE tenant_id=? AND
+  ((domain_id=\'wealth\' AND user_id=?) OR (domain_id<>\'wealth\' AND user_id=?))))`;
+
 export type ConversationRecord = Conversation & {
   principalId: string;
   legacyTranscript?: boolean;
+  preview?: { layout?: UiPublication; tools?: ToolSetup };
   sessions: Partial<Record<Stage, string>>;
   customTitle?: boolean;
 };
@@ -80,6 +88,7 @@ export type StoredWatch = WatchSource & { id: string; conversationId: string; pr
 export type TurnRecord = {
   public: TurnView;
   historyStatus?: TurnStatus;
+  requestSessionId?: string;
   agentLaunch?: AgentLaunch;
   agentRunId?: string;
   agentJourneyId?: string;
@@ -90,12 +99,15 @@ export type TurnRecord = {
   origin: string;
   selectionMode: SelectionMode;
   toolSetup?: ToolSetup;
+  flowCatalog?: TurnFlowCatalog;
   uiLayouts?: UiPublication[];
   attempts: Partial<Record<Stage, StageAttempt>>;
   trace: TurnTrace;
   catalogScopeId?: string;
   tsScopeId?: string;
   glossaryScopeId?: string;
+  retirementScopeId?: string;
+  retirementAccounts?: import("../../packages/contracts/retirement-accounts").RetirementView;
   portfolioScopeId?: string;
   portfolioForRule?: PortfolioSnapshot;
   portfolioSnapshot?: PortfolioSnapshot;
@@ -105,10 +117,12 @@ export type TurnRecord = {
   workflowScopeId?: string;
   fundingRun?: FundingRun;
   treatmentScores?: { scopeId: string; input: ContextScoresRequest };
-  treatmentMockInput?: { mid: string; context: string };
+  treatmentMockInput?: { mid: string; context: string; accountId?: string };
   treatmentCcre?: MockCcreEvaluation;
+  treatmentFormats?: { legacy: string[]; workflows: TreatmentRecommendations; matches?: RuleWorkflowMatch[]; actionMatches?: { name: string; contextId: string; condition: MockCcreCondition; action: ActionRecommendation }[] };
   treatmentEntries?: ContentEntry[];
   recordId?: string;
+  requestedRecordIntent?: string;
   operatorName?: string;
   customerTask?: { ref: string; recordId: string; runId: string; sfieldRunId?: string; sfieldCallId?: string; confirmWatch?: boolean };
   catalog?: CatalogSnapshot;
@@ -162,12 +176,23 @@ export class Store {
       CREATE TABLE IF NOT EXISTS tool_setups (
         principal_id TEXT PRIMARY KEY REFERENCES local_sessions(id), record TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS domain_tool_setups (
+        tenant_id TEXT NOT NULL, domain_id TEXT NOT NULL, scope_key TEXT NOT NULL, record TEXT NOT NULL,
+        PRIMARY KEY (tenant_id, domain_id, scope_key)
+      );
       CREATE TABLE IF NOT EXISTS gateway_exchanges (
         attempt_id TEXT PRIMARY KEY, record TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS routing_flow_settings (
+        tenant_id TEXT NOT NULL, scope TEXT NOT NULL, record TEXT NOT NULL, PRIMARY KEY (tenant_id, scope)
       );
       CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, updated_at INTEGER NOT NULL, record TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS user_threads (
+        thread_id TEXT PRIMARY KEY REFERENCES conversations(id), tenant_id TEXT NOT NULL, domain_id TEXT NOT NULL, user_id TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS user_threads_owner ON user_threads(tenant_id,domain_id,user_id);
       CREATE INDEX IF NOT EXISTS conversations_principal ON conversations(principal_id, updated_at);
       CREATE TABLE IF NOT EXISTS turns (
         id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id),
@@ -176,6 +201,10 @@ export class Store {
       );
       CREATE INDEX IF NOT EXISTS turns_conversation ON turns(conversation_id);
       CREATE INDEX IF NOT EXISTS turns_running ON turns(status);
+      CREATE TABLE IF NOT EXISTS turn_exchanges (
+        turn_id TEXT NOT NULL REFERENCES turns(id), stage TEXT NOT NULL, record TEXT NOT NULL,
+        PRIMARY KEY (turn_id, stage)
+      );
       CREATE INDEX IF NOT EXISTS operator_turns ON turns(conversation_id) WHERE ${operatorTurn};
       CREATE INDEX IF NOT EXISTS completed_conversation_turns ON turns(conversation_id, ordinal) WHERE status = 'completed';
       CREATE TABLE IF NOT EXISTS record_watches (
@@ -204,6 +233,11 @@ export class Store {
         );
     `);
     this.initializeDesignLibrary();
+    this.db.run(`INSERT OR IGNORE INTO user_threads SELECT c.id, ?, json_extract(c.record,'$.domainId'), json_extract(c.record,'$.userId')
+      FROM conversations c WHERE json_extract(c.record,'$.tenantId')=? AND json_extract(c.record,'$.audience') IS NULL
+      AND (json_extract(c.record,'$.domainId') IN ('it_ops','sales_revops') OR EXISTS (
+        SELECT 1 FROM session_profiles p WHERE p.session_id=c.principal_id AND p.persona_id=json_extract(c.record,'$.userId')
+        AND NOT EXISTS (SELECT 1 FROM turns WHERE conversation_id=c.id AND ${operatorTurn})))`, serverTenantId, serverTenantId);
   }
 
   private initializeDesignLibrary() {
@@ -283,18 +317,62 @@ export class Store {
 
   selectProfile(sessionId: string, personaId: string | null) {
     if (personaId === null) this.db.run("DELETE FROM session_profiles WHERE session_id=?", sessionId);
-    else this.db.run("INSERT INTO session_profiles VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET persona_id=excluded.persona_id", sessionId, personaId);
+    else this.db.tx(() => {
+      this.db.run("INSERT INTO session_profiles VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET persona_id=excluded.persona_id", sessionId, personaId);
+      this.db.run(`INSERT OR IGNORE INTO user_threads
+        SELECT id, ?, 'wealth', ? FROM conversations WHERE principal_id=? AND json_extract(record,'$.domainId')='wealth'
+        AND json_extract(record,'$.userId')=? AND json_extract(record,'$.audience') IS NULL
+        AND NOT EXISTS (SELECT 1 FROM turns WHERE conversation_id=conversations.id AND ${operatorTurn})`,
+        serverTenantId, personaId, sessionId, personaId);
+    });
   }
 
-  toolSetup(principalId: string) {
-    return parse<ToolSetup>(this.db.one("SELECT record FROM tool_setups WHERE principal_id = ?", principalId)) ?? defaultToolSetup;
+  toolSetup(domainId: DomainPackId = "wealth", previewSession?: string): ToolSetup {
+    const read = (key: string) => parse<ToolSetup>(this.db.one(
+      "SELECT record FROM domain_tool_setups WHERE tenant_id=? AND domain_id=? AND scope_key=?", serverTenantId, domainId, key,
+    ));
+    if (previewSession) {
+      const draft = read(previewSession) ?? (domainId === "wealth"
+        ? parse<ToolSetup>(this.db.one("SELECT record FROM tool_setups WHERE principal_id=?", previewSession)) : undefined);
+      if (draft) return draft;
+    }
+    return read("published") ?? defaultToolSetup;
   }
 
-  saveToolSetup(principalId: string, setup: ToolSetup) {
-    this.db.run(`
-      INSERT INTO tool_setups (principal_id, record) VALUES (?, ?)
-      ON CONFLICT(principal_id) DO UPDATE SET record = excluded.record
-    `, principalId, JSON.stringify(setup));
+  saveToolSetup(domainId: DomainPackId, setup: ToolSetup, previewSession?: string) {
+    this.db.run(`INSERT INTO domain_tool_setups VALUES (?, ?, ?, ?)
+      ON CONFLICT(tenant_id, domain_id, scope_key) DO UPDATE SET record=excluded.record`,
+      serverTenantId, domainId, previewSession ?? "published", JSON.stringify(setup));
+  }
+
+  private flowOverrides(scope: FlowScope): FlowOverrides {
+    return parse<FlowOverrides>(this.db.one("SELECT record FROM routing_flow_settings WHERE tenant_id=? AND scope=?", serverTenantId, scope)) ?? {};
+  }
+
+  flowSetup(scope: FlowScope, editableScopes: FlowScope[]) {
+    const inherited = inheritedFlows(scope, scope === "tenant" ? {} : this.flowOverrides("tenant"));
+    const overrides = this.flowOverrides(scope);
+    const data: FlowCatalogSetup = { tenantId: serverTenantId, scope, editableScopes, inherited, overrides };
+    return { data, revision: '"' + digestJson({ scope, inherited, overrides }) + '"' };
+  }
+
+  saveFlowSetup(scope: FlowScope, editableScopes: FlowScope[], overrides: FlowOverrides, expected?: string) {
+    return this.db.tx(() => {
+      const current = this.flowSetup(scope, editableScopes);
+      if (expected && expected !== current.revision) throw new ApiError(412, "flows_changed", "Flow settings changed. Reload them before saving.");
+      if (Object.keys(overrides).some((id) => !current.data.inherited.some((flow) => flow.id === id))) {
+        throw new ApiError(400, "flow_scope_invalid", "Choose flows registered for this domain.");
+      }
+      this.db.run(`INSERT INTO routing_flow_settings VALUES (?, ?, ?) ON CONFLICT(tenant_id, scope) DO UPDATE SET record=excluded.record`,
+        serverTenantId, scope, JSON.stringify(overrides));
+      return this.flowSetup(scope, editableScopes);
+    });
+  }
+
+  routingFlows(conversation: Conversation, tenantOperator: boolean) {
+    const { domainId } = conversation;
+    const audience = domainId === "wealth" && conversation.audience !== "admin" ? "customer" : "operator";
+    return resolveTurnFlows(serverTenantId, domainId, audience, tenantOperator, this.flowOverrides("tenant"), this.flowOverrides(domainId));
   }
 
   listUiLayouts(principalId: string, operator: string) {
@@ -337,7 +415,12 @@ export class Store {
           throw new ApiError(400, "domain_attachment_invalid", "Attach an intent or capability supported by this domain.");
         }
         const keys = new Set(draft.targets.map(targetKey));
-        const conflict = this.publishedUiLayouts(domainId).find((item) => item.id !== id && item.design.targets.some((target) => keys.has(targetKey(target))));
+        const others = this.publishedUiLayouts(domainId).filter((item) => item.id !== id);
+        const phrases = new Set(draft.recordIntent?.phrases.map(normalizedIntentPhrase));
+        if (others.some((item) => item.design.recordIntent?.phrases.some((phrase) => phrases.has(normalizedIntentPhrase(phrase))))) {
+          throw new ApiError(409, "ui_phrase_taken", "Another published intent in this domain already uses this phrase.");
+        }
+        const conflict = others.find((item) => item.design.targets.some((target) => keys.has(targetKey(target))));
         if (conflict) {
           throw new ApiError(409, "ui_attachment_taken", `An attachment is already in use by “${conflict.design.name}”. Unpublish that layout or remove the attachment from it.`);
         }
@@ -362,12 +445,37 @@ export class Store {
     this.db.run("INSERT OR IGNORE INTO gateway_exchanges (attempt_id, record) VALUES (?, ?)", attemptId, JSON.stringify(exchange));
   }
 
-  createConversation(principalId: string, personaId: string, scenarioId: string, now: number, audience?: Conversation["audience"], domainId: DomainPackId = "wealth", userId = personaId) {
+  saveTurnExchange(turnId: string, stage: TurnExchangeStage, exchange: TurnExchange) {
+    this.db.run("INSERT OR IGNORE INTO turn_exchanges (turn_id, stage, record) VALUES (?, ?, ?)", turnId, stage, JSON.stringify(exchange));
+  }
+
+  turnExchanges(turnId: string) {
+    const result: Partial<Record<TurnExchangeStage, TurnExchange>> = {};
+    for (const row of this.db.all<{ stage: TurnExchangeStage; record: string }>(
+      "SELECT stage, record FROM turn_exchanges WHERE turn_id=?", turnId,
+    )) result[row.stage] = JSON.parse(row.record) as TurnExchange;
+    return result;
+  }
+
+  renderReceipt(experienceId: string) {
+    return this.db.one<{ eventId: string; experienceId: string; type: string }>(
+      "SELECT id AS eventId, experience_id AS experienceId, event_type AS type FROM analytics WHERE experience_id=? AND event_type IN ('rendered','render_fallback') ORDER BY created_at DESC LIMIT 1",
+      experienceId,
+    );
+  }
+
+  createConversation(principalId: string, personaId: string, scenarioId: string, now: number, audience?: Conversation["audience"], domainId: DomainPackId = "wealth", userId = personaId, preview?: ConversationRecord["preview"]) {
     const record: ConversationRecord = {
       id: makeId("conv"), tenantId: serverTenantId, domainId, userId, principalId, personaId, scenarioId, title: "New conversation", updatedAt: now, sessions: {},
-      ...(audience && { audience }),
+      ...(audience && { audience }), ...(preview && { preview }),
     };
-    this.db.run("INSERT INTO conversations VALUES (?, ?, ?, ?)", record.id, principalId, now, JSON.stringify(record));
+    this.db.tx(() => {
+      this.db.run("INSERT INTO conversations VALUES (?, ?, ?, ?)", record.id, principalId, now, JSON.stringify(record));
+      if (preview?.tools) this.saveToolSetup(domainId, preview.tools, principalId);
+      if (!audience && (domainId !== "wealth" || this.selectedProfile(principalId) === userId)) {
+        this.db.run("INSERT INTO user_threads VALUES (?, ?, ?, ?)", record.id, serverTenantId, domainId, userId);
+      }
+    });
     return record;
   }
 
@@ -375,16 +483,17 @@ export class Store {
     return Boolean(this.db.one(`SELECT 1 FROM turns WHERE conversation_id = ? AND ${operatorTurn} LIMIT 1`, conversationId));
   }
 
-  conversations(principalId: string, includeOperatorThreads = true) {
+  conversations(principalId: string, includeOperatorThreads = true, viewer?: ThreadViewer) {
     const visibility = includeOperatorThreads ? "" : ` AND NOT EXISTS (
       SELECT 1 FROM turns WHERE conversation_id = conversations.id AND ${operatorTurn}
     )`;
-    return this.db.all<{ record: string }>(`SELECT record FROM conversations WHERE principal_id = ?${visibility} ORDER BY updated_at DESC, rowid DESC`, principalId)
+    return this.db.all<{ record: string }>(`SELECT record FROM conversations WHERE ${accessibleThreads}${visibility} ORDER BY updated_at DESC, rowid DESC`, principalId, serverTenantId, viewer?.customer ?? "", viewer?.operator ?? "")
       .map((row) => presentConversation(parse<ConversationRecord>(row)!));
   }
 
-  conversation(id: string, principalId: string) {
-    const record = parse<ConversationRecord>(this.db.one("SELECT record FROM conversations WHERE id = ? AND principal_id = ?", id, principalId));
+  conversation(id: string, principalId: string, viewer?: ThreadViewer) {
+    const record = parse<ConversationRecord>(this.db.one(`SELECT record FROM conversations WHERE id=? AND ${accessibleThreads}`,
+      id, principalId, serverTenantId, viewer?.customer ?? "", viewer?.operator ?? ""));
     return record ?? inaccessible();
   }
 
@@ -449,14 +558,49 @@ export class Store {
     return parse<TurnRecord>(this.db.one("SELECT record FROM turns WHERE id = ?", id));
   }
 
-  ownTurn(id: string, principalId: string) {
+  ownTurn(id: string, principalId: string, viewer?: ThreadViewer) {
     const record = this.turn(id);
-    return record?.scope.principalId === principalId ? record : inaccessible();
+    if (!record) return inaccessible();
+    if (record.scope.principalId !== principalId) this.conversation(record.scope.conversationId, principalId, viewer);
+    return record;
   }
 
   conversationTurns(id: string) {
     return this.db.all<{ record: string }>("SELECT record FROM turns WHERE conversation_id = ? ORDER BY rowid", id)
       .map((row) => parse<TurnRecord>(row)!);
+  }
+
+  treatmentRuns(principalId: string, viewer: ThreadViewer, personaId: string, context: string, turnId?: string) {
+    const rows = this.db.all<Omit<TreatmentRun, "clicks"> & { experienceId: string }>(`
+      SELECT id AS turnId, conversation_id AS threadId, json_extract(record, '$.public.createdAt') AS createdAt,
+        json_extract(record, '$.public.message') AS message, json_extract(record, '$.public.experience.experienceId') AS experienceId
+      FROM turns WHERE conversation_id IN (
+        SELECT id FROM conversations WHERE ${accessibleThreads} AND json_extract(record, '$.domainId') = 'wealth'
+          AND json_extract(record, '$.personaId') = ?
+      ) AND status = 'completed' AND json_extract(record, '$.decision.contextId') = ?
+        AND json_type(record, '$.public.experience.experienceId') = 'text' ${turnId ? "AND id = ?" : ""}
+      ORDER BY rowid DESC LIMIT 25
+    `, principalId, serverTenantId, viewer.customer ?? "", viewer.operator ?? "", personaId, context, ...(turnId ? [turnId] : []));
+    return rows.map(({ experienceId, ...source }) => ({ ...source, clicks: this.offerClicks(source.threadId, experienceId) }));
+  }
+
+  private offerClicks(threadId: string, experienceId: string) {
+    return this.db.all<OfferClick>(`
+      SELECT id AS turnId, json_extract(record, '$.public.message') AS label,
+        CASE WHEN json_type(record, '$.workflow.recommendation') = 'object' THEN 'workflow' ELSE 'action' END AS kind,
+        COALESCE(json_extract(record, '$.workflow.recommendation.id'), json_extract(record, '$.agentLaunch.capability.id')) AS id,
+        COALESCE(json_extract(record, '$.workflow.recommendation.version'), json_extract(record, '$.agentLaunch.capability.version')) AS version
+      FROM turns
+      WHERE conversation_id = ? AND (
+        json_extract(record, '$.workflow.sourceExperienceId') = ? AND json_type(record, '$.fundingRun.answerTo') IS NULL
+        OR json_extract(record, '$.agentLaunch.sourceExperienceId') = ? AND json_type(record, '$.agentLaunch.capability') = 'object'
+      ) ORDER BY ordinal
+    `, threadId, experienceId, experienceId);
+  }
+
+  workflowClicks(source: TurnRecord) {
+    return this.offerClicks(source.scope.conversationId, source.public.experience!.experienceId)
+      .map(({ turnId, label }) => ({ id: turnId, label }));
   }
 
   previousCompletedTurn(conversationId: string, ordinal: number) {
@@ -506,7 +650,8 @@ export class Store {
 
   accept(input: {
     conversation: ConversationRecord; requestId: string; origin: string; message: string; selectionMode: SelectionMode; now: number;
-    retry?: TurnRecord; workflow?: WorkflowLaunch; agentLaunch?: AgentLaunch; operatorName?: string;
+    retry?: TurnRecord; workflow?: WorkflowLaunch; agentLaunch?: AgentLaunch; operatorName?: string; requestSessionId?: string;
+    tenantOperator?: boolean;
   }) {
     let created = false;
     const turn = this.db.tx(() => {
@@ -522,8 +667,10 @@ export class Store {
       }
 
       const id = makeId("turn");
-      const setup = this.toolSetup(conversation.principalId);
-      const uiLayouts = this.publishedUiLayouts(conversation.domainId);
+      const setup = conversation.preview?.tools ?? this.toolSetup(conversation.domainId);
+      const publications = this.publishedUiLayouts(conversation.domainId);
+      const draft = conversation.preview?.layout;
+      const uiLayouts = draft ? [draft, ...publications] : publications;
       const workflowDefinition = setup.fundingWorkflow ?? defaultAgentFundingWorkflow;
       const fundingInput = typeof explicitInputs(message).methodId === "string"
         && !/\b(?:compare|balance|portfolio|retire|address|goal|savings)\b/i.test(message);
@@ -532,21 +679,22 @@ export class Store {
       const continuation = paused?.through && paused.waiting && paused.waiting.expiresAt > now ? {
         id: paused.id, rootTurnId: paused.rootTurnId, after: paused.through, answerTo: paused.waiting.requestId,
       } : undefined;
-      const offered = !continuation && origin === "message" && workflowDefinition.mode === "agent" && asksAboutFunding(message)
+      const offer = !continuation && origin === "message" && workflowDefinition.mode === "agent" && asksAboutFunding(message)
         && latest?.public.experience && latest.public.experience.expiresAt > now
-        ? this.experience(latest.public.experience.experienceId, conversation.principalId).actions.find(({ workflow }) => workflow)?.workflow
+        ? this.experience(latest.public.experience.experienceId, conversation.principalId).actions.find(({ workflow }) => workflow?.id === fundingPreviewWorkflow.recommendation.id)
         : undefined;
       const overviewFunding = workspaceFundingContext(origin);
       const launch = overviewFunding ? undefined
         : retry?.workflow ?? input.workflow ?? (continuation ? latest?.workflow : undefined)
-          ?? (offered && latest?.public.experience ? { recommendation: offered, sourceExperienceId: latest.public.experience.experienceId } : undefined);
+          ?? (offer?.workflow && latest?.public.experience ? { recommendation: offer.workflow, sourceExperienceId: offer.offerSourceId ?? latest.public.experience.experienceId } : undefined);
       const record: TurnRecord = {
         public: { id, conversationId: conversation.id, message, createdAt: now, status: "working", progress: "accepted", retryOf: retry?.public.id },
         scope: { turnId: id, tenantId: serverTenantId, domainId: conversation.domainId, userId: conversation.userId, principalId: conversation.principalId, conversationId: conversation.id, personaId: conversation.personaId },
         ordinal: retry?.ordinal ?? (latest?.ordinal ?? 0) + 1,
         requestId, origin, selectionMode, attempts: {},
         workflow: launch,
-        operatorName: input.operatorName,
+        operatorName: input.operatorName, requestSessionId: input.requestSessionId,
+        flowCatalog: this.routingFlows(conversation, Boolean(input.tenantOperator)),
         agentLaunch: input.agentLaunch ?? retry?.agentLaunch,
         fundingRun: continuation,
         ...(uiLayouts.length && { uiLayouts }),
@@ -591,8 +739,8 @@ export class Store {
     if (!turn.uiLayouts?.length) return result;
     const targets: UiTarget[] = [];
     const capability = turn.public.semanticRoute?.capabilityId;
-    if (turn.recordId && turn.operatorName && (capability === "ops_incident" || capability === "sales_deal_desk")) targets.push({ kind: "capability", id: capability });
     if (turn.trace.intentId) targets.push({ kind: "intent", id: turn.trace.intentId });
+    if (turn.recordId && turn.operatorName && (capability === "ops_incident" || capability === "sales_deal_desk")) targets.push({ kind: "capability", id: capability });
     if (turn.workflow) targets.push({ kind: "capability", id: turn.workflow.recommendation.id });
     const journey = turn.agentJourneyId && this.axe.get("journeys", turn.scope, turn.agentJourneyId);
     if (journey && journey.turnId === turn.public.id) {
@@ -606,6 +754,9 @@ export class Store {
       const extra = turn.recordId && turn.operatorName ? this.domainBindingContext?.(turn.recordId) : undefined;
       const domain = turn.scope.domainId ?? "wealth";
       const bindings = resolveMultiDomainBindings(domain === "wealth" ? turn.scope.personaId : undefined, {
+        portfolio: turn.portfolioSnapshot ?? result.display.blocks.find((b) => b.component === "PznPortfolioSnapshot")?.props ?? turn.portfolioForRule,
+        goal: turn.goalProgress ?? result.display.blocks.find((b) => b.component === "PznGoalProgress")?.props.goal,
+        balances: turn.proof?.values ?? result.display.blocks.find((b) => b.component === "PznMetricSummary")?.props.values,
         effectiveFundingStatus: domain === "wealth" ? this.axe.fundingStatus(turn.scope) : undefined,
         incident: domain === "it_ops" ? extra?.incident : undefined,
         deal: domain === "sales_revops" ? extra?.deal : undefined,
@@ -622,6 +773,37 @@ export class Store {
     return result;
   }
 
+  private carryForwardOffers(turn: TurnRecord, result: CompiledExperience, now: number) {
+    const sourceId = turn.workflow?.sourceExperienceId ?? (turn.agentLaunch && "capability" in turn.agentLaunch ? turn.agentLaunch.sourceExperienceId : undefined);
+    if (!sourceId || result.display.status !== "ready" || !result.display.blocks.length || turn.fundingRun?.waiting) return result;
+    const { turn: source, actions } = this.experience(sourceId, turn.scope.principalId);
+    const display = source.public.experience;
+    if (!display || display.expiresAt <= now || source.scope.conversationId !== turn.scope.conversationId
+      || source.scope.personaId !== turn.scope.personaId || !source.decision?.actionRecommendations?.length) return result;
+    const used = new Set(this.workflowClicks(source).flatMap(({ id }) => {
+      const clicked = this.turn(id);
+      const ref = clicked?.workflow?.recommendation ?? (clicked?.agentLaunch && "capability" in clicked.agentLaunch ? clicked.agentLaunch.capability : undefined);
+      return ref ? [ref.id + "@" + ref.version] : [];
+    }));
+    const issued = [...result.issued];
+    const blocks = [...result.display.blocks];
+    for (const action of actions) {
+      const ref = action.standaloneAction ?? action.workflow;
+      if (!ref || used.has(ref.id + "@" + ref.version)) continue;
+      const actionId = makeId("action");
+      if (action.standaloneAction) {
+        const form = display.blocks.find((block) => block.component === "PznCapabilityForm" && block.props.actionId === action.actionId);
+        if (form?.component !== "PznCapabilityForm") continue;
+        blocks.push({ component: form.component, props: { ...form.props, actionId } });
+        issued.push({ ...action, actionId, componentId: "block_" + blocks.length, offerSourceId: sourceId });
+      } else if (result.display.actions.length + issued.length - result.issued.length < 3) {
+        issued.push({ ...action, actionId, componentId: "offer_" + actionId, offerSourceId: sourceId });
+      }
+    }
+    if (issued.length === result.issued.length) return result;
+    return buildSurface({ ...result.display, expiresAt: Math.min(result.display.expiresAt, display.expiresAt) }, blocks, issued, result.display);
+  }
+
   finish(
     id: string,
     outcome: { type: "completed"; result: CompiledExperience } | { type: "failed"; code: FailureCode } | { type: "cancelled" },
@@ -633,7 +815,8 @@ export class Store {
       turn.public.status = outcome.type;
       turn.trace.markers.terminal = now;
       if (outcome.type === "completed") {
-        const { display, issued } = this.applyUiLayout(turn, outcome.result);
+        const { display, issued } = this.applyUiLayout(turn, this.carryForwardOffers(turn, outcome.result, now));
+        if (turn.agentLaunch && "capability" in turn.agentLaunch) delete turn.agentLaunch.values;
         turn.public.experience = display;
         turn.trace.markers.compiled = now;
         this.db.run("INSERT INTO experiences VALUES (?, ?, ?)", display.experienceId, id, JSON.stringify(issued));
@@ -653,10 +836,10 @@ export class Store {
     return record;
   }
 
-  experience(experienceId: string, principalId: string) {
+  experience(experienceId: string, principalId: string, viewer?: ThreadViewer) {
     const row = this.db.one<{ turn_id: string; actions: string }>("SELECT turn_id, actions FROM experiences WHERE id = ?", experienceId);
     if (!row) return inaccessible();
-    return { turn: this.ownTurn(row.turn_id, principalId), actions: JSON.parse(row.actions) as IssuedAction[] };
+    return { turn: this.ownTurn(row.turn_id, principalId, viewer), actions: JSON.parse(row.actions) as IssuedAction[] };
   }
 
   analytics(principalId: string, experienceId: string, eventId: string, type: "rendered" | "render_fallback" | "helpful" | "unhelpful", now: number) {

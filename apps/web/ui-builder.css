@@ -176,6 +176,11 @@
 .ui-preview-head { color: var(--builder-green-dark); }
 .ui-preview-head p { font-size: .78rem; margin-top: 3px; color: var(--builder-muted); }
 .ui-preview-canvas { min-height: 360px; padding: clamp(14px, 1.9vw, 25px); background: #f7f9f4; }
+.ui-named-intent > summary, .ui-layout-test > summary { cursor: pointer; font-weight: 600; }
+.ui-named-intent[open] > *, .ui-layout-test[open] > * { margin-block: .65rem; }
+.ui-layout-test { padding: 10px clamp(14px, 1.9vw, 25px); border-top: 1px solid var(--builder-border); }
+.ui-layout-test label, .ui-named-intent label { display: grid; gap: .3rem; }
+.ui-layout-test p { color: var(--builder-muted); }
 .ui-preview-canvas .experience-flow { gap: 12px; }
 .ui-preview-canvas .experience-intro { font-size: .91rem; color: var(--builder-muted); }
 .ui-preview-empty { text-align: center; color: var(--builder-muted); font-size: .87rem; padding: 60px 10px; }

@@ -19,7 +19,7 @@ const destinations = [
   { label: "Logs", path: adminPaths.logs, Icon: FileText },
   { label: "Inspector", path: adminPaths.inspector, Icon: Code2 },
   { label: "Architecture", path: adminPaths.help, Icon: BookOpenText },
-  { label: "Test chat", path: adminPaths.chat, Icon: MessageSquare },
+  { label: "Admin chat", path: adminPaths.chat, Icon: MessageSquare },
 ] as const;
 
 const workspaceDestinations = [

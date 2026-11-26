@@ -44,7 +44,7 @@ try {
   await openAdmin(page, "tools");
   await page.getByRole("heading", { name: "Capability Studio" }).waitFor();
   await page.getByText("Evaluation", { exact: true }).click();
-  await page.getByRole("table", { name: "Test mode results" }).getByRole("rowheader", { name: "Multi-step" }).waitFor();
+  await page.getByRole("table", { name: "Model results" }).getByRole("rowheader", { name: "Multi-step" }).waitFor();
   await page.getByLabel("Published capability").selectOption("goal.savings.required-contribution@1.0.0");
   await page.getByRole("button", { name: "Validate manifest", exact: true }).click();
   await page.getByText("Manifest is valid.", { exact: true }).waitFor();

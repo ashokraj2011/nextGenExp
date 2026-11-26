@@ -234,7 +234,7 @@ export function TaskDraftCard({
       <FieldsEditor label="Input" schema={draft.inputSchema} onChange={(inputSchema) => set({ inputSchema })} />
       <FieldsEditor label="Output" schema={draft.outputSchema} onChange={(outputSchema) => set({ outputSchema })} />
       {draft.effect === "read" && <fieldset className="int-auth-section"><legend>Customer chat</legend>
-        <label><input type="checkbox" checked={Boolean(draft.customerExperience)} onChange={(e) => set({ customerExperience: e.target.checked ? { topic: "order", idPrefix: "ORD", memberField: "memberId", fields: [{ key: "status", label: "Status" }] } : undefined })} /> Offer this lookup in chat</label>
+        <label><input type="checkbox" checked={Boolean(draft.customerExperience)} onChange={(e) => set({ customerExperience: e.target.checked ? { topic: "order", idPrefix: "ORD", memberField: "memberId", fields: [{ key: "status", label: "Status" }] } : undefined })} /> Make this lookup available in chat</label>
         {draft.customerExperience && <div className="pzn-form-grid">
           <label>Topic<input value={draft.customerExperience.topic} onChange={(e) => set({ customerExperience: { ...draft.customerExperience!, topic: e.target.value } })} /></label>
           <label>Record prefix<input value={draft.customerExperience.idPrefix} onChange={(e) => set({ customerExperience: { ...draft.customerExperience!, idPrefix: e.target.value.toUpperCase() } })} /></label>

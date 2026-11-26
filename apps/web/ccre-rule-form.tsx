@@ -3,6 +3,7 @@ import type { RuleGlossary } from "../../packages/contracts/rule-glossary";
 import {
   MAX_CCRE_RULE_NAME, MAX_CCRE_SOURCE_LENGTH, type MockCcreCondition, type MockCcreRule, type ToolSetupView,
 } from "../../packages/contracts/tool-setup";
+import { RuleWorkflowPicker } from "./rule-workflow-picker";
 import { GlossaryConditionFields } from "./glossary-condition-fields";
 import "./ccre-rule.css";
 
@@ -30,11 +31,13 @@ export function CcreRuleForm({ scope, targets, personas, initialRule, defaultPer
   const [draft, setDraft] = useState({
     name: initialRule?.name ?? "", contentId: initialRule?.contentId ?? targets[0]?.contentId ?? "",
     source: initialRule?.source ?? "",
+    workflow: initialRule?.workflow ?? null,
   });
   const contentId = targets.some((target) => target.contentId === draft.contentId) ? draft.contentId : "";
   function renderForm(condition: MockCcreCondition | undefined, fields: ReactNode) {
     const rule = draft.name.trim() && contentId && condition
-      ? { ...scope, name: draft.name.trim(), contentId, source: draft.source || undefined, condition }
+      ? { ...scope, name: draft.name.trim(), contentId, source: draft.source || undefined, condition, workflow: draft.workflow,
+        ...(initialRule?.workflowRequiresContentIds && { workflowRequiresContentIds: initialRule.workflowRequiresContentIds }) }
       : undefined;
     return <>
       <fieldset className="rule-draft-fields" disabled={disabled}>
@@ -51,6 +54,8 @@ export function CcreRuleForm({ scope, targets, personas, initialRule, defaultPer
           </div>
         </div>
         {fields}
+        <RuleWorkflowPicker value={draft.workflow} change={(workflow) => setDraft({ ...draft, workflow })} />
+        {draft.workflow && initialRule?.workflowRequiresContentIds?.length ? <p className="rule-field-note">Also requires eligible content · {initialRule.workflowRequiresContentIds.join(", ")}</p> : null}
         <div className="setup-field">
           <label htmlFor={id + "-source"}>CCRE rule text (optional)</label>
           <textarea id={id + "-source"} value={draft.source} rows={3} spellCheck={false} maxLength={MAX_CCRE_SOURCE_LENGTH}

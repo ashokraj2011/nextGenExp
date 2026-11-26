@@ -1,7 +1,9 @@
 import { createServer, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { HttpGatewaySettings } from "../apps/server/gateway";
+import { deterministicCapabilityRoute } from "../apps/server/semantic-router";
 import type { ComponentName, ContextSelectionProposal, ExperienceProposal, Intent } from "../packages/contracts/domain";
+import { retirementAccountRequest } from "../packages/contracts/retirement-accounts";
 import { isSubjectlessSummaryRequest, leavingWorkQuestion, portfolioSummaryQuestion, retirementQuestion, type RoutingHistoryEntry, type RoutingIntent, type RoutingIntentId } from "../packages/contracts/routing-intents";
 import { capabilityRef, type CapabilityRef } from "../packages/contracts/agentic";
 import type { CapabilityDescriptor } from "../apps/server/capability-registry";
@@ -79,6 +81,8 @@ function route(envelope: Envelope): ContextSelectionProposal {
   );
   if (summaryFollowUpIntentId) return select(summaryFollowUpIntentId);
   const previous = recent?.at(-1);
+  const accountIntent = retirementAccountRequest(text, ["list_retirement_accounts", "show_account_beneficiary"].includes(previous?.intentId ?? ""));
+  if (accountIntent && intentCatalog.some(({ intentId }) => intentId === accountIntent)) return select(accountIntent);
   if (/^(?:hi|hello|hey|how are you)[!.?]*$/.test(text)) return reply("Hi! What would you like to talk about?");
   if (/^(?:(?:that(?:['’]s|s| is) )?(?:nice|great|cool|helpful|interesting)|thanks|thank you|got it)[!.?]*$/.test(text)) {
     return reply(previous?.contextId === "learning"
@@ -194,6 +198,7 @@ function compose({ body, envelope }: GatewayCall): ExperienceProposal | ToolCall
     return choose("PznGoalProgress", [get("Home down payment")], "summary");
   }
   if (envelope.selectedContextId === "learning") {
+    if (envelope.selectedIntentId === "show_account_beneficiary") return choose(/steps/.test(text) ? "PznStepList" : "PznContentCard", [get("Update your beneficiaries")], /steps/.test(text) ? "steps" : "explanation");
     if (envelope.intent?.task === "guide") {
       return choose("PznStepList", [get("Update your beneficiaries")], "steps");
     }
@@ -312,6 +317,7 @@ export async function startFixtureGateway(
   authorize = (headers: IncomingHttpHeaders) => headers.authorization === "Bearer " + testKey,
 ) {
   const calls: GatewayCall[] = [];
+  const flowCalls: { request: RequestBody; response: { choices: { message: { role: string; content: string } }[] } }[] = [];
   const server = createServer((request, response) => {
     void (async () => {
       const chunks: Buffer[] = [];
@@ -321,6 +327,14 @@ export async function startFixtureGateway(
         return;
       }
       const body = JSON.parse(Buffer.concat(chunks).toString()) as RequestBody;
+      if (!body.stream && body.messages[0]?.content?.includes("Unified Semantic Capability Router")) {
+        const message = body.messages.findLast((entry) => entry.role === "user")?.content ?? "";
+        const { capabilityId, confidence, reasoning } = deterministicCapabilityRoute(message.split("User message: ").at(-1)!);
+        const reply = { choices: [{ message: { role: "assistant", content: JSON.stringify({ capabilityId, confidence, reasoning }) } }] };
+        flowCalls.push({ request: body, response: reply });
+        response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(reply));
+        return;
+      }
       const envelope = fromMessage(body);
       if (!envelope || !body.stream) {
         response.writeHead(400).end(JSON.stringify({ error: { message: "Unknown test gateway request" } }));
@@ -364,5 +378,5 @@ export async function startFixtureGateway(
     baseUrl: "http://127.0.0.1:" + (server.address() as AddressInfo).port + "/v1",
     apiKey: testKey, model: "pzn-automated-fixture", contextWindow: 16384, maxOutputTokens: 1500,
   };
-  return { settings, calls, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+  return { settings, calls, flowCalls, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }

@@ -10,21 +10,12 @@
     "next-step": ["fund_account"],
     "pending-actions": ["beneficiary_update", "fund_account"]
   },
-  "workflowRecommendations": [
+  "actionRules": [
     {
       "contextId": "address-update",
-      "requiresContentIds": ["address_update_guide", "fund_account"],
-      "recommendation": { "kind": "workflow", "id": "account.funding.preview", "version": "1.0.0" }
-    },
-    {
-      "contextId": "next-step",
-      "requiresContentIds": ["fund_account"],
-      "recommendation": { "kind": "workflow", "id": "account.funding.preview", "version": "1.0.0" }
-    },
-    {
-      "contextId": "pending-actions",
-      "requiresContentIds": ["fund_account"],
-      "recommendation": { "kind": "workflow", "id": "account.funding.preview", "version": "1.0.0" }
+      "name": "Mailing address update requested",
+      "condition": { "kind": "always" },
+      "action": { "kind": "action", "id": "account.address.prepare", "version": "1.0.0" }
     }
   ],
   "defaultCcreRules": [
@@ -57,7 +48,9 @@
     {
       "contextId": "address-update",
       "contentId": "fund_account",
+      "workflowRequiresContentIds": ["address_update_guide"],
       "name": "Account is unfunded",
+      "workflow": { "kind": "workflow", "id": "account.funding.preview", "version": "1.0.0" },
       "condition": {
         "kind": "attribute",
         "glossaryVersion": "pzn-ccre-mock-v1",
@@ -71,6 +64,7 @@
       "contextId": "next-step",
       "contentId": "fund_account",
       "name": "Account is unfunded",
+      "workflow": { "kind": "workflow", "id": "account.funding.preview", "version": "1.0.0" },
       "condition": {
         "kind": "attribute",
         "glossaryVersion": "pzn-ccre-mock-v1",
@@ -97,6 +91,7 @@
       "contextId": "pending-actions",
       "contentId": "fund_account",
       "name": "Account is unfunded",
+      "workflow": { "kind": "workflow", "id": "account.funding.preview", "version": "1.0.0" },
       "condition": {
         "kind": "attribute",
         "glossaryVersion": "pzn-ccre-mock-v1",

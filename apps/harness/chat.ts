@@ -9,13 +9,12 @@ import { fileURLToPath } from "node:url";
 import { ChatHarness, newId, type ChatScope } from "@sfield/core";
 import { SqlitePersistence } from "@sfield/store-sqlite";
 import { gatewayFromEnv, type GatewaySettings } from "../server/gateway";
-import { startApp } from "../../tests/operator-fixture";
+import { startApp } from "../server/http";
 import { sfieldNamespace } from "../server/runtime";
 import type { Bootstrap, ConversationView, TurnView } from "../../packages/contracts/api";
 import { decodeChatInput, type TurnPayloads } from "../../packages/contracts/inspector";
 import type { ContextRoutingInput } from "../../packages/contracts/model-inputs";
-import { testClient } from "../../tests/client";
-import { startFixtureGateway } from "../../tests/gateway-fixture";
+import { connectChat } from "./client";
 
 const projectRoot = fileURLToPath(new URL("../../", import.meta.url));
 const balanceDemo = ["Compare available and current balance.", "/reopen", "show me the summary"];
@@ -42,12 +41,12 @@ async function runChatLoop(
   gateway: GatewaySettings, provider: string, profileId: string, interactive: boolean, tracePath?: string,
 ) {
   const dataDir = await mkdtemp(join(tmpdir(), "pzn-chat-harness-"));
-  const start = () => startApp({ projectRoot, dataDir, gateway, mode: provider === "fixture" ? "test" : "live" });
+  const start = () => startApp({ projectRoot, dataDir, gateway, operatorAuth: "off" });
   let app: Awaited<ReturnType<typeof startApp>> | undefined;
   let terminal: ReturnType<typeof createInterface> | undefined;
   try {
     app = await start();
-    let client = await testClient(app.url);
+    let client = await connectChat(app.url);
     const cookie = client.cookie;
     const { personas } = await client.request<Bootstrap>("/api/bootstrap");
     const profile = personas.find(({ personaId }) => personaId === profileId);
@@ -78,7 +77,7 @@ async function runChatLoop(
         app = undefined;
         const stored = await readTranscript(dataDir, scope);
         app = await start();
-        client = await testClient(app.url, cookie);
+        client = await connectChat(app.url, cookie);
         const reopened = await client.request<ConversationView>("/api/conversations/" + conversation.id);
         events.push({ type: "reopen", restoredTurnIds: reopened.turns.map(({ id }) => id), stored });
         console.log("Reopened " + reopened.id + " with " + reopened.turns.length + " saved turn(s).");
@@ -128,7 +127,7 @@ async function runChatLoop(
 
 const { values } = parseArgs({
   options: {
-    provider: { type: "string", default: "fixture" },
+    provider: { type: "string" },
     profile: { type: "string", default: "demo-learner" },
     interactive: { type: "boolean", default: false },
     trace: { type: "string" },
@@ -137,22 +136,14 @@ const { values } = parseArgs({
 });
 
 if (values.help) {
-  console.log("npm run chat:harness -- [--interactive] [--provider fixture|openai|gateway|copilot_acp] [--profile ID] [--trace PATH]");
+  console.log("npm run chat:harness -- [--interactive] [--provider openai|gateway|copilot_acp] [--profile ID] [--trace PATH]");
 } else {
-  const { provider, profile, interactive, trace } = values;
-  if (!["fixture", "openai", "gateway", "copilot_acp"].includes(provider)) {
-    throw new Error("Choose fixture, openai, gateway, or copilot_acp.");
+  if (existsSync(join(projectRoot, ".env"))) process.loadEnvFile(join(projectRoot, ".env"));
+  if ((values.provider ?? process.env.LLM_PROVIDER) === "openai") {
+    if (existsSync(join(projectRoot, ".env.openai"))) process.loadEnvFile(join(projectRoot, ".env.openai"));
   }
-  const fixture = provider === "fixture" ? await startFixtureGateway() : undefined;
-  try {
-    if (!fixture) {
-      const envFile = join(projectRoot, provider === "openai" ? ".env.openai" : ".env");
-      if (existsSync(envFile)) process.loadEnvFile(envFile);
-    }
-    const gateway = fixture?.settings ?? gatewayFromEnv({ ...process.env, LLM_PROVIDER: provider });
-    if (!gateway) throw new Error("Configure the selected model provider before running the chat harness.");
-    await runChatLoop(gateway, provider, profile, interactive, trace);
-  } finally {
-    await fixture?.close();
-  }
+  const env = values.provider ? { ...process.env, LLM_PROVIDER: values.provider } : process.env;
+  const gateway = gatewayFromEnv(env);
+  if (!gateway) throw new Error("Configure a model provider before running the chat harness.");
+  await runChatLoop(gateway, gateway.profile ?? "gateway", values.profile, values.interactive, values.trace);
 }

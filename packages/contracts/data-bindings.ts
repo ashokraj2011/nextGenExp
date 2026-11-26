@@ -56,6 +56,15 @@ export type ResolvedBindingEntry = {
 
 export type DataBindingValues = Record<string, ResolvedBindingEntry>;
 
+// These profile fields have a write implementation in CustomerProfileStore.applyBindings.
+const editableProfileBindings = new Set<string>([
+  "customer.displayName", "customer.segment", "customer.fundingStatus", "customer.beneficiaryStatus",
+  "balances.available", "balances.current", "portfolio.cash", "portfolio.equities", "portfolio.fixedIncome", "goal.target", "goal.saved",
+]);
+export function canSaveProfileBinding(key: string) {
+  return editableProfileBindings.has(key) || customBindingKeySchema.safeParse(key).success;
+}
+
 export function bindingLabel(key: DataBindingKey): string {
   const builtIn = dataDictionary.find((d) => d.key === key);
   if (builtIn) return builtIn.label;

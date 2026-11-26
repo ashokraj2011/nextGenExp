@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { pznSlugSchema } from "./self-service-pzn";
-import type { WorkflowRecommendation } from "./funding-workflow";
+import type { ActionRecommendation, WorkflowCandidate } from "./funding-workflow";
 import type { RoutingIntentId } from "./routing-intents";
 
 export const componentNames = ["PznContentCard", "PznComparison", "PznStepList", "PznMetricSummary", "PznGoalProgress"] as const;
@@ -130,7 +130,8 @@ export type ContentDecision = Dated & {
   selectionMode: SelectionMode;
   partial: boolean;
   candidates: Candidate[];
-  workflowRecommendations?: WorkflowRecommendation[];
+  workflowRecommendations?: WorkflowCandidate[];
+  actionRecommendations?: ActionRecommendation[];
   composerRunId: string | null;
 };
 export type BalanceProof = MetricReading & {

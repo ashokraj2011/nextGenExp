@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useAui, useAuiState, useExternalStoreRuntime, type ThreadMessageLike } from "@assistant-ui/react";
-import { CreateSurfaceMessageSchema, type ActionMessage } from "@a2ui/web_core/v1_0";
+import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import {
   ArrowLeft, ArrowUp, ArrowUpRight, BookOpenText, ChevronDown, ChevronRight, Columns2, Eye, GraduationCap, House, LayoutDashboard,
   ListChecks, LogIn, LogOut, MapPin, MessageSquare, Mic, MicOff, PanelLeft, PanelLeftClose, Paperclip, Plus, RotateCcw, Sparkles,
@@ -30,7 +30,7 @@ import { LabMark } from "./lab-mark";
 import { planningTopics } from "./planning-topics";
 import { ReasoningPanel } from "./reasoning-panel";
 import { applyTheme, readStoredTheme, ThemeToggle } from "./theme";
-import { BasicSmoke, ExperienceControls, ExperienceDataUI, installA2uiStyles } from "./surface";
+import { ExperienceControls, ExperienceDataUI, installA2uiStyles } from "./surface";
 import { CEP_EMBED_PROTOCOL, type CepEmbedScreenContext } from "../../packages/embed-sdk";
 import type { ProactiveAlert } from "../../packages/contracts/proactive-events";
 import { usePendingActions, WorkspaceHome, WorkspaceOverview, type PendingActions } from "./workspace-overview";
@@ -66,6 +66,7 @@ const starters = [
   { Icon: BookOpenText, label: "Explain a concept", message: "Explain the balance labels." },
   { Icon: Columns2, label: "Compare two terms", message: "Compare available and current balance." },
   { Icon: ListChecks, label: "Guide me through a task", message: "Walk me through the transfer steps." },
+  { Icon: ListChecks, label: "My retirement accounts", message: "Show my retirement accounts." },
   { Icon: GraduationCap, label: "Learn about retirement", message: "I'd like to learn about retirement." },
   { Icon: House, label: "Home-buying goal", message: homeGoalPrompt },
   { Icon: House, label: "Explore a savings plan", message: "I want to buy a house in two years. Show me how close I am and help me explore a savings plan." },
@@ -1140,6 +1141,7 @@ function App() {
       if (!alive) return;
       try {
         const alert = JSON.parse((evt as MessageEvent).data) as ProactiveAlert;
+        if (alert.domain !== domainPack.id) return;
         setProactiveAlert(alert);
         postEmbedEvent("cep:proactive_alert", {
           id: alert.id,
@@ -1155,11 +1157,12 @@ function App() {
       alive = false;
       stream.close();
     };
-  }, [activeProfile?.personaId]);
+  }, [activeProfile?.personaId, adminChat, domainPack.id]);
 
   const modelStatus = adminChat
-    ? (configuration?.mode === "test" ? "Test mode" : configuration?.gatewayConfigured ? "Model connected" : "Model offline")
-    : (configuration?.copilotModel ? `Live · ${configuration.copilotModel}` : "Live Advisory");
+    ? (configuration?.gatewayConfigured ? "Model connected" : "Model offline")
+    : configuration?.gatewayConfigured ? (configuration.copilotModel || configuration.openAiModel
+      ? `Live · ${configuration.copilotModel ?? configuration.openAiModel}` : "Live Advisory") : "Model offline";
   const managedThread = panel?.kind === "thread" ? visibleConversations.find(({ id }) => id === panel.id) : undefined;
   const canRunRailActions = Boolean(configuration) && !pending && latest?.status !== "working";
 
@@ -1267,7 +1270,7 @@ function App() {
                 onClick={() => setRailCollapsed(false)}><PanelLeft size={18} aria-hidden="true" /></button>
             )}
             <span className="workspace-crumb">
-              {adminChat ? "Test chat" : (domainPack.id === "wealth" ? (activeProfile?.displayName ?? "Workspace") : domainPack.label)}
+              {adminChat ? "Admin chat" : (domainPack.id === "wealth" ? (activeProfile?.displayName ?? "Workspace") : domainPack.label)}
               <ChevronRight size={13} aria-hidden="true" />
             </span>
             <h1>{chat?.title ?? "Overview"}</h1>
@@ -1357,7 +1360,6 @@ function App() {
                 const target = proactiveAlert;
                 setProactiveAlert(null);
                 void api.dismissProactiveAlert(target.id).catch(() => undefined);
-                if (target.domain !== domainPack.id) setDomainPack(target.domain);
                 void send(target.ctaPrompt);
               }}
             >
@@ -1418,13 +1420,5 @@ function App() {
 
 installA2uiStyles();
 const root = createRoot(document.getElementById("root")!);
-if (location.pathname === "/__test/a2ui") {
-  void api.bootstrap().then(async (data) => {
-    if (data.mode !== "test") { root.render(<App />); return; }
-    const { default: message } = await import("../../fixtures/a2ui-v1-basic-smoke.json");
-    root.render(<BasicSmoke input={CreateSurfaceMessageSchema.parse(message)} />);
-  });
-} else {
-  document.title = (adminChat ? "Test chat" : "Assistant") + " · CEP";
-  root.render(<App />);
-}
+document.title = (adminChat ? "Admin chat" : "Assistant") + " · CEP";
+root.render(<App />);

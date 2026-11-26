@@ -634,7 +634,7 @@ export function ExperienceRegistryAdmin() {
                   <span>Category / Kind</span>
                   <select value={contentForm.kind} onChange={(e) => setContentForm((p) => ({ ...p, kind: e.target.value as ManagedContentInput["kind"] }))}>
                     <option value="education">Education</option>
-                    <option value="promotion">Promotion / Offer</option>
+                    <option value="promotion">Promotional recommendation</option>
                     <option value="metric_template">Metric Template</option>
                   </select>
                 </label>

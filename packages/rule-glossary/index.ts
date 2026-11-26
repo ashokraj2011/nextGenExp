@@ -2,7 +2,7 @@ import host from "../../fixtures/host.json";
 import { glossaryAllowsCondition, ruleGlossarySchema, type GlossaryAttribute, type GlossaryCondition } from "../contracts/rule-glossary";
 import { findProfileById } from "../customer-profiles/registry";
 
-type RuleInput = { personaId: string; ordinal: number; portfolioCashCents?: number; fundingStatus?: "funded" | "unfunded" };
+type RuleInput = { personaId: string; ordinal: number; beneficiaryStatus?: "missing" | "on_file"; portfolioCashCents?: number; fundingStatus?: "funded" | "unfunded" };
 type AttributeDefinition = GlossaryAttribute & { read: (input: RuleInput) => GlossaryCondition["value"] | undefined };
 
 const namespaces = [
@@ -24,7 +24,7 @@ const namespaces = [
         id: "beneficiary_status", label: "Beneficiary status", description: "Whether the demo account has beneficiary details on file.",
         valueType: "enum", operators: ["eq", "ne"], minimum: null,
         options: [{ value: "missing", label: "Missing" }, { value: "on_file", label: "On file" }],
-        read: ({ personaId }) => findProfileById(personaId)?.beneficiaryStatus ?? host.personas.find((persona) => persona.personaId === personaId)?.beneficiaryStatus,
+        read: ({ personaId, beneficiaryStatus }) => beneficiaryStatus ?? findProfileById(personaId)?.beneficiaryStatus ?? host.personas.find((persona) => persona.personaId === personaId)?.beneficiaryStatus,
       },
     ],
   },

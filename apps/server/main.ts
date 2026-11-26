@@ -8,15 +8,16 @@ import { GatewayConfigStore, settingsFromConfig } from "./gateway-config";
 
 const projectRoot = fileURLToPath(new URL("../../", import.meta.url));
 const useOpenAi = process.argv.includes("--openai");
+const preview = process.argv.includes("--preview");
 const mode = process.env.PZN_SELECTION_MODE ?? "semantic_rerank";
 if (mode !== "semantic_rerank" && mode !== "preserve_ts_rank") throw new Error("PZN_SELECTION_MODE is invalid.");
 const envGateway = gatewayFromEnv(process.env, useOpenAi ? "openai" : "gateway");
 const envProfile = envGateway?.profile;
-const port = Number(process.env.PZN_PORT ?? (envProfile === "openai" ? 4175 : 4173));
+const port = Number(process.env.PZN_PORT ?? (preview ? 4174 : envProfile === "openai" ? 4175 : 4173));
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("PZN_PORT is invalid.");
 // The data directory follows the launch environment, so a gateway activated in the admin UI keeps the same data.
 const defaultDataDir = envProfile === "openai" ? ".pzn-data/openai" : envProfile === "copilot_acp" ? ".pzn-data/copilot" : ".pzn-data";
-const dataDir = resolve(projectRoot, process.env.PZN_DATA_DIR ?? defaultDataDir);
+const dataDir = resolve(projectRoot, process.env.PZN_DATA_DIR ?? (preview ? ".pzn-data/preview" : defaultDataDir));
 const gatewayConfig = new GatewayConfigStore(tenantDataDirectory(dataDir));
 
 /** A gateway activated in Administration → Model gateway wins over environment variables. */

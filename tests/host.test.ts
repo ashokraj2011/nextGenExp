@@ -12,15 +12,17 @@ import type { IncomingHttpHeaders } from "node:http";
 import host from "../fixtures/host.json";
 import { startApp } from "./operator-fixture";
 import type { Bootstrap, TurnAccepted, TurnView, ConversationView } from "../packages/contracts/api";
-import type { TurnPayloads } from "../packages/contracts/inspector";
+import type { TreatmentRun, TurnPayloads } from "../packages/contracts/inspector";
 import {
-  defaultAgentFundingWorkflow, defaultFundingWorkflow, fundingChoiceQuestion, fundingPreviewWorkflow, fundingToolRef, treatmentRecommendationsSchema,
+  defaultAgentFundingWorkflow, defaultFundingWorkflow, fundingChoiceQuestion, fundingPreviewWorkflow, fundingToolRef, treatmentDecisionSchema,
 } from "../packages/contracts/funding-workflow";
+import { beneficiaryReviewWorkflow } from "../packages/contracts/customer-workflows";
 import type { GlossaryCondition } from "../packages/contracts/rule-glossary";
 import { demoExperiencesQuestion, leavingWorkQuestion, portfolioSummaryQuestion, retirementQuestion } from "../packages/contracts/routing-intents";
 import {
   defaultToolSetup, type MockCcreRule, type ToolSetup, type ToolSetupView, type TreatmentPreview, type TreatmentPreviewInput,
 } from "../packages/contracts/tool-setup";
+import { formEnvelope } from "../apps/web/agentic-experience";
 import { actionFor, testClient, testProject } from "./client";
 import { startFixtureGateway, type TestInterceptor } from "./gateway-fixture";
 import { mockRuleGlossary } from "../packages/rule-glossary";
@@ -47,7 +49,6 @@ async function fixture(intercept?: TestInterceptor, opts: {
     projectRoot: fileURLToPath(testProject), dataDir: dir,
     gateway: opts.noGateway || !settings ? null
       : opts.openAiProfile && settings.profile !== "copilot_acp" ? { ...settings, profile: "openai" as const } : settings,
-    mode: "test",
     selectionMode: opts.preserve ? "preserve_ts_rank" : "semantic_rerank",
     inspectorEnabled: opts.inspectorEnabled,
     portfolioSnapshots: opts.portfolioSnapshots,
@@ -124,7 +125,7 @@ test("tool setup previews built-in and configured Treatment Selector responses w
   assert.deepEqual((await client.request<ToolSetupView>("/api/admin/tools")).setup, defaultToolSetup);
 });
 
-test("saved tool settings are isolated by browser and take effect on subsequent sfield turns", async (t) => {
+test("published tool settings reach other browsers and take effect on subsequent sfield turns", async (t) => {
   const f = await fixture(({ envelope }) => envelope.inputType === "PznContextRoutingInput" ? { delayMs: 240 } : undefined);
   t.after(() => f.close());
   const { client } = f;
@@ -164,7 +165,7 @@ test("saved tool settings are isolated by browser and take effect on subsequent 
   const restored = await f.restart();
   assert.deepEqual((await restored.request<ToolSetupView>(path)).setup, timeout);
   const other = await restored.response(path, undefined, { Cookie: "" });
-  assert.deepEqual((await other.json() as ToolSetupView).setup, defaultToolSetup);
+  assert.deepEqual((await other.json() as ToolSetupView).setup, timeout);
   await restored.request(path, rank);
   const retried = await restored.request<TurnAccepted>("/api/turns/" + failed.turn.id + "/retry", { clientRequestId: randomUUID() }, 202);
   assert.deepEqual((await restored.wait(retried)).trace.ts?.baseline, contentIds);
@@ -245,7 +246,7 @@ test("CCRE mock rules filter ranked treatments the same way in preview and chat"
   assert.deepEqual(failing.trace.ts?.baseline, excluded.contentIds);
   assert.ok(failing.trace.ts?.rejections.some(({ contentId, reasonCode }) => contentId === rule.contentId && reasonCode === "RULE_FALSE"));
   const payloads = await client.request<TurnPayloads>("/api/debug/payloads/" + failing.turn.id);
-  assert.deepEqual(payloads.treatment?.result?.data, excluded.contentIds);
+  assert.deepEqual(payloads.treatment?.comparison?.legacy.data, excluded.contentIds);
   assert.deepEqual(payloads.treatment?.ccre?.data, excluded.ccre);
   assert.ok(!JSON.stringify(payloads).includes(rule.source!));
   const composer = f.gateway.calls.at(-1)?.envelope.eligible;
@@ -421,7 +422,7 @@ test("two-stage completion persists source-rich comparison, scopes, SSE replay, 
   assert.match(JSON.stringify(composer?.response?.data), /PznComparison/);
   assert.deepEqual(payloads.treatment?.mockInput?.data, { mid: "DEMO-MID-1001", context: "balance" });
   assert.deepEqual(payloads.treatment?.registryInput.data, { turnRef: turn.id, routeDecisionId: trace.routeDecisionId });
-  assert.deepEqual(payloads.treatment?.result?.data, trace.ts?.baseline);
+  assert.deepEqual(payloads.treatment?.comparison?.legacy.data, trace.ts?.baseline);
   assert.equal((await client.response(payloadPath, undefined, { Cookie: "" })).status, 404);
   const exp = turn.experience!;
   assert.equal(exp.messages[0].version, "1.0");
@@ -510,7 +511,7 @@ test("scenario outcomes distinguish intent-only routing, empty eligibility, part
     if (scenario.scenario === "propensity-unavailable") assert.equal(result.trace.propensity?.status, "unavailable");
     if (scenario.scenario === "relevant-blocked") {
       const input = JSON.stringify(f.gateway.calls.at(-1)?.envelope);
-      assert.doesNotMatch(input, /promotion_blocked|RULE_FALSE|restricted transfer offer/);
+      assert.doesNotMatch(input, /promotion_blocked|RULE_FALSE|restricted transfer recommendation/);
       assert.match(JSON.stringify(result.trace.ts?.rejections), /promotion_blocked/);
       assert.doesNotMatch(JSON.stringify(result.turn.experience), /promotion_blocked|RULE_FALSE/);
     }
@@ -569,7 +570,7 @@ test("an empty eligibility result keeps a plain model reply in chat history and 
   assert.deepEqual(envelope.eligible?.candidates, []);
   assert.equal(envelope.recent?.at(-1)?.request, "Hi");
   const payloads = await client.request<TurnPayloads>("/api/debug/payloads/" + reply.turn.id);
-  assert.deepEqual(payloads.treatment?.result?.data, []);
+  assert.deepEqual(payloads.treatment?.comparison?.legacy.data, []);
   assert.ok(payloads.composer?.attempts.at(-1)?.exchange?.response?.data);
 
   const continued = await client.ask(conversation.id, "What did you just say?");
@@ -649,7 +650,7 @@ test("portfolio summaries combine the scoped snapshot with the cash treatment on
     }
     const payloads = await client.request<TurnPayloads>("/api/debug/payloads/" + turn.id);
     assert.deepEqual(payloads.treatment?.mockInput?.data, { mid, context: "portsum" });
-    assert.deepEqual(payloads.treatment?.result?.data, matched ? ["portfolio_explanation", offer] : ["portfolio_explanation"]);
+    assert.deepEqual(payloads.treatment?.comparison?.legacy.data, matched ? ["portfolio_explanation", offer] : ["portfolio_explanation"]);
     assert.match(JSON.stringify(payloads.treatment?.ccre?.data), matched ? /"outcome":"matched"/ : /"outcome":"excluded"/);
     assert.equal(payloads.portfolio?.tool, "portfolio.snapshot.read@1.0.0");
     assert.equal(payloads.portfolio?.status, "succeeded");
@@ -676,6 +677,47 @@ test("portfolio summaries combine the scoped snapshot with the cash treatment on
   const missing = await client.ask(empty.id, question);
   assert.equal(missing.turn.failureCode, "portfolio_unavailable");
   assert.equal(missing.turn.experience, undefined);
+});
+
+test("first-model requests use the saved tenant and domain catalog for the customer and keep the evidence after edits", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const tenant = "/api/admin/routing-flows?scope=tenant";
+  const wealth = "/api/admin/routing-flows?scope=wealth";
+  const oldRevision = (await f.client.response(wealth)).headers.get("etag")!;
+  const description = "Account services, including changes to the customer’s mailing address.";
+  const example = "Please change where my statements are mailed.";
+  await f.client.request(tenant, { stock_trade: { enabled: false }, verified_experience: { description } });
+  await f.client.request(wealth, {}, 412, { "If-Match": oldRevision });
+  await f.client.request(wealth, { ops_incident: { enabled: false } }, 400);
+  await f.client.request(wealth, { unregistered: { enabled: true } }, 400);
+  const inherited = await f.client.request<import("../packages/contracts/routing-flows").FlowCatalogSetup>(wealth);
+  assert.equal(inherited.inherited.find((flow) => flow.id === "verified_experience")?.description, description);
+  await f.client.request(wealth, {
+    stock_holdings: { enabled: false }, stock_trade: { enabled: true }, verified_experience: { examples: [example] },
+  });
+  const chat = await f.client.conversation("normal", "demo-new-account");
+  const { turn, trace } = await f.client.ask(chat.id, "i want to update the address");
+  assert.equal(trace.intentId, "update_address");
+  const logsPath = "/api/admin/logs/" + turn.id;
+  const logs = await f.client.request<TurnPayloads>(logsPath);
+  const ids = ["verified_experience", "custom_dynamic_ui"];
+  assert.deepEqual(logs.sentFlowList, { tenantId: chat.tenantId, domainId: "wealth", audience: "customer", flowIds: ids });
+  const wire = f.gateway.flowCalls.at(-1)!.request;
+  assert.deepEqual(logs.handoffs?.flowRouting?.request.data, wire);
+  const system = wire.messages[0].content!;
+  assert.deepEqual([...system.matchAll(/^- (\w+) \(/gm)].map((match) => match[1]), ids);
+  assert.ok(system.includes(description) && system.includes(example));
+  assert.doesNotMatch(system, /stock_trade|stock_holdings|ops_incident|sales_deal_desk|external_connector|hitl_approvals/);
+  await f.client.request(wealth, { verified_experience: { enabled: false }, stock_holdings: { enabled: false }, custom_dynamic_ui: { enabled: false } });
+  const client = await f.restart();
+  assert.deepEqual((await client.request<TurnPayloads>(logsPath)).sentFlowList, logs.sentFlowList);
+  assert.deepEqual((await client.request<TurnPayloads>(logsPath)).handoffs?.flowRouting, logs.handoffs?.flowRouting);
+  const count = f.gateway.flowCalls.length;
+  const disabled = (await client.ask(chat.id, "i want to update the address")).turn;
+  assert.match(disabled.experience!.intro, /no chat flows available/i);
+  assert.equal(f.gateway.flowCalls.length, count);
+  assert.equal((await client.request<TurnPayloads>("/api/admin/logs/" + disabled.id)).sentFlowList, undefined);
 });
 
 test("the address guide can launch the funding workflow only when Treatment Selector recommends it", async (t) => {
@@ -715,6 +757,15 @@ test("the address guide can launch the funding workflow only when Treatment Sele
       results: [{ name: "Account is unfunded", contentId: suggestion, outcome: matched ? "matched" : "excluded" }],
     };
     const logs = await client.request<TurnPayloads>("/api/debug/payloads/" + turn.id);
+    assert.deepEqual(logs.catalogLookup?.registryInput.data, { turnRef: turn.id });
+    const flowCall = gateway.flowCalls.at(-1)!;
+    assert.equal(turn.semanticRoute?.capabilityId, "verified_experience");
+    assert.equal(turn.semanticRoute?.method, "llm_semantic");
+    assert.deepEqual(logs.verifiedIntent, { intentId: "update_address", contextId });
+    assert.deepEqual(logs.handoffs?.flowRouting?.request.data, flowCall.request);
+    assert.deepEqual(logs.handoffs?.flowRouting?.response.data, { status: 200, body: flowCall.response });
+    assert.deepEqual(logs.router?.attempts[0]?.exchange?.request.data, gateway.calls.at(-2)?.body);
+    assert.equal(logs.catalogLookup?.tool, "contexts.list@1.0.0");
     assert.deepEqual(logs.topicScores?.mockInput?.data, {
       mid, contextIds: trace.catalog!.contexts.map(({ contextId: id }) => id),
     });
@@ -722,11 +773,12 @@ test("the address guide can launch the funding workflow only when Treatment Sele
     assert.deepEqual(gateway.calls.at(-2)?.envelope.propensity, trace.propensity);
     assert.equal(trace.propensity?.scores.find(({ contextId: id }) => id === contextId)?.score, matched ? 0.78 : null);
     assert.deepEqual(logs.treatment?.mockInput?.data, { mid, context: contextId });
-    assert.equal(logs.treatment?.tool, "treatments.eligible@2.0.0");
-    const recommendations = treatmentRecommendationsSchema.parse(logs.treatment?.result?.data);
+    assert.equal(logs.treatment?.tool, "treatments.eligible@2.1.0");
+    const addressAction = { kind: "action", id: "account.address.prepare", version: "1.0.0" };
+    const recommendations = treatmentDecisionSchema.parse(logs.treatment?.result?.data);
     assert.deepEqual(recommendations.recommendations, [
-      ...expected.map((id) => ({ kind: "content", id })),
-      ...(matched ? [fundingPreviewWorkflow.recommendation] : []),
+      ...expected.map((id) => ({ kind: "content", id })), addressAction,
+      ...(matched ? [{ ...fundingPreviewWorkflow.recommendation, forContentIds: [suggestion] }] : []),
     ]);
     assert.equal(logs.workflow, null);
     assert.deepEqual(logs.treatment?.ccre?.data, ccre);
@@ -735,7 +787,17 @@ test("the address guide can launch the funding workflow only when Treatment Sele
     const preview = await client.request<TreatmentPreview>("/api/admin/treatment-preview", {
       scenarioId: "normal", contextId, personaId, ordinal: 1, enabled: true, output: null,
     } satisfies TreatmentPreviewInput);
-    assert.deepEqual(preview, { status: "ranked", source: "fixture", contentIds: expected, ccre });
+    assert.deepEqual(preview, { status: "ranked", source: "fixture", contentIds: expected, ccre, actions: [addressAction],
+      ...(matched && { workflows: [{ ...fundingPreviewWorkflow.recommendation, forContentIds: [suggestion] }] }),
+    });
+    assert.deepEqual(logs.treatment?.comparison?.legacy.data, expected);
+    assert.deepEqual(logs.treatment?.comparison?.workflows.data, recommendations);
+    assert.equal(logs.treatment?.comparison?.returned, "decisions");
+    assert.deepEqual(logs.treatment?.comparison?.contentReasons?.map(({ id, matchingRules }) => [id, matchingRules]),
+      matched ? [[guide, []], [suggestion, ["Account is unfunded"]]] : [[guide, []]]);
+    assert.deepEqual(logs.treatment?.comparison?.reasons?.map(({ name }) => name),
+      matched ? ["Mailing address update requested", "Account is unfunded"] : ["Mailing address update requested"]);
+    assert.ok(experience.blocks.some((block) => block.component === "PznCapabilityForm"));
 
     assert.deepEqual(experience.actions.map(({ label }) => label), matched ? ["Preview funding", "See transfer steps"] : []);
     if (matched) {
@@ -757,6 +819,10 @@ test("the address guide can launch the funding workflow only when Treatment Sele
       assert.equal(gateway.calls.length, modelCalls);
       const workflowLogs = await client.request<TurnPayloads>("/api/debug/payloads/" + funding.turnId);
       assert.deepEqual(workflowLogs.workflow?.recommendation, fundingPreviewWorkflow.recommendation);
+      assert.equal(workflowLogs.sourceDecision?.turnId, turn.id);
+      assert.deepEqual(workflowLogs.sourceDecision?.treatment, logs.treatment);
+      const decisionLogs = await client.request<TurnPayloads>("/api/debug/payloads/" + turn.id);
+      assert.deepEqual(decisionLogs.workflowClicks, [{ id: funding.turnId, label: "Preview funding" }]);
       assert.equal(workflowLogs.treatment, null);
       const calls = workflowLogs.workflow?.calls ?? [];
       assert.deepEqual(calls.map(({ tool, status }) => [tool, status]), [
@@ -791,6 +857,67 @@ test("the address guide can launch the funding workflow only when Treatment Sele
   assert.deepEqual(excluded.turn.experience?.actions, []);
 });
 
+test("an address action runs independently of content and both clicks link to the original rules", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const { client } = f;
+  const fundingWorkflow = { ...defaultFundingWorkflow, steps: [fundingToolRef("fundingStatus"), ...defaultFundingWorkflow.steps] };
+  await client.request("/api/admin/tools", { ...defaultToolSetup, fundingWorkflow } satisfies ToolSetup);
+  const prompt = "I moved and need to update my address.";
+  const chat = await client.conversation("normal", "demo-new-account");
+  const source = (await client.ask(chat.id, prompt)).turn;
+  const display = source.experience!;
+  const index = display.blocks.findIndex(({ component }) => component === "PznCapabilityForm");
+  const form = display.blocks[index];
+  assert.ok(form?.component === "PznCapabilityForm");
+  const values = { street: "100 Example Lane", city: "Sample City", region: "MA", postalCode: "02110" };
+  const path = "/api/experiences/" + display.experienceId + "/actions";
+  const envelope = (fields: typeof values | {}) => formEnvelope(display.experienceId, "block_" + (index + 1), form.props.actionId, fields);
+  assert.equal((await client.response(path, { clientRequestId: randomUUID(), envelope: envelope({}) })).status, 400);
+  const prepared = (await client.wait(await client.request<TurnAccepted>(path, {
+    clientRequestId: randomUUID(), envelope: envelope(values),
+  }, 202))).turn;
+  const result = prepared.experience!;
+  assert.ok(result.blocks.some((b) => b.component === "PznFactSummary" && b.props.title === "Address change prepared"));
+  const logs = (id: string) => client.request<TurnPayloads>("/api/debug/payloads/" + id);
+  const action = await logs(prepared.id);
+  assert.equal(action.sourceDecision?.turnId, source.id);
+  assert.deepEqual(action.agentic?.calls.map(({ tool }) => tool), ["treatment.select@3.0.0", "address.update.prepare@1.0.0"]);
+  assert.deepEqual(action.agentic?.calls[1].result?.data, { status: "prepared" });
+  assert.doesNotMatch(JSON.stringify(action.agentic), /100 Example Lane/);
+  const second = result.actions.findIndex((item) => item.label === "Preview funding");
+  assert.ok(second >= 0);
+  const workflow = await client.wait(await client.request<TurnAccepted>("/api/experiences/" + result.experienceId + "/actions", {
+    clientRequestId: randomUUID(), envelope: actionFor(result, second),
+  }, 202));
+  const workflowLog = await logs(workflow.turn.id);
+  assert.equal(workflowLog.sourceDecision?.turnId, source.id);
+  assert.deepEqual(workflowLog.workflow?.calls.map(({ tool }) => tool), fundingWorkflow.steps);
+  assert.deepEqual((await logs(source.id)).workflowClicks?.map(({ id }) => id), [prepared.id, workflow.turn.id]);
+
+  const runPath = "/api/admin/treatment-runs?personaId=demo-new-account&context=address-update";
+  const [run] = await client.request<TreatmentRun[]>(runPath + "&turn=" + source.id);
+  assert.deepEqual(run, { threadId: chat.id, turnId: source.id, message: source.message, createdAt: source.createdAt, clicks: [
+    { turnId: prepared.id, label: prepared.message, kind: "action", id: "account.address.prepare", version: "1.0.0" },
+    { turnId: workflow.turn.id, label: workflow.turn.message, ...fundingPreviewWorkflow.recommendation },
+  ] });
+  assert.deepEqual(await client.request(runPath + "&turn=" + prepared.id), []);
+  const later = (await client.ask(chat.id, prompt)).turn;
+  assert.deepEqual((await client.request<TreatmentRun[]>(runPath)).map((r) => [r.turnId, r.clicks.length]), [[later.id, 0], [source.id, 2]]);
+
+  await client.request("/api/admin/tools", { ...defaultToolSetup, treatmentOverrides: [
+    { scenarioId: "normal", contextId: "address-update", output: { mode: "empty" } },
+  ] } satisfies ToolSetup);
+  const other = await client.conversation("normal", "demo-returning");
+  const onlyAction = (await client.ask(other.id, prompt)).turn;
+  assert.deepEqual(onlyAction.experience?.blocks.map((b) => b.component), ["PznCapabilityForm"]);
+  assert.deepEqual(await client.request(runPath + "&turn=" + onlyAction.id), []);
+  const onlyActionLogs = await logs(onlyAction.id);
+  assert.deepEqual(onlyActionLogs.treatment?.comparison?.legacy.data, []);
+  assert.deepEqual(treatmentDecisionSchema.parse(onlyActionLogs.treatment?.result?.data).recommendations,
+    [{ kind: "action", id: "account.address.prepare", version: "1.0.0" }]);
+});
+
 test("an open-ended next-step question uses the member's eligible Treatment Selector recommendation", async (t) => {
   const f = await fixture();
   t.after(() => f.close());
@@ -805,8 +932,8 @@ test("an open-ended next-step question uses the member's eligible Treatment Sele
   assert.deepEqual(experience.actions.map(({ label }) => label), ["Preview funding"]);
   const logs = await client.request<TurnPayloads>("/api/debug/payloads/" + turn.id);
   assert.deepEqual(logs.treatment?.mockInput?.data, { mid: "DEMO-MID-1003", context: "next-step" });
-  assert.deepEqual(treatmentRecommendationsSchema.parse(logs.treatment?.result?.data).recommendations, [
-    { kind: "content", id: "fund_account" }, fundingPreviewWorkflow.recommendation,
+  assert.deepEqual(treatmentDecisionSchema.parse(logs.treatment?.result?.data).recommendations, [
+    { kind: "content", id: "fund_account" }, { ...fundingPreviewWorkflow.recommendation, forContentIds: ["fund_account"] },
   ]);
   const accepted = await client.request<TurnAccepted>("/api/experiences/" + experience.experienceId + "/actions", {
     clientRequestId: randomUUID(), envelope: actionFor(experience),
@@ -823,6 +950,66 @@ test("an open-ended next-step question uses the member's eligible Treatment Sele
   assert.deepEqual(funded.turn.experience?.actions, []);
   const specific = await client.ask(marcus.id, "What's next for my home-buying goal?");
   assert.equal(specific.trace.intentId, "show_home_goal");
+});
+
+test("a rule offers its registered workflow only for displayed, matched content and preserves the decision after editing", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const { client } = f;
+  const path = "/api/admin/tools";
+  const review = beneficiaryReviewWorkflow.recommendation;
+  const settings = await client.request<ToolSetupView>(path);
+  const rule: MockCcreRule = { ...settings.defaultCcreRules.find((entry) => entry.contextId === "learning")!,
+    scenarioId: "normal", workflow: review };
+  const save = (rules: MockCcreRule[]) => client.request(path, { ...defaultToolSetup, ccreRules: rules });
+  await client.request(path, { ...defaultToolSetup, ccreRules: [{ ...rule, workflow: { ...review, version: "9.0.0" } }] }, 400);
+  await save([rule]);
+  const ask = async (persona: string) => {
+    const chat = await client.conversation("normal", persona);
+    return (await client.ask(chat.id, "I want to learn about retirement.")).turn;
+  };
+  const source = await ask("demo-learner");
+  const experience = source.experience!;
+  const index = experience.actions.findIndex((a) => a.label === "Review beneficiary");
+  assert.ok(index >= 0);
+  const logs = (id: string) => client.request<TurnPayloads>("/api/debug/payloads/" + id);
+  const decision = (await logs(source.id)).treatment!;
+  assert.equal(decision.tool, "treatments.eligible@2.1.0");
+  assert.deepEqual(decision.comparison?.rules, [{ name: rule.name, contentId: rule.contentId, workflowId: review.id }]);
+  const accepted = await client.request<TurnAccepted>("/api/experiences/" + experience.experienceId + "/actions",
+    { clientRequestId: randomUUID(), envelope: actionFor(experience, index) }, 202);
+  const run = await client.wait(accepted);
+  assert.equal(run.turn.experience?.blocks[0]?.component, "PznRetirementAccounts", JSON.stringify(run.trace.failures));
+  assert.deepEqual((await logs(run.turn.id)).workflow?.calls.map((call) => call.tool), beneficiaryReviewWorkflow.steps);
+  const filtered = await ask("demo-returning");
+  assert.ok(!filtered.experience?.actions.some((action) => action.label === "Review beneficiary"));
+  assert.deepEqual((await logs(filtered.id)).treatment?.comparison?.rules, []);
+
+  await save([{ ...rule, workflow: null }]);
+  const detached = await ask("demo-learner");
+  assert.ok(!detached.experience?.actions.some((action) => action.label === "Review beneficiary"));
+  assert.deepEqual(treatmentDecisionSchema.parse((await logs(detached.id)).treatment?.result?.data).recommendations
+    .filter((item) => item.kind === "workflow"), []);
+  assert.deepEqual((await logs(source.id)).treatment, decision);
+  // A rule can match a ranked card that the composer omits from the rendered comparison.
+  await save([{ ...rule, contextId: "balance", contentId: "balance_education", condition: { kind: "always" } }]);
+  const balanceChat = await client.conversation();
+  const comparison = await client.ask(balanceChat.id, "Compare available and current balances.");
+  assert.deepEqual((await logs(comparison.turn.id)).treatment?.comparison?.rules.map((r) => r.contentId), ["balance_education"]);
+  assert.ok(!comparison.trace.finalOrder?.includes("balance_education"));
+  assert.ok(!comparison.turn.experience?.actions.some((action) => action.label === "Review beneficiary"));
+
+  const standalone = await client.request<TreatmentPreview>("/api/admin/treatment-preview", {
+    scenarioId: "normal", contextId: "address-update", personaId: "demo-new-account", ordinal: 1,
+    enabled: true, output: { mode: "ranked", contentIds: ["fund_account"] },
+  });
+  assert.ok(standalone.status === "ranked" && !standalone.workflows?.length);
+  const addressRule = settings.defaultCcreRules.find((entry) => entry.contextId === "address-update")!;
+  const marcus = await client.conversation("normal", "demo-new-account");
+  await save([{ ...addressRule, scenarioId: "normal", workflow: null }]);
+  const disabled = (await client.ask(marcus.id, "I moved and need to update my address.")).turn;
+  assert.ok(disabled.experience?.blocks.some((b) => b.component === "PznContentCard" && b.props.title === "Fund your account"));
+  assert.ok(!disabled.experience?.actions.some((a) => a.label === "Preview funding"));
 });
 
 test("the funding workflow uses the saved step order for the Treatment Selector reference", async (t) => {
@@ -964,7 +1151,7 @@ test("home-buying progress reads the eligible member's target and history throug
 
     const logs = await client.request<TurnPayloads>("/api/debug/payloads/" + turn.id);
     assert.deepEqual(logs.treatment?.mockInput?.data, { context: "goals", mid });
-    assert.deepEqual(logs.treatment?.result?.data, ["home_down_payment_progress"]);
+    assert.deepEqual(logs.treatment?.comparison?.legacy.data, ["home_down_payment_progress"]);
     assert.equal(logs.goal?.tool, "goal.progress.read@1.0.0");
     assert.deepEqual(logs.goal?.registryInput.data, { turnRef: turn.id, routeDecisionId: trace.routeDecisionId });
     assert.deepEqual(logs.goal?.result?.data, block.props.goal);
@@ -1052,7 +1239,7 @@ test("a misspelled retirement request reaches Learning and shows the beneficiary
 
     const payloads = await client.request<TurnPayloads>("/api/debug/payloads/" + turn.id);
     assert.deepEqual(payloads.treatment?.mockInput?.data, { mid, context: "learning" });
-    assert.deepEqual(payloads.treatment?.result?.data, ids);
+    assert.deepEqual(payloads.treatment?.comparison?.legacy.data, ids);
     const expectedCcre = {
       beforeRules: ["retirement_learning", "beneficiary_update"],
       results: [{ name: "Beneficiary details are missing", contentId: "beneficiary_update", outcome: missing ? "matched" : "excluded" }],
@@ -1449,6 +1636,7 @@ test("custom gateway headers and body fields reach every request, including tool
   const payloads = await f.client.request<TurnPayloads>("/api/debug/payloads/" + result.turn.id);
   const body = payloads.router?.attempts[0].exchange?.request.data;
   assert.deepEqual(body, { ...f.gateway.calls[0].body, metadata: "[REDACTED]", region: "[REDACTED]" });
+  assert.deepEqual(payloads.handoffs?.flowRouting?.request.data, { ...f.gateway.flowCalls[0].request, metadata: "[REDACTED]", region: "[REDACTED]" });
   assert.doesNotMatch(JSON.stringify(payloads), /pzn-header-only-test-key|demo-east|x-gateway-context/i);
 });
 

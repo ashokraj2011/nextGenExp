@@ -5,7 +5,7 @@ import type { PortfolioHistoryPoint, PortfolioSnapshot } from "./portfolio";
 import type { DisplayExperience } from "./surface";
 import type { WorkspacePin } from "./workspace";
 
-export type Progress = "accepted" | "catalog" | "routing" | "glossary" | "eligibility" | "portfolio" | "goal" | "composition" | "verifying" | "workflow" | "planning";
+export type Progress = "accepted" | "catalog" | "routing" | "glossary" | "eligibility" | "retirementAccounts" | "portfolio" | "goal" | "composition" | "verifying" | "workflow" | "planning";
 export const progressLabels: Record<Progress, string> = {
   planning: "Putting your request together",
   accepted: "Getting your request ready",
@@ -13,6 +13,7 @@ export const progressLabels: Record<Progress, string> = {
   routing: "Finding the right topic",
   glossary: "Loading the rule fields",
   eligibility: "Finding matching content",
+  retirementAccounts: "Checking your retirement accounts",
   portfolio: "Loading your portfolio",
   goal: "Reading your home-buying goal",
   composition: "Preparing your response",
@@ -26,6 +27,7 @@ export const failureCopy = {
   glossary_unavailable: "We couldn’t load the rule fields. Check CCRE glossary in Tool setup and try again.",
   ts_unavailable: "We couldn’t check which content fits this request. Please try again.",
   portfolio_unavailable: "We couldn’t load your portfolio snapshot. Please try again.",
+  retirement_accounts_unavailable: "Your retirement account records are temporarily unavailable. Please try again.",
   goal_unavailable: "We couldn’t load your home-buying goal. Please try again.",
   workflow_unavailable: "We couldn’t prepare your funding preview. Please try again.",
   content_unavailable: "I couldn’t load the matching content. You can try again or ask another question.",
@@ -168,7 +170,7 @@ export type Bootstrap = {
   intentPrompts?: { intentId: string; label: string; prompt: string; isCustom: boolean }[];
   defaultPersonaId: string;
   defaultScenarioId: string;
-  mode: "live" | "test";
+  mode: "live";
   gatewayConfigured: boolean;
   openAiModel?: string;
   copilotModel?: string;

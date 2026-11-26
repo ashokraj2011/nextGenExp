@@ -1,3 +1,4 @@
+import { RuleWorkflowPicker } from "./rule-workflow-picker";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowDown,
@@ -249,6 +250,7 @@ export function RecommendationStudio() {
       name: r.name,
       businessDescription: r.businessDescription,
       effect: r.effect,
+      workflow: r.workflow,
       status: r.status,
       rootGroup: JSON.parse(JSON.stringify(r.rootGroup)),
     });
@@ -689,7 +691,7 @@ export function RecommendationStudio() {
                 <input
                   id="pzn-pub-notes"
                   value={publishNotes}
-                  placeholder="e.g. Attached Q4 VIP cash offer and threshold rule"
+                  placeholder="e.g. Added a cash recommendation and its balance rule"
                   onChange={(e) => setPublishNotes(e.target.value)}
                 />
               </div>
@@ -854,7 +856,7 @@ export function RecommendationStudio() {
                 <input
                   id="pzn-cnt-title"
                   value={contentForm.title}
-                  placeholder="e.g. Exclusive Private Client Cash Yield Offer"
+                  placeholder="e.g. Cash management recommendation"
                   onChange={(e) => {
                     const title = e.target.value;
                     setContentForm((p) => ({
@@ -1078,7 +1080,10 @@ export function RecommendationStudio() {
                 <select
                   id="pzn-rule-effect"
                   value={ruleForm.effect}
-                  onChange={(e) => setRuleForm((p) => ({ ...p, effect: e.target.value as PznRuleInput["effect"] }))}
+                  onChange={(e) => {
+                    const effect = e.target.value as PznRuleInput["effect"];
+                    setRuleForm((p) => ({ ...p, effect, workflow: effect === "exclude_when_true" ? null : p.workflow }));
+                  }}
                 >
                   <option value="include_when_true">Include content when Rule returns TRUE</option>
                   <option value="exclude_when_true">Suppress / Exclude content when Rule returns TRUE</option>
@@ -1098,6 +1103,8 @@ export function RecommendationStudio() {
                   <option value="OR">ANY condition may be TRUE (OR)</option>
                 </select>
               </div>
+              {ruleForm.effect === "include_when_true" && <RuleWorkflowPicker value={ruleForm.workflow}
+                change={(workflow) => setRuleForm((p) => ({ ...p, workflow }))} />}
               <div className="pzn-field is-full">
                 <label htmlFor="pzn-rule-desc">Business Definition / Intent</label>
                 <textarea
@@ -1805,6 +1812,8 @@ export function RecommendationStudio() {
                       <CheckCircle2 size={15} /> Stage 4A · Eligible Content → Experience Layer ({simResult.eligibleContents.length})
                     </span>
                   </div>
+                  {simResult.workflowMatches?.map(({ name, contentId, workflow }) =>
+                    <p key={JSON.stringify([name, contentId, workflow.id])}>{name} recommends <code>{workflow.id}@{workflow.version}</code> on <code>{contentId}</code>.</p>)}
                   {simResult.eligibleContents.length === 0 ? (
                     <p className="pzn-subtitle">Zero eligible contents returned for this MID. The Experience Layer will suppress this placement cleanly.</p>
                   ) : (

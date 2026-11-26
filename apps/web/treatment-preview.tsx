@@ -8,6 +8,10 @@ export function TreatmentPreviewResult({ result }: { result: TreatmentPreview })
     <strong>{result.status === "timeout" ? "Simulated timeout" : result.status === "empty" ? "No matching content" : "Matching content"}</strong>
     <p>{source}</p>
     {result.status === "ranked" && <ol aria-label="Matching content in order">{result.contentIds.map((id) => <li key={id}><code>{id}</code></li>)}</ol>}
+    {result.status !== "timeout" && result.actions?.map((action) =>
+      <p key={action.id + action.version}>Standalone action · <code>{action.id}@{action.version}</code></p>)}
+    {result.status === "ranked" && result.workflows?.map((workflow) =>
+      <p key={workflow.id + workflow.version}>Workflow on click · <code>{workflow.id}@{workflow.version}</code></p>)}
     {result.status !== "timeout" && result.ccre && <div className="ccre-evaluation">
       <h4>Rule results</h4>
       <ul>

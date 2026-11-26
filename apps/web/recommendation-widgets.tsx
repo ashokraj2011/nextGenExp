@@ -15,6 +15,8 @@ import {
 import {
   pznDataTypes,
   pznOperatorLabels,
+  recommendationContextLabel,
+  wealthRecommendationsTopic,
   pznOperators,
   type PznAttribute,
   type PznDataType,
@@ -451,10 +453,10 @@ export function ContextMatrixWidget({
       onWorkspaceChange(res.workspace);
       if (res.approval) {
         setPendingApproval(res.approval);
-        setNotice(`Publishing "${contextId}" needs approval (${res.approval.id}) — ${res.approval.dualControl ? "a second approver must approve" : "you can approve it below"}.`);
+        setNotice(`Publishing "${recommendationContextLabel(contextId)}" needs approval (${res.approval.id}) — ${res.approval.dualControl ? "a second approver must approve" : "you can approve it below"}.`);
       } else {
         setPendingApproval(null);
-        setNotice(`Published "${contextId}" v${res.publication?.version ?? "?"} live to Treatment Selector.`);
+        setNotice(`Published "${recommendationContextLabel(contextId)}" v${res.publication?.version ?? "?"} live to Treatment Selector.`);
       }
     } catch (e) {
       setError(toolSetupErrorMessage(e));
@@ -483,7 +485,7 @@ export function ContextMatrixWidget({
         attachments: nextAttachments,
       });
       onWorkspaceChange(res.workspace);
-      setNotice(`Updated rule bindings on "${contextId}" (draft — click Publish to push live).`);
+      setNotice(`Updated rule bindings on "${recommendationContextLabel(contextId)}" (draft — click Publish to push live).`);
     } catch (e) {
       setError(toolSetupErrorMessage(e));
     } finally {
@@ -502,7 +504,7 @@ export function ContextMatrixWidget({
           <button
             type="button"
             className="pzn-btn pzn-btn-sm pzn-btn-primary"
-            onClick={() => onRunPrompt("Create a Treasury Ladder offer for cash over $20,000, attach to context treasury_nudge, and publish it")}
+            onClick={() => onRunPrompt("Create a Treasury Ladder recommendation for cash over $20,000, attach to context treasury_nudge, and publish it")}
           >
             <Plus size={13} /> New Context via Chat
           </button>
@@ -542,7 +544,7 @@ export function ContextMatrixWidget({
                   <button
                     type="button"
                     className="pzn-btn pzn-btn-sm"
-                    onClick={() => onRunPrompt(`Test ${ctx.contextId} for ${activeMid} and compare with Jordan Lee`)}
+                    onClick={() => onRunPrompt(`Test ${recommendationContextLabel(ctx.contextId)} for ${activeMid} and compare with Jordan Lee`)}
                   >
                     <Play size={12} /> Run Live TS
                   </button>
@@ -737,7 +739,7 @@ export function LiveTsRunnerWidget({
   workspace: PznStudioWorkspaceState;
   activeMid: string;
 }) {
-  const [contextId, setContextId] = useState(workspace.contexts[0]?.contextId ?? "wealth-next-best-offers");
+  const [contextId, setContextId] = useState(workspace.contexts[0]?.contextId ?? wealthRecommendationsTopic.contextId);
   const [cashOverride, setCashOverride] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -862,7 +864,7 @@ export function ContentLibraryWidget({
     if (!title.trim() || !body.trim()) return;
     setBusy(true);
     try {
-      const contentId = slugify(title, "text_offer");
+      const contentId = slugify(title, "text_recommendation");
       const res = await api.pznSaveContent({
         contentId,
         title: title.trim(),

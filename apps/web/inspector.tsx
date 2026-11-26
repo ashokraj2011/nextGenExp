@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { FileText } from "lucide-react";
 import type { Bootstrap, ConversationView } from "../../packages/contracts/api";
 import { adminPaths } from "../../packages/contracts/admin-paths";
+import { recommendationContextLabel } from "../../packages/contracts/self-service-pzn";
 import { diagnosticHref } from "./admin-navigation";
 import { api, type Trace } from "./api";
 
@@ -62,7 +63,7 @@ function TraceView({ trace }: { trace: Trace }) {
       {catalog && <details className="trace-details">
         <summary>Context catalog · {catalog.contexts.length} active</summary>
         <p><code>{catalog.id}</code></p>
-        {catalog.contexts.map((item) => <p key={item.contextId}><strong>{item.displayName}</strong><br />{item.description}</p>)}
+        {catalog.contexts.map((item) => <p key={item.contextId}><strong>{recommendationContextLabel(item.contextId, item.displayName)}</strong><br />{item.description}</p>)}
       </details>}
       {propensity && <details className="trace-details">
         <summary>Topic relevance scores · {propensity.status}</summary>
@@ -155,7 +156,7 @@ export function Inspector({ configuration, conversation, turnId, create }: {
 
   return <section className="admin-diagnostics-content inspector-inline" aria-label="Turn inspection details">
     <details className="admin-test-settings">
-      <summary>Start a test chat</summary>
+      <summary>Start an admin chat</summary>
     <form className="demo-settings" onSubmit={async (event) => {
       event.preventDefault();
       setCreating(true);

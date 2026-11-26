@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +9,7 @@ import { runSelfServicePznCopilot } from "../apps/server/self-service-pzn-copilo
 import { ApprovalStore } from "../apps/server/approval-store";
 import { applyPznOperationDirect, pznGateFor, requestPznApproval, verifyPznApproval } from "../apps/server/pzn-approvals";
 import { CustomerProfileStore, setActiveCustomerProfileStore } from "../packages/customer-profiles";
+import { fundingPreviewWorkflow } from "../packages/contracts/funding-workflow";
 import { FixtureTsAdapter } from "../packages/ts-adapter";
 import { resolveCandidates, lookupContent } from "../packages/experience/content";
 
@@ -190,6 +192,57 @@ test("Self-service Data Dictionary, Rule Engine, Draft/Publish isolation, and Li
   }
 });
 
+test("the wealth topic keeps its published ID and shows the new name for existing data", async () => {
+  const env = setup();
+  const contextId = "wealth-next-best-offers";
+  const oldName = "Wealth Next-Best Offers";
+  const displayName = "Wealth Next-Best Recommendations";
+  try {
+    const db = new DatabaseSync(join(env.dir, "self-service-pzn.sqlite"));
+    try {
+      db.prepare("UPDATE pzn_contexts SET record = json_set(record, '$.displayName', ?) WHERE context_id = ?").run(oldName, contextId);
+      db.prepare("UPDATE pzn_publications SET record = json_set(record, '$.context.displayName', ?) WHERE context_id = ?").run(oldName, contextId);
+    } finally { db.close(); }
+    assert.equal(env.pzn.listPublishedContextSummaries().find((c) => c.contextId === contextId)?.displayName, displayName);
+    assert.equal(env.pzn.getPublishedPublication(contextId)?.context.displayName, oldName);
+    assert.equal(env.pzn.evaluateLiveTs({ mid: "DEMO-MID-1003", contextId }).contextDisplayName, displayName);
+    const { description, attachments } = env.pzn.getContext(contextId)!;
+    env.pzn.upsertContext({ contextId, displayName: "My recommendations", description, attachments });
+    assert.equal(env.pzn.getContext(contextId)?.displayName, "My recommendations");
+    env.pzn.upsertContext({ contextId: "wealth", displayName: "Wealth", description, attachments });
+    const turn = await runSelfServicePznCopilot({ message: "Test " + displayName + " for Marcus Reed", activeContextId: "wealth" }, env.pzn);
+    assert.equal(turn.activeContextId, contextId);
+    assert.ok(turn.cards.some((card) => card.kind === "ts_evaluation" && card.evaluation.contextId === contextId));
+  } finally { env.cleanup(); }
+});
+
+test("published rule attachments reach TS only after publication and only for eligible members", async () => {
+  const env = setup();
+  try {
+    const context = "wealth-next-best-offers";
+    const target = "first_deposit_welcome_text";
+    const { ruleId, name, effect, status, businessDescription, rootGroup } = env.pzn.getRule("unfunded_account_rule")!;
+    const rule = { ruleId, name, effect, status, businessDescription, rootGroup };
+    const workflow = fundingPreviewWorkflow.recommendation;
+    const adapter = new FixtureTsAdapter({ scenarioId: "normal", ordinal: 1 });
+    const request = { mid: env.profiles.findByPersonaId("demo-new-account")!.syntheticMid, context };
+    const offered = async (mid = request.mid) => (await adapter.selectEligibleContent({ mid, context })).recommendations
+      .recommendations.filter((r) => r.kind === "workflow");
+    env.pzn.upsertRule({ ...rule, workflow });
+    assert.deepEqual(await offered(), []);
+    env.pzn.publishContext(context, "Test Operator");
+    assert.deepEqual(await offered(), [{ ...workflow, forContentIds: [target] }]);
+    assert.deepEqual(await offered(env.profiles.findByPersonaId("demo-returning")!.syntheticMid), []);
+    const decision = await adapter.selectEligibleContent(request);
+    assert.deepEqual(decision.workflowMatches, [{ name, contentId: target, workflow }]);
+    assert.deepEqual(await adapter.getRankedEligibleIds(request), decision.contentIds);
+    env.pzn.upsertRule({ ...rule, workflow: null });
+    assert.equal((await offered()).length, 1);
+    env.pzn.publishContext(context, "Test Operator");
+    assert.deepEqual(await offered(), []);
+  } finally { env.cleanup(); }
+});
+
 test("Self-service Copilot chat executes dictionary, authoring, publish, and live MID TS evaluation", async () => {
   const env = setup();
   try {
@@ -202,7 +255,7 @@ test("Self-service Copilot chat executes dictionary, authoring, publish, and liv
 
     // 2. Create content + rule + context + publish in one chat turn
     const createTurn = await runSelfServicePznCopilot(
-      { message: "Create a Treasury Ladder offer for cash over $11,000, attach to context chat_treasury_nudge, and publish it" },
+      { message: "Create a Treasury Ladder recommendation for cash over $11,000, attach to context chat_treasury_nudge, and publish it" },
       env.pzn,
     );
     assert.equal(createTurn.activeContextId, "chat_treasury_nudge");

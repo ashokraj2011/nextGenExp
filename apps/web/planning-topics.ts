@@ -18,6 +18,10 @@ export const planningTopics = [
     Icon: GraduationCap,
   },
   {
+    id: "retirement-accounts", name: "Retirement accounts", title: "Review your retirement accounts",
+    description: "See your accounts and check who is named as a beneficiary.", prompt: "Show my retirement accounts.", Icon: GraduationCap,
+  },
+  {
     id: "balances",
     name: "Balances",
     title: "Understand your balances",

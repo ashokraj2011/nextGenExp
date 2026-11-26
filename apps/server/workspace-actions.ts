@@ -14,7 +14,7 @@ export async function readWorkspacePendingActions(
   portfolios: PortfolioSnapshotProvider, inspection: boolean, now: number,
 ): Promise<WorkspacePendingAction[]> {
   const { personaId, syntheticMid } = persona;
-  const setup = store.toolSetup(principalId);
+  const setup = store.toolSetup("wealth");
   if (!setup.enabled.selection) throw new ApiError(503, "selection_disabled", "Pending actions are unavailable.");
   const adapter = new FixtureTsAdapter(
     { scenarioId: host.defaultScenarioId, ordinal: 1 }, setup.treatmentOverrides, setup.ccreRules,

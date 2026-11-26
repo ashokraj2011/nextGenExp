@@ -104,7 +104,7 @@ export type DecisionEvent = {
 export type AgentAction = {
   operation: "revise" | "save"; journeyId: string; revision: number; capability: string; fieldIds: string[];
 };
-export type AgentLaunch = { action: AgentAction; values: InputValues; sourceExperienceId: string } | { capability: CapabilityRef };
+export type AgentLaunch = { action: AgentAction; values: InputValues; sourceExperienceId: string } | { capability: CapabilityRef; sourceExperienceId?: string; values?: InputValues };
 export const customerEventSchema = z.object({
   eventId: key, type: z.literal("account.first_deposit.completed"), personaId: key,
 }).strict();

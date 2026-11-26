@@ -1,9 +1,24 @@
 import type { JsonValue } from "@sfield/core";
 import type { WorkflowRecommendation } from "./funding-workflow";
+import type { TurnFlowCatalog } from "./routing-flows";
+import type { CepCapabilityId } from "./capabilities-catalog";
 
 export type InspectorPayload = {
   bytes: number;
   data?: JsonValue;
+};
+
+export type TurnExchange = { operation: string; request: InspectorPayload; response: InspectorPayload };
+export type TurnExchangeStage = "submission" | "flowRouting" | "compiler";
+export type TurnHandoffs = {
+  flowRouting?: TurnExchange;
+  submission?: TurnExchange;
+  compiler?: TurnExchange;
+  acceptedInput?: InspectorPayload;
+  acceptedEvent?: InspectorPayload;
+  readyEvent?: InspectorPayload;
+  renderReceipt?: InspectorPayload;
+  settings?: InspectorPayload;
 };
 
 export type GatewayExchange = {
@@ -36,6 +51,7 @@ export function decodeChatInput(exchange: GatewayExchange) {
 }
 
 export type ModelStagePayloads = {
+  session?: { request: InspectorPayload; output?: InspectorPayload };
   attempts: {
     id: string;
     model: string;
@@ -54,9 +70,25 @@ export type RegistryToolPayloads = {
   error?: InspectorPayload;
 };
 
+export type OfferClick = {
+  turnId: string; label: string; kind: "action" | "workflow"; id: string; version: string;
+};
+
+export type TreatmentRun = {
+  turnId: string; threadId: string; createdAt: number; message: string; clicks: OfferClick[];
+};
+
 export type TreatmentPayloads = RegistryToolPayloads & {
   mockInput?: InspectorPayload;
+  inputReconstructed?: true;
   ccre?: InspectorPayload;
+  comparison?: {
+    legacy: InspectorPayload; workflows: InspectorPayload; returned: "legacy" | "workflows" | "decisions";
+    contentReasons?: { id: string; source: string; matchingRules: string[] }[];
+    reasons?: { kind: "action" | "workflow"; id: string; version: string; name: string; context: string;
+      condition?: import("./tool-setup").MockCcreCondition; contentIds: string[] }[];
+    rules: { name: string; contentId: string; workflowId: string }[];
+  };
 };
 
 export type WorkflowPayloads = {
@@ -77,6 +109,10 @@ export type AgenticPayloads = {
   calls: RegistryToolPayloads[];
 };
 export type TurnPayloads = {
+  sentFlowList?: Pick<TurnFlowCatalog, "tenantId" | "domainId" | "audience"> & { flowIds: CepCapabilityId[] };
+  handoffs?: TurnHandoffs;
+  verifiedIntent?: { intentId: string; contextId: string };
+  catalogLookup?: RegistryToolPayloads;
   customerLookup?: RegistryToolPayloads;
   agentic?: AgenticPayloads;
   turnId: string;
@@ -84,8 +120,11 @@ export type TurnPayloads = {
   router: ModelStagePayloads | null;
   glossary: RegistryToolPayloads | null;
   treatment: TreatmentPayloads | null;
+  retirementAccounts?: RegistryToolPayloads;
   portfolio: RegistryToolPayloads | null;
   goal: RegistryToolPayloads | null;
   composer: ModelStagePayloads | null;
   workflow: WorkflowPayloads | null;
+  sourceDecision?: { turnId: string; message: string; treatment: TreatmentPayloads };
+  workflowClicks?: { id: string; label: string }[];
 };

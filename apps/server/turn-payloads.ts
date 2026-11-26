@@ -4,8 +4,9 @@ import { ASK_USER } from "@sfield/core";
 import type { CallRecord, JsonValue, ModelAttemptRecord, RunRecord, SField } from "@sfield/core";
 import host from "../../fixtures/host.json";
 import { findProfileById } from "../../packages/customer-profiles";
-import type { AgenticPayloads, WorkflowPayloads, ModelStagePayloads, RegistryToolPayloads, TreatmentPayloads, TurnPayloads } from "../../packages/contracts/inspector";
-import { fundingAgentId, fundingToolKey, resolveFundingWorkflow, treatmentRecommendationsVersion } from "../../packages/contracts/funding-workflow";
+import type { AgenticPayloads, WorkflowPayloads, ModelStagePayloads, RegistryToolPayloads, TreatmentPayloads, TurnHandoffs, TurnPayloads } from "../../packages/contracts/inspector";
+import { workflowDefinition, workflowToolKey } from "../../packages/contracts/customer-workflows";
+import { fundingAgentId, fundingToolKey, treatmentDecisionVersion, treatmentRecommendationsVersion } from "../../packages/contracts/funding-workflow";
 import { sfieldTools, toolVersion } from "../../packages/contracts/tool-setup";
 import { workspaceFundingContext } from "../../packages/contracts/workspace";
 import type { configureGateway } from "./gateway";
@@ -44,6 +45,8 @@ async function modelPayloads(sf: SField, store: Store, inspection: Inspection, t
     || run.request.inputs?.turnRef !== turn.public.id || run.request.inputs?.stageAttemptId !== stageAttempt.id) return null;
 
   const recorded = await sf.persistence.listModelAttempts(run.runId);
+  const session = { request: inspection.payload(run.request as unknown as JsonValue),
+    ...(run.output !== undefined && { output: inspection.payload(run.output) }) };
   const attempts = recorded.map((attempt) => modelAttemptPayload(store, inspection, attempt));
   if (attempts.length === 1 && !attempts[0].exchange) {
     const exchange = await verifiedExchange(sf, inspection, run, recorded[0]);
@@ -52,7 +55,7 @@ async function modelPayloads(sf: SField, store: Store, inspection: Inspection, t
       attempts[0].exchange = exchange;
     }
   }
-  if (attempts.length && attempts.every(({ exchange }) => exchange)) return { attempts };
+  if (attempts.length && attempts.every(({ exchange }) => exchange)) return { attempts, session };
 
   // Older runs keep the agent's input and assistant messages even without the compiled body.
   const saved = await sf.persistence.getCheckpoint(run.runId);
@@ -62,7 +65,7 @@ async function modelPayloads(sf: SField, store: Store, inspection: Inspection, t
   if (!responses.length && run.output !== undefined) responses.push(inspection.payload(run.output));
   let input: JsonValue = run.request.message.text;
   try { input = JSON.parse(run.request.message.text) as JsonValue; } catch { /* Preserve a plain text input. */ }
-  return { attempts, saved: { input: inspection.payload(input), responses } };
+  return { attempts, session, saved: { input: inspection.payload(input), responses } };
 }
 
 function modelAttemptPayload(store: Store, inspection: Inspection, attempt: ModelAttemptRecord) {
@@ -103,7 +106,7 @@ async function glossaryPayloads(sf: SField, inspection: Inspection, turn: TurnRe
 }
 
 async function routeReadPayloads(
-  sf: SField, inspection: Inspection, turn: TurnRecord, scopeId: string | undefined, key: "portfolio" | "goal",
+  sf: SField, inspection: Inspection, turn: TurnRecord, scopeId: string | undefined, key: "portfolio" | "goal" | "retirementAccounts",
 ) {
   if (!scopeId || !turn.route) return null;
   const tool = `${sfieldTools[key].id}@${toolVersion}`;
@@ -114,15 +117,18 @@ async function routeReadPayloads(
   return call ? registryPayload(inspection, call) : null;
 }
 
-async function topicScoresPayloads(sf: SField, inspection: Inspection, turn: TurnRecord): Promise<TreatmentPayloads | null> {
+async function discoveryPayloads(sf: SField, inspection: Inspection, turn: TurnRecord): Promise<Pick<TurnPayloads, "catalogLookup" | "topicScores">> {
+  if (!turn.catalogScopeId) return { topicScores: null };
+  const calls = (await sf.persistence.listCalls(turn.catalogScopeId)).filter((call) => call.proposedArguments.turnRef === turn.public.id);
+  const catalog = calls.find((call) => call.toolRef === `${sfieldTools.catalog.id}@${toolVersion}`);
+  const scores = turn.catalog && calls.find((call) => call.toolRef === `${sfieldTools.propensity.id}@${toolVersion}`
+    && call.proposedArguments.catalogSnapshotId === turn.catalog?.snapshotId);
   const recorded = turn.treatmentScores;
-  if (!recorded || recorded.scopeId !== turn.catalogScopeId || !turn.catalog) return null;
-  const tool = `${sfieldTools.propensity.id}@${toolVersion}`;
-  const call = (await sf.persistence.listCalls(recorded.scopeId)).find((entry) => (
-    entry.toolRef === tool && entry.proposedArguments.turnRef === turn.public.id
-    && entry.proposedArguments.catalogSnapshotId === turn.catalog?.snapshotId
-  ));
-  return call ? { ...registryPayload(inspection, call), mockInput: inspection.payload(recorded.input) } : null;
+  return {
+    ...(catalog && { catalogLookup: registryPayload(inspection, catalog) }),
+    topicScores: recorded?.scopeId === turn.catalogScopeId && scores
+      ? { ...registryPayload(inspection, scores), mockInput: inspection.payload(recorded.input) } : null,
+  };
 }
 
 async function treatmentPayloads(sf: SField, inspection: Inspection, turn: TurnRecord, conversation: ConversationRecord): Promise<TreatmentPayloads | null> {
@@ -130,7 +136,7 @@ async function treatmentPayloads(sf: SField, inspection: Inspection, turn: TurnR
   const decisionRef = workspaceContext ? turn.public.id : turn.route?.routeDecisionId;
   const context = workspaceContext ?? turn.route?.contextId;
   if (!turn.tsScopeId || !decisionRef || !context) return null;
-  const tools = [toolVersion, treatmentRecommendationsVersion].map((version) => `${sfieldTools.selection.id}@${version}`);
+  const tools = [toolVersion, treatmentRecommendationsVersion, treatmentDecisionVersion].map((version) => `${sfieldTools.selection.id}@${version}`);
   const call = (await sf.persistence.listCalls(turn.tsScopeId)).find((entry) => (
     tools.includes(entry.toolRef) && entry.proposedArguments.turnRef === turn.public.id
     && entry.proposedArguments.routeDecisionId === decisionRef
@@ -141,9 +147,34 @@ async function treatmentPayloads(sf: SField, inspection: Inspection, turn: TurnR
     const persona = findProfileById(conversation.personaId);
     if (persona) mockInput = { mid: persona.syntheticMid, context };
   }
+  const formats = call.result?.status === "succeeded" ? turn.treatmentFormats : undefined;
+  const returned = call.toolRef === tools[0] ? "legacy" : call.toolRef === tools[2] ? "decisions" : "workflows";
+  const raw = registryPayload(inspection, call);
   return {
-    ...registryPayload(inspection, call),
+    ...raw,
+    ...(formats && raw.result && { comparison: {
+      legacy: returned === "legacy" ? raw.result : inspection.payload(formats.legacy),
+      workflows: returned !== "legacy" ? raw.result : inspection.payload(formats.workflows),
+      returned,
+      ...(returned === "decisions" && { contentReasons: formats.legacy.map((id) => ({
+        id, source: turn.treatmentEntries ? "Published context" : turn.trace.ts?.source === "override" ? "Tool setup override" : "Ranked context list",
+        matchingRules: turn.treatmentCcre?.results.filter((rule) => rule.contentId === id && rule.outcome === "matched").map((rule) => rule.name) ?? [],
+      })), reasons: [
+        ...(formats.actionMatches ?? []).map(({ name, contextId, condition, action }) => ({
+          ...action, name, condition, context: contextId, contentIds: [],
+        })),
+        ...(formats.matches ?? []).map(({ name, condition, contentId, requiresContentIds, workflow }) => ({
+          ...workflow, name, condition, context, contentIds: [contentId, ...requiresContentIds ?? []],
+        })),
+      ] }),
+      rules: formats.matches?.map(({ name, contentId, workflow }) => ({ name, contentId, workflowId: workflow.id })) ?? formats.workflows.recommendations.flatMap((item) => item.kind === "workflow"
+        ? (item.forContentIds ?? []).flatMap((id) => {
+          const rule = turn.treatmentCcre?.results.findLast((r) => r.contentId === id && r.outcome === "matched");
+          return rule ? [{ name: rule.name, contentId: id, workflowId: item.id }] : [];
+        }) : []),
+    } }),
     mockInput: mockInput ? inspection.payload(mockInput) : undefined,
+    ...(mockInput && !turn.treatmentMockInput && { inputReconstructed: true as const }),
     ccre: turn.treatmentCcre ? inspection.payload(turn.treatmentCcre) : undefined,
   };
 }
@@ -151,7 +182,7 @@ async function treatmentPayloads(sf: SField, inspection: Inspection, turn: TurnR
 async function workflowPayloads(sf: SField, store: Store, inspection: Inspection, turn: TurnRecord): Promise<WorkflowPayloads | null> {
   if (!turn.workflow) return null;
   const { recommendation } = turn.workflow;
-  const definition = resolveFundingWorkflow(recommendation, turn.toolSetup?.fundingWorkflow);
+  const definition = workflowDefinition(recommendation, turn.toolSetup?.fundingWorkflow);
   const phase = turn.fundingRun;
   if (phase) {
     const run = await sf.persistence.getRun(phase.id);
@@ -187,7 +218,7 @@ async function workflowPayloads(sf: SField, store: Store, inspection: Inspection
   const calls = recorded.filter((call) => call.proposedArguments.turnRef === turn.public.id)
     .sort((a, b) => a.turn - b.turn || a.order - b.order)
     .flatMap((call) => {
-      const key = fundingToolKey(call.toolRef);
+      const key = workflowToolKey(call.toolRef);
       return key ? [{ ...registryPayload(inspection, call), label: sfieldTools[key].label }] : [];
     });
   return { recommendation, definition: definition && inspection.payload(definition), calls };
@@ -223,9 +254,37 @@ async function experiencePayloads(sf: SField, store: Store, inspection: Inspecti
   return { runId: root.runId, model, calls };
 }
 
+function turnHandoffs(store: Store, inspection: Inspection, turn: TurnRecord): TurnHandoffs {
+  const exchanges = store.turnExchanges(turn.public.id);
+  const events = store.replay(turn, 0) ?? [];
+  const accepted = events.find((event) => event.type === "turn.accepted");
+  const ready = events.find((event) => event.type === "experience.ready");
+  const receipt = turn.public.experience && store.renderReceipt(turn.public.experience.experienceId);
+  let savedInput;
+  if (!exchanges.submission && turn.origin === "message") {
+    savedInput = { message: turn.public.message, clientRequestId: turn.requestId };
+  } else if (!exchanges.submission && turn.origin.startsWith("workflow:")) {
+    const actionId = turn.origin.slice("workflow:".length);
+    const surface = store.previousCompletedTurn(turn.scope.conversationId, turn.ordinal)?.public.experience;
+    const action = surface?.actions.find((item) => item.actionId === actionId);
+    savedInput = { actionId, clientRequestId: turn.requestId, ...(surface && action && {
+      surfaceId: surface.experienceId, sourceComponentId: action.componentId,
+    }) };
+  }
+  const settings = turn.toolSetup;
+  return { ...exchanges,
+    ...(savedInput && { acceptedInput: inspection.payload(savedInput) }),
+    ...(accepted && { acceptedEvent: inspection.payload(accepted as unknown as JsonValue) }),
+    ...(ready && { readyEvent: inspection.payload(ready as unknown as JsonValue) }),
+    ...(receipt && { renderReceipt: inspection.payload(receipt) }),
+    ...(settings && { settings: inspection.payload({ enabled: settings.enabled, ruleNames: settings.ccreRules?.map((rule) => rule.name) ?? [],
+      ...(settings.fundingWorkflow && { fundingWorkflow: settings.fundingWorkflow }) } as JsonValue) }),
+  };
+}
+
 export async function readTurnPayloads(sf: SField, store: Store, inspection: Inspection, turn: TurnRecord, conversation: ConversationRecord): Promise<TurnPayloads> {
-  const [topicScores, router, glossary, treatment, portfolio, goal, composer, workflow, agentic, customerLookup] = await Promise.all([
-    topicScoresPayloads(sf, inspection, turn),
+  const [discovery, router, glossary, treatment, portfolio, goal, composer, workflow, agentic, customerLookup, retirementAccounts] = await Promise.all([
+    discoveryPayloads(sf, inspection, turn),
     modelPayloads(sf, store, inspection, turn, "route"),
     glossaryPayloads(sf, inspection, turn),
     treatmentPayloads(sf, inspection, turn, conversation),
@@ -235,6 +294,18 @@ export async function readTurnPayloads(sf: SField, store: Store, inspection: Ins
     workflowPayloads(sf, store, inspection, turn),
     experiencePayloads(sf, store, inspection, turn),
     customerLookupPayload(sf, inspection, turn),
+    routeReadPayloads(sf, inspection, turn, turn.retirementScopeId, "retirementAccounts"),
   ]);
-  return { turnId: turn.public.id, topicScores, router, glossary, treatment, portfolio, goal, composer, workflow, ...(agentic && { agentic }), ...(customerLookup && { customerLookup }) };
+  const sourceId = turn.workflow?.sourceExperienceId ?? (turn.agentLaunch && "capability" in turn.agentLaunch ? turn.agentLaunch.sourceExperienceId : undefined);
+  const source = sourceId && store.experience(sourceId, turn.scope.principalId).turn;
+  const sourceTreatment = source && source.scope.conversationId === conversation.id && source.scope.personaId === turn.scope.personaId
+    ? await treatmentPayloads(sf, inspection, source, conversation) : null;
+  const clicks = turn.public.experience && (turn.decision?.workflowRecommendations?.length || turn.decision?.actionRecommendations?.length) ? store.workflowClicks(turn) : [];
+  const handoffs = turnHandoffs(store, inspection, turn);
+  const catalog = turn.flowCatalog;
+  return { handoffs,
+    ...(handoffs.flowRouting && catalog && { sentFlowList: { tenantId: catalog.tenantId, domainId: catalog.domainId, audience: catalog.audience, flowIds: catalog.flows.map((flow) => flow.id) } }),
+    ...(source && sourceTreatment && { sourceDecision: { turnId: source.public.id, message: source.public.message, treatment: sourceTreatment } }),
+    ...(turn.route && turn.trace.intentId && { verifiedIntent: { intentId: turn.trace.intentId, contextId: turn.route.contextId } }),
+    ...(clicks.length && { workflowClicks: clicks }), turnId: turn.public.id, ...discovery, router, glossary, treatment, portfolio, goal, composer, workflow, ...(retirementAccounts && { retirementAccounts }), ...(agentic && { agentic }), ...(customerLookup && { customerLookup }) };
 }

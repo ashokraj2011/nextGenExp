@@ -7,9 +7,11 @@ import treatmentFixture from "../../fixtures/treatment-scenarios.json";
 import host from "../../fixtures/host.json";
 import marcusCalls from "../../fixtures/marcus-sfield-exchanges.json";
 import type { ContextSelectionProposal, ExperienceProposal, Intent, ProposalBlock } from "../../packages/contracts/domain";
-import { fundingPreviewWorkflow } from "../../packages/contracts/funding-workflow";
+import { beneficiaryReviewWorkflow } from "../../packages/contracts/customer-workflows";
+import { fundingPreviewWorkflow, treatmentDecisionSchema, type TreatmentDecision } from "../../packages/contracts/funding-workflow";
 import { portfolioSummaryQuestion, type RoutingIntentId } from "../../packages/contracts/routing-intents";
 import { mockRuleGlossary } from "../../packages/rule-glossary";
+import { resolveTurnFlows } from "../../packages/contracts/routing-flows";
 
 export type PayloadExample = { label: string; value: unknown };
 type CapturedCall = (typeof marcusCalls)[keyof typeof marcusCalls];
@@ -33,7 +35,8 @@ const turnRef = "turn_demo";
 const catalogSnapshotId = "catalog_demo";
 const decisionId = "decision_demo";
 const routeDecisionId = "route_demo";
-const mid = host.personas[0].syntheticMid;
+const learner = host.personas.find(({ personaId }) => personaId === "demo-learner")!;
+const mid = learner.syntheticMid;
 const newAccount = host.personas.find(({ personaId }) => personaId === "demo-new-account")!;
 const catalog = { ...contextFixture, contexts: contextFixture.contexts.filter(({ active }) => active) };
 const demoBalance = {
@@ -67,7 +70,7 @@ function discoveryFor(personaId: keyof typeof propensityFixture.defaults): FlowS
   };
   return {
     id: "discovery", title: "Load topics and scores", role: "sfield tools",
-    description: "sfield asks the mock Treatment Selector for the active topics from fixtures/contexts.json, then for scores from fixtures/propensity.json. The app saves both for the turn and sends them to the first model call.",
+    description: "Inside account help, sfield asks Treatment Selector for active topics, then for the member’s topic scores. The app saves both and includes them in the Context Router request.",
     input: { label: "Tool requests", value: {
       "contexts.list": { turnRef }, "propensity.context.score": { turnRef, catalogSnapshotId },
     } },
@@ -86,20 +89,21 @@ function routeProposal(intentId: RoutingIntentId, summary: string): ContextSelec
 
 function router(description: string, value: object, proposal: ContextSelectionProposal): FlowStep {
   return {
-    id: "router", title: "Context Router", role: "First model call", description,
+    id: "router", title: "Context Router", role: "sfield · Intent selection", description,
     input: { label: "What the model receives · excerpt", value: { inputType: "PznContextRoutingInput", catalogSnapshotId, ...value } },
     output: { label: "ContextSelectionProposal", value: proposal },
     contracts: ["router", "gateway"],
   };
 }
 
-function treatment(context: string, response: string[] | typeof marcusCalls.treatment.response.output, description: string, memberId = mid): FlowStep {
+function treatment(context: string, response: string[] | TreatmentDecision, description: string, memberId = mid): FlowStep {
   return {
     id: "treatment", title: "Treatment Selector", role: "Finds eligible treatments", description,
     input: { label: "Tool request and what Treatment Selector receives", value: {
       registryInput: { turnRef, routeDecisionId }, adapterInput: { mid: memberId, context },
     } },
-    output: { label: Array.isArray(response) ? "Matching content IDs in order" : "Content and workflow recommendations", value: response },
+    output: { label: "Eligible content, actions and workflows", value: Array.isArray(response)
+      ? { schemaVersion: "2.1", recommendations: response.map((id) => ({ kind: "content", id })) } : response },
     contracts: ["treatment", "rules", "domain"],
   };
 }
@@ -113,7 +117,7 @@ function composer(
     schemaVersion: "1.0", decisionId, status: "ready", intent, introKey, clarificationQuestion: null, blocks, followUpIds,
   };
   return {
-    id: "composer", title: "Experience Composer", role: "Second model call", description,
+    id: "composer", title: "Experience Composer", role: "sfield · Layout selection", description,
     input: { label: "What the model receives · excerpt", value: {
       inputType: "PznExperienceCompositionInput", request, selectedContextId, selectedIntentId, intent,
       ...(selectedIntentId === "show_portfolio" && { portfolioSnapshotIncluded: true }),
@@ -135,6 +139,7 @@ const portfolioPrompt = "Let me know my portfolio summary.";
 const goalPrompt = "Show my home-buying goal and savings progress.";
 const retirementPrompt = "I'd like to learn about retirement.";
 const addressPrompt = "I moved and need to update my address.";
+const referenceFlows = resolveTurnFlows("pzn-local", "wealth", "customer", false, {}, {});
 const rulePrompt = "Create rule";
 const balanceRoute = routeProposal("show_balance", "Show the summary of the established balance topic.");
 const portfolioRoute = routeProposal("show_portfolio", "Show the customer's demo portfolio.");
@@ -156,8 +161,33 @@ balanceComposer.tool = {
 balanceComposer.contracts = [...balanceComposer.contracts, "balance"];
 
 const addressContext = "address-update";
-const addressTreatments = marcusCalls.treatment.response.output;
+const addressTreatments = treatmentDecisionSchema.parse(marcusCalls.treatment.response.output);
+const retirementTreatments: TreatmentDecision = {
+  schemaVersion: "2.1",
+  recommendations: [
+    ...treatmentFixture.base.learning.map((id) => ({ kind: "content" as const, id })),
+    { ...beneficiaryReviewWorkflow.recommendation, forContentIds: ["beneficiary_update"] },
+  ],
+};
 const addressContentIds = addressTreatments.recommendations.filter(({ kind }) => kind === "content").map(({ id }) => id);
+export const treatmentDecisionExamples = [
+  {
+    label: "Marcus · Address update", prompt: addressPrompt,
+    request: { mid: newAccount.syntheticMid, context: addressContext },
+    legacy: treatmentFixture.base["address-update"], response: addressTreatments,
+    rule: "Mailing address update requested · Account is unfunded", button: fundingPreviewWorkflow.label,
+    eligibility: "Address update qualifies Marcus for the form. His unfunded status also qualifies him for the funding card and workflow. A funded customer can still use the address form.",
+    afterClick: "In this example, the saved workflow tells sfield to check funding status, read eligible funding methods, then build a preview.",
+  },
+  {
+    label: "Alice · Retirement", prompt: retirementPrompt,
+    request: { mid, context: "learning" },
+    legacy: treatmentFixture.base.learning, response: retirementTreatments,
+    rule: "Beneficiary details are missing", button: beneficiaryReviewWorkflow.label,
+    eligibility: "Alice gets the retirement lesson and a beneficiary reminder. A customer with a beneficiary on file gets just the lesson.",
+    afterClick: "sfield reads Alice’s retirement accounts. Chat lists her Workplace 401(k) and Rollover IRA and asks which one she wants to check.",
+  },
+] as const;
 const addressCandidateId = "candidate_address";
 const addressExperienceId = "exp_demo";
 const addressFollowUp = { actionId: "action_demo_funding", componentId: "follow_up_1", label: fundingPreviewWorkflow.label };
@@ -165,6 +195,7 @@ const addressActions = [addressFollowUp, { actionId: "action_demo_transfer", com
 const addressBlocks = [
   { component: "PznStepList", props: { title: "Update your mailing address" } },
   { component: "PznContentCard", props: { title: "Fund your account", recommendation: true } },
+  { component: "PznCapabilityForm", props: { title: "Prepare an address change" } },
 ];
 const marcusCustomerContext = {
   segment: "New Onboarding · Unfunded",
@@ -207,29 +238,30 @@ const addressSteps = {
     contracts: ["discovery", "domain"],
   },
   router: {
-    id: "router", title: "Context Router", role: "First model call",
-    description: "Copilot ACP receives Marcus’s message, recent chat, privacy-safe Customer 360 signals, and live High-Level Intents. It returns update_address, which the app verifies before calling Treatment Selector.",
+    id: "router", title: "Context Router", role: "sfield · Intent selection",
+    description: "The routing model receives Marcus’s message, recent chat, privacy-safe Customer 360 signals, and live High-Level Intents. It proposes update_address. The app verifies the intent and asks Treatment Selector which recommendations are eligible.",
     input: { label: "What the model receives", value: marcusRouterInput },
     output: { label: "ContextSelectionProposal", value: marcusCalls.router.response.output },
     contracts: ["router", "gateway"],
   },
   treatment: treatment(
     addressContext, addressTreatments,
-    "Treatment Selector receives Marcus’s member ID and TS rule group (address-update). CCRE evaluates account.funding_status == 'unfunded', making the Fund your account card and funding preview workflow eligible.",
+    "Treatment Selector receives Marcus’s member ID and TS rule group (address-update). CCRE recommends a standalone address action for this topic. Marcus’s unfunded status also qualifies him for the funding card and Preview funding workflow.",
     newAccount.syntheticMid,
   ),
   composer: {
-    id: "composer", title: "Experience Composer", role: "Second model call",
+    id: "composer", title: "Experience Composer", role: "sfield · Layout selection",
     description: "The model selects the address guide strictly from eligible candidates. The app verifies disclosures, merges any published UI Builder layout, and attaches the eligible funding card.",
     input: { label: "What the model receives", value: JSON.parse(marcusCalls.composer.request.message.text) },
     output: { label: "ExperienceProposal", value: marcusCalls.composer.response.output },
     contracts: ["composer", "domain"],
   },
   render: render(
-    "Chat shows the address guide, the funding card, and the Preview funding button. Open the turn in Admin Logs to inspect the calls.",
+    "Chat shows the address guide, the independent address form, and a funding card with a Preview funding button. Open the turn in Admin Logs to inspect the calls.",
     { label: "Verified inputs · excerpt", value: {
       actionMode: "verified_experience",
       selectedCandidateId: addressCandidateId,
+      standaloneAction: treatmentFixture.actionRules[0].action,
       eligibleFundingCard: "fund_account",
       workflow: fundingPreviewWorkflow.recommendation,
     } },
@@ -240,19 +272,18 @@ const addressSteps = {
 export const addressUpdateExample = {
   persona: newAccount.displayName,
   prompt: addressPrompt,
-  treatmentResponse: addressTreatments,
   handoffs: {
     router: {
       calls: [{
         title: "Context Router",
-        description: "The app sends Marcus’s prompt, privacy-safe Customer 360 signals, and live High-Level Intents as JSON text. sfield runs Copilot ACP and returns the proposed intent.",
+        description: "The app sends Marcus’s prompt, privacy-safe Customer 360 signals, and live High-Level Intents as JSON text. sfield calls the configured model and returns the proposed intent.",
         exchange: marcusRouterExchange,
       }],
     },
     treatment: {
       calls: [{
         title: "Treatment Selector",
-        description: "The app sends the turn ID and verified route ID. sfield calls Treatment Selector with Marcus’s member ID and the address-update rule group, running CCRE rules to return eligible content and workflow recommendations.",
+        description: "The app sends the turn ID and verified route ID. sfield calls Treatment Selector with Marcus’s member ID and the address-update rule group, running CCRE rules to return eligible content, the address action and the funding workflow.",
         exchange: marcusCalls.treatment,
       }],
     },
@@ -266,7 +297,21 @@ export const addressUpdateExample = {
   } satisfies Record<string, HandoffExample>,
   exchanges: {
     chat: addressSteps.chat,
-    contexts: addressSteps.discovery,
+    flowList: {
+      description: "The app starts with registered flows and applies tenant defaults, domain overrides and the chat audience. This example uses the Wealth defaults.",
+      input: { label: "Chat scope", value: { tenantId: referenceFlows.tenantId, domainId: referenceFlows.domainId, audience: referenceFlows.audience } },
+      output: { label: "Applicable flow IDs", value: referenceFlows.flows.map((flow) => flow.id) },
+    },
+    flowSelection: {
+      description: "For this address-update example the app calls the configured model directly. It supplies recent chat when available and checks that the returned flow ID belongs to the list for this turn.",
+      input: { label: "Flow selection input · excerpt", value: { message: addressPrompt, flows: referenceFlows.flows.map(({ id, description, examples }) => ({ id, description, examples })) } },
+      output: { label: "Flow selection response · excerpt", value: { capabilityId: "verified_experience" } },
+    },
+    contexts: {
+      description: "Inside account help, sfield asks TS for active topics and then for the member’s scores against those topics. The Context Router also receives supported intents, recent chat and relevant customer fields.",
+      input: { label: "sfield discovery calls", value: [marcusCalls.catalog.request, marcusCalls.scores.request] },
+      output: { label: "TS topics and member scores", value: { catalog: marcusCalls.catalog.response.output, propensity: marcusCalls.scores.response.output } },
+    },
     router: addressSteps.router,
     treatment: addressSteps.treatment,
     content: {
@@ -299,7 +344,7 @@ export const addressUpdateExample = {
           a2uiProtocol: "v1.0",
           a2uiMessages: [
             { type: "createSurface", surfaceId: "exp_demo", theme: "evergreen" },
-            { type: "updateComponents", components: ["PznStepList", "PznContentCard"] },
+            { type: "updateComponents", components: addressBlocks.map((block) => block.component) },
             { type: "updateDataModel", signedActions: addressActions },
           ],
           blocks: addressBlocks,
@@ -324,7 +369,7 @@ export const addressUpdateExample = {
               components: [
                 {
                   id: "root", component: "PznExperience", intro: { "@path": "/intro" },
-                  children: ["block_1", "block_2", ...addressActions.map(({ componentId }) => componentId)],
+                  children: [...addressBlocks.map((_, i) => "block_" + (i + 1)), ...addressActions.map(({ componentId }) => componentId)],
                   actionCount: addressActions.length, question: null, partial: false,
                 },
                 ...addressBlocks.map(({ component, props }, index) => ({ id: "block_" + (index + 1), component, ...props })),
@@ -336,7 +381,7 @@ export const addressUpdateExample = {
       } },
     },
     followUp: {
-      description: "Marcus clicks Preview funding. The app checks the offer and looks up the workflow by ID and version. With Agent-guided selected, sfield shows the eligible methods and waits for his choice. Logs shows the calls for each message.",
+      description: "Marcus clicks Preview funding. The app checks the recommendation and looks up the workflow by ID and version. With Agent-guided selected, sfield shows the eligible methods and waits for his choice. Logs shows the calls for each message.",
       input: { label: "POST /api/experiences/" + addressExperienceId + "/actions", value: {
         clientRequestId: "request_demo_follow_up",
         envelope: {
@@ -448,11 +493,11 @@ export const helpFlows: Flow[] = [
     ],
   },
   {
-    id: "retirement", title: "Retirement learning", prompt: retirementPrompt,
+    id: "retirement", title: "Retirement learning", prompt: retirementPrompt, persona: learner.displayName,
     steps: [
       chat(retirementPrompt), discovery,
       router("The model recognizes a request to learn about retirement. The app checks the choice and selects Learning as the topic.", { request: retirementPrompt, recent: [] }, retirementRoute),
-      treatment("learning", treatmentFixture.base.learning, "Treatment Selector returns a retirement lesson. Alice’s account is missing beneficiary details, so she also gets a reminder."),
+      treatment("learning", retirementTreatments, "Alice’s missing beneficiary details qualify her for the reminder alongside the retirement lesson. This example has Review beneficiary attached to that rule in Tool setup."),
       composer(
         retirementPrompt, "learning", "retirement_learning", { topic: "Learn about retirement", task: "explain", summary: retirementRoute.summary },
         [{ candidateId: "candidate_learning", title: "Retirement planning basics", tsRank: 1 }],
@@ -461,12 +506,15 @@ export const helpFlows: Flow[] = [
         "explanation",
       ),
       render(
-        "Chat shows the lesson and Alice’s reminder. The button opens the beneficiary update guide.",
+        "Chat shows the lesson and Alice’s reminder. Review beneficiary starts the account review. See beneficiary update steps opens the guide.",
         { label: "Verified inputs · excerpt", value: { selectedCandidateId: "candidate_learning", eligibleReminder: "beneficiary_update" } },
         { label: "DisplayExperience · excerpt", value: { status: "ready", blocks: [
           { component: "PznContentCard", props: { title: "Retirement planning basics" } },
           { component: "PznContentCard", props: { title: "Update your beneficiaries" } },
-        ], actions: [{ actionId: "action_demo", componentId: "follow_up_1", label: "See beneficiary update steps" }] } },
+        ], actions: [
+          { actionId: "action_demo_review", componentId: "follow_up_1", label: beneficiaryReviewWorkflow.label },
+          { actionId: "action_demo_steps", componentId: "follow_up_2", label: "See beneficiary update steps" },
+        ] } },
       ),
     ],
   },

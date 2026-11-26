@@ -165,8 +165,8 @@ export class AgenticExecution {
           const thresholdCents = hits.length === 1 && ruleHit && "cashAboveCents" in ruleHit ? ruleHit.cashAboveCents : undefined;
           const decision = eligible ? "Eligible" : "Unavailable";
           const reason = typeof thresholdCents === "number"
-            ? `${decision}. This offer requires more than ${formatPortfolioAmount(thresholdCents)} in cash. The projected cash balance is ${formatPortfolioAmount(cashAfterCents)}.`
-            : `${decision}. ${hits.map((hit) => hit.reason ?? hit.name).join(" ") || "Treatment Selector returned no matching rule for this offer."}`;
+            ? `${decision}. This recommendation requires more than ${formatPortfolioAmount(thresholdCents)} in cash. The projected cash balance is ${formatPortfolioAmount(cashAfterCents)}.`
+            : `${decision}. ${hits.map((hit) => hit.reason ?? hit.name).join(" ") || "Treatment Selector returned no matching rule for this recommendation."}`;
           return {
             eligible, contentId, ruleName,
             ...(typeof thresholdCents === "number" && { thresholdCents }),

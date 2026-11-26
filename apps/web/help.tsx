@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
+import treatmentDiagramUrl from "./assets/ts-sfield-interaction.svg?url";
 import { ArrowUpRight, BookOpenText, Braces, Database, Download, GitBranch, House, Layers, LayoutGrid, ListFilter, MessageSquare, Network, PanelsTopLeft, Settings2, ShieldCheck, Sparkles, UsersRound } from "lucide-react";
 import { recommendationArbitrateToolRef } from "../../packages/contracts/recommendation-provider";
 import { adminPaths } from "../../packages/contracts/admin-paths";
 import { DeveloperDrawer } from "./developer-drawer";
-import { ExchangePath, InteractionDiagram, treatmentExample, TreatmentProposalDiagram, type DiagramExchange } from "./help-architecture";
+import { ExchangePath, InteractionDiagram, TreatmentEvolutionDiagram, TreatmentHandoffDiagram, type DiagramExchange } from "./help-architecture";
 import { contractList, helpContracts, type ContractFile } from "./help-contracts";
-import { addressUpdateExample, helpFlows, type FlowStep, type HandoffExample, type PayloadExample } from "./help-flow";
+import { addressUpdateExample, helpFlows, treatmentDecisionExamples, type FlowStep, type HandoffExample, type PayloadExample } from "./help-flow";
+import { RecordedEvidence, useMarcusRun, type MarcusRun } from "./help-run-evidence";
+import { SystemArchitecture } from "./help-system-architecture";
 import { SfieldHelp } from "./help-sfield";
 import "./help.css";
 
@@ -37,6 +40,67 @@ function PayloadPair({ input, output }: { input: PayloadExample; output: Payload
     { direction: "Input", label: input.label, source: JSON.stringify(input.value, null, 2) },
     { direction: "Output", label: output.label, source: JSON.stringify(output.value, null, 2) },
   ]} />;
+}
+
+function TreatmentEvolution({ selectContract, run }: { selectContract: (id: string) => void; run: MarcusRun }) {
+  const [selected, setSelected] = useState(0);
+  const example = treatmentDecisionExamples[selected];
+  return <section id="proposal" className="help-section" aria-labelledby="proposal-title">
+    <div className="help-section-heading">
+      <div>
+        <h2 id="proposal-title">How Treatment Selector should evolve</h2>
+        <p className="help-exchange-description">Start with the same question TS answers today. Given a member ID (<code>mid</code>) and a verified topic (<code>context</code>), what is this customer eligible for?</p>
+      </div>
+      <nav className="help-step-contracts" aria-label="Treatment Selector resources">
+        <a href="#system-architecture">System map <ArrowUpRight size={14} aria-hidden="true" /></a>
+        <a href={treatmentDiagramUrl} download="ts-sfield-interaction.svg">Download diagram <Download size={14} aria-hidden="true" /></a>
+        <a href="#contracts" onClick={() => selectContract("treatment")}>View TS contracts <ArrowUpRight size={14} aria-hidden="true" /></a>
+      </nav>
+    </div>
+    <div className="help-proposal">
+      <TreatmentHandoffDiagram run={run} />
+      <TreatmentEvolutionDiagram />
+      <div className="help-sfield-subsection">
+        <div className="help-evolution-example-heading">
+          <h3>One rule decision, two response formats</h3>
+          <div className="help-flow-picker" role="group" aria-label="Treatment Selector examples">
+            {treatmentDecisionExamples.map(({ label }, index) => <button key={label} type="button"
+              aria-pressed={index === selected} aria-controls="ts-decision-example" onClick={() => setSelected(index)}>{label}</button>)}
+          </div>
+        </div>
+        <div id="ts-decision-example">
+          <p className="help-example">“{example.prompt}”</p>
+          <dl className="help-decision-facts">
+            <div><dt>Matching CCRE rule</dt><dd><strong>{example.rule}.</strong> {example.eligibility}</dd></div>
+            <div><dt>After the click</dt><dd><strong>{example.button}.</strong> {example.afterClick}</dd></div>
+          </dl>
+          <details className="help-tool-exchange">
+            <summary>Compare the legacy and current TS responses</summary>
+            <p>Both formats use this TS request.{example.request.context === "learning" && <> Once Alice chooses a retirement account, a follow-up can include <code>accountId</code> so the rule checks that account.</>}</p>
+            <pre className="help-contract-source help-ts-request" tabIndex={0} aria-label="Treatment Selector request JSON"><code>{JSON.stringify(example.request, null, 2)}</code></pre>
+            <PayloadExamples examples={[
+              { direction: "Content IDs", label: "v1", source: JSON.stringify(example.legacy, null, 2) },
+              { direction: "Content, actions and workflows", label: "v2.1", source: JSON.stringify(example.response, null, 2) },
+            ]} />
+          </details>
+        </div>
+        <p>In Tool setup, choose <strong>{example.button}</strong> under <strong>Workflow on click</strong> for this rule and save it. Ask the question in chat and click the button. Open the original message in Logs to compare responses, then follow the link to the click for each sfield call in order.</p>
+        {selected === 0 && <p>The standalone address rule is defined in <code>fixtures/treatment-scenarios.json</code>. Its eligibility is independent of the address guide.</p>}
+        <nav className="help-step-contracts" aria-label="Test a TS decision">
+          <a href={adminPaths.tools}>Open Tool setup <ArrowUpRight size={14} aria-hidden="true" /></a>
+          <a href={adminPaths.logs}>Open Logs <ArrowUpRight size={14} aria-hidden="true" /></a>
+        </nav>
+      </div>
+      <div className="help-sfield-subsection">
+        <h3>How to roll this out</h3>
+        <ol className="help-ts-rollout">
+          <li><strong>Check the content order.</strong> Evaluate CCRE once and compare v1’s list with the content entries in v2.1 for the same members and topics. Include cases where a rule excludes a card.</li>
+          <li><strong>Pilot one workflow.</strong> Enable the typed response for one channel and topic while existing channels use v1. If the channel cannot run the workflow version, it can still show the eligible content.</li>
+          <li><strong>Measure what happens next.</strong> Add a TS decision ID and a reason for each recommendation to the shared contract. Use that ID to link what the customer saw and clicked with what they completed.</li>
+        </ol>
+      </div>
+    </div>
+  </section>;
 }
 
 function HandoffExamples({ handoff }: { handoff: HandoffExample }) {
@@ -72,18 +136,20 @@ function HandoffExamples({ handoff }: { handoff: HandoffExample }) {
   </>;
 }
 
-function ExchangeDetails({ exchange, close }: { exchange: DiagramExchange; close: () => void }) {
+function ExchangeDetails({ exchange, close, run }: { exchange: DiagramExchange; close: () => void; run: MarcusRun }) {
   const { example, path, label, number, reply } = exchange;
   const handoff = exchange.inspectHandoff ? exchange.handoff : undefined;
   return <div className="help-exchange-drawer">
     <DeveloperDrawer title={`Step ${number} · ${handoff ? "App server to sfield" : label}`} icon={<Braces size={18} />} closeLabel="Close exchange details" close={close} wide>
+      {run.selected || run.pin || run.error || !run.runs ? <RecordedEvidence run={run} kind={exchange.evidence} /> : <>
+      <p className="help-example-note">Reference example · No recorded Marcus address-update run is available.</p>
       <p className="help-example">As <strong>{addressUpdateExample.persona}</strong>, ask <strong>“{addressUpdateExample.prompt}”</strong></p>
       <p className="help-exchange-direction">
         <ExchangePath path={handoff ? path.slice(0, 2) : path} />
       </p>
       {handoff ? <>
         <HandoffExamples handoff={handoff} />
-        <p className="help-example-note">Recorded in Test mode. Generated IDs were replaced with sample IDs.</p>
+        <p className="help-example-note">Illustrative exchange with sample IDs. Open Logs to see a recorded chat turn.</p>
       </> : <>
         <p className="help-exchange-description">{example.description}</p>
         <PayloadExamples examples={[
@@ -91,6 +157,7 @@ function ExchangeDetails({ exchange, close }: { exchange: DiagramExchange; close
           { direction: "Response", label: example.output.label, source: JSON.stringify(example.output.value, null, 2), emphasized: reply },
         ]} />
         <p className="help-example-note">These examples use sample IDs. Choose a conversation in <strong>Logs</strong> to see a recorded run.</p>
+      </>}
       </>}
     </DeveloperDrawer>
   </div>;
@@ -131,6 +198,7 @@ function ContractDetail({ contract }: { contract: typeof contractList[number] })
 }
 
 export function Help() {
+  const run = useMarcusRun();
   const [flow, setFlow] = useState(helpFlows[0]);
   const [stepId, setStepId] = useState<FlowStep["id"]>("router");
   const [contractId, setContractId] = useState("router");
@@ -144,14 +212,14 @@ export function Help() {
     <header className="help-topbar">
       <div className="help-width help-topbar-inner">
         <nav aria-label="Help sections">
-          <a href="#cep-blueprint">CEP Blueprint</a>
+          <a href="#system-architecture">System architecture</a>
+          <a href="#architecture">Chat sequence</a>
+          <a href="#proposal">TS evolution</a>
           <a href="#demo-playbook">5-Min Demo</a>
           <a href="#providers">Providers</a>
-          <a href="#architecture">Architecture</a>
           <a href="#goal-planning">Multi-step requests</a>
           <a href="#sfield">sfield</a>
           <a href="#walkthroughs">Walkthroughs</a>
-          <a href="#proposal">Proposal</a>
           <a href="#contracts">Contracts</a>
         </nav>
       </div>
@@ -159,107 +227,74 @@ export function Help() {
     <main className="help-width help-main">
       <div className="help-intro">
         <h1>How CEP works</h1>
-        <p>See how CEP combines Customer 360 lookup, Stage 0 Action Gating, High-Level Intent Routing, Treatment Selector (TS + CCRE rules), Dynamic LLM UI, and #1 Arbitrated Next Best Actions.</p>
+        <p>Explore how a customer’s message and account context become an interactive reply, and what happens when the customer acts on it.</p>
       </div>
-      <section id="cep-blueprint" className="help-section" aria-labelledby="cep-blueprint-title">
-        <div className="help-section-heading">
-          <div>
-            <h2 id="cep-blueprint-title">Straightened CEP end-to-end architecture</h2>
-            <p className="help-exchange-description">Every customer message flows through 4 governed stages backed by live Admin Master Data — no static guesswork, no unverified figures.</p>
+      <div id="cep-blueprint">
+        <SystemArchitecture run={run} selectContract={setContractId} />
+        <details className="sa-configuration">
+          <summary>Routing options and administration</summary>
+          <p>The diagram follows a verified customer experience. The turn controller can also return a conversational reply, ask a clarifying question, or use a domain-specific agent or dynamic layout.</p>
+          <div className="help-control-plane" aria-label="Admin master data control plane">
+            <a className="help-cp-card" href={adminPaths.customers}>
+              <span className="help-entity-icon"><UsersRound size={17} aria-hidden="true" /></span>
+              <div>
+                <strong>Customer 360 Profiles</strong>
+                <p>Create/edit customer profiles, balances, portfolios, goals &amp; NBA preview.</p>
+              </div>
+              <ArrowUpRight size={15} aria-hidden="true" />
+            </a>
+            <a className="help-cp-card" href={adminPaths.intents}>
+              <span className="help-entity-icon"><GitBranch size={17} aria-hidden="true" /></span>
+              <div>
+                <strong>Intents, Catalog &amp; NBA Rules</strong>
+                <p>Manage high-level intents, governed content treatments, and NBA priority order.</p>
+              </div>
+              <ArrowUpRight size={15} aria-hidden="true" />
+            </a>
+            <a className="help-cp-card" href={adminPaths.tools}>
+              <span className="help-entity-icon"><Settings2 size={17} aria-hidden="true" /></span>
+              <div>
+                <strong>Tool Setup (TS &amp; CCRE Rules)</strong>
+                <p>Configure Treatment Selector overrides, CCRE eligibility rules, workflows &amp; capabilities.</p>
+              </div>
+              <ArrowUpRight size={15} aria-hidden="true" />
+            </a>
+            <a className="help-cp-card" href={adminPaths.builder}>
+              <span className="help-entity-icon"><PanelsTopLeft size={17} aria-hidden="true" /></span>
+              <div>
+                <strong>UI Builder &amp; Widget Studio</strong>
+                <p>Bind custom layouts to intents and save Copilot-generated widgets to the library.</p>
+              </div>
+              <ArrowUpRight size={15} aria-hidden="true" />
+            </a>
           </div>
-          <a className="help-section-link" href="/chat">Try in customer chat <ArrowUpRight size={14} aria-hidden="true" /></a>
-        </div>
-        <ol className="help-cep-pipeline" aria-label="Straightened CEP pipeline">
-          <li>
-            <span className="help-stage-tag">Stage 1</span>
-            <h3>Customer 360 Lookup</h3>
-            <p>Reads the active profile from <strong>Customer 360</strong> (segment, funding status, beneficiary status, cash/equity/fixed income, goals, notes). Only privacy-safe signals enter the router LLM — never raw MIDs or cent values.</p>
-          </li>
-          <li>
-            <span className="help-stage-tag">Stage 2</span>
-            <h3>Unified Semantic Capability Router</h3>
-            <p>Classifies every message semantically across 8 registered capabilities (Verified Advisory, Stock Holdings, Stock Trading &amp; Tax Harvesting, IT Ops, RevOps, HITL Approvals, External Connectors, Dynamic UI) — plus admin-authored <strong>No-Code Action Flows</strong>:</p>
-            <div className="help-mode-pills">
-              <span className="help-mode-pill mode-chat">Plain Chat</span>
-              <span className="help-mode-pill mode-verified">Verified Experience</span>
-              <span className="help-mode-pill mode-dynamic">Dynamic UI Canvas</span>
-              <span className="help-mode-pill mode-clarify">Clarification</span>
-            </div>
-          </li>
-          <li>
-            <span className="help-stage-tag">Stage 3</span>
-            <h3>Unified sfield Governance &amp; Single Ledger</h3>
-            <p>Invokes <code>{recommendationArbitrateToolRef}</code> for pluggable recommendations alongside scoped reads and a single-source-of-truth holdings ledger (<code>Portfolio snapshot</code> = live share lots + cash + fixed income).</p>
-          </li>
-          <li>
-            <span className="help-stage-tag">Stage 4</span>
-            <h3>Host A2UI Compilation, HITL Gate &amp; Audited Writes</h3>
-            <p>Compiles verified A2UI v1.0 surfaces, applies published multi-domain <strong>UI Builder</strong> layouts, gates high-risk writes &amp; connectors via SHA-256 <strong>HITL Approvals</strong> (Chat + Admin), and logs every mutation to <strong>Write Audit</strong>.</p>
-          </li>
-        </ol>
-        <div className="help-control-plane" aria-label="Admin master data control plane">
-          <a className="help-cp-card" href={adminPaths.customers}>
-            <span className="help-entity-icon"><UsersRound size={17} aria-hidden="true" /></span>
-            <div>
-              <strong>Customer 360 Profiles</strong>
-              <p>Create/edit customer profiles, balances, portfolios, goals &amp; NBA preview.</p>
-            </div>
-            <ArrowUpRight size={15} aria-hidden="true" />
-          </a>
-          <a className="help-cp-card" href={adminPaths.intents}>
-            <span className="help-entity-icon"><GitBranch size={17} aria-hidden="true" /></span>
-            <div>
-              <strong>Intents, Catalog &amp; NBA Rules</strong>
-              <p>Manage high-level intents, governed content treatments, and NBA priority order.</p>
-            </div>
-            <ArrowUpRight size={15} aria-hidden="true" />
-          </a>
-          <a className="help-cp-card" href={adminPaths.tools}>
-            <span className="help-entity-icon"><Settings2 size={17} aria-hidden="true" /></span>
-            <div>
-              <strong>Tool Setup (TS &amp; CCRE Rules)</strong>
-              <p>Configure Treatment Selector overrides, CCRE eligibility rules, workflows &amp; capabilities.</p>
-            </div>
-            <ArrowUpRight size={15} aria-hidden="true" />
-          </a>
-          <a className="help-cp-card" href={adminPaths.builder}>
-            <span className="help-entity-icon"><PanelsTopLeft size={17} aria-hidden="true" /></span>
-            <div>
-              <strong>UI Builder &amp; Widget Studio</strong>
-              <p>Bind custom layouts to intents and save Copilot-generated widgets to the library.</p>
-            </div>
-            <ArrowUpRight size={15} aria-hidden="true" />
-          </a>
-        </div>
-      </section>
+        </details>
+      </div>
+      <TreatmentEvolution run={run} selectContract={setContractId} />
       <section id="demo-playbook" className="help-section" aria-labelledby="demo-playbook-title">
         <div className="help-section-heading">
           <div>
-            <h2 id="demo-playbook-title">5-Minute Executive Demo Playbook</h2>
-            <p className="help-exchange-description">Five guided beats to showcase semantic routing, conversational trading &amp; tax-loss harvesting, multi-domain reuse, no-code admin flows, and sfield governance live.</p>
+            <h2 id="demo-playbook-title">Investment customer walkthrough</h2>
+            <p className="help-exchange-description">Two customers ask the same question about the second retirement account in their chat.</p>
           </div>
-          <a className="help-section-link" href="/chat">Launch Customer Chat <ArrowUpRight size={14} aria-hidden="true" /></a>
+          <a className="help-section-link" href="/chat">Open customer chat <ArrowUpRight size={14} aria-hidden="true" /></a>
         </div>
-        <ol className="help-cep-pipeline" aria-label="Five minute executive demo steps">
+        <ol className="help-cep-pipeline" aria-label="Retirement account walkthrough">
           <li>
-            <span className="help-stage-tag">0:00 – 0:50 · Semantic Routing</span>
-            <h3>Verified Snapshot &amp; Live Equity Book</h3>
-            <p>Ask <strong>“Show my portfolio summary”</strong>, then ask a natural paraphrase: <strong>“whats in my equity book right now?”</strong>. In <strong>Admin test chat</strong>, expand <strong>Advisory Reasoning</strong> to see how the request was routed.</p>
+            <h3>Show Alice’s retirement accounts</h3>
+            <p>Sign in as <strong>Alice Morgan</strong> and choose <strong>Retirement accounts</strong>. Her workplace 401(k) appears first and her rollover IRA second.</p>
           </li>
           <li>
-            <span className="help-stage-tag">0:50 – 2:10 · Trade &amp; TLH SSE Job</span>
-            <h3>Conversational Sell + Tax Harvesting</h3>
-            <p>Ask <strong>“I want to sell 40% of my Apple shares”</strong>, then simply type <strong>“yes”</strong> to run Tax-Loss Harvesting analysis (with 30-day wash-sale checks) and <strong>“execute bundle”</strong> to watch the 5-second live SSE countdown job settle balances via <code>sfield</code>.</p>
+            <h3>Ask who is named on the second account</h3>
+            <p>Ask <strong>“Who’s the beneficiary on the second one?”</strong> The IRA ending in 6105 has no beneficiary on file. Open the steps on <strong>Update your beneficiaries</strong>.</p>
           </li>
           <li>
-            <span className="help-stage-tag">2:10 – 3:25 · Multi-Domain &amp; HITL</span>
-            <h3>No-Code Action Flow &amp; Approval Queue</h3>
-            <p>Switch to the <strong>IT Ops</strong> pack and ask <strong>“escalate to pagerduty”</strong> to trigger an admin-authored No-Code Action Flow bound to <code>cep.connector.invoke@1.0.0</code>. Approve inline in Chat or from <a href={`${adminPaths.logs}?source=approvals`}>Logs → Approvals (HITL)</a>.</p>
+            <h3>Ask the same question as Jordan</h3>
+            <p>Sign in as <strong>Jordan Lee</strong> in another browser session and repeat the two questions. His second account is a Roth IRA ending in 9281. The card names <strong>Casey Lee</strong> as the beneficiary.</p>
           </li>
           <li>
-            <span className="help-stage-tag">3:25 – 5:00 · Control Plane &amp; sfield</span>
-            <h3>UI Builder Templates &amp; 14-Step Diagram</h3>
-            <p>Preview pre-bound <strong>IT Ops</strong> &amp; <strong>Sales RevOps</strong> templates in <a href={adminPaths.builder}>UI Builder</a>, inspect <a href={`${adminPaths.logs}?source=write_audit`}>Write Audit</a>, and click <strong>Step 12</strong> below to show deterministic host A2UI compilation.</p>
+            <h3>Trace the difference to the account record</h3>
+            <p>In <a href={adminPaths.logs}>Logs</a>, open each follow-up. <strong>Context Router</strong> shows the recent chat and displayed account order. <strong>Retirement account records</strong> shows the selected account. <strong>Treatment Selector</strong> shows the member and account IDs and the rule that includes or excludes the reminder. On Alice’s turn, <strong>Experience Composer</strong> shows how the eligible reminder was selected.</p>
           </li>
         </ol>
       </section>
@@ -288,7 +323,7 @@ export function Help() {
             <li className="help-sfield-targets">
               <div className="help-proposal-choice">
                 <span className="help-entity-icon"><ListFilter size={16} aria-hidden="true" /></span>
-                <div><h3>Treatment Selector (TS + CCRE)</h3><p>Wealth eligibility rules, ranking overrides, approved content &amp; workflows.</p></div>
+                <div><h3>Treatment Selector (TS + CCRE)</h3><p>Wealth eligibility rules, ranking overrides, eligible content, standalone actions and workflows.</p></div>
               </div>
               <div className="help-proposal-choice">
                 <span className="help-entity-icon"><UsersRound size={16} aria-hidden="true" /></span>
@@ -296,7 +331,7 @@ export function Help() {
               </div>
               <div className="help-proposal-choice">
                 <span className="help-entity-icon"><Layers size={16} aria-hidden="true" /></span>
-                <div><h3>IT Ops, Sales RevOps &amp; External Engines</h3><p>Live <code>incidents.json</code> SRE runbooks &amp; <code>deals.json</code> Deal Desk today; plug in Pega CDH, Adobe Offer Decisioning, or ML Rankers via <code>RecommendationProvider</code>.</p></div>
+                <div><h3>IT Ops, Sales RevOps &amp; External Engines</h3><p>Operations and sales use <code>incidents.json</code> and <code>deals.json</code>. External decision engines and ranking models connect through <code>RecommendationProvider</code>.</p></div>
               </div>
             </li>
           </ol>
@@ -317,9 +352,9 @@ export function Help() {
         <div className="help-section-heading">
           <div>
             <h2 id="architecture-title">How chat answers a message</h2>
-            <p className="help-exchange-description">Choose a step number for Marcus’s address update, or select an App → sfield arrow to see what passes between the server and sfield.</p>
+            <p className="help-exchange-description">Select a numbered step or an App → sfield arrow to inspect Marcus’s address update. Choose the recorded run in the TS and sfield diagram.</p>
           </div>
-          <a className="help-section-link" href="#walkthroughs">See a walkthrough <ArrowUpRight size={14} aria-hidden="true" /></a>
+          <a className="help-section-link" href="#ts-sfield">Choose Marcus’s run <ArrowUpRight size={14} aria-hidden="true" /></a>
         </div>
         <InteractionDiagram onSelect={setExchange} />
       </section>
@@ -391,24 +426,6 @@ export function Help() {
         </div>
         <p className="help-example-note">Choose a conversation and message in <strong>Logs</strong> to see the recorded requests and responses.</p>
       </section>
-      <section id="proposal" className="help-section" aria-labelledby="proposal-title">
-        <div className="help-section-heading help-reference-heading">
-          <h2 id="proposal-title">Treatment Selector proposal</h2>
-          <p>The address update demo uses Treatment Selector to recommend content and a funding workflow.</p>
-        </div>
-        <div className="help-proposal">
-          <TreatmentProposalDiagram />
-          <details className="help-tool-exchange">
-            <summary>Compare content IDs and the workflow response</summary>
-            <p>Treatment Selector receives Marcus’s demo member ID and the Address update topic.</p>
-            <p><code>{JSON.stringify(treatmentExample.request)}</code></p>
-            <PayloadExamples examples={[
-              { direction: "Content IDs", label: "Version 1", source: JSON.stringify(treatmentExample.contentIds, null, 2) },
-              { direction: "Address update response", label: "Version 2", source: JSON.stringify(treatmentExample.response, null, 2) },
-            ]} />
-          </details>
-        </div>
-      </section>
       <section id="contracts" className="help-section" aria-labelledby="contracts-title">
         <div className="help-section-heading help-reference-heading">
           <h2 id="contracts-title">Contracts</h2>
@@ -434,6 +451,6 @@ export function Help() {
       </section>
       <footer className="help-footer"><a href="/planning">Planning overview <ArrowUpRight size={15} aria-hidden="true" /></a></footer>
     </main>
-    {exchange && <ExchangeDetails exchange={exchange} close={() => setExchange(undefined)} />}
+    {exchange && <ExchangeDetails run={run} exchange={exchange} close={() => setExchange(undefined)} />}
   </div>;
 }

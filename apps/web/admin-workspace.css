@@ -1558,3 +1558,5 @@
   padding-top: 8px;
   border-top: 1px solid var(--line);
 }
+.flow-request-list { margin: 12px 0; padding: 12px 16px; border-left: 3px solid var(--teal); background: var(--teal-pale); }
+.flow-request-list ol { display: flex; flex-wrap: wrap; gap: 6px 28px; margin: 8px 0 0; padding-inline-start: 20px; }

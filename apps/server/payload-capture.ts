@@ -41,18 +41,23 @@ export function createPayloadCapture(secrets: string[], customFields: string[]) 
     return bytes > payloadLimit ? { bytes } : { bytes, data: scrubNestedJson(scrubber.scrubValue(data)) };
   }
 
+  function requestPayload(data: JsonValue, bytes = Buffer.byteLength(JSON.stringify(data))): InspectorPayload {
+    if (bytes > payloadLimit) return { bytes };
+    if (customFields.length && data && typeof data === "object" && !Array.isArray(data)) {
+      const body = { ...data };
+      for (const field of customFields) if (Object.hasOwn(body, field)) body[field] = "[REDACTED]";
+      data = body;
+    }
+    return { ...payload(data), bytes };
+  }
+
   function exchange(
     request: CompiledModelRequest, outcome: ModelOutcome | undefined, source: GatewayExchange["source"],
     wire?: { request?: JsonObject; acpResponse?: JsonObject },
   ): GatewayExchange {
     const requestBody = wire?.request ? JSON.stringify(wire.request) : request.body;
     const bytes = Buffer.byteLength(requestBody);
-    let capturedRequest: InspectorPayload = { bytes };
-    if (bytes <= payloadLimit) {
-      const body = JSON.parse(requestBody);
-      for (const field of customFields) if (Object.hasOwn(body, field)) body[field] = "[REDACTED]";
-      capturedRequest = { ...payload(body), bytes };
-    }
+    const capturedRequest = bytes <= payloadLimit ? requestPayload(JSON.parse(requestBody), bytes) : { bytes };
     const response: JsonValue | undefined = outcome?.type === "done" ? {
       message: assistantResponse(outcome.message),
       stopReason: outcome.stopReason,
@@ -70,5 +75,5 @@ export function createPayloadCapture(secrets: string[], customFields: string[]) 
     };
   }
 
-  return { payload, exchange };
+  return { payload, requestPayload, exchange };
 }

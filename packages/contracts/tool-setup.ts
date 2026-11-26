@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { fundingTools, fundingWorkflowDefinitionSchema } from "./funding-workflow";
+import { fundingTools, fundingWorkflowDefinitionSchema, workflowRecommendationSchema, type ActionRecommendation, type WorkflowCandidate } from "./funding-workflow";
 import { glossaryConditionSchema, type RuleGlossary } from "./rule-glossary";
 
 export const toolVersion = "1.0.0";
@@ -29,6 +29,7 @@ export const sfieldTools = {
     label: "CCRE glossary",
     description: "Lists the demo namespaces, attributes and operators available for authoring rules in chat.",
   },
+  retirementAccounts: { id: "retirement.accounts.read", label: "Retirement accounts", description: "Reads the member’s retirement accounts and the designation for a selected account." },
   portfolio: {
     id: "portfolio.snapshot.read",
     label: "Portfolio Snapshot",
@@ -62,7 +63,7 @@ export const MAX_CCRE_RULES = 48;
 export const MAX_CCRE_RULE_NAME = 80;
 export const MAX_CCRE_SOURCE_LENGTH = 2_000;
 const ordinalSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-const mockCcreConditionSchema = z.discriminatedUnion("kind", [
+export const mockCcreConditionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("always") }).strict(),
   z.object({ kind: z.literal("never") }).strict(),
   z.object({ kind: z.literal("persona_is"), personaId: z.string().min(1) }).strict(),
@@ -74,12 +75,27 @@ export const mockCcreRuleSchema = mockScopeSchema.extend({
   contentId: z.string().min(1),
   source: z.string().max(MAX_CCRE_SOURCE_LENGTH).optional(),
   condition: mockCcreConditionSchema,
+  workflow: workflowRecommendationSchema.nullable().optional(),
+  workflowRequiresContentIds: normalizedIdsSchema.optional(),
 });
 const mockCcreRulesSchema = z.array(mockCcreRuleSchema).max(MAX_CCRE_RULES).refine((rules) => (
   new Set(rules.map(({ scenarioId, contextId, contentId }) => JSON.stringify([scenarioId, contextId, contentId]))).size === rules.length
 ), "Each scenario, context and content item can have one mock rule");
 export type MockCcreCondition = z.infer<typeof mockCcreConditionSchema>;
 export type MockCcreRule = z.infer<typeof mockCcreRuleSchema>;
+export function effectiveCcreRules(scenarioId: string, contextId: string,
+  defaults: readonly Omit<MockCcreRule, "scenarioId">[], configured: readonly MockCcreRule[] = []): MockCcreRule[] {
+  const base = defaults.filter((rule) => rule.contextId === contextId);
+  const custom = configured.filter((rule) => rule.scenarioId === scenarioId && rule.contextId === contextId);
+  // A saved rule from before workflow attachments inherits its original offer. An explicit null detaches it.
+  return [...custom.map((rule) => {
+    const original = base.find((r) => r.contentId === rule.contentId);
+    return { ...rule, workflow: rule.workflow === undefined ? original?.workflow : rule.workflow,
+      workflowRequiresContentIds: rule.workflowRequiresContentIds ?? original?.workflowRequiresContentIds };
+  }),
+    ...base.filter((rule) => !custom.some((r) => r.contentId === rule.contentId)).map((rule) => ({ ...rule, scenarioId }))];
+}
+
 export type MockCcreEvaluation = {
   beforeRules: string[];
   results: { name: string; contentId: string; outcome: "matched" | "excluded" | "outside_list"; reason?: string; cashAboveCents?: number }[];
@@ -87,7 +103,7 @@ export type MockCcreEvaluation = {
 export const toolSetupSchema = z.object({
   enabled: z.object({
     catalog: z.boolean(), propensity: z.boolean(), selection: z.boolean(), balances: z.boolean(),
-    glossary: z.boolean().optional(), portfolio: z.boolean().optional(), goal: z.boolean().optional(),
+    glossary: z.boolean().optional(), portfolio: z.boolean().optional(), goal: z.boolean().optional(), retirementAccounts: z.boolean().optional(),
     fundingOptions: z.boolean().optional(), fundingStatus: z.boolean().optional(), fundingPreview: z.boolean().optional(),
   }).strict(),
   treatmentOverrides: z.array(treatmentOverrideSchema).max(64).refine((rules) => (
@@ -101,7 +117,7 @@ export type TreatmentOverride = z.infer<typeof treatmentOverrideSchema>;
 export type MockOutput = z.infer<typeof mockOutputSchema>;
 export const defaultToolSetup: ToolSetup = {
   enabled: {
-    catalog: true, propensity: true, selection: true, balances: true, glossary: true, portfolio: true, goal: true,
+    catalog: true, propensity: true, selection: true, balances: true, glossary: true, portfolio: true, goal: true, retirementAccounts: true,
     fundingOptions: true, fundingStatus: true, fundingPreview: true,
   },
   treatmentOverrides: [],
@@ -121,12 +137,14 @@ export const treatmentPreviewSchema = mockScopeSchema.extend({
 export type TreatmentPreviewInput = z.infer<typeof treatmentPreviewSchema>;
 export type TreatmentSource = "fixture" | "override";
 export type TreatmentPreview =
-  | { status: "ranked" | "empty"; source: TreatmentSource; contentIds: string[]; ccre?: MockCcreEvaluation }
+  | { status: "ranked" | "empty"; source: TreatmentSource; contentIds: string[]; ccre?: MockCcreEvaluation; workflows?: WorkflowCandidate[]; actions?: ActionRecommendation[] }
   | { status: "timeout"; source: TreatmentSource }
   | { status: "disabled" };
 
 export type ToolSetupView = {
   setup: ToolSetup;
+  privateDraft?: ToolSetup;
+  defaultCcreRules: Omit<MockCcreRule, "scenarioId">[];
   glossary: RuleGlossary;
   defaultPersonaId: string;
   defaultScenarioId: string;

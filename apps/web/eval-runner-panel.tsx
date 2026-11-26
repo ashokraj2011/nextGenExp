@@ -27,7 +27,6 @@ function toCsv(report: EvalRunReport): string {
 export function EvalRunnerPanel() {
   const [runs, setRuns] = useState<EvalRunReport[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string>("");
-  const [mode, setMode] = useState<"deterministic" | "live_llm">("deterministic");
   const [categoryFilter, setCategoryFilter] = useState<EvalCategory | "all">("all");
   const [running, setRunning] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -63,7 +62,7 @@ export function EvalRunnerPanel() {
     setError("");
     setNotice("");
     try {
-      const res = await api.runEvals(mode);
+      const res = await api.runEvals();
       setRuns(res.runs);
       setSelectedRunId(res.report.runId);
       setCategoryFilter("all");
@@ -122,16 +121,6 @@ export function EvalRunnerPanel() {
         </div>
 
         <div className="eval-controls">
-          <select
-            className="eval-mode-select"
-            value={mode}
-            disabled={running}
-            aria-label="Evaluation mode"
-            onChange={(e) => setMode(e.target.value as "deterministic" | "live_llm")}
-          >
-            <option value="deterministic">Deterministic Fast Suite (&lt;1s)</option>
-            <option value="live_llm">Live LLM Routing + Guardrails</option>
-          </select>
           <button type="button" className="eval-run-btn" disabled={running} onClick={executeSuite}>
             <Play size={15} aria-hidden="true" />
             {running ? "Running 16 Evals…" : "Run Guardrail Eval Suite"}

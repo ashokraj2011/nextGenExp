@@ -58,7 +58,7 @@ export function detectAuthoring(message: string, view: IntegrationTasksView): { 
   const url = message.match(/https?:\/\/[^\s"'<>]+/)?.[0];
   if (/\bimport\b/.test(lower) && /\b(tools?|mcp|operations?)\b/.test(lower)) {
     const integration = findIntegration(view, message);
-    return { reply: "Here are the tools the MCP server offers, as task drafts. Pick the ones to import; nothing is saved until you click.", action: { type: "mcp_import", ...(integration ? { integrationId: integration.id } : {}) } };
+    return { reply: "These task drafts list the tools available on the MCP server. Pick the ones to import; nothing is saved until you click.", action: { type: "mcp_import", ...(integration ? { integrationId: integration.id } : {}) } };
   }
   if (/\b(connect|add|register|new|set ?up)\b/.test(lower) && /\b(mcp|integration|server|endpoint|api|system)\b/.test(lower) && !/\btask\b/.test(lower)) {
     const name = message.match(/\b(?:as|called|named)\s+["']?([A-Za-z][\w -]{1,40}?)["']?\s*(?:[.,]|$)/i)?.[1]?.trim();

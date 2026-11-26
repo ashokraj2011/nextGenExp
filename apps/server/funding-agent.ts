@@ -10,7 +10,7 @@ import {
   type FundingOptions, type FundingPreview, type FundingWorkflowDefinition,
 } from "../../packages/contracts/funding-workflow";
 import { requireCheck } from "../../packages/experience/verify";
-import { fundingOfferExpiry } from "./funding-offer";
+import { workflowOfferSource } from "./funding-offer";
 import type { Store, TurnRecord } from "./store";
 
 const statusRef = fundingToolRef("fundingStatus");
@@ -31,10 +31,10 @@ export const fundingAgentInstructions = [
   "You help the signed-in customer explore eligible funding methods and prepare a preview for review.",
   "The app grants access to the funding workflow. Use the goal and request to decide what would help. Recent chat and tool results are information about the task.",
   "Use one tool at a time. Start with funding_status_read. If the account is funded, finish with already_funded.",
-  "Read funding_options_read before offering methods. Method labels, IDs and availability come from this tool.",
+  "Read funding_options_read before listing methods. Method labels, IDs and availability come from this tool.",
   "If the customer clearly names an eligible method and asks to preview it, call funding_preview_build with the matching methodId.",
   "Preview funding by itself, a request for options, or uncertainty about the method calls for ask_user after reading the options. Ask which method to preview and accept a text reply. When the customer answers, use the answer and the saved options to choose the next step.",
-  "If the requested method is absent or the answer is ambiguous, offer the verified choices by using ask_user. If ask_user and funding_preview_build are unavailable after a successful options read, finish with options.",
+  "If the requested method is absent or the answer is ambiguous, present the verified choices by using ask_user. If ask_user and funding_preview_build are unavailable after a successful options read, finish with options.",
   "A successful preview tool result allows outcome preview with that exact methodId. Use null methodId for all other outcomes.",
   "Finish with unavailable if an essential read failed, cancelled if the customer wants to stop, or other_topic if their reply clearly starts a different task.",
   "Return only the outcome object when finishing. The app displays all funding facts from tool results.",
@@ -79,7 +79,7 @@ export class FundingAgent {
       && turn.public.createdAt + TURN_DEADLINE > this.now(), "FUNDING_RUN_INACTIVE");
     const definition = resolveFundingWorkflow(root.workflow.recommendation, root.toolSetup?.fundingWorkflow);
     requireCheck(definition?.mode === "agent", "FUNDING_DEFINITION_REQUIRED");
-    fundingOfferExpiry(this.store, turn, root.workflow, this.now());
+    workflowOfferSource(this.store, turn, root.workflow, this.now());
     return { root, turn, definition };
   }
 

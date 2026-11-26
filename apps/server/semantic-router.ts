@@ -1,9 +1,11 @@
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
+import { z } from "zod";
 import {
   capabilityLabelFor,
   CEP_CAPABILITIES,
   semanticRouteOutputSchema,
+  type CepCapabilityDefinition,
   type CepCapabilityId,
   type SemanticRouteDecision,
 } from "../../packages/contracts/capabilities-catalog";
@@ -21,6 +23,7 @@ import type { GatewaySettings } from "./gateway";
 import { parseStockTradePrompt } from "./trade-store";
 
 const nonDynamicGuard = /\b(weather|stock price|tomorrow|create a? ?rule)\b/i;
+const chatReply = z.object({ choices: z.array(z.object({ message: z.object({ content: z.string() }) })) });
 
 function stripJsonFences(raw: string): string {
   const trimmed = raw.trim();
@@ -32,25 +35,29 @@ function stripJsonFences(raw: string): string {
   return trimmed;
 }
 
-const semanticRouterSystemPrompt = [
-  "You are the CEP (Customer Engagement Platform) Unified Semantic Capability Router.",
-  "Your job is to classify a user's message into EXACTLY ONE capabilityId from the catalog below based on semantic meaning — even when phrased informally, paraphrased, or with typos.",
-  "Catalog:",
-  ...CEP_CAPABILITIES.map(
-    (c) => `- ${c.id} (${c.domain}): ${c.description} Examples: ${c.examples.map((e) => `"${e}"`).join(", ")}`,
-  ),
-  "Critical disambiguation rules:",
-  "1. Choose 'stock_holdings' whenever the user asks to see individual stocks, tickers, shares owned, equity book, cost basis, or which positions are up/down or losing money.",
-  "2. Choose 'stock_trade' whenever the user wants to buy, sell, trim, liquidate, or simulate trading stocks, or wants tax-loss harvesting analysis/offset trades. Extract optional extractedParams: { side?: 'buy'|'sell', symbol?: 'AAPL'|'MSFT'|'NVDA'|'INTC'|'BA'|'PFE', percent?: number (1-100, e.g. 'a third'->33, 'half'->50), shares?: integer }.",
-  "3. Choose 'verified_experience' for high-level portfolio summary/allocation ('portfolio summary', 'how can I invest more'), balance definitions/comparisons, home down-payment goal, retirement/beneficiaries, address change, funding/transfers, 'what is next', creating rules, live market price/weather queries, or plain greetings/thanks.",
-  "4. Choose 'hitl_approvals' for questions about pending approvals, items awaiting sign-off, or the HITL queue.",
-  "5. Choose 'external_connector' for triggering/invoking external webhooks or bridges (PagerDuty, ServiceNow, external connectors).",
-  "6. Choose 'ops_incident' for production incidents, latency/5xx outages, SRE triage, or release rollbacks.",
-  "7. Choose 'sales_deal_desk' for Q4 sales pipeline, RevOps forecast, Deal Desk discount approvals, or enterprise close plans.",
-  "A request to visualize the current portfolio allocation is a verified_experience. The Portfolio Snapshot supplies the asset mix.",
-  "8. Choose 'custom_dynamic_ui' ONLY when the user explicitly wants an interactive calculator, custom chart/table/form/matrix/checklist/dashboard that does not fit capabilities 1-7.",
-  'Return ONLY valid JSON: { "capabilityId": "...", "confidence": 0.95, "reasoning": "short 1-sentence reason", "extractedParams": {} }.',
-].join("\n");
+function routingPrompt(catalog: readonly CepCapabilityDefinition[]) {
+  const registered = new Set(catalog.map((capability) => capability.id));
+  const whenRegistered = (id: CepCapabilityId, instruction: string) => registered.has(id) ? [instruction] : [];
+  return [
+    "You are the CEP (Customer Engagement Platform) Unified Semantic Capability Router.",
+    "Your job is to classify a user's message into EXACTLY ONE capabilityId from the catalog below based on semantic meaning — even when phrased informally, paraphrased, or with typos.",
+    "Catalog:",
+    ...catalog.map(
+      (c) => `- ${c.id} (${c.domain}): ${c.description} Examples: ${c.examples.map((e) => `"${e}"`).join(", ")}`,
+    ),
+    "Critical disambiguation rules:",
+    ...whenRegistered("stock_holdings", "Choose 'stock_holdings' whenever the user asks to see individual stocks, tickers, shares owned, equity book, cost basis, or which positions are up/down or losing money."),
+    ...whenRegistered("stock_trade", "Choose 'stock_trade' whenever the user wants to buy, sell, trim, liquidate, or simulate trading stocks, or wants tax-loss harvesting analysis/offset trades. Extract optional extractedParams: { side?: 'buy'|'sell', symbol?: 'AAPL'|'MSFT'|'NVDA'|'INTC'|'BA'|'PFE', percent?: number (1-100, e.g. 'a third'->33, 'half'->50), shares?: integer }."),
+    ...whenRegistered("verified_experience", "Choose 'verified_experience' for high-level portfolio summary/allocation ('portfolio summary', 'how can I invest more'), balance definitions/comparisons, home down-payment goal, retirement/beneficiaries, address change, funding/transfers, 'what is next', creating rules, live market price/weather queries, or plain greetings/thanks."),
+    ...whenRegistered("hitl_approvals", "Choose 'hitl_approvals' for questions about pending approvals, items awaiting sign-off, or the HITL queue."),
+    ...whenRegistered("external_connector", "Choose 'external_connector' for triggering/invoking external webhooks or bridges (PagerDuty, ServiceNow, external connectors)."),
+    ...whenRegistered("ops_incident", "Choose 'ops_incident' for production incidents, latency/5xx outages, SRE triage, or release rollbacks."),
+    ...whenRegistered("sales_deal_desk", "Choose 'sales_deal_desk' for Q4 sales pipeline, RevOps forecast, Deal Desk discount approvals, or enterprise close plans."),
+    ...whenRegistered("verified_experience", "A request to visualize the current portfolio allocation is a verified_experience. The Portfolio Snapshot supplies the asset mix."),
+    ...whenRegistered("custom_dynamic_ui", "Choose 'custom_dynamic_ui' ONLY when the user explicitly wants an interactive calculator, custom chart/table/form/matrix/checklist/dashboard that does not fit another available capability."),
+    'Return ONLY valid JSON: { "capabilityId": "...", "confidence": 0.95, "reasoning": "short 1-sentence reason", "extractedParams": {} }.',
+  ].join("\n");
+}
 
 export function deterministicCapabilityRoute(prompt: string): SemanticRouteDecision {
   const clean = prompt.trim();
@@ -139,18 +146,21 @@ export function deterministicCapabilityRoute(prompt: string): SemanticRouteDecis
 
 export async function routeCapabilityUnified(input: {
   prompt: string;
-  mode: "live" | "test";
   gateway?: GatewaySettings | null;
   dataDir: string;
   recentSummary?: string;
+  capabilities?: readonly CepCapabilityDefinition[];
   signal?: AbortSignal;
+  onExchange?: (operation: string, request: unknown, response: unknown) => void;
 }): Promise<SemanticRouteDecision> {
-  const { prompt, mode, gateway, dataDir, recentSummary, signal } = input;
+  const { prompt, gateway, dataDir, recentSummary, signal } = input;
   const clean = prompt.trim();
   const fallback = deterministicCapabilityRoute(clean);
+  const catalog = input.capabilities ?? CEP_CAPABILITIES;
+  const available = (id: CepCapabilityId) => catalog.some((capability) => capability.id === id);
+  if (!available(fallback.capabilityId) && fallback.capabilityId !== "verified_experience") return fallback;
 
-  // In automated mock-gateway tests, or on guarded/short prompts, keep routing deterministic with zero extra model calls.
-  if (mode === "test" || !gateway || clean.length < 6 || nonDynamicGuard.test(clean) || /\b(?:DEAL|INC)-[A-Z0-9]+\b/i.test(clean)) {
+  if (!gateway || clean.length < 6 || nonDynamicGuard.test(clean) || /\b(?:DEAL|INC)-[A-Z0-9]+\b/i.test(clean)) {
     return fallback;
   }
 
@@ -167,17 +177,26 @@ export async function routeCapabilityUnified(input: {
   const onParentAbort = () => controller.abort();
   signal?.addEventListener("abort", onParentAbort, { once: true });
 
+  const operation = gateway.profile === "copilot_acp" ? "ACP session/prompt" : "POST /chat/completions";
+  let request: unknown;
+  let received = false;
+  const capture = (response: unknown) => {
+    received = true;
+    input.onExchange?.(operation, request, response);
+  };
   try {
     const userPrompt = recentSummary
       ? `Recent context: ${recentSummary}\nUser message: ${clean}`
       : `User message: ${clean}`;
 
+    const semanticRouterSystemPrompt = routingPrompt(catalog);
     let raw: unknown = null;
     if (gateway.profile === "copilot_acp") {
       const cliHome = resolve(dataDir, "copilot-cli");
       mkdirSync(cliHome, { recursive: true, mode: 0o700 });
       const fullText = `${semanticRouterSystemPrompt}\n\n${userPrompt}\n\nReturn ONLY the JSON object.`;
-      const reply = await runCopilotPrompt(gateway, cliHome, [{ type: "text", text: fullText }], controller.signal, () => undefined);
+      const reply = await runCopilotPrompt(gateway, cliHome, [{ type: "text", text: fullText }], controller.signal, (sent) => { request = sent; });
+      capture({ result: reply.result, text: reply.text });
       raw = JSON.parse(stripJsonFences(reply.text));
     } else {
       const headers: Record<string, string> = {
@@ -185,30 +204,35 @@ export async function routeCapabilityUnified(input: {
         ...(gateway.apiKey ? { Authorization: `Bearer ${gateway.apiKey}` } : {}),
         ...(gateway.headers ?? {}),
       };
+      request = {
+        ...(gateway.bodyFields ?? {}),
+        model: gateway.model,
+        max_tokens: 220,
+        temperature: 0,
+        messages: [
+          { role: "system", content: semanticRouterSystemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+      };
       const response = await fetch(`${gateway.baseUrl.replace(/\/$/, "")}/chat/completions`, {
         method: "POST",
         headers,
         signal: controller.signal,
-        body: JSON.stringify({
-          ...(gateway.bodyFields ?? {}),
-          model: gateway.model,
-          max_tokens: 220,
-          temperature: 0,
-          messages: [
-            { role: "system", content: semanticRouterSystemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-        }),
+        body: JSON.stringify(request),
       });
+      const body = await response.text();
+      let payload: unknown;
+      try { payload = JSON.parse(body); } catch { /* Some gateway errors return text. */ }
+      capture({ status: response.status, body: payload ?? body });
       if (response.ok) {
-        const payload = await response.json() as { choices?: { message?: { content?: string } }[] };
-        const text = payload.choices?.[0]?.message?.content;
-        if (text) raw = JSON.parse(stripJsonFences(text));
+        const reply = chatReply.safeParse(payload);
+        const content = reply.success && reply.data.choices[0]?.message.content;
+        if (content) raw = JSON.parse(stripJsonFences(content));
       }
     }
 
     const parsed = semanticRouteOutputSchema.safeParse(raw);
-    if (parsed.success && parsed.data.confidence >= 0.65) {
+    if (parsed.success && parsed.data.confidence >= 0.65 && available(parsed.data.capabilityId)) {
       const capabilityId: CepCapabilityId = parsed.data.capabilityId;
       return {
         capabilityId,
@@ -220,7 +244,7 @@ export async function routeCapabilityUnified(input: {
       };
     }
   } catch {
-    // Gracefully fall back to deterministic route if LLM classifier times out or fails.
+    if (request !== undefined && !received) capture({ error: controller.signal.aborted ? "request_aborted" : "provider_unavailable" });
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", onParentAbort);

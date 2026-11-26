@@ -14,14 +14,17 @@ import { findProfileById, type PersonaRecord } from "../../packages/customer-pro
 import { MAX_MESSAGE_LENGTH, metricReadingSchema, TURN_DEADLINE, type BalanceProof, type Scope } from "../../packages/contracts/domain";
 import {
   fundingAgentId, fundingAgentToolLimit, fundingOptionsSchema, fundingToolRef, fundingToolVersion,
-  resolveFundingWorkflow, treatmentRecommendationsVersion,
+  treatmentRecommendationsVersion, treatmentDecisionVersion,
 } from "../../packages/contracts/funding-workflow";
+import { readRetirementView } from "../../packages/retirement-accounts";
+import { retirementListIntent, retirementBeneficiaryIntent } from "../../packages/contracts/retirement-accounts";
+import { retirementAccountsResultSchema } from "../../packages/contracts/model-schemas";
 import { goalProgressSchema, isHomeGoalSummary } from "../../packages/contracts/goal-progress";
 import {
   balanceInputSchema, balanceResultSchema, compositionOutputSchema, contextResultSchema, portfolioInputSchema, portfolioResultSchema,
   glossaryInputSchema, glossaryResultSchema, goalProgressInputSchema, goalProgressResultSchema,
   fundingAgentResultSchema, fundingOptionsResultSchema, fundingReadInputSchema, fundingStatusResultSchema, fundingPreviewInputSchema,
-  fundingPreviewResultSchema, treatmentRecommendationsResultSchema,
+  fundingPreviewResultSchema, treatmentRecommendationsResultSchema, treatmentDecisionResultSchema,
   propensityInputSchema, propensityResultSchema, routingOutputSchema,
   treatmentInputSchema, treatmentResultSchema, turnInputSchema,
 } from "../../packages/contracts/model";
@@ -133,24 +136,26 @@ const domainWriteResultJsonSchema = {
   required: ["ok", "recordId", "summary"],
   properties: {
     ok: { type: "boolean" },
+    updatedFields: { type: "array", items: { type: "string" } },
     recordId: { type: "string", minLength: 1, maxLength: 64 },
     summary: { type: "string", minLength: 1, maxLength: 320 },
   },
 } as const;
 import { activeContextCatalog, fixtureEligibleSets, FixtureTsAdapter, type ContextScoresRequest, type FixtureState } from "../../packages/ts-adapter";
 import { nextStepContext, workspaceFundingContext, type WorkspaceNextStep } from "../../packages/contracts/workspace";
-import { nextStepRecommendation } from "./funding-offer";
+import { beneficiaryReviewWorkflow, workflowDefinition } from "../../packages/contracts/customer-workflows";
+import { nextStepRecommendation, workflowOfferSource } from "./funding-offer";
 import { mockRuleGlossary } from "../../packages/rule-glossary";
 import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import { fixtureGoalProgressProvider, type GoalProgressProvider } from "../../packages/goal-progress";
 import { contentCatalog, lookupContent, modelBundle, readDemoBalance, resolveCandidates } from "../../packages/experience/content";
 import { checkFresh, Rejected, requireCheck, verifyContextProposal, verifyExperience, verifyRoute } from "../../packages/experience/verify";
 import { makeId } from "../../packages/experience/compile";
-import type { GatewayExchange } from "../../packages/contracts/inspector";
+import type { GatewayExchange, TurnExchangeStage } from "../../packages/contracts/inspector";
 import { configureCopilotAcp } from "./copilot-acp";
 import { configureGateway, type GatewaySettings } from "./gateway";
 import { FundingAgent, fundingAgentInstructions } from "./funding-agent";
-import { stageAgent, type ConversationRecord, type Stage, type StageAttempt, type Store, type TurnRecord } from "./store";
+import { ApiError, stageAgent, type ConversationRecord, type Stage, type StageAttempt, type Store, type TurnRecord } from "./store";
 import { readTurnPayloads } from "./turn-payloads";
 
 const toolRefs = {
@@ -158,8 +163,10 @@ const toolRefs = {
   propensity: `${sfieldTools.propensity.id}@${toolVersion}`,
   selection: `${sfieldTools.selection.id}@${toolVersion}`,
   recommendations: `${sfieldTools.selection.id}@${treatmentRecommendationsVersion}`,
+  decisions: `${sfieldTools.selection.id}@${treatmentDecisionVersion}`,
   balances: `${sfieldTools.balances.id}@${toolVersion}`,
   glossary: `${sfieldTools.glossary.id}@${toolVersion}`,
+  retirementAccounts: `${sfieldTools.retirementAccounts.id}@${toolVersion}`,
   portfolio: `${sfieldTools.portfolio.id}@${toolVersion}`,
   goal: `${sfieldTools.goal.id}@${toolVersion}`,
   fundingOptions: fundingToolRef("fundingOptions"),
@@ -171,13 +178,14 @@ const registryPurposes = {
   catalogScopeId: "pzn-context-discovery",
   tsScopeId: "pzn-treatment-selection",
   glossaryScopeId: "pzn-ccre-glossary",
+  retirementScopeId: "pzn-retirement-accounts",
   portfolioScopeId: "pzn-portfolio-snapshot",
   goalScopeId: "pzn-goal-progress",
-  workflowScopeId: "pzn-funding-preview",
+  workflowScopeId: "pzn-customer-workflow",
 } as const;
 const registryBoundaries = {
   catalog: "catalogScopeId", propensity: "catalogScopeId", selection: "tsScopeId", glossary: "glossaryScopeId", portfolio: "portfolioScopeId",
-  goal: "goalScopeId", fundingOptions: "workflowScopeId", fundingStatus: "workflowScopeId", fundingPreview: "workflowScopeId",
+  retirementAccounts: "retirementScopeId", goal: "goalScopeId", fundingOptions: "workflowScopeId", fundingStatus: "workflowScopeId", fundingPreview: "workflowScopeId",
 } as const;
 export function principalFor(id: string, scope?: Pick<Scope, "userId" | "personaId" | "domainId">): Principal {
   return { tenantId: serverTenantId, subjectId: id, roles: ["pzn-demo", "pzn-developer"], attributes: scope?.domainId ? { domainId: scope.domainId, userId: scope.userId ?? scope.personaId } : {} };
@@ -395,12 +403,23 @@ export class Runtime implements IntegrationTaskRuntime {
     return this.inspection && readTurnPayloads(this.sf, this.store, this.inspection, turn, conversation);
   }
 
+  captureTurnExchange(turnId: string, stage: TurnExchangeStage, operation: string, request: unknown, response: unknown) {
+    const inspection = this.inspection;
+    if (!inspection) return;
+    try {
+      const safe = (value: unknown) => JSON.parse(JSON.stringify(value, (key, item) =>
+        key === "principalId" || key === "requestSessionId" ? "[REDACTED]" : item)) as JsonValue;
+      const captureRequest = stage === "flowRouting" ? inspection.requestPayload : inspection.payload;
+      this.store.saveTurnExchange(turnId, stage, { operation, request: captureRequest(safe(request)), response: inspection.payload(safe(response)) });
+    } catch { /* An unavailable trace must not change the chat result. */ }
+  }
+
   async evaluation(principalId: string): Promise<EvaluationRow[]> {
     const turns = this.store.recentCompletedTurns(principalId);
     const items = await Promise.all(turns.map(async (turn) => {
       const ids = new Set([
         turn.agentRunId, ...turn.agentExecutionIds ?? [], ...Object.values(turn.attempts).map(({ runId }) => runId),
-        turn.catalogScopeId, turn.tsScopeId, turn.portfolioScopeId, turn.goalScopeId, turn.glossaryScopeId,
+        turn.catalogScopeId, turn.tsScopeId, turn.retirementScopeId, turn.portfolioScopeId, turn.goalScopeId, turn.glossaryScopeId,
         turn.workflowScopeId, turn.fundingRun?.id,
       ].filter((id): id is string => Boolean(id)));
       const results = await Promise.all([...ids].map(async (id) => {
@@ -453,7 +472,7 @@ export class Runtime implements IntegrationTaskRuntime {
     ctx.signal.throwIfAborted();
     requireCheck(typeof ref === "string", "TURN_REF_REQUIRED");
     const turn = this.current(ref);
-    const boundary = registryBoundaries[key];
+    const boundary = key === "retirementAccounts" && ctx.runId === turn.workflowScopeId ? "workflowScopeId" : registryBoundaries[key];
     requireCheck(turn[boundary] === ctx.runId && ctx.principal.tenantId === serverTenantId
       && turn.scope.principalId === ctx.principal.subjectId && !ctx.agentId, "REGISTRY_SCOPE_MISMATCH");
     const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
@@ -461,7 +480,7 @@ export class Runtime implements IntegrationTaskRuntime {
     const persona = findProfileById(conversation.personaId);
     requireCheck(persona && persona.allowedScenarios.includes(conversation.scenarioId), "PERSONA_MISMATCH");
     if (boundary === "workflowScopeId") {
-      const definition = turn.workflow && resolveFundingWorkflow(turn.workflow.recommendation, turn.toolSetup?.fundingWorkflow);
+      const definition = turn.workflow && workflowDefinition(turn.workflow.recommendation, turn.toolSetup?.fundingWorkflow);
       requireCheck(definition?.steps.some((ref) => ref === toolRefs[key]), "FUNDING_WORKFLOW_STEP_REQUIRED");
     }
     requireToolEnabled(turn, key);
@@ -490,7 +509,7 @@ export class Runtime implements IntegrationTaskRuntime {
   async workspaceNextStep(principalId: string, personaId: string): Promise<WorkspaceNextStep | null> {
     const persona = findProfileById(personaId);
     if (!persona) return null;
-    const setup = this.store.toolSetup(principalId);
+    const setup = this.store.toolSetup("wealth");
     if (!setup.enabled.selection) return null;
     const adapter = this.treatmentAdapter({ scenarioId: host.defaultScenarioId, ordinal: 1 }, setup, { principalId, personaId });
     const result = await adapter.selectEligibleContent({ mid: persona.syntheticMid, context: nextStepContext }, AbortSignal.timeout(5000));
@@ -509,8 +528,10 @@ export class Runtime implements IntegrationTaskRuntime {
       verifyRoute(turn.route, turn.catalog, turn.scope, turn.attempts.route.runId, this.now());
       context = turn.route.contextId;
     }
-    const input = { mid: persona.syntheticMid, context };
+    const accountId = turn.retirementAccounts?.selected?.id;
+    const input = { mid: persona.syntheticMid, context, ...(accountId && { accountId }) };
     let ccre: MockCcreEvaluation | undefined;
+    let formats: TurnRecord["treatmentFormats"];
     try {
       const result = await this.turnTreatmentAdapter(turn, conversation).selectEligibleContent(input, ctx.signal);
       if (turn.route && isPortfolioSummary(turn.route)) {
@@ -520,6 +541,7 @@ export class Runtime implements IntegrationTaskRuntime {
         requireCheck(this.store.update(turn.public.id, (row) => { row.treatmentEntries = result.renderedEntries; }), "TURN_INACTIVE");
       }
       ccre = result.ccre;
+      formats = { legacy: result.contentIds, workflows: result.recommendations, matches: result.workflowMatches, actionMatches: result.actionMatches };
       return result;
     } finally {
       if (this.inspection) {
@@ -527,6 +549,7 @@ export class Runtime implements IntegrationTaskRuntime {
           this.store.update(turn.public.id, (row) => {
             row.treatmentMockInput = input;
             row.treatmentCcre = ccre;
+            row.treatmentFormats = formats;
           });
         } catch { /* Diagnostic storage cannot change the tool result. */ }
       }
@@ -591,7 +614,7 @@ export class Runtime implements IntegrationTaskRuntime {
       approvalId?: string;
     },
     signal: AbortSignal,
-  ): Promise<{ summary: string; sfieldRunId: string; audit?: DomainWriteAuditEntry }> {
+  ): Promise<{ summary: string; sfieldRunId: string; audit?: DomainWriteAuditEntry; updatedFields?: string[] }> {
     const scope = await this.sf.executions.open({
       principal: principalFor(principalId),
       purpose: "cep-governed-write",
@@ -626,8 +649,9 @@ export class Runtime implements IntegrationTaskRuntime {
         });
         throw new Error(reason);
       }
-      const out = exec.output as { summary?: string };
-      const summary = out.summary ?? `${input.action} applied to ${input.recordId}`;
+      const out = exec.output as { summary?: string; updatedFields?: string[] };
+      const rejected = input.domain === "customer360" && !out.updatedFields?.length;
+      const summary = rejected ? "No profile fields were saved." : out.summary ?? `${input.action} applied to ${input.recordId}`;
       const audit = this.writeAudit?.record({
         sfieldRunId: scope.id,
         sfieldToolRef: domainWriteToolRef,
@@ -636,10 +660,11 @@ export class Runtime implements IntegrationTaskRuntime {
         action: input.action,
         actor: input.actor,
         summary,
-        status: "succeeded",
+        status: rejected ? "denied" : "succeeded",
         ...(input.approvalId ? { approvalId: input.approvalId } : {}),
       });
-      return { summary, sfieldRunId: scope.id, audit };
+      if (rejected) throw new ApiError(422, "fields_not_saved", "Check the fields and values, then save again.");
+      return { summary, sfieldRunId: scope.id, audit, updatedFields: out.updatedFields };
     } finally {
       await scope.close();
     }
@@ -1102,6 +1127,10 @@ export class Runtime implements IntegrationTaskRuntime {
         inputs: treatmentInputSchema, outputs: treatmentRecommendationsResultSchema,
         handler: async (input, ctx) => (await this.selectTreatment(input, ctx)).recommendations,
       }, treatmentRecommendationsVersion),
+      read("selection", {
+        inputs: treatmentInputSchema, outputs: treatmentDecisionResultSchema,
+        handler: async (input, ctx) => (await this.selectTreatment(input, ctx)).decision,
+      }, treatmentDecisionVersion),
       read("fundingOptions", {
         inputs: fundingReadInputSchema, outputs: fundingOptionsResultSchema,
         handler: async ({ turnRef }, ctx) => {
@@ -1133,6 +1162,24 @@ export class Runtime implements IntegrationTaskRuntime {
           return fundingPreviewFrom(options, method.methodId, options.amountCents);
         },
       }, fundingToolVersion),
+      read("retirementAccounts", {
+        inputs: portfolioInputSchema, outputs: retirementAccountsResultSchema,
+        handler: async ({ turnRef, routeDecisionId }, ctx) => {
+          const { turn, persona } = this.scopedRegistryTurn(turnRef, ctx, "retirementAccounts");
+          if (ctx.runId === turn.workflowScopeId && turn.workflow) {
+            const { source } = workflowOfferSource(this.store, turn, turn.workflow, this.now());
+            requireCheck(turn.workflow.recommendation.id === beneficiaryReviewWorkflow.recommendation.id
+              && source.route?.routeDecisionId === routeDecisionId, "WORKFLOW_SOURCE_REQUIRED");
+            return readRetirementView(persona.syntheticMid, retirementBeneficiaryIntent, source.retirementAccounts?.selected?.id ?? "");
+          }
+          requireCheck(turn.route && turn.catalog && turn.route.routeDecisionId === routeDecisionId && turn.route.contextId === "learning"
+            && [retirementListIntent, retirementBeneficiaryIntent, "beneficiary_update_steps"].includes(turn.trace.intentId ?? ""), "RETIREMENT_ROUTE_REQUIRED");
+          verifyRoute(turn.route, turn.catalog, turn.scope, turn.attempts.route?.runId ?? null, this.now());
+          const prior = this.store.previousCompletedTurn(turn.scope.conversationId, turn.ordinal);
+          const displayed = prior?.public.experience?.blocks.find((block) => block.component === "PznRetirementAccounts");
+          return readRetirementView(persona.syntheticMid, turn.trace.intentId!, turn.public.message, displayed?.props);
+        },
+      }),
       read("portfolio", {
         inputs: portfolioInputSchema, outputs: portfolioResultSchema,
         handler: async ({ turnRef, routeDecisionId }, ctx) => {
@@ -1236,7 +1283,7 @@ export class Runtime implements IntegrationTaskRuntime {
           classification: "public",
           maxOutputBytes: 16_000,
         },
-        handler: async (raw) => {
+        handler: async (raw): Promise<JsonObject> => {
           const inp = raw as {
             domain: "ops_incident" | "sales_deal" | "customer360";
             recordId: string;
@@ -1271,8 +1318,9 @@ export class Runtime implements IntegrationTaskRuntime {
           const updates = inp.updatesJson ? JSON.parse(inp.updatesJson) as Record<string, string> : {};
           const applied = this.profileStore.applyBindings(inp.recordId, updates, this.now());
           return {
-            ok: true,
+            ok: applied.updatedFields.length > 0,
             recordId: inp.recordId,
+            updatedFields: applied.updatedFields,
             summary: `Updated Customer 360 bindings: ${applied.updatedFields.join(", ") || "none"}`,
           };
         },

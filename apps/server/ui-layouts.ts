@@ -1,3 +1,5 @@
+import { readRetirementView } from "../../packages/retirement-accounts";
+import { retirementBeneficiaryIntent, retirementListIntent } from "../../packages/contracts/retirement-accounts";
 import profiles from "../../fixtures/host.json";
 import { findProfileById, listAllProfiles } from "../../packages/customer-profiles";
 import { resolveMultiDomainBindings } from "../../packages/customer-profiles/bindings";
@@ -6,32 +8,85 @@ import type { IncidentRecord } from "../../packages/contracts/ops";
 import type { DealRecord } from "../../packages/contracts/sales";
 import { availableFundingOptions, fundingPreviewFrom } from "../../packages/capabilities";
 import { requiredContribution, savingsProjection } from "../../packages/capabilities/calculations";
-import { allRoutingIntents } from "../../packages/contracts/routing-intents";
+import type { ComponentKind } from "../../packages/contracts/agentic";
+import { canSaveProfileBinding, dataBindingKeySchema } from "../../packages/contracts/data-bindings";
+import { synthesizeDynamicCanvas } from "./dynamic-ui-generator";
+import type { OpsIncidentStore } from "./ops-store";
+import type { SalesDealStore } from "./sales-store";
+import { allRoutingIntents, type IntentDefinition } from "../../packages/contracts/routing-intents";
 import type { DisplayBlock } from "../../packages/contracts/surface";
 import { CEP_CAPABILITIES } from "../../packages/contracts/capabilities-catalog";
-import { recordLayoutCapabilities, targetKey, type LayoutComponent, type UiDesign, type UiTargetOption } from "../../packages/contracts/ui-layout";
+import { bindingDomain, layoutTargetDomain, normalizedIntentPhrase, recordIntentOption, recordCapabilities, recordIntentId, recordLayoutCapabilities, recordViews, targetKey, type LayoutComponent, type UiDesign, type UiTargetOption } from "../../packages/contracts/ui-layout";
 import { conversationalTextAllowed } from "../../packages/experience/chat-policy";
 import { contentCatalog, readDemoBalance } from "../../packages/experience/content";
 import { findEffectiveContentById } from "../../packages/experience-registry/registry";
 import { compileUiLayoutPreview } from "../../packages/experience/ui-layout";
-import { fixtureGoalProgressProvider } from "../../packages/goal-progress";
-import { fixturePortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
+import { fixtureGoalProgressProvider, type GoalProgressProvider } from "../../packages/goal-progress";
+import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import type { CapabilityRegistry } from "./capability-registry";
 import { ApiError } from "./store";
+
+const capabilityBlocks: Record<ComponentKind, LayoutComponent[]> = {
+  GoalProgress: ["PznGoalProgress"], Portfolio: ["PznPortfolioSnapshot"], Balances: ["PznMetricSummary"],
+  Chart: ["PznSavingsChart"], Metric: ["PznSavingsMetric", "PznFactSummary"], Content: ["PznContentCard"],
+  FundingOptions: ["PznFundingOptions"], FundingPreview: ["PznFundingPreview"], Form: ["PznCapabilityForm"], Summary: ["PznFactSummary"],
+};
+
+function intentBlocks({ intentId, contextId, task }: IntentDefinition): LayoutComponent[] {
+  if (intentId === retirementListIntent) return ["PznRetirementAccounts"];
+  if (intentId === retirementBeneficiaryIntent) return ["PznRetirementAccounts", "PznContentCard", "PznStepList"];
+  if (task === "create_rule") return ["PznRuleCreation"];
+  const components: LayoutComponent[] = ["PznContentCard"];
+  if (task === "compare") components.push("PznComparison");
+  if (task === "guide") components.push("PznStepList");
+  if (task === "show" && contextId === "balance") components.push("PznMetricSummary");
+  if (task === "show" && contextId === "portsum") components.push("PznPortfolioSnapshot");
+  if (task === "show" && contextId === "goals") components.push("PznGoalProgress");
+  return components;
+}
 
 export function uiTargetOptions(registry: CapabilityRegistry, principalId: string): UiTargetOption[] {
   const latest = new Map(registry.list(principalId).map((manifest) => [manifest.id, manifest]));
   return [
-    ...allRoutingIntents().map(({ intentId, label, description }): UiTargetOption => ({ target: { kind: "intent", id: intentId }, label, description })),
+    ...allRoutingIntents().map((intent): UiTargetOption => ({
+      target: { kind: "intent", id: intent.intentId }, label: intent.label, description: intent.description, components: intentBlocks(intent),
+    })),
+    ...(["it_ops", "sales_revops"] as const).flatMap((domain) => recordViews.map((view): UiTargetOption => {
+      const subject = domain === "it_ops" ? "Incident" : "Deal";
+      const label = subject + " " + (view === "detail" ? "details" : view);
+      return { target: { kind: "intent", id: recordIntentId(domain, view) }, label,
+        description: view === "list" ? "Choose a record from the displayed results." : "Show the selected record’s " + (view === "timeline" ? "timeline." : "details."), components: ["PznDynamicCanvas"] };
+    })),
     ...recordLayoutCapabilities.map((id): UiTargetOption => {
       const { label, description } = CEP_CAPABILITIES.find((c) => c.id === id)!;
-      return { target: { kind: "capability", id }, label, description };
+      return { target: { kind: "capability", id }, label, description, components: ["PznDynamicCanvas"] };
     }),
-    ...[...latest.values()].map(({ id, title, description }): UiTargetOption => ({ target: { kind: "capability", id }, label: title, description })),
+    ...[...latest.values()].map(({ id, title, description, experience }): UiTargetOption => ({ target: { kind: "capability", id }, label: title, description,
+      components: [...new Set(experience.allowedComponents.flatMap((component) => capabilityBlocks[component]))] })),
   ];
 }
 
-export function validateUiDesign(design: UiDesign, options: UiTargetOption[], publishing: boolean) {
+function slotBindingKeys(slot: UiDesign["slots"][number]) {
+  const keys = [...JSON.stringify(slot).matchAll(/\{\{\s*([^{}\s]+)\s*\}\}/g)].map((match) => match[1]);
+  if (slot.kind === "widget") {
+    keys.push(...slot.metrics.flatMap((metric) => metric.binding ? [metric.binding] : []));
+    if (slot.progressBinding) keys.push(slot.progressBinding);
+  }
+  if (slot.kind === "form") keys.push(...slot.fields.flatMap((field) => field.defaultBinding ? [field.defaultBinding] : []));
+  return keys;
+}
+
+export function validateUiDesign(design: UiDesign, options: UiTargetOption[], publishing: boolean, domain?: DomainPackId) {
+  const declaration = design.recordIntent;
+  if (declaration) {
+    const option = recordIntentOption(declaration);
+    options = [...options, option];
+    const phrases = declaration.phrases.map(normalizedIntentPhrase);
+    if (phrases.some((phrase) => !phrase) || new Set(phrases).size !== phrases.length
+      || !design.targets.some((target) => targetKey(target) === targetKey(option.target))) {
+      throw new ApiError(400, "ui_intent_invalid", "Attach the named intent and enter distinct example phrases.");
+    }
+  }
   const known = new Set(options.map(({ target }) => targetKey(target)));
   if (design.targets.some((target) => !known.has(targetKey(target)))) {
     throw new ApiError(400, "unknown_ui_attachment", "Choose an intent or capability from the list.");
@@ -39,6 +94,26 @@ export function validateUiDesign(design: UiDesign, options: UiTargetOption[], pu
   if (design.slots.some((slot) => slot.kind === "text"
     && !conversationalTextAllowed(slot.heading + ". " + slot.body))) {
     throw new ApiError(400, "invalid_ui_copy", "Use headings and explanatory copy. Add verified components for account figures, recommendations, or results.");
+  }
+  if (domain) {
+    const targets = design.targets.map((target) => options.find((option) => targetKey(option.target) === targetKey(target))!);
+    if (targets.some(({ target }) => layoutTargetDomain(target) !== domain)) throw new ApiError(400, "domain_attachment_invalid", "Choose a target in this domain.");
+    for (const slot of design.slots) {
+      if (slot.kind === "block") {
+        const incompatible = targets.find((target) => target.components && !target.components.includes(slot.component));
+        if (incompatible) throw new ApiError(400, "ui_component_unavailable", `${incompatible.label} cannot supply ${slot.component}. Choose a supported block or change the attachment.`);
+      }
+      if (slot.kind === "form" && slot.writeBack !== false) {
+        const field = slot.fields.find(({ defaultBinding }) => defaultBinding && !canSaveProfileBinding(defaultBinding));
+        if (field) throw new ApiError(400, "ui_field_read_only", `${field.defaultBinding} is read-only. Disable saving bound fields or choose a writable field.`);
+      }
+      for (const key of slotBindingKeys(slot)) {
+        if (!dataBindingKeySchema.safeParse(key).success || bindingDomain(key) !== domain
+          || (domain !== "wealth" && targets.some(({ target }) => target.id === recordIntentId(domain, "list") || (target.id === declaration?.id && declaration.view === "list")))) {
+          throw new ApiError(400, "ui_binding_unavailable", `The selected view cannot supply ${key}. Choose a field for this view.`);
+        }
+      }
+    }
   }
   if (!publishing) return;
   if (!design.description || !design.targets.length || !design.slots.some(({ kind }) => kind === "block" || kind === "form" || kind === "widget")) {
@@ -79,30 +154,43 @@ function sampleDetails(id: string) {
 export async function previewUiLayout(
   design: UiDesign,
   requestedPersonaId?: string,
-  extraContext?: { domainId?: DomainPackId; incident?: IncidentRecord; deal?: DealRecord },
+  extraContext?: { domainId?: DomainPackId; incident?: IncidentRecord; deal?: DealRecord; opsStore?: OpsIncidentStore; salesStore?: SalesDealStore;
+    portfolioProvider?: PortfolioSnapshotProvider; goalProvider?: GoalProgressProvider },
 ) {
   if (extraContext?.domainId && extraContext.domainId !== "wealth") {
-    return compileUiLayoutPreview(design, [], resolveMultiDomainBindings(undefined, extraContext));
+    const domain = extraContext.domainId;
+    const list = design.recordIntent?.view === "list" || design.targets.some(({ id }) => id === recordIntentId(domain, "list"));
+    const timeline = design.recordIntent?.view === "timeline" || design.targets.some(({ id }) => id === recordIntentId(domain, "timeline"));
+    const record = extraContext.incident ?? extraContext.deal;
+    const prompt = list ? "Show records" : (timeline ? "Show timeline for " : "Show ") + (record?.id ?? "");
+    const { canvas } = synthesizeDynamicCanvas(prompt, undefined, extraContext.opsStore, extraContext.salesStore, recordCapabilities[domain]);
+    return compileUiLayoutPreview(design, [{ component: "PznDynamicCanvas", props: canvas }], list ? undefined : resolveMultiDomainBindings(undefined, extraContext));
   }
-  const activeProfile = (requestedPersonaId ? findProfileById(requestedPersonaId) : undefined)
-    ?? listAllProfiles()[0]
-    ?? profiles.personas[0];
+  const activeProfile = requestedPersonaId ? findProfileById(requestedPersonaId) : listAllProfiles()[0];
+  if (!activeProfile) throw new ApiError(404, "preview_profile_unavailable", "Choose an available customer to preview this layout.");
   const { personaId, syntheticMid } = activeProfile;
-  const fallbackMid = profiles.personas[0].syntheticMid;
-  const [goalRaw, portfolioRaw] = await Promise.all([
-    fixtureGoalProgressProvider.read(syntheticMid),
-    fixturePortfolioSnapshotProvider.read(syntheticMid),
+  const fields = design.slots.flatMap(slotBindingKeys);
+  const blocks = design.slots.flatMap((slot) => slot.kind === "block" ? [slot.component] : []);
+  const needsGoal = fields.some((key) => key.startsWith("goal.")) || blocks.some((b) => ["PznGoalProgress", "PznSavingsChart", "PznSavingsMetric"].includes(b));
+  const needsPortfolio = fields.some((key) => key.startsWith("portfolio.")) || blocks.some((b) => ["PznPortfolioSnapshot", "PznSavingsChart", "PznCapabilityForm"].includes(b));
+  const [goal, portfolio] = await Promise.all([
+    needsGoal ? (extraContext?.goalProvider ?? fixtureGoalProgressProvider).read(syntheticMid) : undefined,
+    needsPortfolio ? (extraContext?.portfolioProvider ?? fixturePortfolioSnapshotProvider).read(syntheticMid) : undefined,
   ]);
-  const goal = goalRaw ?? await fixtureGoalProgressProvider.read(fallbackMid);
-  const portfolio = portfolioRaw ?? await fixturePortfolioSnapshotProvider.read(fallbackMid);
-  if (!goal || !portfolio) throw new Error("UI preview data is missing.");
-  const bindings = resolveMultiDomainBindings(personaId, extraContext);
+  if ((needsGoal && !goal) || (needsPortfolio && !portfolio)) {
+    throw new ApiError(422, "preview_data_unavailable", "The selected customer has no reading for the requested layout.");
+  }
   const funding = availableFundingOptions(true, 50_000);
-  const balance = readDemoBalance(personaId, syntheticMid, Date.parse(portfolio.asOf));
+  const balance = readDemoBalance(personaId, syntheticMid, portfolio ? Date.parse(portfolio.asOf) : Date.now());
+  const bindings = resolveMultiDomainBindings(personaId, { goal: goal ?? undefined, portfolio: portfolio ?? undefined, balances: balance.values });
   const education = sampleDetails("balance_education");
   const address = sampleDetails("address_update_guide");
   const definitions = ["balance_available_definition", "balance_current_definition"].map(content);
-  const samples: Record<LayoutComponent, DisplayBlock> = {
+  const retirementIntent = design.targets.some(({ id }) => id === retirementBeneficiaryIntent) ? retirementBeneficiaryIntent : retirementListIntent;
+  const accounts = readRetirementView(syntheticMid, retirementListIntent, "");
+  const samples: Partial<Record<LayoutComponent, DisplayBlock>> = {
+    PznRetirementAccounts: { component: "PznRetirementAccounts", props: retirementIntent === retirementListIntent ? accounts
+      : readRetirementView(syntheticMid, retirementIntent, "the first one", accounts) },
     PznComparison: { component: "PznComparison", props: {
       ...sampleDetails("balance_available_definition").shared, title: "Compare balance definitions",
       columns: definitions.map(({ title, comparisonFields }) => ({ title, fields: comparisonFields })),
@@ -110,14 +198,14 @@ export async function previewUiLayout(
     PznMetricSummary: { component: "PznMetricSummary", props: {
       ...sampleDetails("balance_metric_template").shared, observedAt: balance.observedAt, values: balance.values,
     } },
-    PznPortfolioSnapshot: { component: "PznPortfolioSnapshot", props: portfolio },
-    PznGoalProgress: { component: "PznGoalProgress", props: { ...sampleDetails("home_down_payment_progress").shared, goal } },
-    PznSavingsChart: { component: "PznSavingsChart", props: savingsProjection(goal, 24, 100_000, {
+    ...(portfolio && { PznPortfolioSnapshot: { component: "PznPortfolioSnapshot", props: portfolio } } as const),
+    ...(goal && { PznGoalProgress: { component: "PznGoalProgress", props: { ...sampleDetails("home_down_payment_progress").shared, goal } } } as const),
+    ...(goal && portfolio && { PznSavingsChart: { component: "PznSavingsChart", props: savingsProjection(goal, 24, 100_000, {
       transferFromCashCents: Math.min(1_000_000, portfolio.cashCents),
       portfolioCashBeforeCents: portfolio.cashCents,
       // The chat run supplies eligibility after Treatment Selector evaluates the projected balance.
-    }) },
-    PznSavingsMetric: { component: "PznSavingsMetric", props: requiredContribution(goal, 24) },
+    }) } } as const),
+    ...(goal && { PznSavingsMetric: { component: "PznSavingsMetric", props: requiredContribution(goal, 24) } } as const),
     PznContentCard: { component: "PznContentCard", props: { ...education.shared, body: education.body, description: education.description } },
     PznStepList: { component: "PznStepList", props: { ...address.shared, body: address.body, steps: address.steps } },
     PznFundingOptions: { component: "PznFundingOptions", props: funding },
@@ -126,7 +214,7 @@ export async function previewUiLayout(
       title: "Monthly savings planner", submitLabel: "Recalculate", actionId: "preview_only",
       fields: [
         { field: { id: "monthlyCents", label: "Monthly contribution", type: "integer", min: 0, max: 500_000, required: true, unit: "cents", presentation: "slider" }, value: 100_000 },
-        { field: { id: "transferFromCashCents", label: "Move from portfolio cash today", type: "integer", min: 0, max: Math.max(100_000, Math.floor(portfolio.cashCents / 100) * 100), required: false, unit: "cents", presentation: "slider" }, value: Math.min(1_000_000, Math.floor(portfolio.cashCents / 100) * 100) },
+        { field: { id: "transferFromCashCents", label: "Move from portfolio cash today", type: "integer", min: 0, max: Math.max(100_000, Math.floor((portfolio?.cashCents ?? 0) / 100) * 100), required: false, unit: "cents", presentation: "slider" }, value: Math.min(1_000_000, Math.floor((portfolio?.cashCents ?? 0) / 100) * 100) },
         { field: { id: "months", label: "Months until purchase", type: "integer", min: 1, max: 120, required: true, unit: "months" }, value: 24 },
       ],
     } },
@@ -137,7 +225,12 @@ export async function previewUiLayout(
   };
   return compileUiLayoutPreview(
     design,
-    design.slots.flatMap((slot) => slot.kind === "block" ? [samples[slot.component]] : []),
+    design.slots.flatMap((slot) => {
+      if (slot.kind !== "block") return [];
+      const sample = samples[slot.component];
+      if (!sample) throw new ApiError(422, "preview_data_unavailable", `This customer has no data for ${slot.component}.`);
+      return [sample];
+    }),
     bindings,
   );
 }
