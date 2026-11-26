@@ -3,6 +3,7 @@ import treatmentDiagramUrl from "./assets/ts-sfield-interaction.svg?url";
 import { ArrowUpRight, BookOpenText, Braces, Database, Download, GitBranch, House, Layers, LayoutGrid, ListFilter, MessageSquare, Network, PanelsTopLeft, Settings2, ShieldCheck, Sparkles, UsersRound } from "lucide-react";
 import { recommendationArbitrateToolRef } from "../../packages/contracts/recommendation-provider";
 import { adminPaths } from "../../packages/contracts/admin-paths";
+import { pendingActionsContext } from "../../packages/contracts/workspace";
 import { DeveloperDrawer } from "./developer-drawer";
 import { ExchangePath, InteractionDiagram, TreatmentEvolutionDiagram, TreatmentHandoffDiagram, type DiagramExchange } from "./help-architecture";
 import { contractList, helpContracts, type ContractFile } from "./help-contracts";
@@ -48,8 +49,15 @@ function TreatmentEvolution({ selectContract, run }: { selectContract: (id: stri
   return <section id="proposal" className="help-section" aria-labelledby="proposal-title">
     <div className="help-section-heading">
       <div>
-        <h2 id="proposal-title">How Treatment Selector should evolve</h2>
-        <p className="help-exchange-description">Start with the same question TS answers today. Given a member ID (<code>mid</code>) and a verified topic (<code>context</code>), what is this customer eligible for?</p>
+        <h2 id="proposal-title">Expanding Treatment Selector from Content Recommendations to Actions and Workflows</h2>
+        <p className="help-exchange-description">Today, Treatment Selector (TS) takes a member ID (<code>mid</code>) and a topic (<code>context</code>) and returns ranked content IDs. In this proof of concept, the same CCRE rules can recommend a standalone action or a workflow by ID and version. sfield sends TS the topic it inferred from chat and runs the workflow the customer picks.</p>
+        <p className="help-exchange-description">
+          When Marcus Reed asks “What’s next?”, the <strong>Account is unfunded</strong> rule makes <strong>Preview funding</strong> eligible.
+          Once the mock account portal confirms his first deposit, TS reads his updated status at the next sign-in and drops the reminder.{" "}
+          <a className="help-section-link" href={adminPaths.logs + "?source=" + pendingActionsContext}>
+            View Pending actions in Logs <ArrowUpRight size={14} aria-hidden="true" />
+          </a>
+        </p>
       </div>
       <nav className="help-step-contracts" aria-label="Treatment Selector resources">
         <a href="#system-architecture">System map <ArrowUpRight size={14} aria-hidden="true" /></a>
@@ -214,7 +222,7 @@ export function Help() {
         <nav aria-label="Help sections">
           <a href="#system-architecture">System architecture</a>
           <a href="#architecture">Chat sequence</a>
-          <a href="#proposal">TS evolution</a>
+          <a href="#proposal">Treatment Selector’s role</a>
           <a href="#demo-playbook">5-Min Demo</a>
           <a href="#providers">Providers</a>
           <a href="#goal-planning">Multi-step requests</a>
@@ -227,7 +235,7 @@ export function Help() {
     <main className="help-width help-main">
       <div className="help-intro">
         <h1>How CEP works</h1>
-        <p>Explore how a customer’s message and account context become an interactive reply, and what happens when the customer acts on it.</p>
+        <p>Follow a customer’s question from chat to a recommendation. Treatment Selector checks which choices apply to that customer, and sfield runs the tools behind the choice they make.</p>
       </div>
       <div id="cep-blueprint">
         <SystemArchitecture run={run} selectContract={setContractId} />

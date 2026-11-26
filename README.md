@@ -1,6 +1,12 @@
 # CEP — Customer Engagement Platform
 
-An investment customer can ask which retirement accounts they hold, point to the second one, and see who is named as its beneficiary. The account service supplies the record, Treatment Selector checks which follow-up applies, and `sfield` runs the tools and keeps the conversation. The app renders the result in chat using A2UI. [Try the retirement account review](#try-a-retirement-account-review).
+## Expanding Treatment Selector from Content Recommendations to Actions and Workflows
+
+Treatment Selector (TS) already uses a member ID, a topic, and CCRE rules to return ranked content IDs. This proof of concept lets domain teams use those rules to recommend a standalone action or a versioned workflow. In chat, `sfield` uses the conversation and a language model to identify intent, then asks TS what the customer is eligible for. The app presents the choices using A2UI. When the customer selects a workflow, `sfield` runs its tools.
+
+When Marcus Reed asks **“What’s next?”**, TS recommends **Preview funding** because his account is unfunded. Once the mock account portal confirms his first deposit, the same rule excludes the funding reminder at his next sign-in. Logs show the rule, the account status it evaluated, and the portal confirmation. [See the architecture and rule examples in the local app](http://127.0.0.1:4174/admin/help#proposal).
+
+**What to prove next.** Can a second domain team connect an existing rule, an approved workflow, and the event that confirms completion entirely through configuration? For Alice’s beneficiary review, the retirement account service would confirm the update for one IRA. Reopening the chat would show that IRA’s review as complete while TS still evaluates her other accounts independently. The team should be able to deliver this with its existing UI and without editing chat code or copying eligibility rules into model prompts.
 
 > Follow the five-minute [investment customer walkthrough](./DEMO_SCRIPT.md), also available in Help at `/admin/help#demo-playbook`.
 
@@ -76,6 +82,8 @@ An existing `.env` with an office `LLM_BASE_URL` also selects that gateway. Set 
 3. A saved configuration takes priority on startup. **Use startup settings** clears it and restores the provider selected at launch, which defaults to Copilot ACP. The app also uses this provider if it cannot load a saved configuration.
 
 ### Try a retirement account review
+
+An investment customer can ask which retirement accounts they hold, point to the second one in chat, and see its beneficiary. The account service supplies the record and TS checks which follow-up applies.
 
 Sign in as **Alice Morgan** and select **Retirement accounts** in the chat sidebar. Her workplace 401(k) appears first and her rollover IRA second. Ask **“Who’s the beneficiary on the second one?”** The account record shows that her IRA ending in **6105** has no designation. Treatment Selector evaluates the rule for that MID and account, and returns **Update your beneficiaries**. Ask about the workplace plan to see Jamie Morgan on file.
 

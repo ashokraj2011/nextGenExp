@@ -240,6 +240,7 @@
 .help-evolution-stages { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; }
 .help-evolution-stage { display: flex; align-items: center; gap: 6px; color: var(--help-green); font-size: .77rem; font-weight: 650; }
 .help-evolution-stages code { overflow-wrap: anywhere; }
+#proposal .help-section-heading > div { max-width: 74ch; }
 .help-evolution-example-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 16px; }
 .help-proposal .help-flow-picker button { color: var(--ink); background: var(--white); }
 .help-proposal .help-flow-picker button[aria-pressed="true"] { color: var(--help-green); border-color: var(--teal-border); background: var(--teal-pale); }

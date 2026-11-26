@@ -193,9 +193,10 @@ try {
   await toolRegistry.getByRole("link", { name: "Portfolio Snapshot", exact: true }).click();
   assert.equal(new URL(page.url()).hash, "#contracts");
   await page.getByRole("button", { name: "Download portfolio-snapshot.tool.json", exact: true }).waitFor();
-  await page.getByRole("link", { name: "TS evolution", exact: true }).click();
+  await page.getByRole("link", { name: "Treatment Selector’s role", exact: true }).click();
   assert.equal(new URL(page.url()).hash, "#proposal");
-  const proposal = page.getByRole("region", { name: "How Treatment Selector should evolve" });
+  const proposal = page.getByRole("region", { name: "Expanding Treatment Selector from Content Recommendations to Actions and Workflows" });
+  assert.equal(await proposal.getByRole("link", { name: "View Pending actions in Logs" }).getAttribute("href"), "/admin/logs?source=pending-actions");
   const diagram = proposal.getByRole("figure", { name: "How TS and sfield work together" });
   await diagram.getByText(/No Marcus address-update run is available/).waitFor();
   assert.equal(await diagram.getByRole("button", { name: /^Step \d+ ·/ }).count(), 5);
@@ -828,7 +829,7 @@ try {
   await mobile.getByRole("link", { name: "sfield", exact: true }).click();
   await mobile.getByRole("heading", { name: "Registered tools", exact: true }).waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  await mobile.getByRole("link", { name: "TS evolution", exact: true }).click();
+  await mobile.getByRole("link", { name: "Treatment Selector’s role", exact: true }).click();
   await mobile.getByRole("button", { name: "Alice · Retirement", exact: true }).click();
   await mobile.getByText("Compare the legacy and current TS responses", { exact: true }).click();
   assert.deepEqual(JSON.parse(await mobile.getByLabel("Content, actions and workflows JSON", { exact: true }).innerText()), aliceDecision.decision);
