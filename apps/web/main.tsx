@@ -1156,6 +1156,22 @@ function App() {
   useEffect(() => {
     if (adminChat || !activeProfile) return;
     let alive = true;
+    const syncActiveHandoff = () => {
+      void api.activeHandoff(activeProfile.personaId).then((res) => {
+        if (!alive) return;
+        if (res.ticket) {
+          setActiveHandoff((prev) => (prev?.handoffId === res.ticket!.handoffId && prev.updatedAt === res.ticket!.updatedAt ? prev : res.ticket));
+        }
+      }).catch(() => undefined);
+    };
+    syncActiveHandoff();
+    const timer = setInterval(syncActiveHandoff, 5000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [activeProfile?.personaId, adminChat]);
+
+  useEffect(() => {
+    if (adminChat || !activeProfile) return;
+    let alive = true;
     void api.listWatchcards(activeProfile.personaId).then((res) => {
       if (alive) setWatchcards(res.watchcards);
     }).catch(() => undefined);

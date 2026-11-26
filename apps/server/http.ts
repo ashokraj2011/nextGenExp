@@ -160,7 +160,7 @@ const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".woff2": "font/woff2", ".woff": "font/woff", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml",
 };
-const pagePaths = new Set(["/", "/chat", "/wealth", "/it-ops", "/revops", "/recommendations", "/integrations", "/embed", "/login", "/planning", accountPortalPath, ...Object.values(adminPaths)]);
+const pagePaths = new Set(["/", "/chat", "/wealth", "/advisor", "/it-ops", "/revops", "/recommendations", "/integrations", "/embed", "/login", "/planning", accountPortalPath, ...Object.values(adminPaths)]);
 
 function visibleTurn(turn: TurnView, operator?: string): TurnView {
   if (operator) return turn;
@@ -1120,6 +1120,11 @@ export async function startApp(options: Options) {
       const { query } = await body(req, z.object({ query: z.string().trim().min(2).max(400) }).strict());
       return json(res, knowledgeBase.search(query, 3));
     }
+    if (resource === "handoffs" && id === "active" && !operation && method === "GET") {
+      const personaId = url.searchParams.get("personaId") ?? "";
+      const ticket = personaId ? handoffStore.findActiveForPersona(personaId) ?? null : null;
+      return json(res, { ticket });
+    }
     if (resource === "handoffs" && id && !operation && method === "GET") {
       const ticket = handoffStore.findById(id);
       if (!ticket) throw new ApiError(404, "handoff_not_found", "Handoff ticket not found.");
@@ -1182,11 +1187,29 @@ export async function startApp(options: Options) {
       const ticket = handoffStore.decideProposal(id, decision, auditId);
       return json(res, { ticket, ...(auditId ? { auditId } : {}) });
     }
+    if (resource === "handoffs" && id && operation === "share-card" && method === "POST") {
+      const input = await body(req, z.object({
+        turnId: z.string().max(80).optional(),
+        prompt: z.string().trim().min(1).max(600),
+        sharedBy: z.enum(["advisor", "customer"]).default("advisor"),
+        sharedByName: z.string().trim().min(1).max(80),
+        experience: z.record(z.string(), z.unknown()),
+      }).strict(), 256 * 1024);
+      const ticket = handoffStore.shareCard(id, input);
+      if (!ticket) throw new ApiError(404, "handoff_not_found", "Handoff ticket not found.");
+      return json(res, { ticket });
+    }
     if (resource === "handoffs" && id && operation === "reply" && method === "POST") {
-      const { text } = await body(req, z.object({ text: z.string().trim().min(1).max(2000) }).strict());
+      const { text, role, author } = await body(req, z.object({
+        text: z.string().trim().min(1).max(2000),
+        role: z.enum(["customer", "agent"]).optional(),
+        author: z.string().trim().min(1).max(80).optional(),
+      }).strict());
       const existing = handoffStore.findById(id);
       if (!existing) throw new ApiError(404, "handoff_not_found", "Handoff ticket not found.");
-      const ticket = handoffStore.addReply(id, existing.customerName, text, "customer");
+      const effectiveRole = role ?? "customer";
+      const effectiveAuthor = author ?? (effectiveRole === "agent" ? (existing.assignedAgent ?? "Wealth Advisor") : existing.customerName);
+      const ticket = handoffStore.addReply(id, effectiveAuthor, text, effectiveRole);
       return json(res, { ticket });
     }
     if (resource === "handoffs" && !id && method === "POST") {
@@ -1215,6 +1238,7 @@ export async function startApp(options: Options) {
         domain: input.domain,
         reason: input.reason,
         priority: input.priority,
+        assignedAgent: input.assignedAgent,
         customerSnapshot,
         recentTranscript,
       });

@@ -339,6 +339,28 @@
   border: 1px solid var(--line);
   font-size: 0.74rem;
 }
+.shared-live-card-box {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 2px solid var(--teal-border, rgba(13, 148, 136, 0.45));
+  background: var(--surface, #fff);
+  box-shadow: 0 4px 16px rgba(13, 148, 136, 0.08);
+  display: grid;
+  gap: 10px;
+}
+.shared-live-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.shared-live-card-head small {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
 .live-handoff-messages {
   display: grid;
   gap: 6px;

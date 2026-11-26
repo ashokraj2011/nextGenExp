@@ -80,6 +80,10 @@ export class HandoffStore {
     return this.tickets.find((t) => t.conversationId === conversationId && t.status !== "resolved");
   }
 
+  findActiveForPersona(personaId: string): HandoffTicket | undefined {
+    return this.tickets.find((t) => t.personaId === personaId && t.status !== "resolved");
+  }
+
   create(input: {
     conversationId: string;
     personaId: string;
@@ -87,6 +91,7 @@ export class HandoffStore {
     domain: RecommendationDomain;
     reason: string;
     priority?: HandoffPriority;
+    assignedAgent?: string;
     customerSnapshot: Record<string, string>;
     recentTranscript: Array<{ role: "user" | "assistant"; text: string }>;
   }): HandoffTicket {
@@ -114,16 +119,19 @@ export class HandoffStore {
       domain: input.domain,
       reason: input.reason.slice(0, 400),
       priority,
-      status: "queued",
+      status: input.assignedAgent ? "claimed" : "queued",
+      ...(input.assignedAgent ? { assignedAgent: input.assignedAgent.slice(0, 80), claimedAt: now } : {}),
       aiBrief,
       customerSnapshot: input.customerSnapshot,
       recentTranscript: input.recentTranscript.slice(-10).map((m) => ({ role: m.role, text: m.text.slice(0, 600) })),
       notes: [
         {
           id: `hn_${randomUUID().slice(0, 8)}`,
-          author: "CEP Concierge",
+          author: input.assignedAgent ? input.assignedAgent.slice(0, 80) : "CEP Concierge",
           role: "system",
-          text: `Warm handoff created with full conversation context and ${Object.keys(input.customerSnapshot).length} Customer 360 signals.`,
+          text: input.assignedAgent
+            ? `${input.assignedAgent} started a Live Shared Card session with ${input.customerName}.`
+            : `Warm handoff created with full conversation context and ${Object.keys(input.customerSnapshot).length} Customer 360 signals.`,
           createdAt: now,
         },
       ],
@@ -131,6 +139,7 @@ export class HandoffStore {
       updatedAt: now,
     });
     this.save([ticket, ...this.tickets]);
+    this.emit(ticket);
     return ticket;
   }
 
@@ -307,6 +316,56 @@ export class HandoffStore {
           text: decision === "accepted"
             ? `Customer signed & committed Advisor-Proposed card "${proposal.title}"${auditId ? ` (audit ${auditId})` : ""}.`
             : `Customer declined Advisor-Proposed card "${proposal.title}".`,
+          createdAt: now,
+        },
+      ],
+    };
+    this.save(this.tickets.map((t) => (t.handoffId === handoffId ? updated : t)));
+    this.emit(updated);
+    return updated;
+  }
+
+  /** Shares an exact live A2UI v1.0 DisplayExperience card so both Advisor and Customer see the identical card over SSE. */
+  shareCard(
+    handoffId: string,
+    input: {
+      turnId?: string;
+      prompt: string;
+      sharedBy: "advisor" | "customer";
+      sharedByName: string;
+      experience: Record<string, unknown>;
+    },
+  ): HandoffTicket | undefined {
+    const existing = this.findById(handoffId);
+    if (!existing) return undefined;
+    const now = new Date().toISOString();
+    const prev = existing.coBrowse ?? {
+      active: true,
+      title: "Shared Planning Canvas",
+      updatedBy: input.sharedBy,
+      updatedAt: now,
+      sliders: coBrowseSlidersSchema.parse({}),
+    };
+    const sharedCard = {
+      id: `scard_${randomUUID().replaceAll("-", "").slice(0, 10)}`,
+      ...(input.turnId ? { turnId: input.turnId } : {}),
+      prompt: input.prompt.trim().slice(0, 600),
+      sharedBy: input.sharedBy,
+      sharedByName: input.sharedByName.trim().slice(0, 80),
+      sharedAt: now,
+      experience: input.experience,
+    };
+    const updated: HandoffTicket = {
+      ...existing,
+      updatedAt: now,
+      coBrowse: { ...prev, active: true, updatedBy: input.sharedBy, updatedAt: now, sharedCard },
+      notes: [
+        ...existing.notes,
+        {
+          id: `hn_${randomUUID().slice(0, 8)}`,
+          author: sharedCard.sharedByName,
+          role: "system",
+          text: `Synced live A2UI card ("${sharedCard.prompt.slice(0, 90)}") to both screens.`,
           createdAt: now,
         },
       ],

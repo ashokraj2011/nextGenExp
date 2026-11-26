@@ -34,6 +34,9 @@ if (location.pathname === "/embed") {
 } else if (location.pathname === "/recommendations") {
   document.title = "Recommendations Workspace · CEP";
   void import("./recommendation-workspace").then(({ RecommendationWorkspace }) => createRoot(document.getElementById("root")!).render(<RecommendationWorkspace />));
+} else if (location.pathname === "/advisor") {
+  document.title = "Advisor Co-Pilot & Shared Card Room · CEP";
+  void import("./advisor-workspace").then(({ AdvisorWorkspace }) => createRoot(document.getElementById("root")!).render(<AdvisorWorkspace />));
 } else if (location.pathname === accountPortalPath) {
   document.title = "Account funding · Account portal";
   void import("./funding-portal").then(({ FundingPortal }) => createRoot(document.getElementById("root")!).render(<FundingPortal />));

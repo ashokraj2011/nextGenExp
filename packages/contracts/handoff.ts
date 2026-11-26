@@ -38,6 +38,18 @@ export const advisorProposalSchema = z.object({
 }).strict();
 export type AdvisorProposal = z.infer<typeof advisorProposalSchema>;
 
+export const sharedCardSchema = z.object({
+  id: z.string(),
+  turnId: z.string().optional(),
+  prompt: z.string().trim().min(1).max(600),
+  sharedBy: z.enum(["advisor", "customer"]),
+  sharedByName: z.string().trim().min(1).max(80),
+  sharedAt: z.string(),
+  /** Exact A2UI v1.0 DisplayExperience payload rendered identically on both advisor & customer screens. */
+  experience: z.record(z.string(), z.unknown()),
+}).strict();
+export type SharedCard = z.infer<typeof sharedCardSchema>;
+
 export const coBrowseStateSchema = z.object({
   active: z.boolean().default(true),
   title: z.string().trim().min(1).max(120).default("Shared Planning Canvas"),
@@ -45,6 +57,7 @@ export const coBrowseStateSchema = z.object({
   updatedAt: z.string(),
   sliders: coBrowseSlidersSchema,
   proposal: advisorProposalSchema.optional(),
+  sharedCard: sharedCardSchema.optional(),
 }).strict();
 export type CoBrowseState = z.infer<typeof coBrowseStateSchema>;
 
@@ -76,6 +89,7 @@ export const createHandoffInputSchema = z.object({
   domain: recommendationDomainSchema.default("wealth"),
   reason: z.string().trim().min(1).max(400),
   priority: handoffPrioritySchema.optional(),
+  assignedAgent: z.string().trim().min(1).max(80).optional(),
 }).strict();
 export type CreateHandoffInput = z.input<typeof createHandoffInputSchema>;
 

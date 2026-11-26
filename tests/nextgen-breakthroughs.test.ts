@@ -65,6 +65,28 @@ test("#1 Multiplayer Live Glass Co-Browse: SSE slider sync, Advisor-Proposed car
   const signed = (await signRes.json()) as { ticket: HandoffTicket; auditId?: string };
   assert.equal(signed.ticket.coBrowse?.proposal?.status, "accepted");
   assert.ok(signed.auditId, "governed auditId recorded on signature");
+
+  // 5. Advisor shares an exact A2UI card live -> discovered via /api/handoffs/active & streamed over SSE to both views.
+  const activeRes = await fetch(`${app.url}/api/handoffs/active?personaId=demo-learner`);
+  assert.equal(activeRes.status, 200);
+  const activeBody = (await activeRes.json()) as { ticket: HandoffTicket | null };
+  assert.equal(activeBody.ticket?.handoffId, ticket.handoffId);
+
+  const shareRes = await fetch(`${app.url}/api/handoffs/${ticket.handoffId}/share-card`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      turnId: "turn_adv_1",
+      prompt: "Let me know my portfolio summary.",
+      sharedBy: "advisor",
+      sharedByName: "Priya Sharma, CFP®",
+      experience: { experienceId: "exp_shared_1", status: "ready", intro: "Here is your synced portfolio summary.", blocks: [], actions: [] },
+    }),
+  });
+  assert.equal(shareRes.status, 200);
+  const shared = (await shareRes.json()) as { ticket: HandoffTicket };
+  assert.equal(shared.ticket.coBrowse?.sharedCard?.sharedByName, "Priya Sharma, CFP®");
+  assert.equal((shared.ticket.coBrowse?.sharedCard?.experience as { experienceId?: string })?.experienceId, "exp_shared_1");
 });
 
 test("#2 Parallel Futures Simulator + #4 Expertise Mode persistence in sfield Memory", async (t) => {

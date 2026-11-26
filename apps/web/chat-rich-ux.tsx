@@ -264,6 +264,19 @@ export function LiveHandoffCard({ ticket: initialTicket, onDismiss }: {
         </div>
       )}
 
+      {ticket.coBrowse?.sharedCard?.experience && (
+        <div className="shared-live-card-box" role="region" aria-label="Shared Live A2UI Card">
+          <div className="shared-live-card-head">
+            <span className="cobrowse-live-pill">
+              <Sparkles size={11} aria-hidden="true" />
+              SYNCED LIVE CARD · VIEWED BY BOTH YOU &amp; {ticket.assignedAgent ?? ticket.coBrowse.sharedCard.sharedByName}
+            </span>
+            <small>Shared from: &ldquo;{ticket.coBrowse.sharedCard.prompt.slice(0, 72)}&rdquo;</small>
+          </div>
+          <ExperienceCanvasView data={ticket.coBrowse.sharedCard.experience as unknown as DisplayExperience} />
+        </div>
+      )}
+
       {ticket.status !== "resolved" && (
         <MultiplayerCoBrowseCard ticket={ticket} role="customer" onTicketUpdated={setTicket} />
       )}

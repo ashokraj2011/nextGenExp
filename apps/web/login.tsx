@@ -74,6 +74,16 @@ export function Login() {
               <ArrowRight size={19} aria-hidden="true" />
             </button>
           </li>)}
+          <li>
+            <a className="login-profile" href="/advisor" style={{ textDecoration: "none" }} aria-label="Sign in as Priya Sharma, Wealth Advisor">
+              <ProfileAvatar name="Priya Sharma" />
+              <span>
+                <strong>Priya Sharma, CFP®</strong>
+                <small>Wealth Advisor · Chat with AI Agent &amp; share live cards with clients</small>
+              </span>
+              <ArrowRight size={19} aria-hidden="true" />
+            </a>
+          </li>
         </ul>}
         {!profiles && (loadFailed ? <div className="login-status">
           <p role="alert">Couldn’t load profiles.</p>
