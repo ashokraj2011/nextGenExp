@@ -7,7 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startApp } from "./operator-fixture";
-import { gatewayConfigSchema, settingsFromConfig } from "../apps/server/gateway-config";
+import { defaultGatewayDataDir, GatewayConfigStore, gatewayConfigSchema, settingsFromConfig } from "../apps/server/gateway-config";
+import { tenantDataDirectory } from "../apps/server/tenant";
 import { testClient, testProject } from "./client";
 import { startFixtureGateway } from "./gateway-fixture";
 
@@ -27,6 +28,21 @@ async function fakeGateway(key: string) {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`, seen, close: () => new Promise<void>((r) => server.close(() => r())) };
 }
+
+test("default startup reuses an existing installation and its activated provider", async (t) => {
+  const base = await mkdtemp(join(tmpdir(), "cep-gateway-default-"));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const profile = "copilot_acp";
+  assert.equal(defaultGatewayDataDir(base, profile, true), join(base, "copilot"));
+  const legacy = new GatewayConfigStore(tenantDataDirectory(base));
+  const config = gatewayConfigSchema.parse({ provider: "openai_compatible", baseUrl: "https://office.example.invalid/v1",
+    model: "office-model", apiKeyMode: "env", apiKeyEnv: "OFFICE_KEY" });
+  legacy.activate(config, "owner");
+  const root = defaultGatewayDataDir(base, profile, true);
+  assert.equal(root, base);
+  assert.equal(new GatewayConfigStore(tenantDataDirectory(root)).active()?.model, "office-model");
+  assert.equal(defaultGatewayDataDir(base, profile, false), join(base, "copilot"));
+});
 
 test("gateway settings reuse the environment validation rules", () => {
   const base = gatewayConfigSchema.parse({ provider: "openai_compatible", model: "m", baseUrl: "https://gw.example.com/v1", apiKeyMode: "stored", apiKey: "sk-test-123456" });

@@ -10,7 +10,12 @@ import type { Bootstrap } from "../packages/contracts/api";
 import type { TurnPayloads } from "../packages/contracts/inspector";
 import { testClient, testProject } from "./client";
 
-test("LLM_PROVIDER selects Copilot without requiring HTTP settings", () => {
+test("Copilot ACP is the default and explicit providers take precedence", () => {
+  const defaultGateway = gatewayFromEnv({});
+  assert.equal(defaultGateway?.profile, "copilot_acp");
+  assert.equal(defaultGateway.model, "auto");
+  assert.equal(defaultGateway.command, "copilot");
+  assert.equal(gatewayFromEnv({ LLM_PROVIDER: "  ", LLM_MODEL: "my-model" })?.model, "my-model");
   const gateway = gatewayFromEnv({
     LLM_PROVIDER: "copilot_acp", LLM_BASE_URL: "invalid", LLM_GATEWAY_HEADERS_JSON: "invalid",
     OPENAI_API_KEY: "unused", COPILOT_ALLOW_ALL: "1",
@@ -20,13 +25,15 @@ test("LLM_PROVIDER selects Copilot without requiring HTTP settings", () => {
   assert.equal(gateway.command, "copilot");
   assert.deepEqual(gateway.env, {});
   assert.equal(gatewayFromEnv({ LLM_PROVIDER: "openai", OPENAI_API_KEY: "test-secret" })?.profile, "openai");
+  assert.equal(gatewayFromEnv({ LLM_PROVIDER: "copilot_acp", OPENAI_API_KEY: "test-secret" }, "openai")?.profile, "openai");
+  assert.equal(gatewayFromEnv({ LLM_PROVIDER: "gateway" }), null);
   assert.throws(() => gatewayFromEnv({ LLM_PROVIDER: "unknown" }), /LLM_PROVIDER/);
 });
 
 test("Copilot ACP drives routing, sfield tools, and rendering", { skip: process.platform === "win32" }, async (t) => {
   const dataDir = await mkdtemp(join(tmpdir(), "pzn-acp-test-"));
   const gateway = gatewayFromEnv({
-    ...process.env, LLM_PROVIDER: "copilot_acp", LLM_MODEL: "acp-fixture",
+    ...process.env, LLM_PROVIDER: undefined, LLM_BASE_URL: undefined, LLM_MODEL: "acp-fixture",
     COPILOT_ACP_COMMAND: fileURLToPath(new URL("./copilot-acp-fixture.mjs", import.meta.url)),
     COPILOT_GITHUB_TOKEN: "copilot-acp-fixture-token", OPENAI_API_KEY: "unused", COPILOT_ALLOW_ALL: "1",
   });

@@ -1664,7 +1664,7 @@ test("direct OpenAI and office gateway use their own credentials and request set
   assert.deepEqual(office?.headers, { "x-office-context": '{"project":"demo"}' });
   assert.deepEqual(office?.bodyFields, { region: "office" });
   assert.throws(() => gatewayFromEnv({ ...env, OPENAI_API_KEY: "" }, "openai"), /Set OPENAI_API_KEY/);
-  assert.equal(gatewayFromEnv({ OPENAI_API_KEY: env.OPENAI_API_KEY }), null);
+  assert.equal(gatewayFromEnv({ OPENAI_API_KEY: env.OPENAI_API_KEY })?.profile, "copilot_acp");
 });
 
 test("the direct profile uses OpenAI completion parameters and a separate browser session", async (t) => {

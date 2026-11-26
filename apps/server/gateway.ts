@@ -68,7 +68,9 @@ function modelLimits(contextSetting?: string, outputSetting?: string) {
 }
 
 export function gatewayFromEnv(env: NodeJS.ProcessEnv = process.env, profile: "gateway" | "openai" = "gateway"): GatewaySettings | null {
-  const provider = profile === "openai" ? "openai" : env.LLM_PROVIDER?.trim().toLowerCase() || "gateway";
+  // An explicitly configured endpoint also selects the office gateway in older .env files.
+  const provider = profile === "openai" ? "openai"
+    : env.LLM_PROVIDER?.trim().toLowerCase() || (env.LLM_BASE_URL?.trim() ? "gateway" : "copilot_acp");
   if (provider === "openai") {
     const apiKey = env.OPENAI_API_KEY?.trim();
     if (!apiKey) throw new Error("Set OPENAI_API_KEY in the server environment or .env.openai before using OpenAI API mode.");

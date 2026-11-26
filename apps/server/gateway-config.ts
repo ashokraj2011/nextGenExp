@@ -9,6 +9,7 @@ import { join, resolve } from "node:path";
 import { z } from "zod";
 import { gatewayFromEnv, type GatewaySettings } from "./gateway";
 import { runCopilotPrompt } from "./copilot-acp-client";
+import { tenantDataDirectory } from "./tenant";
 
 export const gatewayQuirks = ["system_as_user", "no_stream_usage", "no_strict", "json_mode_only", "tool_choice_unsupported"] as const;
 
@@ -49,7 +50,7 @@ type Saved = {
 
 /** What the admin UI sees: secrets masked. */
 export type GatewayConfigView = {
-  source: "saved" | "environment" | "none";
+  source: "saved" | "environment" | "default" | "none";
   running: { provider: string; model: string; baseUrl?: string } | null;
   active?: Omit<GatewayConfig, "apiKey"> & { apiKeySet: boolean; apiKeyHint?: string; activatedAt: string; activatedBy: string };
   lastTest?: GatewayTestResult;
@@ -57,6 +58,15 @@ export type GatewayConfigView = {
 };
 
 const mask = (key?: string) => (key ? `••••${key.slice(-4)}` : undefined);
+
+export function defaultGatewayDataDir(base: string, profile: GatewaySettings["profile"], implicitCopilot: boolean) {
+  if (profile === "openai") return join(base, "openai");
+  if (profile !== "copilot_acp") return base;
+  // Existing default installations can already contain a saved gateway and customer chats.
+  const existing = tenantDataDirectory(base);
+  if (implicitCopilot && ["app.sqlite", "llm-gateway.json"].some((name) => existsSync(join(existing, name)))) return base;
+  return join(base, "copilot");
+}
 
 export class GatewayConfigStore {
   private readonly path: string;
@@ -81,14 +91,14 @@ export class GatewayConfigStore {
     const { active: _a, ...rest } = this.read();
     if (Object.keys(rest).length) this.write(rest); else rmSync(this.path, { force: true });
   }
-  view(running: GatewaySettings | null, restartSupported: boolean): GatewayConfigView {
+  view(running: GatewaySettings | null, restartSupported: boolean, launchSource: "environment" | "default" = "environment"): GatewayConfigView {
     const state = this.read();
     const runningView = running
       ? { provider: running.profile === "copilot_acp" ? "copilot_acp" : running.profile === "openai" ? "openai" : "openai_compatible", model: running.model, ...("baseUrl" in running ? { baseUrl: running.baseUrl } : {}) }
       : null;
     const active = state.active;
     return {
-      source: active ? "saved" : running ? "environment" : "none",
+      source: active ? "saved" : running ? launchSource : "none",
       running: runningView,
       ...(active ? { active: { ...withoutKey(active), apiKeySet: Boolean(active.apiKey), ...(active.apiKey ? { apiKeyHint: mask(active.apiKey) } : {}), activatedAt: active.activatedAt, activatedBy: active.activatedBy } } : {}),
       ...(state.lastTest ? { lastTest: state.lastTest } : {}),

@@ -136,7 +136,7 @@ const { values } = parseArgs({
 });
 
 if (values.help) {
-  console.log("npm run chat:harness -- [--interactive] [--provider openai|gateway|copilot_acp] [--profile ID] [--trace PATH]");
+  console.log("npm run chat:harness -- [--interactive] [--provider copilot_acp|gateway|openai] [--profile ID] [--trace PATH]\nCopilot ACP is the default when no provider or office gateway URL is configured.");
 } else {
   if (existsSync(join(projectRoot, ".env"))) process.loadEnvFile(join(projectRoot, ".env"));
   if ((values.provider ?? process.env.LLM_PROVIDER) === "openai") {

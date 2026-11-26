@@ -50,6 +50,7 @@ function jsonFile(name: string, value: unknown): ContractFile {
 }
 
 const gatewaySettingsExample = [
+  "LLM_PROVIDER=gateway",
   "LLM_BASE_URL=https://gateway.example.invalid/v1",
   "LLM_MODEL=your-model-alias",
   "LLM_API_KEY=",
@@ -118,7 +119,7 @@ export const helpContracts = [
       {
         id: "gateway",
         title: "Model gateway",
-        description: "sfield sends the chat messages and expected response format to the model. You can configure extra request details for an office gateway.",
+        description: "The app and sfield use Copilot ACP by default. Administration → Model gateway shows the running provider and lets you activate an office gateway or the OpenAI API.",
         endpoints: [["POST /chat/completions", "Send a request to the configured model."]],
         files: [{ name: "sfield-model.ts", source: sfieldModelSource }, { name: "gateway.env.example", source: gatewaySettingsExample }],
       },

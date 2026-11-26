@@ -126,6 +126,7 @@ type Options = {
   operatorAuth?: "on" | "off";
   /** Called after a gateway configuration is activated or reset; main.ts restarts the app in-process. */
   onGatewayActivated?: () => void;
+  launchGatewaySource?: "environment" | "default";
   dataDir: string;
   gateway: GatewaySettings | null;
   projectRoot: string;
@@ -831,13 +832,14 @@ export async function startApp(options: Options) {
     if (resource === "admin" && id === "gateway" && inspectorEnabled) {
       const actor = requireOperator();
       const restartSupported = Boolean(options.onGatewayActivated);
+      const view = () => gatewayConfig.view(options.gateway, restartSupported, options.launchGatewaySource);
       const parseConfig = async () => {
         const { config } = await body(req, z.object({ config: z.record(z.string(), z.unknown()) }).strict(), 32 * 1024);
         const parsed = gatewayConfigSchema.safeParse(config);
         if (!parsed.success) throw new ApiError(400, "invalid_gateway_config", parsed.error.issues.map((i) => `${i.path.join(".") || "config"}: ${i.message}`).join("; ").slice(0, 400));
         return mergeStoredKey(parsed.data, gatewayConfig.active());
       };
-      if (!operation && method === "GET") return json(res, gatewayConfig.view(options.gateway, restartSupported));
+      if (!operation && method === "GET") return json(res, view());
       if (operation === "test" && method === "POST") {
         const config = await parseConfig();
         const result = await testGatewayConfig(config, { dataDir: options.dataDir, capacityCheck: checkGatewayCapacity });
@@ -851,13 +853,13 @@ export async function startApp(options: Options) {
           throw new ApiError(409, "test_required", "Test this exact configuration successfully (within the last 30 minutes) before activating it.");
         }
         gatewayConfig.activate(config, actor);
-        json(res, { activated: true, restarting: restartSupported, view: gatewayConfig.view(options.gateway, restartSupported) });
+        json(res, { activated: true, restarting: restartSupported, view: view() });
         if (restartSupported) setTimeout(() => options.onGatewayActivated?.(), 250);
         return;
       }
       if (operation === "reset" && method === "POST") {
         gatewayConfig.reset();
-        json(res, { reset: true, restarting: restartSupported, view: gatewayConfig.view(options.gateway, restartSupported) });
+        json(res, { reset: true, restarting: restartSupported, view: view() });
         if (restartSupported) setTimeout(() => options.onGatewayActivated?.(), 250);
         return;
       }

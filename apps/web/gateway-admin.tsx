@@ -12,7 +12,7 @@ type Config = {
 };
 export type GatewayTest = { ok: boolean; testedAt: string; latencyMs: number; provider: Provider; model: string; steps: { name: string; ok: boolean; detail: string }[]; configDigest: string };
 export type GatewayView = {
-  source: "saved" | "environment" | "none";
+  source: "saved" | "environment" | "default" | "none";
   running: { provider: string; model: string; baseUrl?: string } | null;
   active?: Omit<Config, "apiKey"> & { apiKeySet: boolean; apiKeyHint?: string; activatedAt: string; activatedBy: string };
   lastTest?: GatewayTest;
@@ -28,21 +28,25 @@ const QUIRKS = [
 ] as const;
 
 const PROVIDER_LABEL: Record<Provider, string> = {
+  copilot_acp: "GitHub Copilot (ACP)",
   openai_compatible: "LLM gateway (OpenAI-compatible Chat Completions)",
   openai: "OpenAI API",
-  copilot_acp: "GitHub Copilot (ACP)",
 };
 
-const blank = (): Config => ({ provider: "openai_compatible", model: "", baseUrl: "", apiKeyMode: "stored", headers: {}, bodyFields: {}, contextWindow: 16384, maxOutputTokens: 1500, quirks: [] });
+function blank(provider: Provider = "copilot_acp"): Config {
+  const model = provider === "copilot_acp" ? "auto" : provider === "openai" ? "gpt-4.1-mini" : "";
+  return { provider, model, baseUrl: "", apiKeyMode: provider === "copilot_acp" ? "none" : "stored",
+    headers: {}, bodyFields: {}, contextWindow: 16384, maxOutputTokens: 1500, quirks: [] };
+}
 
 function fromView(v: GatewayView): Config {
   if (v.active) {
     const { apiKeySet: _s, apiKeyHint: _h, activatedAt: _a, activatedBy: _b, ...rest } = v.active;
-    return { ...blank(), ...rest };
+    return { ...blank(rest.provider), ...rest };
   }
   if (v.running) {
     const provider = v.running.provider as Provider;
-    return { ...blank(), provider, model: v.running.model, baseUrl: v.running.baseUrl ?? "", apiKeyMode: provider === "copilot_acp" ? "none" : "stored" };
+    return { ...blank(provider), model: v.running.model, baseUrl: v.running.baseUrl ?? "" };
   }
   return blank();
 }
@@ -127,7 +131,7 @@ export function GatewayAdmin() {
     try {
       const out = await api.activateGateway(c);
       if (!out.restarting) { setView(out.view); setNotice("Saved. Restart the server to switch the running model."); setBusy(""); return; }
-      const ok = await waitForRestart((v) => v.source === "saved" && v.running?.model === c.model);
+      const ok = await waitForRestart((v) => v.source === "saved" && v.running?.provider === c.provider && v.running.model === c.model);
       setNotice(ok ? `Active: sfield now runs on ${c.model}.` : "Saved, but the server didn't come back with the new model. Check the server log.");
     } catch (e) { setError(toolSetupErrorMessage(e)); setBusy(""); }
   }
@@ -138,7 +142,7 @@ export function GatewayAdmin() {
       const out = await api.resetGateway();
       if (!out.restarting) { setView(out.view); setBusy(""); return; }
       const ok = await waitForRestart((v) => v.source !== "saved");
-      setNotice(ok ? "Back on the environment settings (.env / launch variables)." : "Reset saved; restart the server to apply.");
+      setNotice(ok ? "The startup gateway is active." : "Restart the server to use the startup gateway.");
     } catch (e) { setError(toolSetupErrorMessage(e)); setBusy(""); }
   }
 
@@ -152,7 +156,7 @@ export function GatewayAdmin() {
             <h3>{running ? `${PROVIDER_LABEL[running.provider as Provider] ?? running.provider} · ${running.model}` : "No model configured"}</h3>
           </div>
           <span className={"pzn-badge " + (view?.source === "none" ? "is-warn" : "is-pass")}>
-            {view?.source === "saved" ? "Saved configuration" : view?.source === "environment" ? "From environment" : "Not configured"}
+            {view?.source === "saved" ? "Saved configuration" : view?.source === "default" ? "Built-in default" : view?.source === "environment" ? "From environment" : "Not configured"}
           </span>
         </div>
         <div className="pzn-list-meta" style={{ fontSize: "0.8rem" }}>
@@ -162,11 +166,11 @@ export function GatewayAdmin() {
           {view?.lastTest && <span>Last test: {view.lastTest.ok ? "passed" : "failed"} · {new Date(view.lastTest.testedAt).toLocaleString()}</span>}
         </div>
         <p className="pzn-subtitle" style={{ fontSize: "0.78rem" }}>
-          Every agent run, chat copilot and tool call goes through sfield using this model binding. A saved configuration overrides the launch environment; activating one restarts the app in place (pending approvals resume).
+          The app and sfield use this provider for model calls. Copilot ACP is the built-in default. Activating a saved configuration restarts the app with that provider.
         </p>
         {view?.source === "saved" && (
           <div className="pzn-btn-row">
-            <button type="button" className="pzn-btn pzn-btn-sm" disabled={Boolean(busy)} onClick={() => void reset()}><RotateCcw size={12} /> Use environment settings instead</button>
+            <button type="button" className="pzn-btn pzn-btn-sm" disabled={Boolean(busy)} onClick={() => void reset()}><RotateCcw size={12} /> Use startup settings</button>
           </div>
         )}
       </section>
@@ -181,7 +185,10 @@ export function GatewayAdmin() {
         <div className="pzn-form-grid">
           <div className="pzn-field">
             <label>Provider</label>
-            <select aria-label="Provider" value={config.provider} onChange={(e) => set({ provider: e.target.value as Provider, apiKeyMode: e.target.value === "copilot_acp" ? "none" : "stored" })}>
+            <select aria-label="Provider" value={config.provider} onChange={(e) => {
+              const { provider, model, apiKeyMode } = blank(e.target.value as Provider);
+              set({ provider, model, apiKeyMode });
+            }}>
               {(Object.keys(PROVIDER_LABEL) as Provider[]).map((p) => <option key={p} value={p}>{PROVIDER_LABEL[p]}</option>)}
             </select>
           </div>

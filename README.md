@@ -29,11 +29,12 @@ npm ci
 npm run build
 ```
 
-### 1. Run with GitHub Copilot ACP (Recommended Local Live Mode)
-Sign in once via Copilot CLI (`copilot login`), then start CEP in dev mode:
+### 1. Run with GitHub Copilot ACP (default)
+
+Sign in with Copilot CLI (`copilot login`), then start CEP. The app and chat harness use Copilot ACP with automatic model selection when no provider or office gateway URL is configured.
 
 ```sh
-LLM_PROVIDER=copilot_acp PZN_PORT=4180 npm run dev
+PZN_PORT=4180 npm run dev
 ```
 
 Open **[http://127.0.0.1:4180/](http://127.0.0.1:4180/)** for Customer Chat and **[http://127.0.0.1:4180/admin/help](http://127.0.0.1:4180/admin/help)** for interactive Architecture Docs.
@@ -50,7 +51,7 @@ Opens on port `4175` with `gpt-4.1-mini` (override via `OPENAI_MODEL`).
 
 ### 3. Run the local app on port 4174
 
-Configure a model provider in the environment or in `.env`, then run:
+After signing in to Copilot CLI, run:
 
 ```sh
 npm run build
@@ -62,15 +63,17 @@ Open [chat](http://127.0.0.1:4174/) or [admin Logs](http://127.0.0.1:4174/admin/
 ### 4. Run with an Enterprise Gateway
 Copy `.env.example` to `.env` and set `LLM_PROVIDER=gateway`, `LLM_BASE_URL`, `LLM_MODEL`, and `LLM_API_KEY` (or custom headers via `LLM_GATEWAY_HEADERS_JSON` and body fields via `LLM_GATEWAY_BODY_JSON`), then run `npm start`.
 
+An existing `.env` with an office `LLM_BASE_URL` also selects that gateway. Set `LLM_PROVIDER=copilot_acp` to select Copilot explicitly.
+
 ---
 
 ### Model gateway (sfield)
 
-**Administration → Model gateway** (`/admin/gateway`) configures the LLM that sfield binds for every agent run, chat copilot and tool call: an OpenAI-compatible gateway (base URL, model, API key or env var, extra headers/body fields, context and output limits, adapter quirks), the OpenAI API, or GitHub Copilot (ACP).
+**Administration → Model gateway** (`/admin/gateway`) selects the provider the app uses to choose a flow and sfield uses to infer intent and compose the reply. It supports GitHub Copilot (ACP), the OpenAI API, and an OpenAI-compatible office gateway with custom headers, body fields and model limits.
 
 1. **Test connection** checks the settings with the same rules as the environment variables, runs sfield's context-capacity check for the router and composer prompts, and makes a real model call that must return JSON.
 2. **Activate** is enabled only after a passing test of exactly those settings (within 30 minutes). It saves the configuration to `llm-gateway.json` in the data directory (mode 600; a stored key is never sent back to the browser) and restarts the app in place so sfield re-binds the model. Pending approvals resume after the restart.
-3. A saved configuration overrides the launch environment on every start. **Use environment settings instead** removes it. If a saved configuration can't start, the server falls back to the environment settings.
+3. A saved configuration takes priority on startup. **Use startup settings** clears it and restores the provider selected at launch, which defaults to Copilot ACP. The app also uses this provider if it cannot load a saved configuration.
 
 ### Try a retirement account review
 
