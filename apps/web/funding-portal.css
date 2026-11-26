@@ -1,0 +1,14 @@
+.funding-portal { width: min(100% - 32px, 620px); margin: clamp(26px, 8vh, 85px) auto; color: var(--ink); }
+.funding-portal header, .funding-portal header span, .funding-portal > a, .portal-confirmation { display: flex; align-items: center; gap: 10px; }
+.funding-portal header { justify-content: space-between; margin-bottom: 20px; }
+.funding-portal header span { font-weight: 650; color: var(--teal-dark); }
+.funding-portal .content-card { padding: clamp(22px, 5vw, 40px); }
+.funding-portal h1 { font: 500 clamp(1.8rem, 5vw, 2.5rem)/1.12 var(--font-serif); margin: 0; }
+.funding-portal h2 { font-size: 1.1rem; margin: 26px 0 6px; }
+.funding-portal p { color: var(--soft-ink); line-height: 1.6; }
+.funding-portal .portal-owner { margin: 6px 0 20px; }
+.portal-confirm { border: 0; border-radius: 999px; padding: 11px 19px; background: var(--teal-dark); color: white; font: inherit; font-weight: 600; cursor: pointer; }
+.portal-confirm:disabled { opacity: .6; }
+.portal-confirmation { align-items: flex-start; padding: 16px; border: 1px solid var(--teal-border); border-radius: 12px; background: var(--teal-pale); color: var(--teal-dark); }
+.portal-confirmation p { margin: 4px 0 0; }
+.funding-portal > a { width: fit-content; margin-top: 20px; color: var(--teal-dark); }

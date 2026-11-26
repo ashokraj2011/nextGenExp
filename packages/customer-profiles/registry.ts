@@ -30,8 +30,8 @@ const defaultSegments: Record<string, { segment: string; notes: string; customAt
     ],
   },
   "demo-new-account": {
-    segment: "New Onboarding · Unfunded",
-    notes: "Recently opened account awaiting initial funding deposit.",
+    segment: "New account holder",
+    notes: "Recently opened an investment account.",
     customAttributes: [
       { key: "risk_tolerance", label: "Risk tolerance", type: "text", value: "Starter Growth" },
       { key: "advisor_name", label: "Dedicated advisor", type: "text", value: "Onboarding Desk" },

@@ -40,6 +40,7 @@
 .pending-actions ul { display: grid; gap: 11px; margin: 13px 0 0; padding: 0; list-style: none; }
 .pending-actions li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; }
 .pending-actions li + li { border-top: 1px solid var(--line); padding-top: 11px; }
+.pending-actions .pending-completion { border-top: 1px solid var(--line); padding-top: 12px; color: var(--teal-dark); }
 .pending-action-icon {
   display: grid; flex-shrink: 0; place-items: center; width: 34px; height: 34px;
   color: var(--teal-dark); background: var(--teal-pale); border-radius: 8px;

@@ -102,7 +102,7 @@ import demo from "../../fixtures/host.json";
 import type { Bootstrap, Conversation, TurnView } from "../../packages/contracts/api";
 import type { SelectionMode } from "../../packages/contracts/domain";
 import { actionBody, conversationChangeBody, createBody, eventBody, idPattern, messageBody, previewFundingBody, retryBody } from "../../packages/contracts/http-inputs";
-import { pendingActionsContext, workspacePinsSchema } from "../../packages/contracts/workspace";
+import { accountPortalPath, pendingActionsContext, workspacePinsSchema, type PortalFundingView } from "../../packages/contracts/workspace";
 import { adminPaths, isAdminPath } from "../../packages/contracts/admin-paths";
 import { mockCcreRuleSchema, toolSetupSchema, treatmentPreviewSchema } from "../../packages/contracts/tool-setup";
 import { tsFixtures } from "../../packages/ts-adapter";
@@ -146,7 +146,7 @@ const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".woff2": "font/woff2", ".woff": "font/woff", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml",
 };
-const pagePaths = new Set(["/", "/chat", "/wealth", "/it-ops", "/revops", "/recommendations", "/integrations", "/embed", "/login", "/planning", ...Object.values(adminPaths)]);
+const pagePaths = new Set(["/", "/chat", "/wealth", "/it-ops", "/revops", "/recommendations", "/integrations", "/embed", "/login", "/planning", accountPortalPath, ...Object.values(adminPaths)]);
 
 function visibleTurn(turn: TurnView, operator?: string): TurnView {
   if (operator) return turn;
@@ -244,6 +244,7 @@ export async function startApp(options: Options) {
         (personaId === selected ? portfolioSnapshots : fixturePortfolioSnapshotProvider).read(syntheticMid),
         (personaId === selected ? goalProgressProvider : fixtureGoalProgressProvider).read(syntheticMid),
       ]);
+      const confirmation = store.axe.portalConfirmation(syntheticMid);
       return {
         personaId, displayName, allowedScenarios,
         pins: store.workspacePins(principalId, personaId),
@@ -252,6 +253,7 @@ export async function startApp(options: Options) {
           accountFundingStatus: accountFundingStatusSchema.parse(
             store.axe.fundingStatus({ principalId, personaId }) ?? accountFundingStatus,
           ),
+          ...(confirmation && { firstDepositConfirmedAt: confirmation.occurredAt }),
           cashCents: portfolio?.cashCents ?? null,
         },
         overview: { portfolio, homeGoal, portfolioHistory: fixturePortfolioHistory(syntheticMid) },
@@ -703,8 +705,8 @@ export async function startApp(options: Options) {
     const method = req.method;
     if (resource === "profile-options" && !id && method === "GET") {
       const profiles = profileStore.list().filter(({ personaId }) => membership.chat("wealth", personaId))
-        .map(({ personaId, displayName, accountFundingStatus }) => ({
-          personaId, displayName, ...(!membership.restricted && { fundingStatus: accountFundingStatus }),
+        .map(({ personaId, displayName, accountFundingStatus, syntheticMid }) => ({
+          personaId, displayName, ...(!membership.restricted && { fundingStatus: store.axe.portalConfirmation(syntheticMid) ? "funded" : accountFundingStatus }),
         }));
       return json(res, { profiles });
     }
@@ -715,6 +717,19 @@ export async function startApp(options: Options) {
       }
       store.selectProfile(principalId, personaId);
       return json(res, { personaId });
+    }
+    if (resource === "account-portal" && id === "funding" && !operation && (method === "GET" || method === "POST")) {
+      const member = selectedProfile ? profileStore.findByPersonaId(selectedProfile) : undefined;
+      if (!member) throw new ApiError(403, "profile_required", "Sign in to open your account.");
+      requireChatDomain("wealth", member.personaId);
+      if (method === "POST") {
+        const expected = await body(req, z.object({ personaId: z.string().regex(idPattern) }).strict());
+        if (expected.personaId !== member.personaId) throw new ApiError(409, "profile_changed", "Your signed-in account changed. Reopen the account portal.");
+        if (member.accountFundingStatus === "unfunded") store.axe.confirmPortalDeposit(member.personaId, member.syntheticMid, now());
+      }
+      const confirmation = store.axe.portalConfirmation(member.syntheticMid);
+      return json(res, { personaId: member.personaId, displayName: member.displayName,
+        fundingStatus: confirmation ? "funded" : member.accountFundingStatus, confirmation } satisfies PortalFundingView);
     }
     const createChat = async (audience?: "admin") => {
       const test = audience && url.searchParams.get("scope") === "preview" ? await body(req,
@@ -1091,7 +1106,9 @@ export async function startApp(options: Options) {
         return json(res, setup);
       }
       if (id === "treatment-preview" && method === "POST") {
-        return json(res, await previewTreatmentSelector(await body(req, treatmentPreviewSchema, toolSetupLimit), portfolioSnapshots));
+        const input = await body(req, treatmentPreviewSchema, toolSetupLimit);
+        const funding = store.axe.fundingFact({ principalId, personaId: input.personaId });
+        return json(res, await previewTreatmentSelector(input, portfolioSnapshots, funding));
       }
       if (id === "ccre-rules" && method === "POST") {
         const rule = await body(req, mockCcreRuleSchema, toolSetupLimit);

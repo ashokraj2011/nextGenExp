@@ -7,6 +7,7 @@
  *   - GET /embed-demo        -> Standalone Host Portal (default: Meridian Private Wealth, or any ?vertical=<packId>)
  */
 import type { VerticalPackRecord, VerticalScreenContext } from "../../packages/contracts/vertical-pack";
+import { accountPortalPath } from "../../packages/contracts/workspace";
 
 function escapeHtml(input: string): string {
   return input
@@ -878,6 +879,7 @@ export function renderHostPortalDemoHtml(
     <div style="display:flex;gap:14px;">
       <a href="/admin/embed">&larr; Back to Admin Embed Studio</a>
       <a href="/chat">Open Full CEP App</a>
+      ${initialDomain === "wealth" ? `<a href="${accountPortalPath}">Open account funding</a>` : ""}
     </div>
   </div>
 

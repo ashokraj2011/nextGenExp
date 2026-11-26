@@ -63,15 +63,26 @@ export function ModelStage({ title, stage, expanded = false, showBodies = false 
   </details>;
 }
 
+function FundingRuleDetails({ check }: { check: NonNullable<TreatmentPayloads["fundingCheck"]> }) {
+  const { confirmation } = check;
+  return <section className="content-card" aria-label="Funding reminder decision">
+    <h3>Funding reminder {check.eligible ? "eligible" : "excluded"}</h3>
+    <p>The account portal confirmed the first deposit for <code>{confirmation.mid}</code> on {new Date(confirmation.occurredAt).toLocaleString()}.</p>
+    <p>TS evaluated <strong>{check.rule}</strong>. The condition was <code>{check.condition}</code>. The recorded funding status was <strong>{check.actual}</strong>.</p>
+    <JsonBlock title="Account portal confirmation" value={{ bytes: 0, data: confirmation }} />
+  </section>;
+}
+
 function TreatmentStage({ stage, scoring = false }: { stage: TreatmentPayloads | null; scoring?: boolean }) {
   const title = scoring ? "Treatment Selector topic scores" : "Treatment Selector";
   const labels = scoring
     ? { toolRequest: "sfield topic scores request", request: "Mock topic scores request", response: "Topic scores response", error: "Topic scores error" }
     : { toolRequest: "sfield tool request", request: "Mock request", response: "Tool response", error: "Tool error" };
-  return <details className="trace-details payload-stage">
+  return <details className="trace-details payload-stage" open={stage?.fundingCheck ? true : undefined}>
     <summary>{title} · {stage?.status ?? "no call"}</summary>
     {stage ? <>
       <p><code>{stage.tool}</code></p>
+      {stage.fundingCheck && <FundingRuleDetails check={stage.fundingCheck} />}
       <JsonBlock title={labels.toolRequest} value={stage.registryInput} />
       {stage.mockInput && <JsonBlock title={labels.request} value={stage.mockInput} open />}
       {stage.ccre && <JsonBlock title="Mock CCRE evaluation" value={stage.ccre} />}
@@ -298,6 +309,7 @@ export function PendingActionLogs({ profiles }: { profiles: DemoPersona[] }) {
       {lookup ? <div className="call-log-list">
         <h3>Treatment Selector · {lookup.status}</h3>
         <p>{profileName(lookup.personaId)} · <time dateTime={new Date(lookup.createdAt).toISOString()}>{lookupTime.format(lookup.createdAt)}</time></p>
+        {lookup.status === "succeeded" && lookup.ccre?.fundingCheck && <FundingRuleDetails check={lookup.ccre.fundingCheck} />}
         <div className="pending-log-payloads" key={lookup.id}>
           <JsonBlock title="Treatment Selector request" value={{ bytes: 0, data: lookup.request }} open />
           {lookup.status === "succeeded"

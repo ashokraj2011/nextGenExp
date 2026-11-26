@@ -120,7 +120,8 @@ export function usePendingActions(personaId?: string) {
 
 export type PendingActions = ReturnType<typeof usePendingActions>;
 
-function PendingActionsCard({ pendingActions, disabled, onReviewGuide, onPreviewFunding }: {
+function PendingActionsCard({ pendingActions, firstDepositConfirmedAt, disabled, onReviewGuide, onPreviewFunding }: {
+  firstDepositConfirmedAt?: number;
   pendingActions: PendingActions; disabled: boolean; onReviewGuide: (message: string) => void; onPreviewFunding: () => void;
 }) {
   const title = useId();
@@ -148,6 +149,10 @@ function PendingActionsCard({ pendingActions, disabled, onReviewGuide, onPreview
       <p role="status">Couldn’t load pending actions.</p>
       <button className="secondary-button" type="button" onClick={refresh}>Try again</button>
     </div> : <p role="status">Checking pending actions…</p>)}
+    {firstDepositConfirmedAt !== undefined && <p className="pending-completion">
+      <strong>First deposit confirmed</strong> · <time dateTime={new Date(firstDepositConfirmedAt).toISOString()}>
+        {new Date(firstDepositConfirmedAt).toLocaleDateString(undefined, { dateStyle: "medium" })}</time>
+    </p>}
   </section>;
 }
 
@@ -186,7 +191,7 @@ export function WorkspaceHome({ activeProfile, pendingActions, disabled, modelUn
         <h3>Account summary</h3>
         <p>Portfolio information is unavailable.</p>
       </section>}
-      <PendingActionsCard pendingActions={pendingActions} disabled={actionsDisabled}
+      <PendingActionsCard pendingActions={pendingActions} firstDepositConfirmedAt={activeProfile.profile?.firstDepositConfirmedAt} disabled={actionsDisabled}
         onReviewGuide={onReviewGuide} onPreviewFunding={onPreviewFunding} />
     </>}
   </div>;

@@ -176,6 +176,7 @@ async function treatmentPayloads(sf: SField, inspection: Inspection, turn: TurnR
     mockInput: mockInput ? inspection.payload(mockInput) : undefined,
     ...(mockInput && !turn.treatmentMockInput && { inputReconstructed: true as const }),
     ccre: turn.treatmentCcre ? inspection.payload(turn.treatmentCcre) : undefined,
+    fundingCheck: turn.treatmentCcre?.fundingCheck,
   };
 }
 

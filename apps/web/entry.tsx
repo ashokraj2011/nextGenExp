@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import "@fontsource-variable/inter/wght.css";
 import { adminPaths, isAdminPath } from "../../packages/contracts/admin-paths";
+import { accountPortalPath } from "../../packages/contracts/workspace";
 import { domainPackFromPath, getDomainPack } from "../../packages/contracts/domain-packs";
 import { readProfileSession, saveProfileSession } from "./conversation-storage";
 import { setStoredDomainPack } from "./domain-pack-ui";
@@ -33,6 +34,9 @@ if (location.pathname === "/embed") {
 } else if (location.pathname === "/recommendations") {
   document.title = "Recommendations Workspace · CEP";
   void import("./recommendation-workspace").then(({ RecommendationWorkspace }) => createRoot(document.getElementById("root")!).render(<RecommendationWorkspace />));
+} else if (location.pathname === accountPortalPath) {
+  document.title = "Account funding · Account portal";
+  void import("./funding-portal").then(({ FundingPortal }) => createRoot(document.getElementById("root")!).render(<FundingPortal />));
 } else if (location.pathname === "/login") {
   document.title = "Sign in · CEP";
   void import("./login").then(({ Login }) => createRoot(document.getElementById("root")!).render(<Login />));

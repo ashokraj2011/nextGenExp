@@ -18,7 +18,7 @@ export async function readWorkspacePendingActions(
   if (!setup.enabled.selection) throw new ApiError(503, "selection_disabled", "Pending actions are unavailable.");
   const adapter = new FixtureTsAdapter(
     { scenarioId: host.defaultScenarioId, ordinal: 1 }, setup.treatmentOverrides, setup.ccreRules,
-    portfolios, store.axe.fundingStatus({ principalId, personaId }),
+    portfolios, store.axe.fundingFact({ principalId, personaId }),
   );
   const request = { mid: syntheticMid, context: pendingActionsContext } as const;
   const log = { id: makeId("pending"), personaId, createdAt: now, request };

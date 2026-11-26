@@ -98,6 +98,10 @@ export function effectiveCcreRules(scenarioId: string, contextId: string,
 
 export type MockCcreEvaluation = {
   beforeRules: string[];
+  fundingCheck?: {
+    confirmation: import("./workspace").FirstDepositConfirmation;
+    rule: string; condition: string; actual: string; eligible: boolean;
+  };
   results: { name: string; contentId: string; outcome: "matched" | "excluded" | "outside_list"; reason?: string; cashAboveCents?: number }[];
 };
 export const toolSetupSchema = z.object({

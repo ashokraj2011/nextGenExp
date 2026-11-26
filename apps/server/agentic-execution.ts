@@ -102,7 +102,7 @@ export class AgenticExecution {
     const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
     return new FixtureTsAdapter(
       { scenarioId: conversation.scenarioId, ordinal: turn.ordinal }, turn.toolSetup?.treatmentOverrides, turn.toolSetup?.ccreRules,
-      this.portfolios, this.store.axe.fundingStatus(turn.scope),
+      this.portfolios, this.store.axe.fundingFact(turn.scope),
     );
   }
 

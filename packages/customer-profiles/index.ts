@@ -97,6 +97,13 @@ export class CustomerProfileStore {
     }
     try {
       const parsed = persistedSchema.parse(JSON.parse(readFileSync(this.filePath, "utf8")));
+      // Earlier profile defaults embedded a funding status that can now change at the account portal.
+      const onboarding = parsed.profiles.find((profile) => profile.personaId === "demo-new-account");
+      const defaults = builtInById.get("demo-new-account");
+      if (onboarding && defaults) {
+        if (onboarding.segment === "New Onboarding · Unfunded") onboarding.segment = defaults.segment;
+        if (onboarding.notes === "Recently opened account awaiting initial funding deposit.") onboarding.notes = defaults.notes;
+      }
       this.overrides = new Map(parsed.profiles.map((p) => [p.personaId, p]));
       return this.overrides;
     } catch {

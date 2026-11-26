@@ -1,4 +1,7 @@
 import type { SqliteDatabase } from "@sfield/store-sqlite";
+import { randomUUID } from "node:crypto";
+import { findProfileById } from "../../packages/customer-profiles";
+import type { FirstDepositConfirmation } from "../../packages/contracts/workspace";
 import type { DecisionEvent, Evidence, ExecutionPlan, ExperienceIR, EligibilityGrant, Journey, CapabilityManifest, InputValues } from "../../packages/contracts/agentic";
 
 type Owner = { principalId: string; personaId: string };
@@ -26,6 +29,9 @@ const formatVersion = 1;
 
 export class AgenticStore {
   constructor(private readonly db: SqliteDatabase) {
+    db.exec(`CREATE TABLE IF NOT EXISTS account_first_deposits (
+      mid TEXT PRIMARY KEY, event_id TEXT UNIQUE NOT NULL, occurred_at INTEGER NOT NULL
+    )`);
     for (const table of tables) {
       db.exec(`CREATE TABLE IF NOT EXISTS ${table} (
         principal_id TEXT NOT NULL, persona_id TEXT NOT NULL, id TEXT NOT NULL, correlation TEXT NOT NULL,
@@ -93,9 +99,35 @@ export class AgenticStore {
     });
   }
 
-  fundingStatus(owner: Owner) {
+  portalConfirmation(mid: string): FirstDepositConfirmation | undefined {
+    const row = this.db.one<{ event_id: string; occurred_at: number }>(
+      "SELECT event_id, occurred_at FROM account_first_deposits WHERE mid = ?", mid);
+    if (row) return { eventId: row.event_id, type: "account.first_deposit.completed",
+      source: "mock-account-portal", mid, occurredAt: row.occurred_at };
+  }
+
+  confirmPortalDeposit(personaId: string, mid: string, now: number) {
+    return this.db.tx(() => {
+      const existing = this.portalConfirmation(mid);
+      if (existing) return existing;
+      const eventId = "deposit_" + randomUUID();
+      this.db.run("INSERT INTO account_first_deposits (mid, event_id, occurred_at) VALUES (?, ?, ?)", mid, eventId, now);
+      const sessions = this.db.all<{ principal_id: string }>("SELECT DISTINCT principal_id FROM journeys WHERE persona_id = ?", personaId);
+      for (const { principal_id } of sessions) this.confirmFundingJourneys({ principalId: principal_id, personaId }, eventId, now);
+      return this.portalConfirmation(mid)!;
+    });
+  }
+
+  fundingFact(owner: Owner) {
+    const mid = findProfileById(owner.personaId)?.syntheticMid;
+    const confirmation = mid ? this.portalConfirmation(mid) : undefined;
+    if (confirmation) return confirmation;
     const record = this.get("customer_facts", owner, "funding_status");
     return record?.kind === "event" ? record.status : undefined;
+  }
+
+  fundingStatus(owner: Owner) {
+    return this.fundingFact(owner) ? "funded" as const : undefined;
   }
 
   setObservedFact(owner: Owner, evidence: Evidence) {
@@ -120,21 +152,25 @@ export class AgenticStore {
       if (existing || this.fundingStatus(owner)) return false;
       if (!this.insert("customer_events", owner, event.eventId, event.type, event)) return false;
       this.upsert("customer_facts", owner, "funding_status", event.eventId, { kind: "event", status: "funded", evidence: event });
-      for (const journey of this.activeJourneys(owner)) {
-        const affected = journey.plan.steps.filter(({ capabilityId }) => capabilityId === "account.funding.preview");
-        if (!affected.length) continue;
-        const results = journey.results.map((step) => affected.some(({ id }) => id === step.stepId)
-          ? { ...step, status: "blocked" as const, reason: "FIRST_DEPOSIT_CONFIRMED", missing: undefined } : step);
-        this.saveJourney(owner, {
-          ...journey, results, pending: undefined, status: "partially_completed", updatedAt: event.occurredAt,
-          confirmations: [...journey.confirmations ?? [], { objective: "first_deposit", eventId: event.eventId, confirmedAt: event.occurredAt }],
-        });
-        this.trace(owner, {
-          type: "journey.event_applied", at: event.occurredAt, runId: journey.runId, turnId: journey.turnId,
-          journeyId: journey.id, detail: { eventId: event.eventId, type: event.type, fundingObjectiveConfirmed: true },
-        });
-      }
+      this.confirmFundingJourneys(owner, event.eventId, event.occurredAt);
       return true;
     });
+  }
+
+  private confirmFundingJourneys(owner: Owner, eventId: string, occurredAt: number) {
+    for (const journey of this.activeJourneys(owner)) {
+      const affected = journey.plan.steps.filter(({ capabilityId }) => capabilityId === "account.funding.preview");
+      if (!affected.length || journey.confirmations?.some((item) => item.objective === "first_deposit")) continue;
+      const results = journey.results.map((step) => affected.some(({ id }) => id === step.stepId)
+        ? { ...step, status: "blocked" as const, reason: "FIRST_DEPOSIT_CONFIRMED", missing: undefined } : step);
+      this.saveJourney(owner, {
+        ...journey, results, pending: undefined, status: "partially_completed", updatedAt: occurredAt,
+        confirmations: [...journey.confirmations ?? [], { objective: "first_deposit", eventId, confirmedAt: occurredAt }],
+      });
+      this.trace(owner, {
+        type: "journey.event_applied", at: occurredAt, runId: journey.runId, turnId: journey.turnId,
+        journeyId: journey.id, detail: { eventId, type: "account.first_deposit.completed", fundingObjectiveConfirmed: true },
+      });
+    }
   }
 }

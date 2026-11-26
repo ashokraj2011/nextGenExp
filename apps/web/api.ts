@@ -47,7 +47,7 @@ import type { AgenticTrace } from "./decision-trace";
 import type { EvaluationRow } from "../../packages/contracts/evaluation";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import type { RecordUpdate, Bootstrap, ProfileChoice, Conversation, ConversationChange, ConversationView, DomainWriteAuditEntry, EngagementAnalyticsView, TurnAccepted, TurnView } from "../../packages/contracts/api";
-import { pendingActionsContext, type WorkspaceActionLog, type WorkspaceNextStep, type WorkspacePendingAction, type WorkspacePin } from "../../packages/contracts/workspace";
+import { pendingActionsContext, type PortalFundingView, type WorkspaceActionLog, type WorkspaceNextStep, type WorkspacePendingAction, type WorkspacePin } from "../../packages/contracts/workspace";
 import type { TreatmentRun, TurnPayloads } from "../../packages/contracts/inspector";
 import type { ContextCatalog, PropensityResult, SelectionMode } from "../../packages/contracts/domain";
 import type { DraftCheck, Integration, IntegrationCopilotRequest, IntegrationCopilotResponse, IntegrationTasksView, McpImportCandidate, TaskContract, TaskContractInput, TaskRun } from "../../packages/contracts/integration-task";
@@ -202,6 +202,8 @@ export const api = {
   changeConversation: (id: string, change: ConversationChange) => request<Conversation>("/api/conversations/" + id + "/settings", change),
   nextStep: (personaId: string) => request<WorkspaceNextStep | null>("/api/workspace/" + personaId + "/next-step"),
   pendingActions: (personaId: string) => request<WorkspacePendingAction[]>("/api/workspace/" + personaId + "/" + pendingActionsContext),
+  portalFunding: () => request<PortalFundingView>("/api/account-portal/funding"),
+  confirmPortalFunding: (personaId: string) => request<PortalFundingView>("/api/account-portal/funding", { personaId }),
   savePins: (personaId: string, pins: WorkspacePin[]) => request<WorkspacePin[]>("/api/workspace/" + personaId + "/preferences", { pins }),
   dismissNba: (personaId: string, nbaId: string) => request<{ dismissed: string[] }>("/api/workspace/" + personaId + "/dismiss-nba", { nbaId }),
   applyCustomerBindings: (personaId: string, updates: Record<string, string>) => request<{ updatedFields: string[] }>(

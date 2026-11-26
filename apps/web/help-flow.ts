@@ -198,12 +198,12 @@ const addressBlocks = [
   { component: "PznCapabilityForm", props: { title: "Prepare an address change" } },
 ];
 const marcusCustomerContext = {
-  segment: "New Onboarding · Unfunded",
+  segment: "New account holder",
   fundingStatus: "unfunded" as const,
   beneficiaryStatus: "on_file" as const,
   hasElevatedCash: false,
   hasActiveHomeGoal: true,
-  notes: "Recently opened account awaiting initial funding deposit.",
+  notes: "Recently opened an investment account.",
 };
 const marcusRouterInput = {
   ...JSON.parse(marcusCalls.router.request.message.text),
@@ -358,7 +358,7 @@ export const addressUpdateExample = {
         type: "experience.ready",
         turnId: turnRef,
         actionMode: "verified_experience",
-        customerLookup: { personaName: newAccount.displayName, fundingStatus: "unfunded", highlights: ["New Onboarding · Unfunded", "Awaiting first deposit", "Beneficiaries on file"] },
+        customerLookup: { personaName: newAccount.displayName, fundingStatus: "unfunded", highlights: [marcusCustomerContext.segment, "Awaiting first deposit", "Beneficiaries on file"] },
         payload: {
           experienceId: addressExperienceId, messageId: "msg_demo", a2uiVersion: "1.0",
           messages: [{

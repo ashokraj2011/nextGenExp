@@ -498,7 +498,7 @@ export class Runtime implements IntegrationTaskRuntime {
 
   private treatmentAdapter(state: FixtureState, setup: ToolSetup | undefined, scope: Pick<Scope, "principalId" | "personaId">) {
     return new FixtureTsAdapter(
-      state, setup?.treatmentOverrides, setup?.ccreRules, this.portfolioSnapshots, this.store.axe.fundingStatus(scope),
+      state, setup?.treatmentOverrides, setup?.ccreRules, this.portfolioSnapshots, this.store.axe.fundingFact(scope),
     );
   }
 

@@ -564,6 +564,7 @@ function Chat({
     <ExperienceControls.Provider value={{
       activeExperienceId,
       allowRuleCreation: adminChat,
+      accountPortalAvailable: !adminChat && conversation?.domainId === "wealth",
       askPrompt: canWrite ? (prompt) => void onSend(prompt) : undefined,
       onWriteBack,
       followUp: onFollowUp,

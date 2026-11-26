@@ -4,7 +4,9 @@ import { contextCatalogSchema, type ContextCatalog, type PropensityResult } from
 import { actionRecommendationSchema, type TreatmentDecision, type TreatmentRecommendations, type WorkflowCandidate } from "../contracts/funding-workflow";
 import { portfolioSnapshotSchema } from "../contracts/portfolio";
 import { effectiveCcreRules, mockCcreConditionSchema, mockCcreRuleSchema, normalizedIdsSchema, treatmentOverride, type MockCcreRule, type TreatmentOverride } from "../contracts/tool-setup";
-import { pendingActionsContext } from "../contracts/workspace";
+import { pendingActionsContext, type FirstDepositConfirmation } from "../contracts/workspace";
+import { formatGlossaryCondition } from "../contracts/rule-glossary";
+import type { MockCcreEvaluation } from "../contracts/tool-setup";
 import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../portfolio-snapshot";
 import { memberRetirementAccounts } from "../retirement-accounts";
 import { findProfileByMid } from "../customer-profiles";
@@ -54,6 +56,7 @@ if (new Set(catalog.contexts.map((entry) => entry.contextId)).size !== catalog.c
 }
 
 export type FixtureState = Readonly<{ scenarioId: string; ordinal: number }>;
+export type FundingFact = "funded" | "unfunded" | FirstDepositConfirmation;
 type TreatmentRequest = { mid: string; context: string; accountId?: string; overrideCashCents?: number };
 export type ContextScoresRequest = { mid: string; contextIds: string[] };
 export interface TsAdapter {
@@ -92,13 +95,20 @@ function recommendationsFor(contentIds: string[], matches: RuleWorkflowMatch[]):
 }
 
 export class FixtureTsAdapter implements TsAdapter {
+  private readonly fundingStatus?: "funded" | "unfunded";
+  private readonly confirmation?: FirstDepositConfirmation;
   constructor(
     private readonly state: FixtureState,
     private readonly overrides: readonly TreatmentOverride[] = [],
     private readonly ccreRules: readonly MockCcreRule[] = [],
     private readonly portfolios: PortfolioSnapshotProvider = fixturePortfolioSnapshotProvider,
-    private readonly fundingStatus?: "funded" | "unfunded",
-  ) {}
+    funding?: FundingFact,
+  ) {
+    if (typeof funding === "object") {
+      this.confirmation = funding;
+      this.fundingStatus = "funded";
+    } else this.fundingStatus = funding;
+  }
 
   private personaFor(mid: string) {
     const profile = findProfileByMid(mid);
@@ -138,6 +148,8 @@ export class FixtureTsAdapter implements TsAdapter {
   async selectEligibleContent({ mid, context, accountId, overrideCashCents }: TreatmentRequest, signal?: AbortSignal) {
     signal?.throwIfAborted();
     const persona = this.personaFor(mid);
+    const confirmation = this.confirmation;
+    if (confirmation && confirmation.mid !== mid) throw new Error("FUNDING_MEMBER_MISMATCH");
     const account = accountId ? memberRetirementAccounts(mid).find((item) => item.id === accountId) : undefined;
     if (accountId && (!account || context !== "learning")) throw new Error("RETIREMENT_ACCOUNT_UNAVAILABLE");
     const activeRules = effectiveCcreRules(this.state.scenarioId, context, tsFixtures.defaultCcreRules, this.ccreRules);
@@ -156,6 +168,14 @@ export class FixtureTsAdapter implements TsAdapter {
         ...(account && { beneficiaryStatus: account.beneficiary === null ? "missing" as const : "on_file" as const }),
       };
       const result = applyMockCcreRules([...ids], rules, input);
+      const fundingRule = rules.find((rule) => rule.contentId === "fund_account");
+      const condition = fundingRule?.condition;
+      const evaluatedFunding = result.ccre?.results.find((rule) => rule.contentId === "fund_account" && rule.outcome !== "outside_list");
+      if (confirmation && result.ccre && evaluatedFunding && condition?.kind === "attribute"
+        && condition.namespaceId === "account" && condition.attributeId === "funding_status") {
+        result.ccre.fundingCheck = { confirmation, rule: evaluatedFunding.name, condition: formatGlossaryCondition(condition),
+          actual: input.fundingStatus!, eligible: evaluatedFunding.outcome === "matched" };
+      }
       const actionMatches = contextAllowed ? scopedActionRules.filter(({ condition }) => matchesCondition(condition, input)) : [];
       const workflowMatches = result.contentIds.flatMap((contentId) => {
         const rule = rules.find((r) => r.contentId === contentId);
@@ -190,8 +210,19 @@ export class FixtureTsAdapter implements TsAdapter {
           ...evalResult.eligibleContents.map((c) => c.contentId),
           ...evalResult.filteredOutContents.map((c) => c.contentId),
         ];
+        let publishedFundingCheck: MockCcreEvaluation["fundingCheck"];
         const ccreResults = [...evalResult.eligibleContents, ...evalResult.filteredOutContents].map((card) => {
           const rules = [...evalResult.contextRuleResults, ...evalResult.ruleResults.filter((r) => card.attachedRuleIds.includes(r.ruleId))];
+          if (confirmation && card.contentId === "fund_account") {
+            for (const rule of rules) {
+              const check = rule.clauses.find((c) => c.namespaceId === "account" && c.attributeId === "funding_status");
+              if (check) {
+                publishedFundingCheck = { confirmation, rule: rule.ruleName, condition: check.reason,
+                  actual: String(check.actualValue), eligible: card.eligible };
+                if (!rule.effectiveAllow) break;
+              }
+            }
+          }
           const rule = rules.length === 1 ? rules[0] : undefined;
           const clause = rule?.effect === "include_when_true" && rule.clauses.length === 1 ? rule.clauses[0] : undefined;
           const cashAboveCents = clause?.namespaceId === "portfolio" && clause.attributeId === "cash_usd" && clause.operator === "gt" && typeof clause.expectedValue === "number" ? Math.round(clause.expectedValue * 100) : undefined;
@@ -214,7 +245,8 @@ export class FixtureTsAdapter implements TsAdapter {
             const entry = pznTextContentToCatalogEntry({ ...template, headline: card.headline, body: card.renderedBody });
             return [{ ...entry, sourceRef: `${entry.sourceRef}@${context}:v${selfServicePub.version}` }];
           }),
-          ccre: { beforeRules, results: [...ccreResults, ...(evaluated.ccre?.results ?? [])] },
+          ccre: { beforeRules, results: [...ccreResults, ...(evaluated.ccre?.results ?? [])],
+            fundingCheck: evaluated.ccre?.fundingCheck ?? publishedFundingCheck },
         };
       }
     }

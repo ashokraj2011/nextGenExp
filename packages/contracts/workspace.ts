@@ -18,6 +18,20 @@ export type WorkspaceNextStep = {
 export const overviewFundingOrigin = "overview_funding";
 export const nextStepContext = "next-step";
 export const pendingActionsContext = "pending-actions";
+export const accountPortalPath = "/portal/funding";
+export type FirstDepositConfirmation = {
+  eventId: string;
+  type: "account.first_deposit.completed";
+  source: "mock-account-portal";
+  mid: string;
+  occurredAt: number;
+};
+export type PortalFundingView = {
+  personaId: string;
+  displayName: string;
+  fundingStatus: "funded" | "unfunded";
+  confirmation?: FirstDepositConfirmation;
+};
 export const pendingActionsFundingOrigin = "pending_actions_funding";
 
 export function workspaceFundingContext(origin: string) {

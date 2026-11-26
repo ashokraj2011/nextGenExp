@@ -518,8 +518,10 @@ try {
   await portfolioPage.getByLabel("Topic", { exact: true }).selectOption("portsum");
   await portfolioPage.getByLabel("Demo profile", { exact: true }).selectOption("demo-returning");
   await portfolioPage.getByRole("button", { name: "Run preview", exact: true }).click();
-  await portfolioPage.getByText("Cash above $10,000", { exact: true }).waitFor();
-  await portfolioPage.getByText("Filtered out", { exact: true }).waitFor();
+  const cashRuleResult = portfolioPage.getByRole("status").getByRole("listitem").filter({
+    has: portfolioPage.getByText("Cash above $10,000", { exact: true }),
+  });
+  await cashRuleResult.getByText("Filtered out", { exact: true }).waitFor();
   await portfolioPage.getByRole("button", { name: "Open in chat", exact: true }).click();
   await jordanProfileTrigger.waitFor();
   await portfolioQuestion.fill("Let me know my portfolio summary.");
@@ -962,6 +964,17 @@ try {
   await askAsProfile("Use the linked bank account.");
   await signedInResponse.getByRole("region", { name: "Funding preview", exact: true }).waitFor();
 
+  await signedInResponse.getByRole("region", { name: "Funding preview" }).getByRole("link", { name: "Open account portal" }).click();
+  await signInPage.getByRole("button", { name: "Mark account funded" }).click();
+  await signInPage.getByRole("status").getByText("Account funded", { exact: true }).waitFor();
+  await signOut.click();
+  await signInAs("Marcus Reed");
+  await pendingActions.getByText("First deposit confirmed", { exact: true }).waitFor();
+  await pendingActions.getByText("No pending actions.", { exact: true }).waitFor();
+  assert.equal(await pendingActions.getByRole("button", { name: "Preview funding" }).count(), 0);
+  await askAsProfile("what is next");
+  await signedInResponse.getByRole("heading", { name: "Your first deposit is on file" }).waitFor();
+
   await signOut.click();
   await signInAs("Alice Morgan");
   await currentProfile("Alice Morgan").waitFor();
@@ -976,7 +989,7 @@ try {
   const lookup = loginLogs.getByLabel("Pending action lookup", { exact: true });
   for (const [name, mid, ids] of [
     ["Alice Morgan", "DEMO-MID-1001", ["beneficiary_update"]],
-    ["Marcus Reed", "DEMO-MID-1003", ["fund_account", "account.funding.preview"]],
+    ["Marcus Reed", "DEMO-MID-1003", []],
     ["Jordan Lee", "DEMO-MID-1002", []],
   ] as const) {
     const option = lookup.locator("option").filter({ hasText: name }).first();
@@ -985,6 +998,7 @@ try {
     assert.deepEqual(JSON.parse(await details.getByLabel("Treatment Selector request").innerText()), { mid, context: pendingActionsContext });
     const response = JSON.parse(await details.getByLabel("Treatment Selector response").innerText());
     assert.deepEqual(response.recommendations.map(({ id }: { id: string }) => id), ids);
+    if (name === "Marcus Reed") await details.getByRole("heading", { name: "Funding reminder excluded" }).waitFor();
   }
   await loginLogs.close();
   await pendingGuide.click();

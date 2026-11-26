@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import type { ProfileChoice } from "../../packages/contracts/api";
+import { accountPortalPath } from "../../packages/contracts/workspace";
 import { api } from "./api";
 import coastalPhoto from "./assets/coastal-planning.jpg";
 import { readProfileSession, saveProfileSession } from "./conversation-storage";
@@ -34,6 +35,10 @@ export function Login() {
     if (!saveProfileSession(personaId)) {
       setSelecting(false);
       setNotice("Couldn’t save your profile in this tab. Please try again.");
+      return;
+    }
+    if (new URLSearchParams(location.search).get("returnTo") === "funding") {
+      location.replace(accountPortalPath);
       return;
     }
     const destination = new URL(chatPath, location.origin);

@@ -12,6 +12,7 @@ import {
 import { ArrowUpRight, BookOpenText, ChartNoAxesColumnIncreasing, ChevronDown, Columns2, FileText, House, ListChecks } from "lucide-react";
 import { makeAssistantDataUI } from "@assistant-ui/react";
 import type { FundingOptions, FundingPreview } from "../../packages/contracts/funding-workflow";
+import { accountPortalPath } from "../../packages/contracts/workspace";
 import { formatPortfolioAmount } from "../../packages/contracts/portfolio";
 import {
   PZN_CATALOG_ID, FOLLOW_UP_EVENT, boundWidget, contentCard, comparison, stepList, metricSummary, experienceRoot, followUpButton, ruleCreation, portfolioSnapshot,
@@ -288,6 +289,13 @@ function surfaceClass({ layout, theme, preview }: { layout?: string; theme?: str
     + (theme === "evergreen" ? " published-ui" : "") + (preview ? " preview-ui" : "");
 }
 
+function FundingPortalLink() {
+  const { enabled, preview } = useContext(SurfaceActions);
+  const { accountPortalAvailable } = useContext(ExperienceControls);
+  if (!enabled || preview || !accountPortalAvailable) return null;
+  return <a className="overview-action" href={accountPortalPath}>Open account portal <ArrowUpRight size={15} aria-hidden="true" /></a>;
+}
+
 function FundingPreviewBlock({ amountCents, method }: FundingPreview) {
   const { enabled, preview } = useContext(SurfaceActions);
   return <section className="content-card" aria-label="Funding preview">
@@ -298,7 +306,7 @@ function FundingPreviewBlock({ amountCents, method }: FundingPreview) {
       <div className="compare-column"><dt>From</dt><dd>{method.from}</dd></div>
       <div className="compare-column"><dt>To</dt><dd>{method.to}</dd></div>
     </dl>
-    <div className="content-footer"><p className="disclosure">The preview ends at review.</p></div>
+    <div className="content-footer"><p className="disclosure">The preview ends at review.</p><FundingPortalLink /></div>
   </section>;
 }
 
@@ -333,6 +341,7 @@ function FundingOptionsBlock({ methods }: FundingOptions) {
         </dl>
       </section>)}
     </div>
+    <div className="content-footer"><FundingPortalLink /></div>
   </section>;
 }
 
@@ -532,6 +541,7 @@ class SurfaceBoundary extends Component<{ children: ReactNode; fallback: ReactNo
   render() { return this.state.fallback ? this.props.fallback : this.props.children; }
 }
 type SurfaceControls = {
+  accountPortalAvailable?: boolean;
   activeExperienceId?: string;
   allowRuleCreation?: boolean;
   askPrompt?: (prompt: string) => void;

@@ -79,6 +79,7 @@ export type TreatmentRun = {
 };
 
 export type TreatmentPayloads = RegistryToolPayloads & {
+  fundingCheck?: import("./tool-setup").MockCcreEvaluation["fundingCheck"];
   mockInput?: InspectorPayload;
   inputReconstructed?: true;
   ccre?: InspectorPayload;

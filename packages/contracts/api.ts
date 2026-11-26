@@ -151,6 +151,7 @@ export type DemoPersona = {
   profile?: {
     beneficiaryStatus: "missing" | "on_file";
     accountFundingStatus: "funded" | "unfunded";
+    firstDepositConfirmedAt?: number;
     cashCents: number | null;
   };
   overview?: {

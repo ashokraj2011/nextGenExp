@@ -1096,9 +1096,9 @@ export class ExperienceService {
           const activeTurn = current();
           if (allows("custom_dynamic_ui") && domainTools && isDynamicUiRequest(activeTurn.public.message) && (initial.operatorName || (!isSalesDealPrompt(activeTurn.public.message) && !isOpsIncidentPrompt(activeTurn.public.message) && !isApprovalQueuePrompt(activeTurn.public.message) && !isConnectorActionPrompt(activeTurn.public.message)))) {
             this.store.progress(id, "composition", this.now());
-            const persona = findProfileById(conversation.personaId);
+            const persona = personaForRoute;
             const profileSummary = persona
-              ? `${persona.displayName} (${persona.accountFundingStatus === "funded" ? "funded account" : "unfunded account"}, beneficiaries ${persona.beneficiaryStatus === "on_file" ? "on file" : "missing"})`
+              ? `${persona.displayName} (${effectiveFundingForRoute} account, beneficiaries ${persona.beneficiaryStatus === "on_file" ? "on file" : "missing"})`
               : undefined;
             const generated = await generateDynamicUi({
               prompt: activeTurn.public.message,

@@ -25,8 +25,9 @@ export function applyMockCcreRules(contentIds: string[], rules: readonly MockCcr
     outcome: !candidates.has(contentId) ? "outside_list" : matchesCondition(condition, input) ? "matched" : "excluded",
   }));
   const excluded = new Set(results.filter(({ outcome }) => outcome === "excluded").map(({ contentId }) => contentId));
+  const ccre: MockCcreEvaluation = { beforeRules: contentIds, results };
   return {
     contentIds: contentIds.filter((id) => !excluded.has(id)),
-    ccre: { beforeRules: contentIds, results },
+    ccre,
   };
 }
