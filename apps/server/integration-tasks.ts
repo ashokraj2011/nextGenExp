@@ -11,6 +11,7 @@ import {
   type DraftCheck,
   type FieldProvenance,
   type Integration,
+  type IntegrationResilienceSnapshot,
   type IntegrationTasksView,
   type TaskContract,
   type TaskContractInput,
@@ -21,6 +22,7 @@ import type { ApprovalRecord } from "../../packages/contracts/approval";
 import type { ApprovalStore } from "./approval-store";
 import type { ConnectorStore } from "./connector-store";
 import { callMcpTool, discoverMcpTools, McpTransportError } from "./integration-mcp";
+import { IntegrationResilience, verifyAsyncCallback } from "./integration-resilience";
 
 /* ============================================================================
  * Identity and digests
@@ -145,6 +147,7 @@ type SandboxHandler = (input: Record<string, unknown>) => Promise<TransportRespo
 /** Deterministic sandbox systems used by the seeded demo integration and the tests. */
 function createSandboxHandlers(orders?: ReturnType<typeof orderSource>): Record<string, SandboxHandler> {
   const tickets = new Map<string, { ticketId: string; status: string }>();
+  const asyncJobs = new Map<string, { jobId: string; changeNumber: string; polls: number; fast: boolean }>();
   let seq = 4800;
   return {
     "commerce.lookup_order": async (input) => {
@@ -156,6 +159,7 @@ function createSandboxHandlers(orders?: ReturnType<typeof orderSource>): Record<
       const existing = key ? tickets.get(key) : undefined;
       if (existing) return { status: 200, body: { ...existing, duplicate: true } };
       const title = String(input.title ?? "");
+      if (title.includes("[fail500]")) return { status: 503, body: { error: "Upstream ITSM unavailable" } };
       if (title.includes("[reject]")) return { status: 422, body: { error: "Unknown service" } };
       const ticket = { ticketId: `TCK-${++seq}`, status: "open" };
       if (key) tickets.set(key, ticket);
@@ -167,6 +171,24 @@ function createSandboxHandlers(orders?: ReturnType<typeof orderSource>): Record<
     "itsm.find_ticket": async (input) => {
       const found = tickets.get(String(input.idempotencyKey ?? ""));
       return { status: 200, body: found ? { found: true, ...found } : { found: false } };
+    },
+    "itsm.submit_change_request": async (input) => {
+      const summary = String(input.summary ?? "");
+      if (summary.includes("[fail500]")) return { status: 503, body: { error: "Change control service unavailable" } };
+      if (summary.includes("[timeout]")) throw new TransportTimeout("Change control request timed out");
+      const jobId = `job_${++seq}`;
+      const changeNumber = `CHG-${seq}`;
+      asyncJobs.set(jobId, { jobId, changeNumber, polls: 0, fast: summary.includes("[fast]") });
+      return { status: 202, body: { jobId, status: "accepted", etaSeconds: 5 } };
+    },
+    "itsm.check_change_status": async (input) => {
+      const job = asyncJobs.get(String(input.jobId ?? ""));
+      if (!job) return { status: 200, body: { jobId: String(input.jobId ?? ""), status: "failed", error: "Job not found" } };
+      job.polls += 1;
+      if (job.fast || job.polls >= 2) {
+        return { status: 200, body: { jobId: job.jobId, status: "completed", changeNumber: job.changeNumber, approved: true } };
+      }
+      return { status: 200, body: { jobId: job.jobId, status: "in_progress", changeNumber: job.changeNumber, approved: false } };
     },
     "schema.generate_mapping": async (input) => {
       let sample: unknown;
@@ -225,11 +247,12 @@ async function callHttp(integration: Integration, contract: TaskContract, input:
  * ========================================================================== */
 
 export type TaskCallResult = {
-  state: "succeeded" | "succeeded_unverified_output" | "outcome_unknown" | "failed";
+  state: "succeeded" | "succeeded_unverified_output" | "outcome_unknown" | "failed" | "accepted";
   outcome?: { code: string; success: boolean; retryable: boolean; meaning: string };
   error?: { kind: TaskErrorKind; retryable: boolean; message: string };
   output?: unknown;
   artifact?: TaskRun["artifact"];
+  externalJobId?: string;
 };
 
 function readPath(value: unknown, path: string): unknown {
@@ -238,9 +261,21 @@ function readPath(value: unknown, path: string): unknown {
 
 export class TaskCallExecutor {
   private readonly sandbox;
-  constructor(orders?: ReturnType<typeof orderSource>, private readonly connectorStore?: ConnectorStore) { this.sandbox = createSandboxHandlers(orders); }
+  readonly resilience: IntegrationResilience;
+  constructor(
+    orders?: ReturnType<typeof orderSource>,
+    private readonly connectorStore?: ConnectorStore,
+    resilience?: IntegrationResilience,
+  ) {
+    this.sandbox = createSandboxHandlers(orders);
+    this.resilience = resilience ?? new IntegrationResilience();
+  }
 
   async execute(integration: Integration, contract: TaskContract, input: Record<string, unknown>, signal: AbortSignal): Promise<TaskCallResult> {
+    const gate = this.resilience.checkBeforeCall(integration);
+    if (!gate.ok) {
+      return { state: "failed", error: { kind: gate.kind, retryable: true, message: gate.message } };
+    }
     const writes = contract.effect !== "read";
     let response: TransportResponse;
     try {
@@ -275,6 +310,7 @@ export class TaskCallExecutor {
         response = await callHttp(integration, contract, input, signal);
       }
     } catch (err) {
+      this.resilience.recordFailure(integration);
       const message = err instanceof Error ? err.message : "transport error";
       if (err instanceof TransportTimeout) {
         return writes
@@ -289,12 +325,17 @@ export class TaskCallExecutor {
 
     const { status, body } = response;
     if (status === 429) return { state: "failed", error: { kind: "rate_limited", retryable: true, message: "Rate limited by the integration" } };
-    if (status === 401 || status === 403) return { state: "failed", error: { kind: "auth", retryable: false, message: `Authorization failed (${status})` } };
+    if (status === 401 || status === 403) {
+      this.resilience.recordSuccess(integration);
+      return { state: "failed", error: { kind: "auth", retryable: false, message: `Authorization failed (${status})` } };
+    }
     if (status >= 500) {
+      this.resilience.recordFailure(integration);
       return writes
         ? { state: "outcome_unknown", error: { kind: "upstream_5xx", retryable: false, message: `Upstream error ${status}; the change may have been applied. Reconcile before retrying.` } }
         : { state: "failed", error: { kind: "upstream_5xx", retryable: true, message: `Upstream error ${status}` } };
     }
+    this.resilience.recordSuccess(integration);
 
     const rule = contract.outcomeMapping.find((r) => r.statusIn.includes(status) && (r.field === undefined || readPath(body, r.field) === r.equals));
     const def = rule ? contract.outcomeCodes.find((c) => c.code === rule.code) : undefined;
@@ -306,6 +347,16 @@ export class TaskCallExecutor {
     const outcome = { code: def.code, success: def.success, retryable: def.retryable, meaning: def.meaning };
     if (!def.success) {
       return { state: "failed", outcome, error: { kind: status >= 400 ? "upstream_4xx" : "unknown", retryable: def.retryable, message: def.meaning } };
+    }
+
+    // Async long-running task: 202 Accepted returns an intermediate job handle; final outputSchema is validated on completion.
+    if (contract.executionMode === "async" && (status === 202 || def.code === "ACCEPTED" || def.code === "QUEUED")) {
+      const jobPath = contract.asyncConfig?.jobIdPath ?? "jobId";
+      const rawJobId = readPath(body, jobPath);
+      const externalJobId = typeof rawJobId === "string" && rawJobId.trim()
+        ? rawJobId.trim()
+        : `job_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+      return { state: "accepted", outcome, output: body, externalJobId };
     }
 
     const validation = sharedValidator().validate(contract.outputSchema as JsonObject, body);
@@ -708,6 +759,8 @@ export interface IntegrationTaskRuntime {
     call: { sfieldApprovalId: string; sfieldRunId: string; callId: string; sfieldToolRef: string; toolInputs: JsonObject },
     approver: string, decision: "approve" | "deny", principalId: string,
   ): Promise<{ kind: "result"; result: ToolResult; sfieldRunId: string; resumed: boolean } | { kind: "denied"; resumed: boolean }>;
+  resilienceSnapshot?(integrations: Integration[]): Record<string, IntegrationResilienceSnapshot>;
+  resetIntegrationResilience?(integrationId: string): void;
 }
 
 type ApprovalPayload = {
@@ -724,7 +777,17 @@ export class IntegrationTaskService {
 
   view() {
     const runtime = this.runtime();
-    return this.store.view(runtime?.registeredIntegrationTools() ?? new Set(), runtime !== null);
+    const base = this.store.view(runtime?.registeredIntegrationTools() ?? new Set(), runtime !== null);
+    const resilience = runtime?.resilienceSnapshot?.(base.integrations);
+    return { ...base, ...(resilience ? { resilience } : {}) };
+  }
+
+  resetResilience(integrationId: string) {
+    if (!this.store.integration(integrationId)) {
+      throw new IntegrationTaskError("integration_not_found", `Integration "${integrationId}" not found.`);
+    }
+    this.runtime()?.resetIntegrationResilience?.(integrationId);
+    return this.view();
   }
 
   customerReads() {
@@ -959,21 +1022,134 @@ export class IntegrationTaskService {
     return { run: resolved, reconcileRun: check.run };
   }
 
+  /** Polls an accepted async task run using its contract's `asyncConfig.statusTaskId` read task. */
+  async pollAsyncRun(principalId: string, runId: string) {
+    const run = this.store.run(runId);
+    if (!run) throw new IntegrationTaskError("run_not_found", `Run ${runId} not found.`);
+    if (run.state !== "accepted") throw new IntegrationTaskError("not_accepted", `Run ${runId} is ${run.state}; only accepted async runs can be polled.`);
+    const contract = this.store.contract(run.toolRef);
+    const statusTaskId = contract?.asyncConfig?.statusTaskId;
+    if (!contract || !statusTaskId || !run.externalJobId) {
+      throw new IntegrationTaskError("no_poll_task", `${run.toolRef} does not configure an async statusTaskId; complete it via signed webhook callback.`);
+    }
+    const statusContract = this.store.latestPublished(contract.integrationId, statusTaskId);
+    if (!statusContract || statusContract.effect !== "read") {
+      throw new IntegrationTaskError("status_task_missing", `Async status task "${statusTaskId}" is not a published read task.`);
+    }
+    const check = await this.run(principalId, {
+      toolRef: statusContract.ref,
+      input: { jobId: run.externalJobId },
+      requestedBy: "async_poller",
+    });
+    const now = new Date().toISOString();
+    const pollAttempts = (run.pollAttempts ?? 0) + 1;
+    if (check.run.state !== "succeeded") {
+      const updated = this.store.saveRun({ ...run, pollAttempts, lastPolledAt: now });
+      return { run: updated, pollRun: check.run, terminal: false };
+    }
+    const body = (check.run.output ?? {}) as Record<string, unknown>;
+    const statusText = String(body.status ?? "").toLowerCase();
+    if (["completed", "succeeded", "done", "settled"].includes(statusText)) {
+      const validation = sharedValidator().validate(contract.outputSchema as JsonObject, body);
+      const updated = this.store.saveRun({
+        ...run,
+        state: validation.ok ? "succeeded" : "succeeded_unverified_output",
+        pollAttempts,
+        lastPolledAt: now,
+        output: body,
+        outcome: { code: "ASYNC_COMPLETED", success: true, retryable: false, meaning: "Async job completed" },
+        ...(validation.ok ? { error: undefined } : {
+          error: {
+            kind: "validation_output" as const,
+            retryable: false,
+            message: `Async completion output did not match schema: ${validation.errors.slice(0, 3).map((e) => `${e.path} ${e.message}`).join("; ")}`,
+          },
+        }),
+      });
+      return { run: updated, pollRun: check.run, terminal: true };
+    }
+    if (["failed", "error", "cancelled", "rejected"].includes(statusText)) {
+      const updated = this.store.saveRun({
+        ...run,
+        state: "failed",
+        pollAttempts,
+        lastPolledAt: now,
+        output: body,
+        error: { kind: "upstream_4xx" as const, retryable: false, message: String(body.error ?? `Async job ended with status "${statusText}"`).slice(0, 300) },
+      });
+      return { run: updated, pollRun: check.run, terminal: true };
+    }
+    const updated = this.store.saveRun({ ...run, pollAttempts, lastPolledAt: now, output: body });
+    return { run: updated, pollRun: check.run, terminal: false };
+  }
+
+  /** Completes an accepted async task run from an HMAC-SHA256 signed external webhook callback. */
+  completeAsyncCallback(runId: string, rawBody: string, signatureHeader: string | undefined) {
+    const run = this.store.run(runId);
+    if (!run) throw new IntegrationTaskError("run_not_found", `Run ${runId} not found.`);
+    if (run.state !== "accepted") throw new IntegrationTaskError("not_accepted", `Run ${runId} is already ${run.state}.`);
+    const contract = this.store.contract(run.toolRef);
+    const envSecret = contract?.asyncConfig?.callbackSecretRef ? process.env[contract.asyncConfig.callbackSecretRef] : undefined;
+    const secret = envSecret || run.callbackToken;
+    if (!secret || !verifyAsyncCallback(rawBody, signatureHeader, secret)) {
+      throw new IntegrationTaskError("invalid_callback_signature", "Invalid or missing X-CEP-Signature HMAC-SHA256 header.");
+    }
+    let payload: { status?: string; output?: Record<string, unknown>; errorMessage?: string };
+    try {
+      payload = JSON.parse(rawBody) as typeof payload;
+    } catch {
+      throw new IntegrationTaskError("invalid_contract", "Callback payload is not valid JSON.");
+    }
+    const statusText = String(payload.status ?? "").toLowerCase();
+    if (statusText === "failed" || statusText === "cancelled") {
+      const updated = this.store.saveRun({
+        ...run,
+        state: "failed",
+        ...(payload.output ? { output: payload.output } : {}),
+        error: { kind: "upstream_4xx" as const, retryable: false, message: String(payload.errorMessage ?? `Callback reported status "${statusText}"`).slice(0, 300) },
+      });
+      return { run: updated };
+    }
+    const output = payload.output ?? {};
+    const validation = contract ? sharedValidator().validate(contract.outputSchema as JsonObject, output) : { ok: true as const, errors: [] };
+    const updated = this.store.saveRun({
+      ...run,
+      state: validation.ok ? "succeeded" : "succeeded_unverified_output",
+      output,
+      outcome: { code: "ASYNC_CALLBACK_COMPLETED", success: true, retryable: false, meaning: "Completed via signed async callback" },
+      ...(validation.ok ? { error: undefined } : {
+        error: {
+          kind: "validation_output" as const,
+          retryable: false,
+          message: `Callback output did not match schema: ${validation.errors.slice(0, 3).map((e) => `${e.path} ${e.message}`).join("; ")}`,
+        },
+      }),
+    });
+    return { run: updated };
+  }
+
   private applyResult(run: TaskRun, result: ToolResult, sfieldRunId: string): TaskRun {
     const base = { ...run, sfieldRunId, sfieldCallId: result.callId };
     if (result.status === "succeeded") {
-      const env = (result.output ?? {}) as { state?: string; outcomeCode?: string; success?: boolean; retryable?: boolean; message?: string; outputJson?: string; artifactJson?: string };
+      const env = (result.output ?? {}) as { state?: string; outcomeCode?: string; success?: boolean; retryable?: boolean; message?: string; outputJson?: string; artifactJson?: string; externalJobId?: string };
       const contract = this.store.contract(run.toolRef);
       const def = contract?.outcomeCodes.find((c) => c.code === env.outcomeCode);
       const parse = (text?: string) => { try { return text ? JSON.parse(text) : undefined; } catch { return undefined; } };
+      const nextState = env.state === "accepted" ? "accepted"
+        : env.state === "succeeded_unverified_output" ? "succeeded_unverified_output" : "succeeded";
       return {
         ...base,
-        state: env.state === "succeeded_unverified_output" ? "succeeded_unverified_output" : "succeeded",
+        state: nextState,
         ...(env.outcomeCode && env.outcomeCode !== "UNMAPPED"
           ? { outcome: { code: env.outcomeCode, success: env.success ?? true, retryable: env.retryable ?? false, meaning: def?.meaning ?? env.outcomeCode } }
           : {}),
         output: parse(env.outputJson),
         ...(env.artifactJson ? { artifact: parse(env.artifactJson) } : {}),
+        ...(nextState === "accepted" ? {
+          externalJobId: env.externalJobId ?? `job_${randomUUID().replaceAll("-", "").slice(0, 12)}`,
+          callbackToken: randomUUID().replaceAll("-", ""),
+          pollAttempts: 0,
+        } : {}),
         ...(env.state === "succeeded_unverified_output" ? { error: { kind: "validation_output" as const, retryable: false, message: env.message ?? "Output did not match the contract" } } : {}),
       };
     }

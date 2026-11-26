@@ -65,7 +65,7 @@ import { rehydrateObjectStrings, scrubNeutralModelRequest, type PiiFirewallStore
 import type { CepTelemetry } from "./telemetry";
 import { PznApprovalError, splitApprovalId, verifyPznApproval } from "./pzn-approvals";
 import { needsApproval, TaskCallExecutor, taskToolId, type IntegrationTaskRuntime, type IntegrationTaskStore } from "./integration-tasks";
-import { taskEnvelopeJsonSchema, type TaskContract } from "../../packages/contracts/integration-task";
+import { taskEnvelopeJsonSchema, type Integration, type TaskContract } from "../../packages/contracts/integration-task";
 import { SFieldError, sharedValidator, type ExecutionScope } from "@sfield/core";
 import {
   pznDataDictionaryToolId,
@@ -859,6 +859,14 @@ export class Runtime implements IntegrationTaskRuntime {
     return this.registeredIntegrationRefs;
   }
 
+  resilienceSnapshot(integrations: Integration[]) {
+    return Object.fromEntries(integrations.map((i) => [i.id, this.integrationExecutor.resilience.snapshot(i)]));
+  }
+
+  resetIntegrationResilience(integrationId: string) {
+    this.integrationExecutor.resilience.reset(integrationId);
+  }
+
   /** Dispatcher tools exist from startup, so a task version published later runs without a restart. */
   dispatcherRef(effect: "read" | "write" | "destructive"): string {
     return `int.dispatch.${effect}@1.0.0`;
@@ -905,6 +913,7 @@ export class Runtime implements IntegrationTaskRuntime {
       message: (res.error?.message ?? res.outcome?.meaning ?? "ok").slice(0, 400),
       outputJson: JSON.stringify(res.output ?? null).slice(0, 40_000),
       ...(res.artifact ? { artifactJson: JSON.stringify(res.artifact).slice(0, 40_000) } : {}),
+      ...(res.externalJobId ? { externalJobId: res.externalJobId.slice(0, 160) } : {}),
     };
   }
 

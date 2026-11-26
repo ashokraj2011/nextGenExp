@@ -14,6 +14,7 @@ const STATE_INFO: Record<TaskRun["state"], { label: string; tone: "pass" | "warn
   outcome_unknown: { label: "Outcome unknown", tone: "warn", hint: "No reliable response. The change may or may not have been applied. Reconcile before retrying." },
   pending_approval: { label: "Waiting for approval", tone: "warn", hint: "sfield is holding this exact call until it is approved. The approval survives a server restart." },
   executing: { label: "Running", tone: "warn", hint: "In progress." },
+  accepted: { label: "Accepted · running async", tone: "warn", hint: "The upstream accepted this long-running job (202). Poll status or wait for its signed webhook callback." },
   failed: { label: "Failed", tone: "fail", hint: "Nothing was applied, or the system rejected it." },
   denied: { label: "Denied", tone: "fail", hint: "An approver denied it. Nothing was sent." },
   expired: { label: "Expired", tone: "fail", hint: "The approval window passed. Request it again." },
@@ -51,8 +52,22 @@ export function approvalLabel(c: TaskContract) {
 }
 
 /* ============================================================================ CATALOG */
-export function CatalogCard({ view, onPrompt }: { view: IntegrationTasksView; onPrompt: (p: string) => void }) {
+export function CatalogCard({ view: initialView, onPrompt }: { view: IntegrationTasksView; onPrompt: (p: string) => void }) {
+  const [view, setView] = useState(initialView);
+  const [resettingId, setResettingId] = useState<string | null>(null);
+  useEffect(() => { setView(initialView); }, [initialView]);
   const tasks = latest(view);
+
+  async function resetCircuit(integrationId: string) {
+    setResettingId(integrationId);
+    try {
+      const out = await api.resetIntegrationResilience(integrationId);
+      setView(out.view);
+    } finally {
+      setResettingId(null);
+    }
+  }
+
   return (
     <section className="content-card pzn-widget-card" aria-label="Integration catalog">
       <div className="pzn-widget-head">
@@ -61,11 +76,30 @@ export function CatalogCard({ view, onPrompt }: { view: IntegrationTasksView; on
           <h3>{view.integrations.length} integration(s) · {tasks.length} task(s)</h3>
         </div>
       </div>
-      {view.integrations.map((integration) => (
+      {view.integrations.map((integration) => {
+        const res = view.resilience?.[integration.id];
+        return (
         <div key={integration.id} className="pzn-attachment-card">
           <div className="pzn-attr-head">
             <div className="pzn-btn-row"><strong>{integration.name}</strong><span className="pzn-code">{integration.id}</span></div>
-            <span className="pzn-badge">{integration.transport}{integration.enabled ? "" : " · disabled"}</span>
+            <div className="pzn-btn-row">
+              {res && (
+                <span className={"pzn-badge " + (res.circuitState === "closed" ? "is-pass" : res.circuitState === "half_open" ? "is-warn" : "is-fail")}>
+                  circuit {res.circuitState}
+                </span>
+              )}
+              {res?.rateLimit && (
+                <span className="pzn-badge" title="Token-bucket rate limit">
+                  {res.rateLimit.tokensRemaining}/{res.rateLimit.burst} req ({res.rateLimit.requestsPerMinute}/m)
+                </span>
+              )}
+              {res && res.circuitState !== "closed" && (
+                <button type="button" className="pzn-btn pzn-btn-sm" disabled={resettingId === integration.id} onClick={() => void resetCircuit(integration.id)}>
+                  <RefreshCw size={11} /> Reset circuit
+                </button>
+              )}
+              <span className="pzn-badge">{integration.transport}{integration.enabled ? "" : " · disabled"}</span>
+            </div>
           </div>
           <p className="pzn-subtitle" style={{ fontSize: "0.8rem" }}>{integration.description}</p>
           <div className="pzn-list">
@@ -76,6 +110,7 @@ export function CatalogCard({ view, onPrompt }: { view: IntegrationTasksView; on
                     <strong>{t.taskId}</strong>
                     <span className="pzn-badge">v{t.version}</span>
                     <span className={"pzn-badge " + (t.effect === "read" ? "" : t.effect === "write" ? "is-warn" : "is-fail")}>{t.effect}</span>
+                    {t.executionMode === "async" && <span className="pzn-badge is-warn">async</span>}
                     {t.resultKind !== "data" && <span className="pzn-badge">returns {t.artifact?.type ?? t.resultKind}</span>}
                     <RouteBadge contract={t} />
                   </div>
@@ -92,7 +127,8 @@ export function CatalogCard({ view, onPrompt }: { view: IntegrationTasksView; on
             ))}
           </div>
         </div>
-      ))}
+      );
+      })}
     </section>
   );
 }
@@ -277,9 +313,26 @@ export function TaskFormCard({
 }
 
 /* ============================================================================ RUN RESULT */
-export function TaskRunCard({ run, onPrompt }: { run: TaskRun; onPrompt: (p: string) => void }) {
+export function TaskRunCard({ run: initialRun, onPrompt }: { run: TaskRun; onPrompt: (p: string) => void }) {
+  const [run, setRun] = useState(initialRun);
+  const [polling, setPolling] = useState(false);
+  const [pollError, setPollError] = useState("");
+  useEffect(() => { setRun(initialRun); }, [initialRun]);
   const info = STATE_INFO[run.state];
   const [copied, setCopied] = useState(false);
+
+  async function pollStatus() {
+    setPolling(true);
+    setPollError("");
+    try {
+      const out = await api.pollIntegrationRun(run.runId);
+      setRun(out.run);
+    } catch (e) {
+      setPollError(toolSetupErrorMessage(e));
+    } finally {
+      setPolling(false);
+    }
+  }
   const outputEntries = run.output && typeof run.output === "object" && !Array.isArray(run.output)
     ? Object.entries(run.output as Record<string, unknown>).filter(([k]) => k !== run.artifact?.type && k !== "schema")
     : [];
@@ -337,6 +390,8 @@ export function TaskRunCard({ run, onPrompt }: { run: TaskRun; onPrompt: (p: str
       )}
       <div className="pzn-list-meta" style={{ fontSize: "0.74rem" }}>
         <span>Run <code className="pzn-code">{run.runId}</code></span>
+        {run.externalJobId && <span>Job <code className="pzn-code">{run.externalJobId}</code></span>}
+        {typeof run.pollAttempts === "number" && run.pollAttempts > 0 && <span>Polls: {run.pollAttempts}</span>}
         {run.sfieldRunId && <span>sfield {run.sfieldRunId.slice(0, 16)}…</span>}
         {run.idempotencyKey && <span>Key {run.idempotencyKey}</span>}
         {run.reconciledFrom && <span>Reconciled via {run.reconciledFrom}</span>}
@@ -344,7 +399,13 @@ export function TaskRunCard({ run, onPrompt }: { run: TaskRun; onPrompt: (p: str
           <span>Inputs: {Object.entries(run.provenance).map(([k, p]) => `${k} (${p.replaceAll("_", " ")})`).join(", ")}</span>
         )}
       </div>
+      {pollError && <p className="pzn-error" role="alert">{pollError}</p>}
       <div className="pzn-btn-row">
+        {run.state === "accepted" && (
+          <button type="button" className="pzn-btn pzn-btn-sm pzn-btn-primary" disabled={polling} onClick={() => void pollStatus()}>
+            <RefreshCw size={12} /> {polling ? "Checking…" : "Check status (Poll)"}
+          </button>
+        )}
         {run.state === "outcome_unknown" && (
           <button type="button" className="pzn-btn pzn-btn-sm pzn-btn-primary" onClick={() => onPrompt(`Reconcile ${run.runId}`)}>
             <RefreshCw size={12} /> Reconcile

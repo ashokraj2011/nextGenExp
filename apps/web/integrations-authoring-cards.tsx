@@ -335,6 +335,27 @@ export function TaskDraftCard({
               {["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
+          <div className="pzn-field">
+            <label>Execution mode</label>
+            <select aria-label="Execution mode" value={draft.executionMode ?? "sync"} onChange={(e) => {
+              const mode = e.target.value as "sync" | "async";
+              set({ executionMode: mode, ...(mode === "async" && !draft.asyncConfig ? { asyncConfig: { jobIdPath: "jobId", pollIntervalMs: 5000 } } : {}) });
+            }}>
+              <option value="sync">sync — single round-trip</option>
+              <option value="async">async — 202 Accepted + poll/callback</option>
+            </select>
+          </div>
+          {draft.executionMode === "async" && (
+            <div className="pzn-field">
+              <label>Async status poll task</label>
+              <select aria-label="Async status poll task" value={draft.asyncConfig?.statusTaskId ?? ""} onChange={(e) => set({
+                asyncConfig: { ...(draft.asyncConfig ?? { jobIdPath: "jobId", pollIntervalMs: 5000 }), statusTaskId: e.target.value || undefined },
+              })}>
+                <option value="">callback only (no poll task)</option>
+                {[...new Set(readTasks.map((t) => t.taskId))].map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+          )}
         </div>
         <div className="int-auth-table">
           <div className="int-auth-row int-auth-row-outcome int-auth-row-head"><span>Outcome code</span><span>Meaning</span><span>Success</span><span>HTTP status</span><span /></div>
@@ -472,6 +493,10 @@ export function IntegrationFormCard({ prefill, existing, onPrompt, post }: { pre
     id: prefill.id ?? "", name: prefill.name ?? "", description: prefill.description ?? "",
     transport: prefill.transport ?? "mcp", baseUrl: prefill.baseUrl ?? "", secretRef: prefill.secretRef ?? "",
     timeoutMs: prefill.timeoutMs ?? 5000, enabled: prefill.enabled ?? true,
+    rpm: prefill.rateLimit?.requestsPerMinute ? String(prefill.rateLimit.requestsPerMinute) : "",
+    burst: prefill.rateLimit?.burst ? String(prefill.rateLimit.burst) : "",
+    failureThreshold: prefill.circuitBreaker?.failureThreshold ? String(prefill.circuitBreaker.failureThreshold) : "5",
+    resetTimeoutMs: prefill.circuitBreaker?.resetTimeoutMs ? String(prefill.circuitBreaker.resetTimeoutMs) : "30000",
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -482,9 +507,15 @@ export function IntegrationFormCard({ prefill, existing, onPrompt, post }: { pre
     setBusy(true);
     setError("");
     try {
+      const rpmNum = Number(form.rpm);
+      const burstNum = Number(form.burst);
+      const threshNum = Number(form.failureThreshold);
+      const resetNum = Number(form.resetTimeoutMs);
       const out = await api.saveIntegration({
         id: form.id, name: form.name || form.id, description: form.description, transport: form.transport,
         baseUrl: form.baseUrl, ...(form.secretRef ? { secretRef: form.secretRef } : {}), timeoutMs: Number(form.timeoutMs), enabled: form.enabled,
+        ...(rpmNum >= 1 ? { rateLimit: { requestsPerMinute: rpmNum, ...(burstNum >= 1 ? { burst: burstNum } : {}) } } : {}),
+        ...(threshNum >= 1 && resetNum >= 500 ? { circuitBreaker: { failureThreshold: threshNum, resetTimeoutMs: resetNum } } : {}),
       });
       setSaved(out.integration);
       post?.(`Saved integration **${out.integration.name}** (\`${out.integration.id}\`).`, {
@@ -529,6 +560,10 @@ export function IntegrationFormCard({ prefill, existing, onPrompt, post }: { pre
           )}
         </div>
         <div className="pzn-field"><label>Secret (env var name)</label><input aria-label="Secret env var" placeholder="e.g. ORDERS_API_TOKEN" value={form.secretRef} onChange={(e) => set({ secretRef: e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "") })} /></div>
+        <div className="pzn-field"><label>Rate limit (req/min)</label><input aria-label="Rate limit req/min" type="number" min={1} placeholder="unlimited" value={form.rpm} onChange={(e) => set({ rpm: e.target.value })} /></div>
+        <div className="pzn-field"><label>Rate burst</label><input aria-label="Rate burst" type="number" min={1} placeholder="same as req/min" value={form.burst} onChange={(e) => set({ burst: e.target.value })} /></div>
+        <div className="pzn-field"><label>Circuit failure threshold</label><input aria-label="Circuit failure threshold" type="number" min={1} max={50} value={form.failureThreshold} onChange={(e) => set({ failureThreshold: e.target.value })} /></div>
+        <div className="pzn-field"><label>Circuit reset (ms)</label><input aria-label="Circuit reset ms" type="number" min={500} max={600000} value={form.resetTimeoutMs} onChange={(e) => set({ resetTimeoutMs: e.target.value })} /></div>
         <div className="pzn-field is-full"><label>Description</label><input aria-label="Integration description" value={form.description} onChange={(e) => set({ description: e.target.value })} /></div>
       </div>
       <p className="pzn-subtitle" style={{ fontSize: "0.74rem" }}>Secrets are referenced by environment variable name; the value never leaves the server. Once tasks are published, the URL and transport are fixed.</p>

@@ -798,7 +798,7 @@ export async function startApp(options: Options) {
       return json(res, { ...presentConversation(thread), turns: [] }, 201);
     };
     const internalApi = ["admin", "debug", "pzn", "approvals", "connectors", "ops", "ops-incidents", "sales", "sales-deals", "workflows", "workflow-runs", "mcp", "ag-ui"].includes(resource)
-      || (resource === "integrations" && id !== "demo-mcp")
+      || (resource === "integrations" && id !== "demo-mcp" && id !== "callbacks")
       || (resource === "proactive" && id === "trigger");
     if (internalApi) {
       const actor = requireOperator();
@@ -2071,7 +2071,10 @@ export async function startApp(options: Options) {
           return await fn();
         } catch (err) {
           if (err instanceof IntegrationTaskError) {
-            const status = err.code === "sfield_runtime_required" ? 503 : err.code.endsWith("not_found") ? 404 : err.code === "invalid_contract" ? 400 : 409;
+            const status = err.code === "sfield_runtime_required" ? 503
+              : err.code === "invalid_callback_signature" ? 401
+              : err.code.endsWith("not_found") ? 404
+              : err.code === "invalid_contract" ? 400 : 409;
             throw new ApiError(status, err.code, err.message);
           }
           if (err instanceof z.ZodError) throw new ApiError(400, "invalid_input", err.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ").slice(0, 400));
@@ -2146,7 +2149,7 @@ export async function startApp(options: Options) {
       if (id === "tasks" && operation === "run" && method === "POST") {
         const data = await body(req, runTaskRequestSchema, 32 * 1024);
         const out = await guard(() => integrationService.run(principalId, { ...data, requestedBy: requireOperator() }));
-        return json(res, out, out.approval ? 202 : 200);
+        return json(res, out, out.approval || out.run.state === "accepted" ? 202 : 200);
       }
       if (id === "copilot" && !operation && method === "POST") {
         const data = await body(req, integrationCopilotRequestSchema, 48 * 1024);
@@ -2155,6 +2158,29 @@ export async function startApp(options: Options) {
       if (id === "runs" && operation === "reconcile" && method === "POST") {
         const { runId } = await body(req, z.object({ runId: z.string().min(3).max(64) }).strict());
         return json(res, await guard(() => integrationService.reconcile(principalId, runId)));
+      }
+      if (id === "runs" && operation === "poll" && method === "POST") {
+        const { runId } = await body(req, z.object({ runId: z.string().min(3).max(64) }).strict());
+        return json(res, await guard(() => integrationService.pollAsyncRun(principalId, runId)));
+      }
+      if (id === "callbacks" && operation && method === "POST") {
+        const chunks: Buffer[] = [];
+        let size = 0;
+        for await (const chunk of req.iterator({ destroyOnReturn: false })) {
+          size += chunk.length;
+          if (size > 64 * 1024) {
+            req.resume();
+            throw new ApiError(413, "request_too_large", "Callback payload is too large.");
+          }
+          chunks.push(chunk);
+        }
+        const rawBody = Buffer.concat(chunks).toString("utf8");
+        const sigHeader = typeof req.headers["x-cep-signature"] === "string" ? req.headers["x-cep-signature"] : undefined;
+        return json(res, await guard(() => integrationService.completeAsyncCallback(operation, rawBody, sigHeader)));
+      }
+      if (id === "resilience" && operation === "reset" && method === "POST") {
+        const { integrationId } = await body(req, z.object({ integrationId: z.string().min(2).max(64) }).strict());
+        return json(res, { view: await guard(() => integrationService.resetResilience(integrationId)) });
       }
       if (id === "migrate-connectors" && !operation && method === "POST") {
         requireOperator();

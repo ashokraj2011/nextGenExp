@@ -13,11 +13,13 @@ export const semverSchema = z.string().regex(/^\d+\.\d+\.\d+$/, "semver x.y.z");
 export const taskEffectSchema = z.enum(["read", "write", "destructive"]);
 export const taskResultKindSchema = z.enum(["data", "code", "artifact"]);
 export const taskTransportSchema = z.enum(["sandbox", "http", "mcp"]);
+export const taskExecutionModeSchema = z.enum(["sync", "async"]);
 
-/** Run lifecycle. `outcome_unknown` and `succeeded_unverified_output` exist so uncertain writes are never retried blindly. */
+/** Run lifecycle. `outcome_unknown` and `succeeded_unverified_output` exist so uncertain writes are never retried blindly; `accepted` tracks async jobs. */
 export const taskRunStateSchema = z.enum([
   "pending_approval",
   "executing",
+  "accepted",
   "succeeded",
   "succeeded_unverified_output",
   "outcome_unknown",
@@ -32,6 +34,7 @@ export const taskErrorKindSchema = z.enum([
   "timeout",
   "auth",
   "rate_limited",
+  "circuit_open",
   "validation_input",
   "validation_output",
   "policy_denied",
@@ -40,6 +43,26 @@ export const taskErrorKindSchema = z.enum([
   "unmapped",
   "unknown",
 ]);
+
+export const integrationRateLimitSchema = z.object({
+  requestsPerMinute: z.number().int().min(1).max(60_000),
+  burst: z.number().int().min(1).max(1_000).optional(),
+}).strict();
+
+export const integrationCircuitBreakerSchema = z.object({
+  failureThreshold: z.number().int().min(1).max(50).default(5),
+  resetTimeoutMs: z.number().int().min(500).max(600_000).default(30_000),
+}).strict();
+
+export const taskAsyncConfigSchema = z.object({
+  /** Published read task on the same integration used to poll an accepted async job. */
+  statusTaskId: slugSchema.optional(),
+  /** Dotted path in the 202 response body holding the external job id (defaults to "jobId"). */
+  jobIdPath: z.string().trim().min(1).max(64).default("jobId"),
+  /** Env var name holding the HMAC-SHA256 secret for signed completion webhooks. */
+  callbackSecretRef: z.string().regex(/^[A-Z][A-Z0-9_]{1,63}$/).optional(),
+  pollIntervalMs: z.number().int().min(500).max(300_000).default(5_000),
+}).strict();
 
 const jsonSchemaObject = z.record(z.string(), z.unknown());
 
@@ -53,6 +76,8 @@ export const integrationSchema = z.object({
   secretRef: z.string().regex(/^[A-Z][A-Z0-9_]{1,63}$/).optional(),
   timeoutMs: z.number().int().min(200).max(30_000).default(5_000),
   enabled: z.boolean().default(true),
+  rateLimit: integrationRateLimitSchema.optional(),
+  circuitBreaker: integrationCircuitBreakerSchema.optional(),
 }).strict();
 
 export const outcomeCodeSchema = z.object({
@@ -117,6 +142,9 @@ export const taskContractInputSchema = z.object({
   manualReconcile: z.boolean().optional(),
   /** Input field naming the business entity the call acts on (sfield resource). */
   resourceIdField: z.string().max(64).optional(),
+  /** sync: single round-trip; async: returns 202 Accepted and completes via status polling or signed callback webhook. */
+  executionMode: taskExecutionModeSchema.default("sync"),
+  asyncConfig: taskAsyncConfigSchema.optional(),
   customerExperience: z.object({
     topic: z.string().trim().regex(/^[a-zA-Z][a-zA-Z -]{1,39}$/), idPrefix: z.string().regex(/^[A-Z]{2,12}$/),
     memberField: slugField(), fields: z.array(z.object({ key: slugField(), label: z.string().trim().min(1).max(48) }).strict()).min(1).max(4),
@@ -168,9 +196,30 @@ export const taskRunSchema = z.object({
     validation: z.object({ ok: z.boolean(), errors: z.array(z.string()) }),
   }).optional(),
   reconciledFrom: z.string().optional(),
+  externalJobId: z.string().optional(),
+  callbackToken: z.string().optional(),
+  lastPolledAt: z.string().optional(),
+  pollAttempts: z.number().int().min(0).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 }).strict();
+
+export type IntegrationResilienceSnapshot = {
+  integrationId: string;
+  circuitState: "closed" | "open" | "half_open";
+  consecutiveFailures: number;
+  failureThreshold: number;
+  resetTimeoutMs: number;
+  openedAt?: string;
+  nextAttemptAt?: string;
+  rateLimit?: {
+    requestsPerMinute: number;
+    burst: number;
+    tokensRemaining: number;
+  };
+  rejectedRateLimitCount: number;
+  rejectedCircuitCount: number;
+};
 
 export type Integration = z.infer<typeof integrationSchema>;
 export type TaskContractInput = z.input<typeof taskContractInputSchema>;
@@ -187,13 +236,14 @@ export const taskEnvelopeJsonSchema = {
   additionalProperties: false,
   required: ["state", "outcomeCode", "success", "retryable", "message", "outputJson"],
   properties: {
-    state: { type: "string", enum: ["succeeded", "succeeded_unverified_output", "outcome_unknown"] },
+    state: { type: "string", enum: ["succeeded", "succeeded_unverified_output", "outcome_unknown", "accepted"] },
     outcomeCode: { type: "string", maxLength: 40 },
     success: { type: "boolean" },
     retryable: { type: "boolean" },
     message: { type: "string", maxLength: 400 },
     outputJson: { type: "string", maxLength: 40000 },
     artifactJson: { type: "string", maxLength: 40000 },
+    externalJobId: { type: "string", maxLength: 160 },
   },
 } as const;
 
@@ -211,6 +261,7 @@ export type IntegrationTasksView = {
   integrations: Integration[];
   contracts: ViewContract[];
   runs: TaskRun[];
+  resilience?: Record<string, IntegrationResilienceSnapshot>;
 };
 
 /* ============================================================================
