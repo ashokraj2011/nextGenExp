@@ -774,11 +774,20 @@ function UiWorkspace({ initial, customers }: {
 }) {
   const params = new URLSearchParams(location.search);
   const scopedDomain = initial.domains.find((domain) => domain === params.get("domain"));
-  const initialRecord = scopedDomain ? initial.layouts.find(({ domainId }) => domainId === scopedDomain) : initial.layouts[0];
+  const contentTarget = scopedDomain === "wealth" ? initial.targets.find(({ target }) =>
+    target.kind === "content" && target.id === params.get("content")) : undefined;
+  const contentKey = contentTarget && targetKey(contentTarget.target);
+  const publication = contentKey ? initial.library.find(({ domainId, design }) =>
+    domainId === scopedDomain && design.targets.some((target) => targetKey(target) === contentKey)) : undefined;
+  const initialRecord = contentKey
+    ? initial.layouts.find(({ id, domainId, draft }) => domainId === scopedDomain && (publication
+      ? id === publication.id
+      : draft.targets.some((target) => targetKey(target) === contentKey)))
+    : scopedDomain ? initial.layouts.find(({ domainId }) => domainId === scopedDomain) : initial.layouts[0];
   const [view, setView] = useState<"editor" | "widgets" | "designs" | "surfaces">(() => {
     const param = params.get("view");
     if (param === "surfaces") return "surfaces";
-    if (!initial.domains.length || param === "library") return "designs";
+    if (!initial.domains.length || param === "library" || (publication && !initialRecord)) return "designs";
     return param === "widgets" ? "widgets" : "editor";
   });
   const [library, setLibrary] = useState(initial.library);
@@ -786,7 +795,15 @@ function UiWorkspace({ initial, customers }: {
   const [widgets, setWidgets] = useState<SavedWidget[]>([]);
   const [records, setRecords] = useState(initial.layouts);
   const [selected, setSelected] = useState(initialRecord?.id ?? "new");
-  const [edits, setEdits] = useState<Partial<Record<string, UiDesign>>>(() => initialRecord ? {} : { new: domainStarters[newDomain]() });
+  const [edits, setEdits] = useState<Partial<Record<string, UiDesign>>>(() => {
+    if (initialRecord) return {};
+    if (!contentTarget) return { new: domainStarters[newDomain]() };
+    const component = contentTarget.components?.[0];
+    return { new: {
+      ...blank(), name: `${contentTarget.label} layout`.slice(0, 72), description: contentTarget.description.slice(0, maxLayoutDescription),
+      targets: [contentTarget.target], slots: component ? [{ kind: "block", id: "content", component }] : [],
+    } };
+  });
   const [expandedSlotId, setExpandedSlotId] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -1163,7 +1180,7 @@ function UiWorkspace({ initial, customers }: {
             setNewDomain(initial.domains.includes(item.domainId) ? item.domainId : initial.domains[0]);
             setEdits((prior) => ({ ...prior, new: { ...item.design, recordIntent: undefined, name: (item.design.name + " copy").slice(0, 72), targets: [] } }));
             select("new"); setShowDetails(true); setView("editor");
-            setNotice(item.design.experience ? "Choose the domain and review your copy’s action phrases before publishing." : "Choose the domain and attach an intent or capability for your copy.");
+            setNotice(item.design.experience ? "Choose the domain and review your copy’s action phrases before publishing." : "Choose the domain and where your copy appears in chat.");
           }} />
       ) : view === "widgets" ? (
         <WidgetStudio key={domainId} domainId={domainId} widgets={widgets} onWidgetsChange={setWidgets} onInsertIntoLayout={insertWidgetIntoLayout} />
@@ -1305,7 +1322,7 @@ function UiWorkspace({ initial, customers }: {
                 )}
 
                 <div className="ui-targets-strip">
-                  <span className="ui-strip-label">Show on intent:</span>
+                  <span className="ui-strip-label">Show in chat</span>
                   {activeDesign.targets.map((target) => {
                     const key = targetKey(target);
                     const label = names.get(key)?.label ?? target.id;
@@ -1315,7 +1332,7 @@ function UiWorkspace({ initial, customers }: {
                         <button
                           type="button"
                           aria-label={"Remove " + label}
-                          onClick={() => edit({ ...activeDesign, recordIntent: activeDesign.recordIntent?.id === target.id ? undefined : activeDesign.recordIntent, targets: activeDesign.targets.filter((i) => targetKey(i) !== key) })}
+                          onClick={() => edit({ ...activeDesign, recordIntent: target.kind === "intent" && activeDesign.recordIntent?.id === target.id ? undefined : activeDesign.recordIntent, targets: activeDesign.targets.filter((i) => targetKey(i) !== key) })}
                         >
                           <X size={12} />
                         </button>
@@ -1325,7 +1342,7 @@ function UiWorkspace({ initial, customers }: {
                   {attached.size < maxLayoutTargets && (
                     <select
                       className="ui-target-add-select"
-                      aria-label="Attach intent or capability"
+                      aria-label="Attach to chat"
                       value={targetChoice}
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1334,7 +1351,7 @@ function UiWorkspace({ initial, customers }: {
                         setTargetChoice("");
                       }}
                     >
-                      <option value="">+ Attach intent…</option>
+                      <option value="">+ Attach…</option>
                       <optgroup label="Chat intents">
                         {choices.filter(({ target }) => target.kind === "intent").map(({ target, label }) => (
                           <option value={targetKey(target)} key={targetKey(target)}>{label}</option>
@@ -1345,6 +1362,11 @@ function UiWorkspace({ initial, customers }: {
                           <option value={targetKey(target)} key={targetKey(target)}>{label}</option>
                         ))}
                       </optgroup>
+                      {domainId === "wealth" && <optgroup label="Content items">
+                        {choices.filter(({ target }) => target.kind === "content").map(({ target, label }) => (
+                          <option value={targetKey(target)} key={targetKey(target)}>{label}</option>
+                        ))}
+                      </optgroup>}
                     </select>
                   )}
                 </div>

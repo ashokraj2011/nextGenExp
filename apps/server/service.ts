@@ -1540,7 +1540,7 @@ export class ExperienceService {
         row.trace.finalOrder = verified.contentOrder;
         row.trace.components = resultForDisplay.display.blocks.map((block) => block.component);
       });
-      this.store.finish(id, { type: "completed", result: resultForDisplay }, this.now());
+      this.store.finish(id, { type: "completed", result: resultForDisplay, verifiedContentIds: verified.contentOrder }, this.now());
     } catch (error) {
       if (this.closing || this.store.turn(id)?.public.status !== "working") return;
       const mapped = signal.reason instanceof TurnFailure ? signal.reason.code

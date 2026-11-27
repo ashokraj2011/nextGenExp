@@ -32,7 +32,7 @@ try {
   await page.getByRole("button", { name: "Move Information card up" }).click();
   await preview.getByRole("heading", { name: "Understanding your balances" }).waitFor();
   await page.getByRole("button", { name: "Remove Information card" }).click();
-  await page.getByLabel("Attach intent or capability").selectOption("intent:show_balance");
+  await page.getByLabel("Attach to chat").selectOption("intent:show_balance");
   await page.getByRole("button", { name: "Remove Show balances", exact: true }).click();
   await page.getByRole("button", { name: "Save draft", exact: true }).click();
   await page.getByText("Draft saved.", { exact: true }).waitFor();
@@ -208,7 +208,7 @@ try {
   await preview.getByRole("button", { name: "Back", exact: true }).click();
   await preview.getByText("Step 1 of 2", { exact: true }).waitFor();
 
-  await page.getByLabel("Attach intent or capability").selectOption("capability:ops_incident");
+  await page.getByLabel("Attach to chat").selectOption("capability:ops_incident");
   await page.getByRole("button", { name: "Publish", exact: true }).click();
   await page.getByText("Published to the shared design library.", { exact: true }).waitFor();
   await preview.getByRole("link", { name: "Open chat", exact: true }).click();
@@ -257,8 +257,25 @@ try {
   await opsLibrary.getByRole("heading", { name: "IT Ops · Live P1 Incident Command", exact: true }).waitFor();
   assert.equal(await opsLibrary.getByRole("heading", { name: "Compare balances layout", exact: true }).count(), 0);
 
+  await openAdmin(page, "intents");
+  await page.getByRole("tab", { name: /Content Catalog/ }).click();
+  await page.getByRole("region", { name: "Content catalog", exact: true }).getByRole("button", { name: /^Home down payment/ }).click();
+  assert.equal(await page.getByRole("checkbox", { name: "Goal progress", exact: true }).isChecked(), true);
+  await page.getByRole("link", { name: "Design in UI Builder", exact: true }).click();
+  await page.getByRole("button", { name: "Remove Home down payment", exact: true }).waitFor();
+  await preview.getByRole("heading", { name: "Home down payment", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await page.getByText("Published to the shared design library.", { exact: true }).waitFor();
+  await openAdmin(page, "intents");
+  await page.getByRole("tab", { name: /Content Catalog/ }).click();
+  await page.getByRole("region", { name: "Content catalog", exact: true }).getByRole("button", { name: /^Home down payment/ }).click();
+  await page.getByText(/Home down payment layout · Revision/).waitFor();
+  await page.getByRole("link", { name: "Open in UI Builder", exact: true }).click();
+  await page.getByRole("button", { name: "Remove Home down payment", exact: true }).waitFor();
+  assert.equal(await page.getByLabel("Layout name").inputValue(), "Home down payment layout");
+
   assert.deepEqual(pageErrors, []);
-  console.log("UI builder preview, publishing, intent routing, Inspector, Widget Studio, interactive actions, linked widgets, workspace catalogs, and responsive layout passed.");
+  console.log("UI builder preview, publishing, intent routing, Inspector, Widget Studio, interactive actions, linked widgets, workspace catalogs, content attachments, and responsive layout passed.");
 } finally {
   await browser.close();
   await app.close();

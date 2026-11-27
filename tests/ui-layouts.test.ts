@@ -12,6 +12,7 @@ import type { TurnPayloads } from "../packages/contracts/inspector";
 import { decodeChatInput } from "../packages/contracts/inspector";
 import type { DisplayExperience } from "../packages/contracts/surface";
 import type { EvalRunReport } from "../packages/contracts/eval-suite";
+import type { ExperienceRegistryView } from "../packages/contracts/experience-registry";
 import type { UxProposal } from "../packages/contracts/ux-evolution";
 import type { UiDesign, UiLayoutCatalog, UiLayoutRecord, WidgetSlot } from "../packages/contracts/ui-layout";
 import { operatorHeader, reviewer, startApp } from "./operator-fixture";
@@ -126,6 +127,44 @@ test("linked widgets form a single ordered surface and invalid links are rejecte
   }
   const catalog = await client.request<UiLayoutCatalog>(settingsPath);
   assert.deepEqual(catalog.layouts.find(({ id }) => id === published.id)?.published?.design, published.published?.design);
+});
+
+test("a content layout arranges the verified goal and only applies to replies showing that item", async (t) => {
+  const app = await startTestPreview();
+  t.after(() => app.close());
+  const client = await testClient(app.url);
+  const target = { kind: "content", id: "home_down_payment_progress" } as const;
+  const goal: UiDesign = {
+    name: "Down payment walkthrough", description: "Show progress and explain what to review next.", layout: "stack",
+    targets: [target], slots: [
+      { kind: "block", id: "progress", component: "PznGoalProgress" },
+      { kind: "widget", id: "next", title: "Review your savings timeline", badge: "", body: "", accentTop: false, metrics: [] },
+    ],
+  };
+  const catalog = await client.request<UiLayoutCatalog>(settingsPath);
+  assert.deepEqual(catalog.targets.find((option) => option.target.id === target.id)?.components, ["PznGoalProgress"]);
+  await client.request(settingsPath, { operation: "publish", design: { ...goal, targets: [{ kind: "intent", id: "show_home_goal" }] } });
+  const published = await client.request<UiLayoutRecord>(settingsPath, { operation: "publish", design: goal });
+  const registry = await client.request<ExperienceRegistryView>("/api/admin/experience-registry?domain=wealth");
+  assert.ok(registry.componentOptions.some(({ id, label }) => id === "PznGoalProgress" && label === "Goal progress"));
+  assert.deepEqual(registry.content.find(({ contentId }) => contentId === target.id)?.publishedLayout, {
+    id: published.id, name: goal.name, revision: published.revision,
+  });
+
+  const prompt = "Show my home-buying goal and savings progress.";
+  const chat = await client.conversation();
+  const { turn, trace } = await client.ask(chat.id, prompt);
+  assert.deepEqual(trace.uiLayout, { id: published.id, name: goal.name, revision: published.revision, target });
+  assert.deepEqual(turn.experience?.blocks.map(({ component }) => component), ["PznGoalProgress", "PznBoundWidget"]);
+  const graph = turn.experience?.blocks[0];
+  assert.ok(graph?.component === "PznGoalProgress" && graph.props.goal.history.length > 0);
+
+  const other = await client.ask(chat.id, compare);
+  assert.equal(other.trace.uiLayout, undefined);
+  const empty = await client.conversation("empty");
+  const excluded = await client.ask(empty.id, prompt);
+  assert.equal(excluded.trace.uiLayout, undefined);
+  assert.equal(excluded.turn.experience?.outcome, "eligible_empty");
 });
 
 test("approved feedback replays the original request and detects when its card is unpublished", async (t) => {

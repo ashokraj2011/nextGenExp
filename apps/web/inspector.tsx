@@ -40,7 +40,7 @@ function TraceView({ trace }: { trace: Trace }) {
     <dl className="trace-dl">
       <Detail label="Layout">{trace.uiLayout.name}</Detail>
       <Detail label="Revision">{trace.uiLayout.revision}</Detail>
-      <Detail label={trace.uiLayout.target.kind === "intent" ? "Intent" : "Capability"}><code>{trace.uiLayout.target.id}</code></Detail>
+      <Detail label={trace.uiLayout.target.kind === "content" ? "Content" : trace.uiLayout.target.kind === "intent" ? "Intent" : "Capability"}><code>{trace.uiLayout.target.id}</code></Detail>
     </dl>
   </section>;
   const empathy = trace.emotionalState && <section className="trace-stage">

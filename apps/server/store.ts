@@ -1095,9 +1095,9 @@ export class Store {
       userMessage: turn.public.message, ordinal: turn.ordinal, emotionalState: turn.public.emotionalState }) : result;
   }
 
-  private applyUiLayout(turn: TurnRecord, result: CompiledExperience) {
+  private applyUiLayout(turn: TurnRecord, result: CompiledExperience, verifiedContentIds: readonly string[] = []) {
     if (turn.interactive || !turn.uiLayouts?.length) return result;
-    const targets: UiTarget[] = [];
+    const targets: UiTarget[] = verifiedContentIds.map((id) => ({ kind: "content", id }));
     const capability = turn.public.semanticRoute?.capabilityId;
     if (turn.trace.intentId) targets.push({ kind: "intent", id: turn.trace.intentId });
     if (turn.recordId && turn.operatorName && (capability === "ops_incident" || capability === "sales_deal_desk")) targets.push({ kind: "capability", id: capability });
@@ -1166,7 +1166,9 @@ export class Store {
 
   finish(
     id: string,
-    outcome: { type: "completed"; result: CompiledExperience; interactive?: InteractiveCompletion } | { type: "failed"; code: FailureCode } | { type: "cancelled" },
+    outcome: { type: "completed"; result: CompiledExperience; interactive?: InteractiveCompletion; verifiedContentIds?: readonly string[] }
+      | { type: "failed"; code: FailureCode }
+      | { type: "cancelled" },
     now: number,
   ) {
     const record = this.db.tx(() => {
@@ -1178,7 +1180,7 @@ export class Store {
       }
       turn.trace.markers.terminal = now;
       if (outcome.type === "completed") {
-        const laidOut = this.applyUiLayout(turn, this.carryForwardOffers(turn, outcome.result, now));
+        const laidOut = this.applyUiLayout(turn, this.carryForwardOffers(turn, outcome.result, now), outcome.verifiedContentIds);
         const { display, issued } = this.personalize(turn, laidOut);
         delete turn.public.previewExperience;
         if (turn.agentLaunch && "capability" in turn.agentLaunch) delete turn.agentLaunch.values;

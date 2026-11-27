@@ -3,8 +3,15 @@ import { pznSlugSchema } from "./self-service-pzn";
 import type { ActionRecommendation, WorkflowCandidate } from "./funding-workflow";
 import type { RoutingIntentId } from "./routing-intents";
 
-export const componentNames = ["PznContentCard", "PznComparison", "PznStepList", "PznMetricSummary", "PznGoalProgress"] as const;
-export type ComponentName = typeof componentNames[number];
+export const contentComponentCatalog = [
+  { id: "PznContentCard", label: "Information card", description: "Show approved text with its source." },
+  { id: "PznComparison", label: "Balance comparison", description: "Show two approved items with matching comparison fields." },
+  { id: "PznStepList", label: "Step-by-step guide", description: "Show the approved steps for a task." },
+  { id: "PznMetricSummary", label: "Balance figures", description: "Show verified available or current balances." },
+  { id: "PznGoalProgress", label: "Goal progress", description: "Show a verified goal target and its savings history." },
+] as const;
+export type ComponentName = typeof contentComponentCatalog[number]["id"];
+export const componentNames = contentComponentCatalog.map(({ id }) => id) as [ComponentName, ...ComponentName[]];
 export type Variant = "compact" | "expanded";
 export type SelectionMode = "semantic_rerank" | "preserve_ts_rank";
 export type IntroKey = "explanation" | "comparison" | "steps" | "summary" | "next_step" | "clarification" | "no_match";

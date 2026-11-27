@@ -3,18 +3,15 @@ import { interactiveExperienceSchema } from "./interactive-experience";
 import { domainPackIds, type DomainPackId } from "./domain-packs";
 import { capabilityIdSchema } from "./agentic";
 import { dataBindingKeySchema } from "./data-bindings";
+import { contentComponentCatalog } from "./domain";
 import type { RoutingIntentId } from "./routing-intents";
 
 export const layoutComponents = [
-  { id: "PznComparison", label: "Balance comparison", description: "Compare definitions in two columns." },
-  { id: "PznMetricSummary", label: "Balance figures", description: "Show the available and current amounts." },
+  ...contentComponentCatalog,
   { id: "PznRetirementAccounts", label: "Retirement accounts", description: "Show the customer’s accounts or the beneficiary on the selected account." },
   { id: "PznPortfolioSnapshot", label: "Portfolio snapshot", description: "Show portfolio value, cash, and holdings." },
-  { id: "PznGoalProgress", label: "Goal progress", description: "Show savings history and progress toward a target." },
   { id: "PznSavingsChart", label: "Savings projection", description: "Chart projected savings over time." },
   { id: "PznSavingsMetric", label: "Required contribution", description: "Show the monthly amount needed to reach a goal." },
-  { id: "PznContentCard", label: "Information card", description: "Display an explanation or eligible recommendation." },
-  { id: "PznStepList", label: "Step-by-step guide", description: "Display the approved steps for a task." },
   { id: "PznFundingOptions", label: "Funding methods", description: "Show the available funding methods." },
   { id: "PznFundingPreview", label: "Funding review", description: "Show an amount and method for review." },
   { id: "PznCapabilityForm", label: "Input form", description: "Show inputs supplied by a capability, such as dates and amounts." },
@@ -34,6 +31,7 @@ export const recordLayoutCapabilities = ["ops_incident", "sales_deal_desk"] as c
 const intentIdSchema = z.string().regex(/^[a-z][a-z0-9_]{1,63}$/);
 export const uiTargetSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("intent"), id: intentIdSchema }).strict(),
+  z.object({ kind: z.literal("content"), id: intentIdSchema }).strict(),
   z.object({ kind: z.literal("capability"), id: capabilityIdSchema.or(z.enum(recordLayoutCapabilities)) }).strict(),
 ]);
 export type UiTarget = z.infer<typeof uiTargetSchema>;

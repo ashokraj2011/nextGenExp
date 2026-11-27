@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { componentNames, contextEntrySchema, type ContentEntry } from "./domain";
+import { componentNames, contextEntrySchema, type ComponentName, type ContentEntry } from "./domain";
 import type { DomainPackId } from "./domain-packs";
 import type { RecommendationProviderDescriptor } from "./recommendation-provider";
 
@@ -41,6 +41,7 @@ export type ManagedContentRecord = ManagedContentInput & {
   isBuiltIn: boolean;
   isCustomized: boolean;
   linkedContexts: string[];
+  publishedLayout?: { id: string; revision: number; name: string };
   rawEntry: ContentEntry;
 };
 
@@ -102,6 +103,7 @@ export type RecordWorkspaceRegistry = {
 export type ExperienceRegistryView = {
   tenantId: string;
   domainId: "wealth";
+  componentOptions: readonly { id: ComponentName; label: string; description: string }[];
   contexts: { contextId: string; displayName: string; description: string; active: boolean; baseContentIds: string[] }[];
   intents: ManagedIntentRecord[];
   content: ManagedContentRecord[];

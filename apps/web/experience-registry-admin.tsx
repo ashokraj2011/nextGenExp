@@ -6,7 +6,7 @@ import { ActionFlowsPanel } from "./action-flows-panel";
 import { WorkflowStudioPanel } from "./workflow-studio-panel";
 import { KnowledgeBasePanel } from "./knowledge-base-panel";
 import { adminPaths } from "../../packages/contracts/admin-paths";
-import { componentNames, type ComponentName } from "../../packages/contracts/domain";
+import type { ComponentName } from "../../packages/contracts/domain";
 import { getDomainPack } from "../../packages/contracts/domain-packs";
 import type { FlowScope } from "../../packages/contracts/routing-flows";
 import type {
@@ -765,16 +765,32 @@ function WealthRegistry() {
               </label>
 
               <div className="reg-field">
-                <span>Allowed A2UI Components</span>
+                <span>Built-in formats</span>
                 <div className="reg-comp-checks">
-                  {componentNames.map((comp) => (
-                    <label key={comp} className={"reg-comp-pill" + (contentForm.allowedComponents.includes(comp) ? " is-checked" : "")}>
-                      <input type="checkbox" checked={contentForm.allowedComponents.includes(comp)} onChange={() => toggleComponent(comp)} />
-                      <span>{comp}</span>
+                  {view.componentOptions.map(({ id, label, description }) => (
+                    <label key={id} className={"reg-comp-pill" + (contentForm.allowedComponents.includes(id) ? " is-checked" : "")} title={description}>
+                      <input type="checkbox" checked={contentForm.allowedComponents.includes(id)} onChange={() => toggleComponent(id)} />
+                      <span>{label}</span>
                     </label>
                   ))}
                 </div>
               </div>
+
+              {selectedContent?.publicationStatus === "published" && (
+                <div className="reg-hop-box">
+                  <span className="reg-hop-kicker">Chat design</span>
+                  <p className="reg-link-note">
+                    {selectedContent.publishedLayout
+                      ? <>{selectedContent.publishedLayout.name} · Revision {selectedContent.publishedLayout.revision}</>
+                      : "Add widgets or a step-by-step layout for when this content appears in chat."}
+                  </p>
+                  <div className="reg-hop-links">
+                    <a href={`${adminPaths.builder}?domain=wealth&content=${encodeURIComponent(selectedContent.contentId)}`}>
+                      {selectedContent.publishedLayout ? "Open in UI Builder" : "Design in UI Builder"}
+                    </a>
+                  </div>
+                </div>
+              )}
 
               <div className="reg-fields reg-fields-2">
                 <label className="reg-field">

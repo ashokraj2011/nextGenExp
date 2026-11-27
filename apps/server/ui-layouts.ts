@@ -19,7 +19,7 @@ import { CEP_CAPABILITIES } from "../../packages/contracts/capabilities-catalog"
 import { bindingDomain, layoutTargetDomain, layoutWidgets, widgetSequence, normalizedIntentPhrase, recordIntentOption, recordCapabilities, recordIntentId, recordLayoutCapabilities, recordViews, targetKey, type RecordDomain, type LayoutComponent, type UiDesign, type UiTargetOption } from "../../packages/contracts/ui-layout";
 import { conversationalTextAllowed } from "../../packages/experience/chat-policy";
 import { contentCatalog, readDemoBalance } from "../../packages/experience/content";
-import { findEffectiveContentById } from "../../packages/experience-registry/registry";
+import { findEffectiveContentById, getEffectiveContentEntries } from "../../packages/experience-registry/registry";
 import { compileUiLayoutPreview } from "../../packages/experience/ui-layout";
 import { fixtureGoalProgressProvider, type GoalProgressProvider } from "../../packages/goal-progress";
 import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
@@ -64,6 +64,11 @@ export function uiTargetOptions(registry: CapabilityRegistry, principalId: strin
         target, label: intent.label, description: intent.description, components: intentBlocks(intent),
       }] : [];
     }),
+    ...getEffectiveContentEntries().filter(({ publicationStatus }) => publicationStatus === "published")
+      .map((entry): UiTargetOption => ({
+        target: { kind: "content", id: entry.contentId }, label: entry.title, description: entry.description,
+        components: entry.allowedComponents,
+      })),
     ...(["it_ops", "sales_revops"] as const).flatMap(recordViewOptions),
     ...recordLayoutCapabilities.map((id): UiTargetOption => {
       const { label, description } = CEP_CAPABILITIES.find((c) => c.id === id)!;
@@ -110,7 +115,7 @@ export function validateUiDesign(design: UiDesign, options: UiTargetOption[], pu
   }
   const known = new Set(options.map(({ target }) => targetKey(target)));
   if (design.targets.some((target) => !known.has(targetKey(target)))) {
-    throw new ApiError(400, "unknown_ui_attachment", "Choose an intent or capability from the list.");
+    throw new ApiError(400, "unknown_ui_attachment", "Choose an intent, capability, or published content item from the list.");
   }
   if (design.slots.some((slot) => slot.kind === "text"
     && !conversationalTextAllowed(slot.heading + ". " + slot.body))) {
@@ -166,8 +171,8 @@ function content(id: string) {
   return published;
 }
 
-function sampleDetails(id: string) {
-  const item = content(id);
+function sampleDetails(item: string | ReturnType<typeof content>) {
+  if (typeof item === "string") item = content(item);
   const { title, body, description, steps, sourceLabel, version, sourceRef } = item;
   const shared = {
     variant: "expanded" as const,
@@ -196,6 +201,11 @@ export async function previewUiLayout(
   const activeProfile = requestedPersonaId ? findProfileById(requestedPersonaId) : listAllProfiles()[0];
   if (!activeProfile) throw new ApiError(404, "preview_profile_unavailable", "Choose an available customer to preview this layout.");
   const { personaId, syntheticMid } = activeProfile;
+  const targetContent = design.targets.find(({ kind }) => kind === "content");
+  const selectedContent = targetContent ? findEffectiveContentById(targetContent.id) : undefined;
+  const sampleFor = (component: LayoutComponent, fallback: string) => sampleDetails(
+    selectedContent?.allowedComponents.some((allowed) => allowed === component) ? selectedContent : fallback,
+  );
   const fields = design.slots.flatMap(slotBindingKeys);
   const blocks = design.slots.flatMap((slot) => slot.kind === "block" ? [slot.component] : []);
   const needsGoal = fields.some((key) => key.startsWith("goal.")) || blocks.some((b) => ["PznGoalProgress", "PznSavingsChart", "PznSavingsMetric"].includes(b));
@@ -210,23 +220,26 @@ export async function previewUiLayout(
   const funding = availableFundingOptions(true, 50_000);
   const balance = readDemoBalance(personaId, syntheticMid, portfolio ? Date.parse(portfolio.asOf) : Date.now());
   const bindings = resolveMultiDomainBindings(personaId, { goal: goal ?? undefined, portfolio: portfolio ?? undefined, balances: balance.values });
-  const education = sampleDetails("balance_education");
-  const address = sampleDetails("address_update_guide");
-  const definitions = ["balance_available_definition", "balance_current_definition"].map(content);
+  const education = sampleFor("PznContentCard", "balance_education");
+  const address = sampleFor("PznStepList", "address_update_guide");
+  const pair = selectedContent?.comparisonGroup && getEffectiveContentEntries().find((entry) =>
+    entry.publicationStatus === "published" && entry.contentId !== selectedContent.contentId
+    && entry.allowedComponents.includes("PznComparison") && entry.comparisonGroup === selectedContent.comparisonGroup);
+  const definitions = selectedContent && pair ? [selectedContent, pair] : ["balance_available_definition", "balance_current_definition"].map(content);
   const retirementIntent = design.targets.some(({ id }) => id === retirementBeneficiaryIntent) ? retirementBeneficiaryIntent : retirementListIntent;
   const accounts = readRetirementView(syntheticMid, retirementListIntent, "");
   const samples: Partial<Record<LayoutComponent, DisplayBlock>> = {
     PznRetirementAccounts: { component: "PznRetirementAccounts", props: retirementIntent === retirementListIntent ? accounts
       : readRetirementView(syntheticMid, retirementIntent, "the first one", accounts) },
     PznComparison: { component: "PznComparison", props: {
-      ...sampleDetails("balance_available_definition").shared, title: "Compare balance definitions",
+      ...sampleDetails(definitions[0]).shared, title: "Compare balance definitions",
       columns: definitions.map(({ title, comparisonFields }) => ({ title, fields: comparisonFields })),
     } },
     PznMetricSummary: { component: "PznMetricSummary", props: {
-      ...sampleDetails("balance_metric_template").shared, observedAt: balance.observedAt, values: balance.values,
+      ...sampleFor("PznMetricSummary", "balance_metric_template").shared, observedAt: balance.observedAt, values: balance.values,
     } },
     ...(portfolio && { PznPortfolioSnapshot: { component: "PznPortfolioSnapshot", props: portfolio } } as const),
-    ...(goal && { PznGoalProgress: { component: "PznGoalProgress", props: { ...sampleDetails("home_down_payment_progress").shared, goal } } } as const),
+    ...(goal && { PznGoalProgress: { component: "PznGoalProgress", props: { ...sampleFor("PznGoalProgress", "home_down_payment_progress").shared, goal } } } as const),
     ...(goal && portfolio && { PznSavingsChart: { component: "PznSavingsChart", props: savingsProjection(goal, 24, 100_000, {
       transferFromCashCents: Math.min(1_000_000, portfolio.cashCents),
       portfolioCashBeforeCents: portfolio.cashCents,

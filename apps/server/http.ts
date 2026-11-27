@@ -122,7 +122,7 @@ import type { ViteDevServer } from "vite";
 import { z } from "zod";
 import demo from "../../fixtures/host.json";
 import type { Bootstrap, Conversation, TurnView } from "../../packages/contracts/api";
-import type { SelectionMode } from "../../packages/contracts/domain";
+import { contentComponentCatalog, type SelectionMode } from "../../packages/contracts/domain";
 import { actionBody, conversationChangeBody, createBody, eventBody, folderCreateBody, folderRenameBody, folderUpdateBody, forkBody, idPattern, messageBody, previewFundingBody, retryBody } from "../../packages/contracts/http-inputs";
 import { accountPortalPath, pendingActionsContext, workspacePinsSchema, type PortalFundingView, type WorkspaceActionState } from "../../packages/contracts/workspace";
 import { adminPaths, isAdminPath } from "../../packages/contracts/admin-paths";
@@ -324,6 +324,8 @@ export async function startApp(options: Options) {
     const publishedIntentIds = new Set(
       layouts.flatMap((l) => l.design.targets.filter((t) => t.kind === "intent").map((t) => t.id)),
     );
+    const contentLayouts = new Map(layouts.flatMap(({ id, revision, design }) => design.targets.flatMap((target) =>
+      target.kind === "content" ? [[target.id, { id, revision, name: design.name }] as const] : [])));
     const contexts = activeContexts.map((ctx) => ({
       contextId: ctx.contextId,
       displayName: ctx.displayName,
@@ -341,13 +343,14 @@ export async function startApp(options: Options) {
       version: rawEntry.version,
       isBuiltIn,
       isCustomized,
+      publishedLayout: contentLayouts.get(rawEntry.contentId),
       linkedContexts: Object.entries(tsFixtures.base)
         .filter(([, ids]) => ids.includes(rawEntry.contentId))
         .map(([ctxId]) => ctxId),
       rawEntry,
     }));
     return {
-      tenantId: serverTenantId, domainId: "wealth", contexts, intents, content,
+      tenantId: serverTenantId, domainId: "wealth", componentOptions: contentComponentCatalog, contexts, intents, content,
       nbaRules: experienceRegistry.listNbaRules(),
     };
   }

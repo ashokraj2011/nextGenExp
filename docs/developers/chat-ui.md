@@ -1,6 +1,6 @@
 ## Create a chat UI
 
-A layout controls how an existing result appears. Its attachment identifies the intent or capability that can use it. On a customer turn the server supplies verified content, values and actions. You can share the same design across customers with different results.
+A layout controls how an existing result appears. Attach it to an intent, a capability, or a published Wealth content item. On a customer turn the server supplies verified content, values and actions. You can share the same design across customers with different results.
 
 ### Publish a balance comparison
 
@@ -10,11 +10,19 @@ A layout controls how an existing result appears. Its attachment identifies the 
 4. **Save draft**. In **Layout preview → Try a chat turn**, ask **“Compare available and current balances.”** The expected result says **Draft layout applied** and includes your heading. Layout preview uses sample blocks and reads the selected profile for supported data bindings. The chat check runs the configured model and domain rules.
 5. **Publish**, then ask the same question in customer chat. In **Inspector → Published UI**, check the design name and revision. **Design library → Use as template** gives another owner an editable copy. Publishing an edit affects subsequent turns. Earlier turns retain their recorded UI.
 
+### Configure how a content item appears
+
+In **Administration → Intents & Catalog → Wealth → Content Catalog**, select **Home down payment**. **Built-in formats** shows which verified formats this item may use. Save changes to the content item to update that list.
+
+Choose **Design in UI Builder** to start with the content item attached and its first allowed block in place. Add a saved widget, a linked sequence of widgets, or text. Preview with a customer who has a home-buying goal, then use **Try a chat turn** with **“Show my home-buying goal and savings progress.”** Publish to apply the layout in chat. The Content Catalog shows the published design and revision.
+
+The app checks content attachments after verifying which items the reply will show. If multiple items have designs, it tries them in the order the reply uses them, then tries the intent and capability attachments. The selected layout keeps the verified goal, balances, or other approved blocks and arranges the widgets around them.
+
 ### Link widgets into steps
 
 Add each widget to the same layout. Expand the starting widget, open **Advanced (Badge, Progress Bar & CTA)**, and choose the destination under **On button click → Show another widget**. Give the button a label such as **See service impact**. Repeat on the next widget if you need more steps. **Layout preview** shows exactly one linked card at a time and adds **Back** after the first step.
 
-Publish the layout with its chat intent, then open the card in chat. The steps use the data that was resolved for that reply. To continue the conversation from the last step, use **Send a chat prompt** on that widget and fill in its button label and prompt.
+Publish the layout with its chat attachment, then open the card in chat. The steps use the data that was resolved for that reply. To continue the conversation from the last step, use **Send a chat prompt** on that widget and fill in its button label and prompt.
 
 ### Publish an interactive experience
 
@@ -85,6 +93,6 @@ For screens or widgets that bind directly to registered `sfield` tools without c
 Use the home-buying goal card as a working example.
 
 1. Define the props and data shape. Follow `goalProgressCard`, `catalogApis` and `DisplayBlock` in `packages/contracts/surface.ts`. The goal data contract in `packages/contracts/goal-progress.ts` specifies whole cents and chronological months.
-2. Supply validated data in the relevant compiler. The `PznGoalProgress` case in `packages/experience/compile.ts` requires a verified goal read. For a composer-selectable type, extend `componentNames` in `packages/contracts/domain.ts` and the enum in `packages/contracts/schemas/experience-proposal.schema.json`. Declare which content can use it via `allowedComponents` in `fixtures/content-catalog.json` and enforce its data requirements in `packages/experience/verify.ts`.
-3. Add the React implementation to `pznCatalog` in `apps/web/surface.tsx` and support the canonical fallback there. The goal chart itself lives in `apps/web/goal-progress.tsx`. To make the type available in the builder, add its entry to `layoutComponents` in `packages/contracts/ui-layout.ts` and supply compatible target and preview data in `apps/server/ui-layouts.ts`.
+2. Supply validated data in the relevant compiler. The `PznGoalProgress` case in `packages/experience/compile.ts` requires a verified goal read. Add composer-selectable types to `contentComponentCatalog` in `packages/contracts/domain.ts` and the enum in `packages/contracts/schemas/experience-proposal.schema.json`. The catalog supplies the choices in the Content Catalog and UI Builder. Set `allowedComponents` for each applicable content item and enforce the data requirements in `packages/experience/verify.ts`.
+3. Add the React implementation to `pznCatalog` in `apps/web/surface.tsx` and support the canonical fallback there. The goal chart itself lives in `apps/web/goal-progress.tsx`. Supply compatible target and preview data in `apps/server/ui-layouts.ts`. Components used only in layouts can be listed directly in `layoutComponents` in `packages/contracts/ui-layout.ts`.
 4. Check a real chat turn, its fallback rendering, and any issued controls after reordering. `tests/ui-layouts.test.ts` covers verification and publication. `tests/ui-builder-browser.ts` exercises preview, publication and the resulting customer screen.
