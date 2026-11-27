@@ -161,53 +161,60 @@ const sdkPackages = [
 
 const frameworkComparison = [
   {
-    dimension: "Primary Focus",
-    sfield: "Zero-trust governed runtime (Node 22+ / TS) for regulated enterprise apps",
-    langgraph: "Graph/state-machine orchestration (Python / JS)",
-    vercel: "Frontend streaming UI hooks & multi-model SDK (TS)",
-    openaiAdk: "Multi-agent handoffs & Gemini/OpenAI-native orchestration",
+    dimension: "Runtime & Ecosystem",
+    sfieldPros: "Zero-trust TypeScript/Node 22+ kernel with zero cloud lock-in and minimal runtime dependencies.",
+    sfieldCons: "Node.js/TS only (no native Python SDK yet); smaller third-party community plugin catalog than LangChain/LangGraph.",
+    othersPros: "Massive Python & JS ecosystems (LangGraph, Google ADK, CrewAI), hundreds of community integrations, and deep cloud/vendor hooks.",
+    othersCons: "Heavier dependency trees, faster API churn, or tighter coupling to a single cloud/model vendor.",
   },
   {
-    dimension: "Identity & Agent OBO",
-    sfield: "Built-in Principal (human|agent|service, custom identifiers, RFC 8693 actingFor)",
-    langgraph: "App-layer / custom middleware",
-    vercel: "App-layer / custom middleware",
-    openaiAdk: "Session context / cloud IAM",
+    dimension: "Identity, Multi-Tenant & OBO",
+    sfieldPros: "First-class Principal (human|agent|service), custom identifiers (mid, mrn, orderId), RFC 8693 actingFor, and declarative principal.* bindings.",
+    sfieldCons: "Host apps must construct and pass a Principal upfront (slightly more setup for quick throwaway scripts).",
+    othersPros: "Fast to prototype with plain strings or session dicts and minimal identity ceremony.",
+    othersCons: "Tenant isolation, agent OBO attribution, and cross-principal replay protection must be hand-rolled in app middleware.",
   },
   {
-    dimension: "Tool Policy & HITL",
-    sfield: "read_only / supervised / bounded_auto + closed Ajv schemas + SHA-256 digest-bound approvals",
-    langgraph: "Checkpointed interrupt() (digest binding & RBAC DIY)",
-    vercel: "Zod tool schemas & confirmation callbacks",
-    openaiAdk: "Guardrails & approval callbacks (host persists state)",
+    dimension: "Tool Schemas & Policy Presets",
+    sfieldPros: "Strict closed Ajv schemas, built-in read_only / supervised / bounded_auto presets, and beforeModelDispatch tool narrowing block prompt-injected writes.",
+    sfieldCons: "Strict closed schemas reject loose/untyped tool payloads until explicitly modeled.",
+    othersPros: "Flexible Zod/Pydantic tool definitions make rapid prototyping and open-ended JSON tools effortless.",
+    othersCons: "Read/write effect isolation and per-turn tool narrowing are usually convention-based rather than kernel-enforced.",
+  },
+  {
+    dimension: "HITL Approvals & Crash Resume",
+    sfieldPros: "Built-in SHA-256 argument-digest-bound approvals, single-use resume, and durable SQLite/Postgres+JSON checkpoints out of the box.",
+    sfieldCons: "Structured around governed tool calls/digests rather than arbitrary free-form graph-node interrupts.",
+    othersPros: "LangGraph interrupt() and Mastra/ADK workflows support arbitrary mid-graph pauses and complex branching state machines.",
+    othersCons: "Cryptographic argument binding, tamper detection, and role/dual-control approval queues are typically DIY.",
   },
   {
     dimension: "Data-to-UI & Sealed Actions",
-    sfield: "Built-in sf.surfaces ($ref/$repeat/$input + HMAC-SHA256 sealed action dispatch)",
-    langgraph: "Separate (AG-UI / CopilotKit)",
-    vercel: "Generative UI (streamUI) — no cryptographic action sealing",
-    openaiAdk: "None built-in",
+    sfieldPros: "Built-in sf.surfaces ($ref/$repeat/$input) prevents LLMs from fabricating numbers and seals every button action with HMAC-SHA256 bound to Principal.",
+    sfieldCons: "Backend declarative envelope only — you still bring your own frontend renderer (e.g. React, A2UI, or assistant-ui).",
+    othersPros: "Vercel AI SDK (streamUI / useChat) provides best-in-class React streaming hooks and instant generative UI components.",
+    othersCons: "No built-in cryptographic action sealing or closed-schema Data-to-UI stitcher; LLMs often serialize raw business numbers into UI JSON.",
   },
   {
     dimension: "MCP 2026 & Federation",
-    sfield: "Built-in RBAC SFieldMcpServer (Elicitation + Async Tasks) + McpClient proxy tools",
-    langgraph: "MCP client adapters",
-    vercel: "Experimental MCP client",
-    openaiAdk: "MCP client / toolsets",
+    sfieldPros: "Built-in RBAC SFieldMcpServer (HTTP + stdio), MCP 2026 Elicitation (input_required), Async Tasks, and McpClient proxy tools.",
+    sfieldCons: "Newer MCP 2026 extensions (Elicitation/Async Tasks) are still rolling out across third-party clients.",
+    othersPros: "Wide MCP client adapter support across Python/JS frameworks and hosted MCP marketplaces.",
+    othersCons: "Server-side RBAC, tenant-isolated async task queues, and schema-validated mid-flight elicitation are rarely built in.",
   },
   {
     dimension: "PII Firewall & Resilience",
-    sfield: "Built-in egress PiiFirewall + local rehydration + TokenBucket & 3-state CircuitBreaker",
-    langgraph: "External gateway / custom middleware",
-    vercel: "External gateway / custom middleware",
-    openaiAdk: "External (Model Armor / custom guardrails)",
+    sfieldPros: "Built-in PiiFirewall (egress tokenization + local rehydration) and TokenBucket / 3-state CircuitBreaker with zero extra infra.",
+    sfieldCons: "Deterministic pattern/dictionary PII scrubbing may still be paired with ML DLP (e.g. Model Armor/Presidio) for unstructured legal/clinical prose.",
+    othersPros: "Easy to pair with enterprise cloud DLP and API gateways (GCP Model Armor, Azure Content Safety, Cloudflare AI Gateway).",
+    othersCons: "Requires deploying and operating separate sidecars, gateways, or custom middleware for PII redaction and circuit breaking.",
   },
   {
     dimension: "Workbench & Release Gates",
-    sfield: "Embeddable & standalone @sfield/studio + sfield eval + sfield lock approve",
-    langgraph: "LangSmith / LangGraph Studio",
-    vercel: "External (OTel / Braintrust / Langfuse)",
-    openaiAdk: "OpenAI Traces / ADK Web UI + Vertex Eval",
+    sfieldPros: "Zero-framework embeddable & standalone @sfield/studio + sfield eval + sfield lock approve with zero SaaS dependency.",
+    sfieldCons: "Lighter visual graph-debugging and dataset-annotation UX than mature commercial SaaS platforms like LangSmith.",
+    othersPros: "Rich hosted observability, prompt playgrounds, and visual trace UIs (LangSmith, LangGraph Studio, Vertex Eval, OpenAI Traces).",
+    othersCons: "Often requires paid SaaS accounts, external trace data egress, or vendor-specific cloud lock-in.",
   },
 ];
 
@@ -353,20 +360,22 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
             <thead>
               <tr>
                 <th>Capability</th>
-                <th><code>sfield</code> (@sfield/*)</th>
-                <th>LangGraph / LangChain</th>
-                <th>Vercel AI SDK</th>
-                <th>OpenAI Agents / Google ADK</th>
+                <th><code>sfield</code> — Pros &amp; Cons</th>
+                <th>Others (LangGraph, Vercel AI SDK, OpenAI Agents, Google ADK, Mastra/CrewAI) — Pros &amp; Cons</th>
               </tr>
             </thead>
             <tbody>
               {frameworkComparison.map((row) => (
                 <tr key={row.dimension}>
                   <td><strong>{row.dimension}</strong></td>
-                  <td>{row.sfield}</td>
-                  <td>{row.langgraph}</td>
-                  <td>{row.vercel}</td>
-                  <td>{row.openaiAdk}</td>
+                  <td>
+                    <div><strong>Pros:</strong> {row.sfieldPros}</div>
+                    <div style={{ marginTop: "6px", opacity: 0.9 }}><strong>Cons:</strong> {row.sfieldCons}</div>
+                  </td>
+                  <td>
+                    <div><strong>Pros:</strong> {row.othersPros}</div>
+                    <div style={{ marginTop: "6px", opacity: 0.9 }}><strong>Cons:</strong> {row.othersCons}</div>
+                  </td>
                 </tr>
               ))}
             </tbody>

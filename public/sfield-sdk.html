@@ -457,86 +457,50 @@
           <thead>
             <tr>
               <th>Capability</th>
-              <th><code>sfield</code> (@sfield/*)</th>
-              <th>LangGraph / LangChain</th>
-              <th>Vercel AI SDK</th>
-              <th>OpenAI Agents SDK</th>
-              <th>Google ADK</th>
-              <th>Mastra / CrewAI</th>
+              <th><code>sfield</code> (@sfield/*) — Pros &amp; Cons</th>
+              <th>Other Frameworks (LangGraph, Vercel AI SDK, OpenAI Agents, Google ADK, Mastra/CrewAI) — Pros &amp; Cons</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td><strong>Primary Focus</strong></td>
-              <td>Zero-trust enterprise governance runtime (Node 22+ / TS)</td>
-              <td>Graph/state-machine orchestration (Python / JS)</td>
-              <td>Frontend streaming UI hooks &amp; multi-model SDK (TS)</td>
-              <td>Lightweight multi-agent handoffs &amp; guardrails</td>
-              <td>Hierarchical multi-agent &amp; Vertex AI / Gemini orchestration</td>
-              <td>Rapid workflow / role-based agent prototyping</td>
+              <td><strong>Runtime &amp; Ecosystem</strong></td>
+              <td><strong>Pros:</strong> Zero-trust TypeScript/Node 22+ kernel with zero cloud lock-in and minimal runtime dependencies.<br /><br /><strong>Cons:</strong> Node.js/TS only (no native Python SDK yet); smaller third-party community plugin catalog than LangChain/LangGraph.</td>
+              <td><strong>Pros:</strong> Massive Python &amp; JS ecosystems (LangGraph, Google ADK, CrewAI), hundreds of pre-built connectors, and deep vendor hooks (Vertex AI, OpenAI).<br /><br /><strong>Cons:</strong> Heavier dependency trees, faster API churn, or tighter coupling to a single cloud/model vendor.</td>
             </tr>
             <tr>
               <td><strong>Identity, Multi-Tenant &amp; Agent OBO</strong></td>
-              <td><strong>Built-in</strong> <code>Principal</code> (<code>human|agent|service</code>, custom <code>identifiers</code>, RFC 8693 <code>actingFor</code>, declarative <code>principal.*</code> bindings)</td>
-              <td>App-layer / custom middleware</td>
-              <td>App-layer / custom middleware</td>
-              <td>Context object (no built-in OBO / tenant isolation)</td>
-              <td>Session state / Vertex IAM</td>
-              <td>App-layer / custom middleware</td>
+              <td><strong>Pros:</strong> First-class <code>Principal</code> (<code>human|agent|service</code>), custom <code>identifiers</code> (<code>mid</code>, <code>mrn</code>, <code>orderId</code>), RFC 8693 <code>actingFor</code>, and declarative <code>principal.*</code> bindings.<br /><br /><strong>Cons:</strong> Host apps must construct and pass a <code>Principal</code> upfront (slightly more setup for quick throwaway scripts).</td>
+              <td><strong>Pros:</strong> Quick to start with plain strings or session dicts and minimal identity ceremony for prototypes.<br /><br /><strong>Cons:</strong> Multi-tenant isolation, agent OBO attribution, and cross-principal replay protection must be hand-rolled in app middleware.</td>
             </tr>
             <tr>
-              <td><strong>Policy Presets &amp; Effect Isolation</strong></td>
-              <td><strong>Built-in</strong> (<code>read_only</code>, <code>supervised</code>, <code>bounded_auto</code>) + closed Ajv schemas + <code>beforeModelDispatch</code> tool narrowing</td>
-              <td>Custom graph guards / Pydantic or Zod schemas</td>
-              <td>Zod tool schemas; effect isolation built by host</td>
-              <td>Input/output guardrails; no effect presets</td>
-              <td>Tool callbacks / plugins</td>
-              <td>Zod/Pydantic schemas; custom policy layer</td>
+              <td><strong>Tool Schemas &amp; Policy Presets</strong></td>
+              <td><strong>Pros:</strong> Strict closed Ajv schemas, built-in <code>read_only</code> / <code>supervised</code> / <code>bounded_auto</code> presets, and <code>beforeModelDispatch</code> tool narrowing prevent prompt-injected writes.<br /><br /><strong>Cons:</strong> Strict closed schemas reject loose/untyped tool payloads until explicitly modeled.</td>
+              <td><strong>Pros:</strong> Flexible Zod/Pydantic tool definitions make rapid prototyping and open-ended JSON tools effortless.<br /><br /><strong>Cons:</strong> Read/write effect isolation and per-turn tool narrowing are usually convention-based rather than kernel-enforced.</td>
             </tr>
             <tr>
-              <td><strong>Digest-Bound HITL &amp; Crash Resume</strong></td>
-              <td><strong>Built-in</strong> SHA-256 argument-bound approvals, single-use resume &amp; SQLite/Postgres checkpoints</td>
-              <td>Checkpointed <code>interrupt()</code> (digest binding &amp; RBAC DIY)</td>
-              <td>Tool confirmation hooks (host persists state)</td>
-              <td>Approval callbacks (host persists state)</td>
-              <td>Long-running tool pause / resume</td>
-              <td>Workflow suspend / resume</td>
+              <td><strong>HITL Approvals &amp; Crash Resume</strong></td>
+              <td><strong>Pros:</strong> Built-in SHA-256 argument-digest-bound approvals, single-use resume, and durable SQLite/Postgres+JSON checkpoints out of the box.<br /><br /><strong>Cons:</strong> Structured around governed tool calls/digests rather than arbitrary free-form graph-node interrupts.</td>
+              <td><strong>Pros:</strong> LangGraph <code>interrupt()</code> and Mastra/ADK workflows support arbitrary mid-graph pauses and complex branching state machines.<br /><br /><strong>Cons:</strong> Cryptographic argument binding, tamper detection, and role/dual-control approval queues are typically DIY.</td>
             </tr>
             <tr>
-              <td><strong>Deterministic Data-to-UI &amp; Sealed Actions</strong></td>
-              <td><strong>Built-in</strong> <code>sf.surfaces</code> (<code>$ref</code> / <code>$repeat</code> / <code>$input</code> + <strong>HMAC-SHA256 principal-bound sealed actions</strong>)</td>
-              <td>No built-in UI binder (separate AG-UI / CopilotKit)</td>
-              <td>Generative UI (<code>streamUI</code>) — no cryptographic action sealing</td>
-              <td>None built-in</td>
-              <td>None built-in</td>
-              <td>None built-in</td>
+              <td><strong>Data-to-UI &amp; Sealed Actions</strong></td>
+              <td><strong>Pros:</strong> Built-in <code>sf.surfaces</code> (<code>$ref</code>/<code>$repeat</code>/<code>$input</code>) prevents LLMs from fabricating numbers and seals every button action with <strong>HMAC-SHA256</strong> bound to <code>Principal</code>.<br /><br /><strong>Cons:</strong> Backend declarative envelope only — you still bring your own frontend renderer (React, A2UI, or <code>assistant-ui</code>).</td>
+              <td><strong>Pros:</strong> Vercel AI SDK (<code>streamUI</code> / <code>useChat</code>) provides best-in-class React streaming hooks and instant generative UI components.<br /><br /><strong>Cons:</strong> No built-in cryptographic action sealing or closed-schema Data-to-UI stitcher; LLMs often serialize raw business figures into UI JSON.</td>
             </tr>
             <tr>
-              <td><strong>MCP 2026 (Elicitation + Async Tasks)</strong></td>
-              <td><strong>Built-in</strong> RBAC <code>SFieldMcpServer</code> (HTTP + stdio), Elicitation, Async Tasks, <code>McpClient</code> + proxy tools</td>
-              <td>MCP client adapters (server RBAC &amp; 2026 extensions DIY)</td>
-              <td>Experimental MCP client</td>
-              <td>Hosted/local MCP client</td>
-              <td>MCP toolset client</td>
-              <td>MCP client / server adapters</td>
+              <td><strong>MCP 2026 &amp; Federation</strong></td>
+              <td><strong>Pros:</strong> Built-in RBAC <code>SFieldMcpServer</code> (HTTP + stdio), MCP <code>2026-07-28</code> Elicitation (<code>input_required</code>), Async Tasks, and <code>McpClient</code> proxy tools.<br /><br /><strong>Cons:</strong> Newer MCP 2026 extensions (Elicitation/Async Tasks) are still rolling out across third-party MCP clients.</td>
+              <td><strong>Pros:</strong> Broad MCP client adapters across Python/JS frameworks and hosted MCP marketplaces.<br /><br /><strong>Cons:</strong> Server-side RBAC, tenant-isolated async task queues, and schema-validated mid-flight elicitation are rarely built in.</td>
             </tr>
             <tr>
-              <td><strong>PII Egress Firewall &amp; Resilience</strong></td>
-              <td><strong>Built-in</strong> <code>PiiFirewall</code> (egress scrub + local rehydration) &amp; <code>TokenBucket</code> + 3-state <code>CircuitBreaker</code></td>
-              <td>External gateway or custom middleware</td>
-              <td>External gateway or custom middleware</td>
-              <td>Custom guardrail functions</td>
-              <td>Model Armor (GCP) / custom callbacks</td>
-              <td>Custom middleware / gateway</td>
+              <td><strong>PII Firewall &amp; Resilience</strong></td>
+              <td><strong>Pros:</strong> Built-in <code>PiiFirewall</code> (egress tokenization + local rehydration) and <code>TokenBucket</code> / 3-state <code>CircuitBreaker</code> with zero extra infra.<br /><br /><strong>Cons:</strong> Deterministic pattern/dictionary PII scrubbing may still be paired with ML DLP (e.g. Model Armor/Presidio) for unstructured legal/clinical prose.</td>
+              <td><strong>Pros:</strong> Easy to pair with enterprise cloud DLP and API gateways (GCP Model Armor, Azure Content Safety, Cloudflare AI Gateway).<br /><br /><strong>Cons:</strong> Requires deploying and operating separate sidecars, gateways, or custom middleware for PII redaction and circuit breaking.</td>
             </tr>
             <tr>
-              <td><strong>Governance Workbench &amp; Release Gates</strong></td>
-              <td><strong>Embeddable &amp; standalone</strong> <code>@sfield/studio</code> (zero UI deps) + <code>sfield eval</code> + <code>sfield lock approve</code></td>
-              <td>LangSmith / LangGraph Studio (SaaS or self-hosted)</td>
-              <td>External observability (OTel / Langfuse / Braintrust)</td>
-              <td>OpenAI Traces dashboard</td>
-              <td>ADK Web Dev UI + Vertex Eval</td>
-              <td>Mastra Playground / CrewAI Enterprise</td>
+              <td><strong>Workbench &amp; Release Gates</strong></td>
+              <td><strong>Pros:</strong> Zero-framework embeddable &amp; standalone <code>@sfield/studio</code> + <code>sfield eval</code> + <code>sfield lock approve</code> with zero SaaS dependency.<br /><br /><strong>Cons:</strong> Lighter visual graph-debugging and dataset-annotation UX than mature commercial SaaS platforms like LangSmith.</td>
+              <td><strong>Pros:</strong> Rich hosted observability, prompt playgrounds, and visual trace UIs (LangSmith, LangGraph Studio, Vertex Eval, OpenAI Traces).<br /><br /><strong>Cons:</strong> Often requires paid SaaS accounts, external trace data egress, or vendor-specific cloud lock-in.</td>
             </tr>
           </tbody>
         </table>
