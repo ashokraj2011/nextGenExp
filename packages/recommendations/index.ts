@@ -24,6 +24,7 @@ export function createTreatmentSelectorProvider(
     label: "Treatment Selector (TS + CCRE)",
     description: "Evaluates CCRE eligibility rules, ranking overrides, and approved content/workflow treatments per customer MID.",
     domains: ["wealth"],
+    toolRef: "treatments.eligible@1.0.0",
     async evaluate(ctx, signal) {
       const result = await selectEligible(ctx.syntheticMid, ctx.contextId, signal);
       return result.recommendations.recommendations.map((rec, index): NormalizedRecommendation => {
@@ -163,9 +164,11 @@ export class RecommendationArbitrator {
     return this.providers.map((p) => ({
       id: p.id,
       label: p.label,
+      category: "recommendation_provider",
       description: p.description,
       domains: [...p.domains],
       sfieldToolRef: recommendationArbitrateToolRef,
+      ...(p.toolRef ? { toolRef: p.toolRef } : {}),
     }));
   }
 

@@ -57,12 +57,179 @@ if (new Set(catalog.contexts.map((entry) => entry.contextId)).size !== catalog.c
 
 export type FixtureState = Readonly<{ scenarioId: string; ordinal: number }>;
 export type FundingFact = "funded" | "unfunded" | FirstDepositConfirmation;
-type TreatmentRequest = { mid: string; context: string; accountId?: string; overrideCashCents?: number };
+export type TreatmentRequest = { mid: string; context: string; accountId?: string; overrideCashCents?: number };
 export type ContextScoresRequest = { mid: string; contextIds: string[] };
+
+export interface TreatmentSelectionResult {
+  contentIds: string[];
+  ccre?: MockCcreEvaluation;
+  portfolio: z.infer<typeof portfolioSnapshotSchema> | null;
+  workflowMatches: RuleWorkflowMatch[];
+  actionMatches: typeof tsFixtures.actionRules;
+  recommendations: TreatmentRecommendations;
+  decision: TreatmentDecision;
+  renderedEntries?: ReturnType<typeof pznTextContentToCatalogEntry>[];
+}
+export interface TreatmentRecommendationsResult extends TreatmentSelectionResult {
+  response: TreatmentV3;
+}
+
 export interface TsAdapter {
   listContexts(signal?: AbortSignal): Promise<ContextCatalog>;
   getContextScores(request: ContextScoresRequest, signal?: AbortSignal): Promise<PropensityResult>;
   getRankedEligibleIds(request: TreatmentRequest, signal?: AbortSignal): Promise<string[]>;
+  selectEligibleContent(request: TreatmentRequest, signal?: AbortSignal): Promise<TreatmentSelectionResult>;
+  selectRecommendations(request: TreatmentRequest, signal?: AbortSignal): Promise<TreatmentRecommendationsResult>;
+}
+
+export type TsAdapterContext = {
+  state: FixtureState;
+  overrides?: readonly TreatmentOverride[];
+  ccreRules?: readonly MockCcreRule[];
+  portfolios?: PortfolioSnapshotProvider;
+  funding?: FundingFact;
+};
+
+/**
+ * Shared factory seam for Treatment Selector (categorized as a recommendation_provider tool).
+ * Chat, Agentic Execution, Pending Actions, and Admin Tool Setup preview all resolve through
+ * the single injected factory so customers receive a consistent decision across every surface.
+ */
+export type TsAdapterFactory = (ctx: TsAdapterContext) => TsAdapter;
+
+export function createFixtureTsAdapterFactory(): TsAdapterFactory {
+  return ({ state, overrides = [], ccreRules = [], portfolios = fixturePortfolioSnapshotProvider, funding }) =>
+    new FixtureTsAdapter(state, overrides, ccreRules, portfolios, funding);
+}
+
+export interface RemoteTsAdapterOptions {
+  /** Base URL of the external Treatment Selector HTTP service (e.g. https://ts.internal/v1). */
+  endpoint: string;
+  /** Optional static headers (e.g. Authorization: Bearer ...). */
+  headers?: Record<string, string>;
+  /** Per-request timeout in ms (default 5000). */
+  timeoutMs?: number;
+  /** Optional custom fetch implementation (for testing or mTLS dispatchers). */
+  fetchFn?: typeof fetch;
+}
+
+/**
+ * HTTP-backed Treatment Selector adapter implementing the full TsAdapter contract.
+ * Connects Chat, Agentic Execution, Pending Actions, and Tool Setup preview to a real TS endpoint.
+ */
+export class RemoteTsAdapter implements TsAdapter {
+  private readonly baseUrl: string;
+  private readonly headers: Record<string, string>;
+  private readonly timeoutMs: number;
+  private readonly fetchFn: typeof fetch;
+  private readonly ctx: TsAdapterContext;
+
+  constructor(options: RemoteTsAdapterOptions, ctx: TsAdapterContext) {
+    this.baseUrl = options.endpoint.replace(/\/+$/, "");
+    this.headers = { "Content-Type": "application/json", ...options.headers };
+    this.timeoutMs = options.timeoutMs ?? 5000;
+    this.fetchFn = options.fetchFn ?? fetch;
+    this.ctx = ctx;
+  }
+
+  private async requestJson<T>(path: string, init: RequestInit, signal?: AbortSignal): Promise<T> {
+    const combinedSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)])
+      : AbortSignal.timeout(this.timeoutMs);
+    let response: Response;
+    try {
+      response = await this.fetchFn(`${this.baseUrl}${path}`, {
+        ...init,
+        headers: { ...this.headers, ...(init.headers as Record<string, string> | undefined) },
+        signal: combinedSignal,
+      });
+    } catch (err) {
+      if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+        throw new TreatmentSelectorTimeout();
+      }
+      throw err;
+    }
+    if (!response.ok) {
+      if (response.status === 504 || response.status === 408) throw new TreatmentSelectorTimeout();
+      throw new Error(`REMOTE_TS_HTTP_${response.status}`);
+    }
+    return await response.json() as T;
+  }
+
+  async listContexts(signal?: AbortSignal): Promise<ContextCatalog> {
+    return this.requestJson<ContextCatalog>("/contexts", { method: "GET" }, signal);
+  }
+
+  async getContextScores(request: ContextScoresRequest, signal?: AbortSignal): Promise<PropensityResult> {
+    return this.requestJson<PropensityResult>("/scores", {
+      method: "POST",
+      body: JSON.stringify({ ...request, scenarioId: this.ctx.state.scenarioId }),
+    }, signal);
+  }
+
+  async getRankedEligibleIds(request: TreatmentRequest, signal?: AbortSignal): Promise<string[]> {
+    return (await this.selectEligibleContent(request, signal)).contentIds;
+  }
+
+  async selectEligibleContent(request: TreatmentRequest, signal?: AbortSignal): Promise<TreatmentSelectionResult> {
+    const fundingStatus = typeof this.ctx.funding === "object" ? "funded" : this.ctx.funding;
+    const raw = await this.requestJson<Partial<TreatmentSelectionResult> & { contentIds: string[] }>("/select", {
+      method: "POST",
+      body: JSON.stringify({
+        ...request,
+        scenarioId: this.ctx.state.scenarioId,
+        ordinal: this.ctx.state.ordinal,
+        ...(fundingStatus ? { fundingStatus } : {}),
+      }),
+    }, signal);
+    const contentIds = Array.isArray(raw.contentIds) ? raw.contentIds : [];
+    const recommendations: TreatmentRecommendations = raw.recommendations ?? {
+      schemaVersion: "2.0",
+      recommendations: contentIds.map((id) => ({ kind: "content" as const, id })),
+    };
+    const decision: TreatmentDecision = raw.decision ?? {
+      schemaVersion: "2.1",
+      recommendations: recommendations.recommendations,
+    };
+    return {
+      contentIds,
+      ccre: raw.ccre,
+      portfolio: raw.portfolio ?? null,
+      workflowMatches: raw.workflowMatches ?? [],
+      actionMatches: raw.actionMatches ?? [],
+      recommendations,
+      decision,
+      renderedEntries: raw.renderedEntries,
+    };
+  }
+
+  async selectRecommendations(request: TreatmentRequest, signal?: AbortSignal): Promise<TreatmentRecommendationsResult> {
+    const selection = await this.selectEligibleContent(request, signal);
+    const recommendations = normalizeRecommendations(selection.decision);
+    const response: TreatmentV3 = { schemaVersion: "3.0", recommendations };
+    return { ...selection, response };
+  }
+}
+
+export function createRemoteTsAdapterFactory(options: RemoteTsAdapterOptions): TsAdapterFactory {
+  return (ctx) => new RemoteTsAdapter(options, ctx);
+}
+
+/**
+ * Returns the default shared TsAdapterFactory:
+ * - If `PZN_TS_ENDPOINT` is configured, connects all callers to the real HTTP TS service.
+ * - Otherwise, uses the local FixtureTsAdapter mock.
+ */
+export function createDefaultTsAdapterFactory(env: NodeJS.ProcessEnv = process.env): TsAdapterFactory {
+  const endpoint = env.PZN_TS_ENDPOINT?.trim();
+  if (endpoint) {
+    const apiKey = env.PZN_TS_API_KEY?.trim();
+    return createRemoteTsAdapterFactory({
+      endpoint,
+      ...(apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : {}),
+    });
+  }
+  return createFixtureTsAdapterFactory();
 }
 
 function fixtureRuleFor(state: FixtureState, context: string) {

@@ -8,7 +8,7 @@ import type { PortfolioSnapshotProvider } from "../../packages/portfolio-snapsho
 import type { GoalProgressProvider } from "../../packages/goal-progress";
 import { makeId } from "../../packages/experience/compile";
 import { Rejected, requireCheck } from "../../packages/experience/verify";
-import { FixtureTsAdapter, type TsAdapter } from "../../packages/ts-adapter";
+import { createDefaultTsAdapterFactory, type TsAdapter, type TsAdapterFactory } from "../../packages/ts-adapter";
 import { normalizeRecommendations } from "../../packages/ts-adapter/recommendations";
 import { formatPortfolioAmount } from "../../packages/contracts/portfolio";
 import { capabilityTools, type CapabilityTool } from "../../packages/capabilities";
@@ -38,7 +38,7 @@ type BoundRead =
       decision: EligibilityDecision; values: InputValues; prior: Partial<Record<OutputKind, unknown>> };
 
 type Scope = {
-  turnId: string; runId: string; principal: Principal; persona: Persona; adapter: FixtureTsAdapter; leases: Map<string, BoundRead>;
+  turnId: string; runId: string; principal: Principal; persona: Persona; adapter: TsAdapter; leases: Map<string, BoundRead>;
 };
 
 export function readTool(ref: string, description: string, inputs: JsonObject, handler: DefineToolInput["handler"], timeoutMs = 5_000) {
@@ -86,6 +86,7 @@ export class AgenticExecution {
   constructor(
     readonly store: Store, readonly sf: () => SField, readonly now: () => number, readonly current: (turnId: string) => TurnRecord,
     private readonly portfolios: PortfolioSnapshotProvider, private readonly goals: GoalProgressProvider, readonly budget: ExecutionBudget,
+    private readonly tsAdapterFactory: TsAdapterFactory = createDefaultTsAdapterFactory(),
   ) {
     this.registry = new CapabilityRegistry(store);
     this.world = new CustomerWorldModel(store, now);
@@ -98,12 +99,15 @@ export class AgenticExecution {
     return persona;
   }
 
-  adapter(turn: TurnRecord) {
+  adapter(turn: TurnRecord): TsAdapter {
     const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
-    return new FixtureTsAdapter(
-      { scenarioId: conversation.scenarioId, ordinal: turn.ordinal }, turn.toolSetup?.treatmentOverrides, turn.toolSetup?.ccreRules,
-      this.portfolios, this.store.axe.fundingFact(turn.scope),
-    );
+    return this.tsAdapterFactory({
+      state: { scenarioId: conversation.scenarioId, ordinal: turn.ordinal },
+      overrides: turn.toolSetup?.treatmentOverrides,
+      ccreRules: turn.toolSetup?.ccreRules,
+      portfolios: this.portfolios,
+      funding: this.store.axe.fundingFact(turn.scope),
+    });
   }
 
   trace(turn: TurnRecord, runId: string, type: string, detail?: unknown, journeyId?: string) {

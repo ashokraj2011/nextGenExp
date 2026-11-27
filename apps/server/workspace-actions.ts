@@ -5,21 +5,25 @@ import { pendingActionsContext, type WorkspaceActionLog, type WorkspacePendingAc
 import { makeId } from "../../packages/experience/compile";
 import { lookupContent } from "../../packages/experience/content";
 import type { PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
-import { FixtureTsAdapter, TreatmentSelectorTimeout } from "../../packages/ts-adapter";
+import { createDefaultTsAdapterFactory, TreatmentSelectorTimeout, type TreatmentSelectionResult, type TsAdapterFactory } from "../../packages/ts-adapter";
 import { nextStepRecommendation } from "./funding-offer";
 import { ApiError, type Store } from "./store";
 
 export async function readWorkspacePendingActions(
   store: Store, principalId: string, persona: Pick<PersonaRecord, "personaId" | "syntheticMid">,
   portfolios: PortfolioSnapshotProvider, inspection: boolean, now: number,
+  tsAdapterFactory: TsAdapterFactory = createDefaultTsAdapterFactory(),
 ): Promise<WorkspacePendingAction[]> {
   const { personaId, syntheticMid } = persona;
   const setup = store.toolSetup("wealth");
   if (!setup.enabled.selection) throw new ApiError(503, "selection_disabled", "Pending actions are unavailable.");
-  const adapter = new FixtureTsAdapter(
-    { scenarioId: host.defaultScenarioId, ordinal: 1 }, setup.treatmentOverrides, setup.ccreRules,
-    portfolios, store.axe.fundingFact({ principalId, personaId }),
-  );
+  const adapter = tsAdapterFactory({
+    state: { scenarioId: host.defaultScenarioId, ordinal: 1 },
+    overrides: setup.treatmentOverrides,
+    ccreRules: setup.ccreRules,
+    portfolios,
+    funding: store.axe.fundingFact({ principalId, personaId }),
+  });
   const request = { mid: syntheticMid, context: pendingActionsContext } as const;
   const log = { id: makeId("pending"), personaId, createdAt: now, request };
   const record = (entry: WorkspaceActionLog) => {
@@ -28,7 +32,7 @@ export async function readWorkspacePendingActions(
     catch { /* Diagnostic storage cannot change the selection result. */ }
   };
 
-  let selection: Awaited<ReturnType<FixtureTsAdapter["selectEligibleContent"]>>;
+  let selection: TreatmentSelectionResult;
   try {
     selection = await adapter.selectEligibleContent(request, AbortSignal.timeout(5000));
   } catch (error) {

@@ -134,9 +134,12 @@ export type RecommendationArbitrateResult = z.infer<typeof recommendationArbitra
 export interface RecommendationProviderDescriptor {
   id: string;
   label: string;
+  category: "recommendation_provider";
   description: string;
   domains: RecommendationDomain[];
   sfieldToolRef: string;
+  /** Optional underlying sfield tool reference when the provider is backed by a standalone tool (e.g. treatments.eligible@1.0.0). */
+  toolRef?: string;
 }
 
 export interface RecommendationProviderContext {
@@ -155,5 +158,6 @@ export interface RecommendationProvider {
   readonly label: string;
   readonly description: string;
   readonly domains: RecommendationDomain[];
+  readonly toolRef?: string;
   evaluate(ctx: RecommendationProviderContext, signal: AbortSignal): Promise<NormalizedRecommendation[]>;
 }

@@ -12,7 +12,7 @@ import { contentCatalog } from "../../packages/experience/content";
 import { builtInContentById, getEffectiveContentEntries } from "../../packages/experience-registry/registry";
 import type { PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import { mockRuleGlossary } from "../../packages/rule-glossary";
-import { fixtureEligibleSets, FixtureTsAdapter, type FundingFact, scenariosById, treatmentContexts, TreatmentSelectorTimeout, tsFixtures } from "../../packages/ts-adapter";
+import { createDefaultTsAdapterFactory, fixtureEligibleSets, type FundingFact, scenariosById, treatmentContexts, TreatmentSelectorTimeout, type TsAdapterFactory, tsFixtures } from "../../packages/ts-adapter";
 import { ApiError } from "./store";
 
 const fixtureIds = new Set(fixtureEligibleSets.flat());
@@ -96,7 +96,12 @@ export function addCcreRule(setup: ToolSetup, rule: MockCcreRule): ToolSetup {
   return { ...setup, ccreRules: [...rules, rule] };
 }
 
-export async function previewTreatmentSelector(input: TreatmentPreviewInput, portfolios?: PortfolioSnapshotProvider, funding?: FundingFact): Promise<TreatmentPreview> {
+export async function previewTreatmentSelector(
+  input: TreatmentPreviewInput,
+  portfolios?: PortfolioSnapshotProvider,
+  funding?: FundingFact,
+  tsAdapterFactory: TsAdapterFactory = createDefaultTsAdapterFactory(),
+): Promise<TreatmentPreview> {
   const { scenarioId, contextId, personaId, ordinal, enabled, output, ccreRules = [] } = input;
   validateMock(scenarioId, contextId, output);
   for (const rule of ccreRules) {
@@ -109,7 +114,13 @@ export async function previewTreatmentSelector(input: TreatmentPreviewInput, por
   if (!persona || !persona.allowedScenarios.includes(scenarioId)) throw new ApiError(400, "invalid_mock_persona", "Choose a demo persona allowed for this scenario.");
   if (!enabled) return { status: "disabled" };
   const source = output ? "override" : "fixture";
-  const adapter = new FixtureTsAdapter({ scenarioId, ordinal }, output ? [{ scenarioId, contextId, output }] : [], ccreRules, portfolios, funding);
+  const adapter = tsAdapterFactory({
+    state: { scenarioId, ordinal },
+    overrides: output ? [{ scenarioId, contextId, output }] : [],
+    ccreRules,
+    portfolios,
+    funding,
+  });
   try {
     const { contentIds, ccre, recommendations, actionMatches } = await adapter.selectEligibleContent({ mid: persona.syntheticMid, context: contextId });
     const workflows = recommendations.recommendations.filter((item) => item.kind === "workflow");

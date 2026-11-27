@@ -2,42 +2,51 @@ import { z } from "zod";
 import { fundingTools, fundingWorkflowDefinitionSchema, workflowRecommendationSchema, type ActionRecommendation, type WorkflowCandidate } from "./funding-workflow";
 import { glossaryConditionSchema, type RuleGlossary } from "./rule-glossary";
 
+export type SfieldToolCategory = "recommendation_provider" | "data_read" | "workflow";
+
 export const toolVersion = "1.0.0";
 export const sfieldTools = {
   catalog: {
     id: "contexts.list",
     label: "Context catalog",
+    category: "recommendation_provider" as SfieldToolCategory,
     description: "Lists the demo placements the router can choose.",
   },
   propensity: {
     id: "propensity.context.score",
     label: "Topic relevance scores",
+    category: "recommendation_provider" as SfieldToolCategory,
     description: "Gets advisory topic scores from Treatment Selector.",
   },
   selection: {
     id: "treatments.eligible",
     label: "Treatment Selector",
+    category: "recommendation_provider" as SfieldToolCategory,
     description: "Returns the eligible treatments for the selected topic.",
   },
   balances: {
     id: "demo.balance.read",
     label: "Demo balance",
+    category: "data_read" as SfieldToolCategory,
     description: "Reads synthetic values for an eligible balance summary.",
   },
   glossary: {
     id: "ccre.glossary.get",
     label: "CCRE glossary",
+    category: "data_read" as SfieldToolCategory,
     description: "Lists the demo namespaces, attributes and operators available for authoring rules in chat.",
   },
-  retirementAccounts: { id: "retirement.accounts.read", label: "Retirement accounts", description: "Reads the member’s retirement accounts and the designation for a selected account." },
+  retirementAccounts: { id: "retirement.accounts.read", label: "Retirement accounts", category: "data_read" as SfieldToolCategory, description: "Reads the member’s retirement accounts and the designation for a selected account." },
   portfolio: {
     id: "portfolio.snapshot.read",
     label: "Portfolio Snapshot",
+    category: "data_read" as SfieldToolCategory,
     description: "Reads the scoped demo member’s portfolio values for a portfolio-summary request.",
   },
   goal: {
     id: "goal.progress.read",
     label: "Goal Progress",
+    category: "data_read" as SfieldToolCategory,
     description: "Reads the scoped demo member’s down payment target and savings history for an eligible home-buying goal.",
   },
   ...fundingTools,

@@ -114,7 +114,7 @@ export {
   domainWriteToolRef,
   domainWriteToolVersion,
 };
-import { activeContextCatalog, fixtureEligibleSets, FixtureTsAdapter, type ContextScoresRequest, type FixtureState } from "../../packages/ts-adapter";
+import { activeContextCatalog, createDefaultTsAdapterFactory, fixtureEligibleSets, type ContextScoresRequest, type FixtureState, type TsAdapterFactory } from "../../packages/ts-adapter";
 import { nextStepContext, workspaceFundingContext, type WorkspaceNextStep } from "../../packages/contracts/workspace";
 import { beneficiaryReviewWorkflow, workflowDefinition } from "../../packages/contracts/customer-workflows";
 import { nextStepRecommendation, workflowOfferSource } from "./funding-offer";
@@ -285,10 +285,11 @@ export class Runtime implements IntegrationTaskRuntime {
     private readonly modelMeta?: { provider: string; model: string },
     private readonly gatewaySettings?: GatewaySettings,
     private readonly dataDir?: string,
+    private readonly tsAdapterFactory: TsAdapterFactory = createDefaultTsAdapterFactory(),
   ) {
     this.integrationExecutor = new TaskCallExecutor(integrationTasks?.orders, connectorStore);
     this.funding = new FundingAgent(store, () => this.sf, now);
-    const execution = new AgenticExecution(store, () => this.sf, now, (turnId) => this.current(turnId), portfolioSnapshots, goalProgressProvider, goalBudget);
+    const execution = new AgenticExecution(store, () => this.sf, now, (turnId) => this.current(turnId), portfolioSnapshots, goalProgressProvider, goalBudget, tsAdapterFactory);
     this.experiences = new ExperienceAgent(execution, () => this.sf);
   }
 
@@ -312,6 +313,7 @@ export class Runtime implements IntegrationTaskRuntime {
       integrationTasks?: IntegrationTaskStore;
       piiFirewall?: PiiFirewallStore;
       telemetry?: CepTelemetry;
+      tsAdapterFactory?: TsAdapterFactory;
     },
   ) {
     const record = inspectorEnabled ? (id: string, exchange: GatewayExchange) => store.saveGatewayExchange(id, exchange) : undefined;
@@ -330,6 +332,7 @@ export class Runtime implements IntegrationTaskRuntime {
       { provider: settings.profile === "copilot_acp" ? "copilot_acp" : settings.profile === "openai" ? "openai" : "openai_compatible", model: settings.model },
       settings,
       dirname(path),
+      extraProviders?.tsAdapterFactory,
     );
     const agentTools = [...runtime.experiences.tools(), ...runtime.experiences.execution.tools()];
     const agentActions = new Set(agentTools.map(({ ref }) => axeToolAction(ref)));
@@ -526,9 +529,13 @@ export class Runtime implements IntegrationTaskRuntime {
   }
 
   private treatmentAdapter(state: FixtureState, setup: ToolSetup | undefined, scope: Pick<Scope, "principalId" | "personaId">) {
-    return new FixtureTsAdapter(
-      state, setup?.treatmentOverrides, setup?.ccreRules, this.portfolioSnapshots, this.store.axe.fundingFact(scope),
-    );
+    return this.tsAdapterFactory({
+      state,
+      overrides: setup?.treatmentOverrides,
+      ccreRules: setup?.ccreRules,
+      portfolios: this.portfolioSnapshots,
+      funding: this.store.axe.fundingFact(scope),
+    });
   }
 
   private turnTreatmentAdapter(turn: TurnRecord, conversation: ConversationRecord) {
