@@ -6,6 +6,8 @@ import type { DomainPackId } from "../../packages/contracts/domain-packs";
 import { normalizedIntentPhrase, layoutTargetDomain, maxLayouts, targetKey, type LibraryDesign, type AppliedUiLayout, type UiLayoutChange, type UiLayoutRecord, type UiPublication, type UiTarget } from "../../packages/contracts/ui-layout";
 import { applyPublishedUi } from "../../packages/experience/ui-layout";
 import { resolveMultiDomainBindings } from "../../packages/customer-profiles/bindings";
+import { findProfileById } from "../../packages/customer-profiles";
+import { applyPersonalization, firstNameOf } from "./response-personalizer";
 import type { IncidentRecord } from "../../packages/contracts/ops";
 import type { DealRecord } from "../../packages/contracts/sales";
 import type { AgentLaunch } from "../../packages/contracts/agentic";
@@ -1038,7 +1040,15 @@ export class Store {
       turn.public.status = outcome.type;
       turn.trace.markers.terminal = now;
       if (outcome.type === "completed") {
-        const { display, issued } = this.applyUiLayout(turn, this.carryForwardOffers(turn, outcome.result, now));
+        const laidOut = this.applyUiLayout(turn, this.carryForwardOffers(turn, outcome.result, now));
+        const profile = turn.scope.domainId === "wealth" ? findProfileById(turn.scope.personaId) : undefined;
+        const { display, issued } = profile
+          ? applyPersonalization(laidOut, {
+              firstName: firstNameOf(profile.displayName),
+              userMessage: turn.public.message,
+              ordinal: turn.ordinal,
+            })
+          : laidOut;
         if (turn.agentLaunch && "capability" in turn.agentLaunch) delete turn.agentLaunch.values;
         turn.public.experience = display;
         turn.trace.markers.compiled = now;

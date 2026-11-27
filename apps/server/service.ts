@@ -62,6 +62,7 @@ import { principalFor, type Runtime } from "./runtime";
 import { PznChatHistory, resolveClarificationReply } from "./chat-history";
 import { collectCrossThreadStatus, isThreadStatusPrompt, runThreadStatusHarness } from "./thread-status";
 import { CustomerGoalStore, inferSuggestedGoalFromPrompt, isGoalSetupPrompt } from "./goal-store";
+import { buildHardshipSupportCanvas, isStandaloneHardshipPrompt } from "./response-personalizer";
 
 class TurnFailure extends Error {
   constructor(readonly code: FailureCode) { super(code); }
@@ -1063,6 +1064,32 @@ export class ExperienceService {
         }
 
         const recentForRoute = await this.history.recent(conversation, initial.ordinal);
+        const hasRetirementHistory = recentForRoute.some((entry) =>
+          entry.contextId === "learning"
+          || entry.intentId === "retirement_learning"
+          || /\bretir|62|leaving your job/i.test(`${entry.request} ${entry.clarificationQuestion ?? ""} ${entry.assistantReply ?? ""}`),
+        );
+        if (conversation.domainId === "wealth" && isStandaloneHardshipPrompt(scopedPrompt, hasRetirementHistory)) {
+          stage = "compose";
+          this.store.progress(id, "planning", this.now());
+          const profile = findProfileById(conversation.personaId);
+          const support = buildHardshipSupportCanvas(scopedPrompt, profile);
+          const now = this.now();
+          const dynamicResult = compileDynamicCanvas(support.intro, support.canvas, now + DECISION_TTL);
+          this.store.update(id, (row) => {
+            row.public.actionMode = "dynamic_ui";
+            row.public.semanticRoute = {
+              capabilityId: "custom_dynamic_ui",
+              capabilityLabel: "Life Event Support",
+              method: "deterministic",
+              confidence: 0.96,
+              reasoning: "Matched urgent life-event / hardship inquiry with empathetic liquidity guidance.",
+            };
+            row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
+          });
+          this.store.finish(id, { type: "completed", result: dynamicResult }, now);
+          return;
+        }
         const pendingClarification = await this.history.pendingClarification(conversation, initial.ordinal);
         const clarificationMatch = resolveClarificationReply(scopedPrompt, pendingClarification);
         const activePrincipal = principalFor(initial.scope.principalId, initial.scope);

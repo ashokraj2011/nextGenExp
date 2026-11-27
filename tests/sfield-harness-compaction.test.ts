@@ -446,3 +446,38 @@ test("All Dynamic Canvas recommendations come strictly from Recommendation Provi
     assert.ok(holdingsTurn.providerArbitration?.providers.length, "provider arbitration trace must be recorded");
   }
 });
+
+test("Contextual personalization, empathetic job-loss support, and industry sector drill-down", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "cep-personalize-empathy-"));
+  const gateway = await startFixtureGateway();
+  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: gateway.settings });
+  t.after(async () => { await app.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
+  const client = await testClient(app.url);
+
+  // 1. Standard portfolio summary greets the customer by first name ("Hi Alice") instead of cold "Here's your summary."
+  const chat1 = await client.conversation();
+  const portTurn = (await client.ask(chat1.id, "Show my portfolio summary.")).turn;
+  assert.equal(portTurn.status, "completed");
+  assert.match(portTurn.experience?.intro ?? "", /\bAlice\b/i, "expected customer first name in intro");
+  assert.notEqual(portTurn.experience?.intro, "Here’s your summary.");
+
+  // 2. "I want to see drill down based on industry" renders grounded Industry & Sector Drill-Down card
+  const drillTurn = (await client.ask(chat1.id, "i want to see drill down based on industry")).turn;
+  assert.equal(drillTurn.status, "completed");
+  const drillCard = drillTurn.experience?.blocks.find((b) => b.component === "PznDynamicCanvas");
+  assert.ok(drillCard && drillCard.component === "PznDynamicCanvas");
+  assert.equal(drillCard.props.badge, "Industry Drill-Down");
+  assert.ok(drillCard.props.nodes.some((n) => n.type === "piechart"), "expected industry piechart");
+  assert.ok(drillCard.props.nodes.some((n) => n.type === "table"), "expected industry breakdown table");
+  assert.match(drillTurn.experience?.intro ?? "", /\bAlice\b/i);
+
+  // 3. Standalone job loss -> warm empathy + first name + grounded Cash Runway & First-30-Days checklist!
+  const chat2 = await client.conversation();
+  const jobLossTurn = (await client.ask(chat2.id, "I just lost my job, what should I do?")).turn;
+  assert.equal(jobLossTurn.status, "completed");
+  assert.match(jobLossTurn.experience?.intro ?? "", /sorry to hear.*Alice/i, "expected empathetic job-loss opener with customer name");
+  const supportCard = jobLossTurn.experience?.blocks.find((b) => b.component === "PznDynamicCanvas");
+  assert.ok(supportCard && supportCard.component === "PznDynamicCanvas");
+  assert.equal(supportCard.props.badge, "Life Event Support");
+  assert.ok(supportCard.props.nodes.some((n) => n.type === "checklist"), "expected First-30-Days checklist");
+});

@@ -101,10 +101,10 @@ export interface FetchedGroundedData {
 }
 
 const portfolioWord = /\b(port?f[oa]l?io|protfolio|portfoilo|portofolio|porfolio|allocation|asset\s*mix|net\s*worth|invested|investments?)\b/i;
-const holdingsWord = /\b(holdings?|stocks?|tickers?|equities|shares?|positions?|tax[- ]?loss)\b/i;
+const holdingsWord = /\b(holdings?|stocks?|tickers?|equities|shares?|positions?|tax[- ]?loss|industry|industries|sector|sectors|drill\s*down)\b/i;
 const goalWord = /\b(goal|home\s+(?:goal|plan|savings?|purchase)|down\s*payment|savings?\s+target)\b/i;
 const balanceWord = /\b(balance|balances|cash|available|current\s+balance|beneficiar(?:y|ies)|funding|account\s+status)\b/i;
-const followUpOrCorrectionWord = /\b(this\s+is\s+not|that\s+is\s+not|not\s+a\s+(?:pie|bar|donut|table|chart)|instead|make\s+it|change\s+it|turn\s+(?:it|that|this)\s+into|show\s+(?:it|that|this)\s+as|last\s+answer|previous\s+answer|prior\s+answer|your\s+answer|above|reframe|try\s+again)\b|^\s*(?:as|in|into|like|switch\s+to|convert\s+to)\s+(?:a\s+|an\s+)?[\w\s-]{2,28}(?:chart|graph|table|plot|diagram|map|view|summary|list|matrix|bullets?)\s*[.!?]*$/i;
+const followUpOrCorrectionWord = /\b(this\s+is\s+not|that\s+is\s+not|not\s+a\s+(?:pie|bar|donut|table|chart)|instead|make\s+it|change\s+it|turn\s+(?:it|that|this)\s+into|show\s+(?:it|that|this)\s+as|last\s+answer|previous\s+answer|prior\s+answer|your\s+answer|above|reframe|try\s+again|where\s+is\s+(?:the|my)\s+drill\s*down)\b|^\s*(?:as|in|into|like|switch\s+to|convert\s+to)\s+(?:a\s+|an\s+)?[\w\s-]{2,28}(?:chart|graph|table|plot|diagram|map|view|summary|list|matrix|bullets?)\s*[.!?]*$/i;
 const unsupportedVisualTypeRegex = /\b(heat\s*map|radar\s*chart|spider\s*chart|tree\s*map|sankey(?:\s*diagram)?|waterfall\s*chart|gantt\s*chart|candlestick(?:\s*chart)?|box\s*plot|funnel\s*chart|3d\s*chart)\b/i;
 const explicitUnconnectedWord = /\b(jira|confluence|snowflake|databricks|bigquery|sap|erp|workday|bamboohr|zendesk|freshdesk|hubspot|marketo|shopify|stripe\s+invoices|github\s+issues|linear\s+tickets|datadog|splunk|warehouse|shipments?|inventory|weather|sports\s+scores|flights?|hotels?)\b/i;
 
@@ -311,6 +311,7 @@ const composerSystemPrompt = [
   "1. You MUST include EVERY visual node type listed in plan.requiredVisuals! For example, if 'piechart' is in requiredVisuals, you MUST include a { type: 'piechart', slices: [...] } node — do NOT substitute a barchart or table.",
   "2. Use ONLY the exact live numbers, labels, and facts from FETCHED GROUNDED DATA. Never invent numbers.",
   "3. Never mention any external brokerage or company names; refer to the platform only as CEP.",
+  "4. Personalize the 'intro' naturally with the customer's first name and contextual tone (e.g., warm 'Hi <Name>' on a fresh topic, genuine empathy for job loss/hardship, enthusiasm for milestones, or a quick 'Good catch, <Name>' if correcting a missed detail). Never use cold robotic openers like 'Here's your summary.'",
   "Return ONE JSON object with this exact shape:",
   JSON.stringify({
     intro: "1-2 concise sentences explaining what the dynamic view shows.",
@@ -487,9 +488,88 @@ export function buildGroundedFallbackCanvas(
   fetched: FetchedGroundedData,
 ): { intro: string; canvas: DynamicCanvasProps } {
   const name = fetched.persona?.displayName ?? "Customer";
+  const firstName = name.split(/\s+/)[0] ?? name;
   const p = fetched.portfolio;
   const nodes: DynamicCanvasNode[] = [];
   const visuals = new Set(plan.requiredVisuals);
+  const isIndustryDrillDown = /\b(industry|industries|sector|sectors|drill\s*down)\b/i.test(`${prompt}\n${fetched.recentContext ?? ""}`);
+
+  if (isIndustryDrillDown && fetched.holdings?.length) {
+    const sectorMap: Record<string, string> = {
+      AAPL: "Technology",
+      MSFT: "Technology",
+      NVDA: "Semiconductors",
+      INTC: "Semiconductors",
+      BA: "Industrials & Aerospace",
+      PFE: "Healthcare & Pharma",
+    };
+    const grouped = new Map<string, { symbols: string[]; valueCents: number; plCents: number }>();
+    for (const h of fetched.holdings) {
+      const sec = sectorMap[h.symbol.toUpperCase()] ?? "Diversified Equities";
+      const cur = grouped.get(sec);
+      if (cur) {
+        cur.symbols.push(h.symbol);
+        cur.valueCents += h.marketValueCents;
+        cur.plCents += h.unrealizedPlCents;
+      } else {
+        grouped.set(sec, { symbols: [h.symbol], valueCents: h.marketValueCents, plCents: h.unrealizedPlCents });
+      }
+    }
+    const sectors = [...grouped.entries()]
+      .map(([sector, v]) => ({ sector, ...v }))
+      .sort((a, b) => b.valueCents - a.valueCents);
+    const equityTotal = Math.max(1, sectors.reduce((sum, s) => sum + s.valueCents, 0));
+    const palette = ["#2f7d32", "#0d9488", "#476b8a", "#c88a2b", "#6d5bd0"];
+    const topSector = sectors[0]!;
+    return {
+      intro: `Here is the industry drill-down of your equity holdings, ${firstName} — **${topSector.sector}** is your largest sector at ${pct1(topSector.valueCents, equityTotal)}% (${fmtUsd(topSector.valueCents)}). Click any sector slice or table row to inspect further.`,
+      canvas: {
+        title: "Portfolio Industry & Sector Drill-Down",
+        badge: "Industry Drill-Down",
+        subtitle: `${name} · ${sectors.length} industries across ${fetched.holdings.length} equity holdings`,
+        generatedBy: "synthesizer",
+        dataSource: fetched.sourceLabels.join(" + ") || "Live Stock Holdings + Customer 360",
+        prompt: prompt.slice(0, 600),
+        nodes: [
+          {
+            type: "metrics",
+            items: [
+              { label: "Equity Holdings", value: fmtUsd(equityTotal), delta: `${fetched.holdings.length} tickers` },
+              { label: "Top Industry", value: topSector.sector.slice(0, 34), delta: `${pct1(topSector.valueCents, equityTotal)}%` },
+              { label: "Sectors", value: String(sectors.length), delta: "Diversified" },
+              ...(p ? [{ label: "Cash Reserve", value: fmtUsd(p.cashCents) }] : []),
+            ],
+          },
+          ...(sectors.length >= 2 ? [{
+            type: "piechart" as const,
+            title: "Equity Allocation by Industry",
+            centerLabel: "Equities",
+            centerValue: fmtUsdWhole(equityTotal),
+            slices: sectors.map((s, idx) => ({
+              label: s.sector,
+              value: Math.round(s.valueCents / 100),
+              displayValue: fmtUsd(s.valueCents),
+              color: palette[idx % palette.length],
+              highlight: idx === 0,
+            })),
+          }] : []),
+          {
+            type: "table",
+            caption: "Holdings Breakdown by Industry",
+            columns: ["Industry", "Tickers", "Market Value", "Share", "Unrealized P/L"],
+            rows: sectors.map((s) => [
+              s.sector,
+              s.symbols.join(", "),
+              fmtUsd(s.valueCents),
+              `${pct1(s.valueCents, equityTotal)}%`,
+              `${s.plCents >= 0 ? "+" : ""}${fmtUsd(s.plCents)}`,
+            ]),
+          },
+        ],
+        disclaimer: "Industry breakdown reflects live equity holdings from Customer 360 & Trade Store.",
+      },
+    };
+  }
 
   if (p) {
     const stocksPct = pct1(p.equityCents, p.totalCents);

@@ -81,7 +81,7 @@ export function deterministicCapabilityRoute(prompt: string): SemanticRouteDecis
       extractedParams: parsed,
     };
   }
-  const explicitChartFormat = /\b(pie\s*chart|donut\s*chart|bar\s*chart|bubble\s*chart|scatter\s*(?:plot|chart)|radar\s*chart|heat\s*map)\b/i.test(clean);
+  const explicitChartFormat = /\b(pie\s*chart|donut\s*chart|bar\s*chart|bubble\s*chart|scatter\s*(?:plot|chart)|radar\s*chart|heat\s*map|industry|sector|drill\s*down)\b/i.test(clean);
   if (!explicitChartFormat && (isStockHoldingsPrompt(clean) || /\b(?:equity|stock)\s+book\b|\bmy\s+equities\b/i.test(clean))) {
     return {
       capabilityId: "stock_holdings",
@@ -127,8 +127,8 @@ export function deterministicCapabilityRoute(prompt: string): SemanticRouteDecis
       reasoning: "Matched live Sales & RevOps Deal Desk workflow.",
     };
   }
-  if (isDynamicUiRequest(clean)) {
-    const explicitFormatOrCorrection = /\b(pie\s*chart|donut\s*chart|bar\s*chart|bubble\s*chart|scatter\s*plot|radar\s*chart|heat\s*map|comparison\s+table|as\s+a\s+(?:clear\s+)?(?:comparison\s+)?table|summarize\s+(?:your\s+)?last\s+answer|in\s+\d+\s+bullet\s+points?|not\s+a\s+(?:pie|bar|donut)\s*chart)\b|^\s*as\s+(?:a\s+|an\s+)?[\w\s-]{2,24}(?:chart|table|graph|plot)\s*$/i.test(clean);
+  if (isDynamicUiRequest(clean) || /\b(by\s+industry|based\s+on\s+industry|by\s+sector|sector\s+breakdown|industry\s+breakdown|drill\s*down)\b/i.test(clean)) {
+    const explicitFormatOrCorrection = /\b(pie\s*chart|donut\s*chart|bar\s*chart|bubble\s*chart|scatter\s*plot|radar\s*chart|heat\s*map|comparison\s+table|as\s+a\s+(?:clear\s+)?(?:comparison\s+)?table|summarize\s+(?:your\s+)?last\s+answer|in\s+\d+\s+bullet\s+points?|not\s+a\s+(?:pie|bar|donut)\s*chart|by\s+industry|based\s+on\s+industry|by\s+sector|sector\s+breakdown|industry\s+breakdown|drill\s*down)\b|^\s*as\s+(?:a\s+|an\s+)?[\w\s-]{2,24}(?:chart|table|graph|plot)\s*$/i.test(clean);
     return {
       capabilityId: "custom_dynamic_ui",
       capabilityLabel: capabilityLabelFor("custom_dynamic_ui"),

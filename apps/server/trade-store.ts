@@ -198,6 +198,48 @@ export class TradeStore {
     }, 0);
   }
 
+  sectorBreakdownFor(personaId: string): Array<{
+    sector: string;
+    symbols: string[];
+    marketValueCents: number;
+    unrealizedPlCents: number;
+    sharePct: number;
+  }> {
+    const sectorMap: Record<string, string> = {
+      AAPL: "Technology",
+      MSFT: "Technology",
+      NVDA: "Semiconductors",
+      INTC: "Semiconductors",
+      BA: "Industrials & Aerospace",
+      PFE: "Healthcare & Pharma",
+    };
+    const active = this.holdingsFor(personaId).filter((h) => h.shares > 0);
+    const total = Math.max(1, active.reduce((sum, h) => sum + h.shares * h.priceCents, 0));
+    const grouped = new Map<string, { symbols: string[]; marketValueCents: number; unrealizedPlCents: number }>();
+    for (const h of active) {
+      const sector = sectorMap[h.symbol.toUpperCase()] ?? "Diversified Equities";
+      const mv = h.shares * h.priceCents;
+      const pl = (h.priceCents - h.avgCostCents) * h.shares;
+      const cur = grouped.get(sector);
+      if (cur) {
+        cur.symbols.push(h.symbol);
+        cur.marketValueCents += mv;
+        cur.unrealizedPlCents += pl;
+      } else {
+        grouped.set(sector, { symbols: [h.symbol], marketValueCents: mv, unrealizedPlCents: pl });
+      }
+    }
+    return [...grouped.entries()]
+      .map(([sector, v]) => ({
+        sector,
+        symbols: v.symbols,
+        marketValueCents: v.marketValueCents,
+        unrealizedPlCents: v.unrealizedPlCents,
+        sharePct: Math.round((v.marketValueCents / total) * 1000) / 10,
+      }))
+      .sort((a, b) => b.marketValueCents - a.marketValueCents);
+  }
+
   recentlyBoughtSymbols(personaId: string): Set<string> {
     const cutoff = Date.now() - WASH_SALE_WINDOW_MS;
     const symbols = new Set<string>();
