@@ -10,6 +10,7 @@ export const adminPaths = {
   help: "/admin/help",
   chat: "/admin/chat",
   gateway: "/admin/gateway",
+  sfieldStudio: "/admin/sfield-studio",
 } as const;
 
 export const isAdminPath = (path: string) => path === adminPaths.tools || path.startsWith("/admin/");

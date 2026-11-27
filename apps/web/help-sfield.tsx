@@ -136,6 +136,11 @@ const sdkPackages = [
     highlights: "Zero-dependency TelemetrySink recording gen_ai.* spans & token/cost/duration metrics with OTLP/HTTP JSON (v1/traces) export.",
   },
   {
+    pkg: "@sfield/studio",
+    role: "Standalone & Embeddable Workbench",
+    highlights: "Zero-framework governance UI & HTTP handler (createStudioHandler, startStudioServer) for runs, Principal/Tool playground, HITL approvals, locks, evals, memory, PII lab, and OTel traces.",
+  },
+  {
     pkg: "@sfield/testing",
     role: "Conformance & Release-Gate Eval Runner",
     highlights: "persistenceConformance() suite, deterministic FakeModelProvider, plus runEvalSuite() & evaluateReleaseGate() wired into sf.lock.evalReports().",
@@ -143,7 +148,7 @@ const sdkPackages = [
   {
     pkg: "@sfield/cli",
     role: "Standalone CLI (sfield)",
-    highlights: "init, validate, eval, lock status, lock approve, inspect <runId>, doctor, and mcp serve (stdio).",
+    highlights: "init, validate, eval, lock status, lock approve, inspect <runId>, doctor, studio, and mcp serve (stdio).",
   },
 ];
 
@@ -153,6 +158,9 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
     <div className="help-section-heading">
       <h2 id="sfield-title">sfield Agent SDK &amp; plug-in tools</h2>
       <div style={{ display: "flex", gap: "14px", alignItems: "center", flexWrap: "wrap" }}>
+        <a className="help-section-link" href="/admin/sfield-studio">
+          Open sfield Studio <ArrowUpRight size={14} aria-hidden="true" />
+        </a>
         <a className="help-section-link" href="/sfield-sdk.html" target="_blank" rel="noreferrer">
           Standalone HTML SDK Guide <ArrowUpRight size={14} aria-hidden="true" />
         </a>
@@ -163,7 +171,7 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
     </div>
     <div className="help-sfield">
       <p className="help-sfield-lead">
-        <strong>sfield is the standalone zero-trust Governed Agent SDK</strong> (8 publishable packages under <code>@sfield/*</code>), and <strong>CEP is its flagship reference application</strong>. sfield sits between any host application, language models, and business systems — enforcing identity, closed schemas, policy presets, PII egress redaction, rate limits/circuit breakers, MCP federation, budgets, durability, and verification on every call.
+        <strong>sfield is the standalone zero-trust Governed Agent SDK</strong> (9 publishable packages under <code>@sfield/*</code>), and <strong>CEP is its flagship reference application</strong>. sfield sits between any host application, language models, and business systems — enforcing identity, closed schemas, policy presets, PII egress redaction, rate limits/circuit breakers, MCP federation, budgets, durability, and verification on every call.
       </p>
 
       <ol className="help-sfield-flow" aria-label="How sfield handles a chat message" role="list">

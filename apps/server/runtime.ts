@@ -163,7 +163,19 @@ const registryBoundaries = {
   retirementAccounts: "retirementScopeId", goal: "goalScopeId", fundingOptions: "workflowScopeId", fundingStatus: "workflowScopeId", fundingPreview: "workflowScopeId",
 } as const;
 export function principalFor(id: string, scope?: Pick<Scope, "userId" | "personaId" | "domainId">): Principal {
-  return { tenantId: serverTenantId, subjectId: id, roles: ["pzn-demo", "pzn-developer"], attributes: scope?.domainId ? { domainId: scope.domainId, userId: scope.userId ?? scope.personaId } : {} };
+  const persona = scope?.personaId ? findProfileById(scope.personaId) : undefined;
+  const identifiers: Record<string, string> = {};
+  if (persona?.syntheticMid) identifiers.mid = persona.syntheticMid;
+  if (scope?.personaId) identifiers.personaId = scope.personaId;
+  if (scope?.domainId) identifiers.domainId = scope.domainId;
+  return {
+    tenantId: serverTenantId,
+    subjectId: id,
+    kind: "human",
+    roles: ["pzn-demo", "pzn-developer"],
+    attributes: scope?.domainId ? { domainId: scope.domainId, userId: scope.userId ?? scope.personaId } : {},
+    ...(Object.keys(identifiers).length > 0 ? { identifiers } : {}),
+  };
 }
 const actions = new Set<string>([
   ...toolKeys.map((key) => sfieldTools[key].id),

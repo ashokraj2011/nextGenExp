@@ -1,4 +1,4 @@
-import { Activity, Blocks, Cpu, BookOpenText, Briefcase, Code2, FileText, GitBranch, Landmark, Layers, MessageSquare, Plug, PanelsTopLeft, Settings2, UsersRound } from "lucide-react";
+import { Activity, Blocks, Cpu, BookOpenText, Briefcase, Code2, FileText, GitBranch, Landmark, Layers, MessageSquare, Plug, PanelsTopLeft, Settings2, TerminalSquare, UsersRound } from "lucide-react";
 import { adminPaths } from "../../packages/contracts/admin-paths";
 
 export const developerGuideHref = (guide = "start") => adminPaths.help + "?guide=" + encodeURIComponent(guide);
@@ -20,6 +20,7 @@ const destinations = [
   { label: "Embed SDK", path: adminPaths.embed, Icon: Blocks },
   { label: "Logs", path: adminPaths.logs, Icon: FileText },
   { label: "Inspector", path: adminPaths.inspector, Icon: Code2 },
+  { label: "sfield Studio", path: adminPaths.sfieldStudio, Icon: TerminalSquare },
   { label: "Architecture", path: adminPaths.help, Icon: BookOpenText },
   { label: "Developer docs", path: developerGuideHref(), Icon: Code2 },
   { label: "Admin chat", path: adminPaths.chat, Icon: MessageSquare },

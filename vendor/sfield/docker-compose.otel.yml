@@ -1,0 +1,16 @@
+# Local OpenTelemetry + Jaeger observability stack for @sfield/telemetry-otel
+#
+# Usage:
+#   docker compose -f vendor/sfield/docker-compose.otel.yml up -d
+#   OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 npm run dev
+#   Open Jaeger UI at http://127.0.0.1:16686
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686" # Jaeger Web UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP (POST /v1/traces — matches @sfield/telemetry-otel)
+    restart: unless-stopped

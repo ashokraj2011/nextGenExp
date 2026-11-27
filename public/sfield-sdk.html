@@ -226,10 +226,11 @@
       <div class="brand"><span class="brand-dot"></span><span>sfield Agent SDK</span></div>
       <nav class="nav" aria-label="Page sections">
         <a href="#architecture">Architecture</a>
-        <a href="#packages">8 Packages</a>
+        <a href="#packages">9 Packages</a>
         <a href="#primitives">Enterprise Primitives</a>
         <a href="#persistence">Postgres + JSON Fallback</a>
         <a href="#quickstart">Code &amp; CLI</a>
+        <a href="/admin/sfield-studio">sfield Studio</a>
         <a href="/admin/help">CEP Admin Docs</a>
         <a href="/admin/gateway">Model Gateway</a>
         <button id="themeToggle" class="btn" type="button" aria-label="Toggle color theme">Dark mode</button>
@@ -245,16 +246,17 @@
         <strong>sfield</strong> is the standalone TypeScript SDK for building auditable, policy-governed AI agent platforms — separating model reasoning from identity, authorization, closed JSON Schema validation, HITL approvals, MCP federation, resilience, and durable persistence. <strong>CEP</strong> (Wealth Advisory, IT Ops, Sales RevOps) is its flagship reference application.
       </p>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="#quickstart">5-Line Quick Start</a>
+        <a class="btn btn-primary" href="/admin/sfield-studio">Open sfield Studio</a>
+        <a class="btn" href="#quickstart">5-Line Quick Start</a>
         <a class="btn" href="/admin/help?guide=sdk">Open Admin SDK Reference</a>
         <a class="btn" href="/admin/help#sfield">View CEP + sfield Blueprint</a>
         <a class="btn" href="/">Launch CEP Reference App</a>
       </div>
       <div class="metrics">
-        <div class="metric"><strong>8 Packages</strong><span>Publishable <code>@sfield/*</code> workspaces</span></div>
+        <div class="metric"><strong>9 Packages</strong><span>Publishable <code>@sfield/*</code> workspaces</span></div>
         <div class="metric"><strong>4 Model Backends</strong><span>Gemini, Anthropic, OpenAI-compat, Copilot ACP</span></div>
         <div class="metric"><strong>3 Storage Modes</strong><span>Memory, SQLite, Postgres + JSON fallback</span></div>
-        <div class="metric"><strong>145+ Tests</strong><span>Unit, SDK, MCP &amp; Conformance verified</span></div>
+        <div class="metric"><strong>148+ Tests</strong><span>Unit, Studio, MCP &amp; Conformance verified</span></div>
       </div>
     </section>
 
@@ -324,7 +326,7 @@
 
     <section id="packages">
       <h2>Publishable <code>@sfield/*</code> Workspace Suite</h2>
-      <p class="section-desc">All 8 packages carry public npm / GitHub Packages manifests and release cleanly in topological order via <code>.github/workflows/release.yml</code>.</p>
+      <p class="section-desc">All 9 packages carry public npm / GitHub Packages manifests and release cleanly in topological order via <code>.github/workflows/release.yml</code>.</p>
       <div class="table-wrap">
         <table>
           <thead>
@@ -362,6 +364,11 @@
               <td><code>createOtelTelemetrySink</code>, <code>OtelTelemetrySink</code> (<code>gen_ai.*</code> spans/metrics + OTLP/HTTP JSON <code>v1/traces</code>)</td>
             </tr>
             <tr>
+              <td><code>@sfield/studio</code></td>
+              <td>Governance Workbench</td>
+              <td><code>createStudioHandler</code>, <code>startStudioServer</code>, <code>renderStudioHtml</code> — Runs, Principal/Tool Playground, HITL Approvals, Locks, Evals, Memory, PII Lab, OTel &amp; Host Plugins</td>
+            </tr>
+            <tr>
               <td><code>@sfield/testing</code></td>
               <td>Conformance &amp; Evals</td>
               <td><code>persistenceConformance</code>, <code>runEvalSuite</code>, <code>evaluateReleaseGate</code>, <code>FakeModelProvider</code></td>
@@ -369,7 +376,7 @@
             <tr>
               <td><code>@sfield/cli</code></td>
               <td>Developer &amp; Ops CLI</td>
-              <td><code>sfield init | validate | eval | lock status | lock approve | inspect | doctor | mcp serve</code></td>
+              <td><code>sfield init | validate | eval | lock status | lock approve | inspect | doctor | studio | mcp serve</code></td>
             </tr>
           </tbody>
         </table>

@@ -398,7 +398,7 @@ export function renderStudioHtml(opts: {
               '<label class="field" style="flex:1">Subject ID<input id="pg-subject" value="studio-user" /></label>' +
               '<label class="field" style="width:130px">Kind<select id="pg-kind"><option value="human">human</option><option value="agent">agent</option><option value="service">service</option></select></label>' +
             '</div>' +
-            '<label class="field">Principal Identifiers (JSON)<input id="pg-ids" value=\'{"mid":"DEMO-MID-1001"}\' /></label>' +
+            '<label class="field">Principal Identifiers (JSON)<input id="pg-ids" value="{&quot;mid&quot;:&quot;DEMO-MID-1001&quot;}" /></label>' +
             '<label class="field">Acting For / On-Behalf-Of Subject (optional, for agent kind)<input id="pg-obo" placeholder="e.g. patient-42" /></label>' +
             '<label class="field">Tool Input Arguments (JSON)<textarea id="pg-args" class="mono">{}</textarea></label>' +
             '<div class="row"><button class="btn primary" id="pg-run-btn" type="button" ' + (BOOT.readOnly || !state.tools.length ? "disabled" : "") + '>Invoke via sfield</button></div>' +

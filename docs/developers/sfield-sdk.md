@@ -2,11 +2,11 @@
 
 **`sfield`** is the standalone TypeScript-first **Governed Agent SDK** (Node.js 22+) that powers CEP. Every capability built in this repository—closed-schema tool execution, HITL approvals, MCP federation, PII egress firewalling, resilience guards, sub-agent delegation, OpenTelemetry tracing, vector memory, and durable storage—is packaged under `vendor/sfield/packages/*` so any application can adopt `sfield` independently of CEP.
 
-> Prefer a visual architecture overview? Open the standalone HTML guide at [`/sfield-sdk.html`](/sfield-sdk.html).
+> Prefer a visual architecture overview? Open the standalone HTML guide at [`/sfield-sdk.html`](/sfield-sdk.html) or launch the live governance workbench at [`/admin/sfield-studio`](/admin/sfield-studio).
 
 ---
 
-### Package suite (8 publishable workspaces)
+### Package suite (9 publishable workspaces)
 
 | Package | Role | Key exports |
 | --- | --- | --- |
@@ -16,8 +16,9 @@
 | `@sfield/store-sqlite` | Single-node durable store | `sqlitePersistence`, `SqlitePersistence`, `SqliteMemoryRepository` (over built-in `node:sqlite`) |
 | `@sfield/store-postgres` | Service Postgres store + JSON fallback | `PostgresPersistence`, `PostgresMemoryRepository`, `POSTGRES_SCHEMA_SQL`, `createPgPoolAdapter`, `JsonFilePersistence`, `createPostgresOrJsonPersistence` |
 | `@sfield/telemetry-otel` | OpenTelemetry `gen_ai.*` sink | `createOtelTelemetrySink`, `OtelTelemetrySink` (OTLP/HTTP JSON `v1/traces`) |
+| `@sfield/studio` | Standalone & embeddable workbench | `createStudioHandler`, `startStudioServer`, `renderStudioHtml`, `StudioPluginTab` |
 | `@sfield/testing` | Conformance & release-gate eval runner | `persistenceConformance`, `runEvalSuite`, `evaluateReleaseGate`, `FakeModelProvider` |
-| `@sfield/cli` | Standalone CLI (`sfield`) | `init`, `validate`, `eval`, `lock status`, `lock approve`, `inspect`, `doctor`, `mcp serve` |
+| `@sfield/cli` | Standalone CLI (`sfield`) | `init`, `validate`, `eval`, `lock status`, `lock approve`, `inspect`, `doctor`, `studio`, `mcp serve` |
 
 ---
 
@@ -85,6 +86,9 @@ npm run sfield -- inspect <runId> --db ./state.sqlite
 
 # 6. Serve governed sfield tools over MCP stdio
 npm run sfield -- mcp serve --db ./state.sqlite --config ./my-agent/sfield.config.yaml
+
+# 7. Launch standalone @sfield/studio workbench
+npm run sfield -- studio --db ./state.sqlite --port 4310
 ```
 
 ---
