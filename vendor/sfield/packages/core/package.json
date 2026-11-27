@@ -1,15 +1,40 @@
 {
   "name": "@sfield/core",
   "version": "0.1.0",
-  "private": true,
+  "description": "Governed enterprise agent SDK runtime: closed-schema tools, HITL approvals, MCP server/client, PII firewall, resilience, delegation, streaming, and native model providers.",
   "type": "module",
   "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     }
+  },
+  "keywords": [
+    "sfield",
+    "ai-agents",
+    "mcp",
+    "governance",
+    "hitl",
+    "llm-sdk",
+    "gemini",
+    "anthropic",
+    "openai"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ashokraj2011/nextGenExp.git",
+    "directory": "vendor/sfield/packages/core"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "ajv": "8.20.0",

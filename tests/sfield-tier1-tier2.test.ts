@@ -22,6 +22,7 @@ import {
 import { sqlitePersistence } from "@sfield/store-sqlite";
 import { runCli } from "@sfield/cli";
 import { configureGateway, gatewayFromEnv } from "../apps/server/gateway";
+import { gatewayConfigSchema, settingsFromConfig } from "../apps/server/gateway-config";
 import { CepTelemetry } from "../apps/server/telemetry";
 import { IntegrationResilience } from "../apps/server/integration-resilience";
 import type { Integration } from "../packages/contracts/integration-task";
@@ -391,6 +392,46 @@ test("CEP dogfoods @sfield/core GeminiProvider, @sfield/telemetry-otel, and Toke
     assert.equal(resilience.snapshot(integration).circuitState, "half_open");
     resilience.recordSuccess(integration);
     assert.equal(resilience.snapshot(integration).circuitState, "closed");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("@sfield/cli doctor diagnoses runtime, packages, config, and SQLite persistence; Admin Gateway accepts Gemini", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "sfield-doctor-test-"));
+  try {
+    const cfgPath = join(dir, "sfield.config.yaml");
+    writeFileSync(cfgPath, "version: 1\nmodels: {}\nagents: {}\n", "utf8");
+    const dbPath = join(dir, "doctor.sqlite");
+
+    let stdout = "";
+    let stderr = "";
+    const code = await runCli(["doctor", "--config", cfgPath, "--db", dbPath, "--json"], {
+      cwd: dir,
+      stdout: (s) => { stdout += s; },
+      stderr: (s) => { stderr += s; },
+    });
+    assert.equal(code, 0, stderr);
+    const report = JSON.parse(stdout) as { ok: boolean; checks: Array<{ name: string; status: string; detail: string }> };
+    assert.equal(report.ok, true);
+    assert.equal(report.checks.find((c) => c.name === "node_runtime")?.status, "pass");
+    assert.equal(report.checks.find((c) => c.name === "sdk_packages")?.status, "pass");
+    assert.ok(report.checks.find((c) => c.name === "sdk_packages")?.detail.includes("8/8 installed"));
+    assert.equal(report.checks.find((c) => c.name === "config")?.status, "pass");
+    assert.equal(report.checks.find((c) => c.name === "persistence")?.status, "pass");
+
+    // Admin GatewayConfigSchema + settingsFromConfig supports Gemini
+    const parsed = gatewayConfigSchema.parse({
+      provider: "gemini",
+      model: "gemini-2.5-flash",
+      apiKeyMode: "stored",
+      apiKey: "test-gemini-secret-key",
+      contextWindow: 1_000_000,
+      maxOutputTokens: 8192,
+    });
+    const settings = settingsFromConfig(parsed);
+    assert.equal(settings.profile, "gemini");
+    assert.equal(settings.model, "gemini-2.5-flash");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

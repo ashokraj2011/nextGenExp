@@ -3,7 +3,7 @@ import { CheckCircle2, CircleAlert, Cpu, FlaskConical, Power, RotateCcw } from "
 import { api, toolSetupErrorMessage } from "./api";
 import "./recommendation-studio.css";
 
-type Provider = "openai_compatible" | "openai" | "copilot_acp";
+type Provider = "openai_compatible" | "openai" | "gemini" | "copilot_acp";
 type Config = {
   provider: Provider; label?: string; baseUrl?: string; model: string;
   apiKeyMode: "stored" | "env" | "none"; apiKey?: string; apiKeyEnv?: string;
@@ -29,14 +29,17 @@ const QUIRKS = [
 
 const PROVIDER_LABEL: Record<Provider, string> = {
   copilot_acp: "GitHub Copilot (ACP)",
-  openai_compatible: "LLM gateway (OpenAI-compatible Chat Completions)",
+  gemini: "Google Gemini API (@sfield/core GeminiProvider)",
   openai: "OpenAI API",
+  openai_compatible: "LLM gateway (OpenAI-compatible Chat Completions)",
 };
 
 function blank(provider: Provider = "copilot_acp"): Config {
-  const model = provider === "copilot_acp" ? "auto" : provider === "openai" ? "gpt-4.1-mini" : "";
+  const model = provider === "copilot_acp" ? "auto" : provider === "gemini" ? "gemini-2.5-flash" : provider === "openai" ? "gpt-4.1-mini" : "";
+  const contextWindow = provider === "gemini" ? 1_000_000 : 16384;
+  const maxOutputTokens = provider === "gemini" ? 8192 : 1500;
   return { provider, model, baseUrl: "", apiKeyMode: provider === "copilot_acp" ? "none" : "stored",
-    headers: {}, bodyFields: {}, contextWindow: 16384, maxOutputTokens: 1500, quirks: [] };
+    headers: {}, bodyFields: {}, contextWindow, maxOutputTokens, quirks: [] };
 }
 
 function fromView(v: GatewayView): Config {
@@ -186,8 +189,8 @@ export function GatewayAdmin() {
           <div className="pzn-field">
             <label>Provider</label>
             <select aria-label="Provider" value={config.provider} onChange={(e) => {
-              const { provider, model, apiKeyMode } = blank(e.target.value as Provider);
-              set({ provider, model, apiKeyMode });
+              const { provider, model, apiKeyMode, contextWindow, maxOutputTokens } = blank(e.target.value as Provider);
+              set({ provider, model, apiKeyMode, contextWindow, maxOutputTokens });
             }}>
               {(Object.keys(PROVIDER_LABEL) as Provider[]).map((p) => <option key={p} value={p}>{PROVIDER_LABEL[p]}</option>)}
             </select>
@@ -204,7 +207,7 @@ export function GatewayAdmin() {
           )}
           <div className="pzn-field">
             <label>Model</label>
-            <input aria-label="Model" placeholder={config.provider === "copilot_acp" ? "auto" : config.provider === "openai" ? "gpt-4.1-mini" : "model id"} value={config.model} onChange={(e) => set({ model: e.target.value })} />
+            <input aria-label="Model" placeholder={config.provider === "copilot_acp" ? "auto" : config.provider === "gemini" ? "gemini-2.5-flash" : config.provider === "openai" ? "gpt-4.1-mini" : "model id"} value={config.model} onChange={(e) => set({ model: e.target.value })} />
           </div>
           {config.provider === "copilot_acp" ? (
             <div className="pzn-field">
@@ -232,7 +235,7 @@ export function GatewayAdmin() {
           {config.provider !== "copilot_acp" && config.apiKeyMode === "env" && (
             <div className="pzn-field">
               <label>Environment variable</label>
-              <input aria-label="API key env var" placeholder="LLM_API_KEY" value={config.apiKeyEnv ?? ""} onChange={(e) => set({ apiKeyEnv: e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "") })} />
+              <input aria-label="API key env var" placeholder={config.provider === "gemini" ? "GEMINI_API_KEY" : config.provider === "openai" ? "OPENAI_API_KEY" : "LLM_API_KEY"} value={config.apiKeyEnv ?? ""} onChange={(e) => set({ apiKeyEnv: e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "") })} />
             </div>
           )}
           <div className="pzn-field">

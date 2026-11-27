@@ -1,15 +1,36 @@
 {
   "name": "@sfield/testing",
   "version": "0.1.0",
-  "private": true,
+  "description": "Persistence conformance suite, deterministic fake model providers, and guardrail eval/release-gate runner for @sfield/core.",
   "type": "module",
   "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     }
+  },
+  "keywords": [
+    "sfield",
+    "testing",
+    "eval",
+    "conformance",
+    "ai-agents"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ashokraj2011/nextGenExp.git",
+    "directory": "vendor/sfield/packages/testing"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@sfield/core": "0.1.0"

@@ -14,7 +14,7 @@ import { tenantDataDirectory } from "./tenant";
 export const gatewayQuirks = ["system_as_user", "no_stream_usage", "no_strict", "json_mode_only", "tool_choice_unsupported"] as const;
 
 export const gatewayConfigSchema = z.object({
-  provider: z.enum(["openai_compatible", "openai", "copilot_acp"]),
+  provider: z.enum(["openai_compatible", "openai", "gemini", "copilot_acp"]),
   label: z.string().trim().max(60).optional(),
   baseUrl: z.string().trim().max(300).optional(),
   model: z.string().trim().min(1).max(120),
@@ -61,6 +61,7 @@ const mask = (key?: string) => (key ? `••••${key.slice(-4)}` : undefined
 
 export function defaultGatewayDataDir(base: string, profile: GatewaySettings["profile"], implicitCopilot: boolean) {
   if (profile === "openai") return join(base, "openai");
+  if (profile === "gemini") return join(base, "gemini");
   if (profile !== "copilot_acp") return base;
   // Existing default installations can already contain a saved gateway and customer chats.
   const existing = tenantDataDirectory(base);
@@ -94,7 +95,7 @@ export class GatewayConfigStore {
   view(running: GatewaySettings | null, restartSupported: boolean, launchSource: "environment" | "default" = "environment"): GatewayConfigView {
     const state = this.read();
     const runningView = running
-      ? { provider: running.profile === "copilot_acp" ? "copilot_acp" : running.profile === "openai" ? "openai" : "openai_compatible", model: running.model, ...("baseUrl" in running ? { baseUrl: running.baseUrl } : {}) }
+      ? { provider: running.profile === "copilot_acp" ? "copilot_acp" : running.profile === "openai" ? "openai" : running.profile === "gemini" ? "gemini" : "openai_compatible", model: running.model, ...("baseUrl" in running ? { baseUrl: running.baseUrl } : {}) }
       : null;
     const active = state.active;
     return {
@@ -133,6 +134,20 @@ export function settingsFromConfig(config: GatewayConfig, env: NodeJS.ProcessEnv
     if (!key) throw new Error("OpenAI needs an API key.");
     const settings = gatewayFromEnv({ OPENAI_API_KEY: key, OPENAI_MODEL: config.model, OPENAI_CONTEXT_WINDOW: limits.LLM_CONTEXT_WINDOW, OPENAI_MAX_OUTPUT_TOKENS: limits.LLM_MAX_OUTPUT_TOKENS }, "openai");
     if (!settings) throw new Error("OpenAI settings are incomplete.");
+    return settings;
+  }
+  if (config.provider === "gemini") {
+    if (!key) throw new Error("Google Gemini needs an API key.");
+    const settings = gatewayFromEnv({
+      ...env,
+      LLM_PROVIDER: "gemini",
+      GEMINI_API_KEY: key,
+      GEMINI_MODEL: config.model,
+      ...(config.baseUrl ? { GEMINI_BASE_URL: config.baseUrl } : {}),
+      GEMINI_CONTEXT_WINDOW: limits.LLM_CONTEXT_WINDOW,
+      GEMINI_MAX_OUTPUT_TOKENS: limits.LLM_MAX_OUTPUT_TOKENS,
+    });
+    if (!settings) throw new Error("Gemini settings are incomplete.");
     return settings;
   }
   if (!config.baseUrl) throw new Error("Enter the gateway base URL (the Chat Completions prefix, e.g. https://gateway.example.com/v1).");
@@ -178,7 +193,7 @@ export async function testGatewayConfig(
   let settings: GatewaySettings;
   try {
     settings = settingsFromConfig(config, opts.env);
-    steps.push({ name: "Settings", ok: true, detail: config.provider === "openai_compatible" ? `Chat Completions at ${config.baseUrl}` : config.provider === "openai" ? "OpenAI API" : `Copilot ACP (${config.copilotCommand || "copilot"})` });
+    steps.push({ name: "Settings", ok: true, detail: config.provider === "openai_compatible" ? `Chat Completions at ${config.baseUrl}` : config.provider === "openai" ? "OpenAI API" : config.provider === "gemini" ? "Google Gemini API (@sfield/core GeminiProvider)" : `Copilot ACP (${config.copilotCommand || "copilot"})` });
   } catch (err) {
     steps.push({ name: "Settings", ok: false, detail: scrub(err instanceof Error ? err.message : String(err), secrets) });
     return done(false);
@@ -198,6 +213,22 @@ export async function testGatewayConfig(
       const home = resolve(opts.dataDir, "copilot-cli");
       mkdirSync(home, { recursive: true, mode: 0o700 });
       text = (await runCopilotPrompt(settings, home, [{ type: "text", text: prompt }], AbortSignal.timeout(60_000), () => undefined)).text;
+    } else if (settings.profile === "gemini") {
+      const url = `${settings.baseUrl.replace(/\/$/, "")}/models/${encodeURIComponent(settings.model)}:generateContent`;
+      const res = await fetch(url, {
+        method: "POST", redirect: "error", signal: AbortSignal.timeout(30_000),
+        headers: { "Content-Type": "application/json", ...(settings.apiKey ? { "x-goog-api-key": settings.apiKey } : {}) },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: "You reply with JSON only." }] },
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 200, responseMimeType: "application/json" },
+        }),
+      });
+      const body = await res.text();
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
+      const payload = JSON.parse(body) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>; modelVersion?: string };
+      text = payload.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+      if (payload.modelVersion) steps.push({ name: "Model", ok: true, detail: `Gemini answered as ${payload.modelVersion}` });
     } else {
       const res = await fetch(`${settings.baseUrl.replace(/\/$/, "")}/chat/completions`, {
         method: "POST", redirect: "error", signal: AbortSignal.timeout(30_000),

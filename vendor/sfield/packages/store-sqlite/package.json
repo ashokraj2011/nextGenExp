@@ -1,15 +1,35 @@
 {
   "name": "@sfield/store-sqlite",
   "version": "0.1.0",
-  "private": true,
+  "description": "Durable single-process SQLite ExecutionPersistence and MemoryRepository over Node.js built-in node:sqlite.",
   "type": "module",
   "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     }
+  },
+  "keywords": [
+    "sfield",
+    "sqlite",
+    "persistence",
+    "ai-agents"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ashokraj2011/nextGenExp.git",
+    "directory": "vendor/sfield/packages/store-sqlite"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@sfield/core": "0.1.0"

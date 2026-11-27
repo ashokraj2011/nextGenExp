@@ -10,6 +10,7 @@
  *   sfield mcp serve --db <sqlitePath> [--config <configPath>] [--name <name>] [--preset <preset>]
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { SField, EphemeralPersistence, approveLock, createDevAuthorizer, LOCAL_DEV_PRINCIPAL, nowIso, type JsonObject } from "@sfield/core";
@@ -45,6 +46,10 @@ Usage:
   sfield eval <suiteModule> --db <sqlitePath> [--config <configPath> | --digest <digest>] [--suite <name>] [--gate-min-pass <0..1>] [--json]
       Execute an evaluation suite module (exporting 'cases' or default array),
       persist its EvalReportRecord into SQLite, and evaluate the release gate.
+
+  sfield doctor [--config <configPath>] [--db <sqlitePath>] [--json]
+      Diagnose Node runtime, installed @sfield/* packages, config validity,
+      credential presence, persistence health, and OTLP telemetry settings.
 
   sfield mcp serve --db <sqlitePath> [--config <configPath>] [--name <name>] [--preset <preset>]
       Expose the SField runtime's governed tools over MCP stdio (JSON-RPC 2.0).
@@ -513,6 +518,136 @@ async function cmdEval(args: ParsedArgs, cwd: string, out: (s: string) => void, 
   }
 }
 
+async function cmdDoctor(args: ParsedArgs, cwd: string, out: (s: string) => void): Promise<number> {
+  const asJson = flagBool(args.flags, "json");
+  const checks: Array<{ name: string; status: "pass" | "warn" | "fail"; detail: string }> = [];
+
+  // 1. Node.js runtime version (>= 22.13)
+  const [majorStr = "0", minorStr = "0"] = process.versions.node.split(".");
+  const major = Number(majorStr);
+  const minor = Number(minorStr);
+  const nodeOk = major > 22 || (major === 22 && minor >= 13);
+  checks.push({
+    name: "node_runtime",
+    status: nodeOk ? "pass" : "fail",
+    detail: `Node.js v${process.versions.node} (requires >=22.13.0)`,
+  });
+
+  // 2. Installed @sfield/* packages
+  const req = createRequire(import.meta.url);
+  const pkgNames = [
+    "@sfield/core",
+    "@sfield/preset-memory",
+    "@sfield/preset-local",
+    "@sfield/store-sqlite",
+    "@sfield/store-postgres",
+    "@sfield/telemetry-otel",
+    "@sfield/testing",
+    "@sfield/cli",
+  ];
+  const installed: string[] = [];
+  const missing: string[] = [];
+  for (const pkg of pkgNames) {
+    try {
+      req.resolve(pkg);
+      installed.push(pkg);
+    } catch {
+      missing.push(pkg);
+    }
+  }
+  checks.push({
+    name: "sdk_packages",
+    status: installed.includes("@sfield/core") ? "pass" : "fail",
+    detail: `${installed.length}/${pkgNames.length} installed (${installed.join(", ")}${missing.length ? `; optional missing: ${missing.join(", ")}` : ""})`,
+  });
+
+  // 3. Config compilation & credential readiness
+  const cfgFlag = flagString(args.flags, "config");
+  const defaultCfg = resolve(cwd, "sfield.config.yaml");
+  const cfgPath = cfgFlag ? resolve(cwd, cfgFlag) : existsSync(defaultCfg) ? defaultCfg : null;
+  let compiledDigest: string | undefined;
+  if (cfgPath) {
+    if (!existsSync(cfgPath)) {
+      checks.push({ name: "config", status: "fail", detail: `Config file not found: ${cfgPath}` });
+    } else {
+      const structural = await SField.validate({ config: cfgPath, checkCredentials: false });
+      if (!structural.ok) {
+        checks.push({
+          name: "config",
+          status: "fail",
+          detail: structural.errors.map((e) => `${e.code}: ${e.message}`).join("; "),
+        });
+      } else {
+        compiledDigest = structural.digest;
+        checks.push({
+          name: "config",
+          status: "pass",
+          detail: `${cfgPath} valid (digest ${structural.digest}, ${Object.keys(structural.effective?.models ?? {}).length} model(s), ${Object.keys(structural.effective?.agents ?? {}).length} agent(s))`,
+        });
+        const envCheck = await SField.validate({ config: cfgPath, checkCredentials: true });
+        checks.push({
+          name: "credentials",
+          status: envCheck.ok ? "pass" : "warn",
+          detail: envCheck.ok
+            ? "All referenced secret environment variables are present."
+            : envCheck.errors.map((e) => e.message).join("; "),
+        });
+      }
+    }
+  } else {
+    checks.push({ name: "config", status: "warn", detail: "No sfield.config.yaml found in working directory (pass --config <path> to validate one)." });
+  }
+
+  // 4. Persistence health (SQLite)
+  const dbFlag = flagString(args.flags, "db");
+  if (dbFlag) {
+    const dbPath = resolve(cwd, dbFlag);
+    const store = sqlitePersistence({ path: dbPath });
+    try {
+      await store.init({ namespace: "sfield-doctor", ownerId: `doctor-${process.pid}` });
+      const h = await store.health();
+      const lockRec = compiledDigest ? await store.lockApprovals.get(compiledDigest) : await store.lockApprovals.latest();
+      checks.push({
+        name: "persistence",
+        status: h.ok ? "pass" : "fail",
+        detail: `SQLite ${dbPath} (${h.detail ?? "ok"}); lock=${lockRec ? `approved by ${lockRec.approver}` : "unapproved"}`,
+      });
+    } catch (e) {
+      checks.push({
+        name: "persistence",
+        status: "fail",
+        detail: `SQLite ${dbPath} error: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    } finally {
+      await store.close().catch(() => undefined);
+    }
+  } else {
+    checks.push({ name: "persistence", status: "pass", detail: "No --db specified (ephemeral / preset mode)." });
+  }
+
+  // 5. OpenTelemetry OTLP exporter configuration
+  const otlp = process.env["OTEL_EXPORTER_OTLP_ENDPOINT"]?.trim();
+  checks.push({
+    name: "telemetry_otel",
+    status: "pass",
+    detail: otlp ? `OTLP/HTTP endpoint configured (${otlp})` : "In-process OTel sink ready (set OTEL_EXPORTER_OTLP_ENDPOINT to push traces).",
+  });
+
+  const ok = checks.every((c) => c.status !== "fail");
+  const report = { ok, checkedAt: nowIso(), node: process.versions.node, checks };
+
+  if (asJson) {
+    emitJson(out, report);
+  } else {
+    out(`sfield doctor — ${ok ? "ALL CHECKS PASSED" : "ISSUES FOUND"}\n`);
+    for (const c of checks) {
+      const icon = c.status === "pass" ? "✓" : c.status === "warn" ? "!" : "✗";
+      out(`  [${icon}] ${c.name}: ${c.detail}\n`);
+    }
+  }
+  return ok ? 0 : 1;
+}
+
 async function cmdMcpServe(args: ParsedArgs, cwd: string, err: (s: string) => void): Promise<number> {
   const sub = args.positionals[1];
   if (sub !== "serve") {
@@ -584,6 +719,8 @@ export async function runCli(argv: string[], io: CliIo = {}): Promise<number> {
         return await cmdInspect(args, cwd, out, err);
       case "eval":
         return await cmdEval(args, cwd, out, err);
+      case "doctor":
+        return await cmdDoctor(args, cwd, out);
       case "mcp":
         return await cmdMcpServe(args, cwd, err);
       default:

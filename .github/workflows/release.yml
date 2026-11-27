@@ -1,0 +1,80 @@
+name: Release @sfield/* SDK Packages
+
+on:
+  push:
+    tags:
+      - "sfield-v*"
+  workflow_dispatch:
+    inputs:
+      registry:
+        description: Target package registry
+        required: true
+        default: npm
+        type: choice
+        options:
+          - npm
+          - github-packages
+      dry_run:
+        description: Run npm publish with --dry-run (no registry upload)
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  publish-sfield:
+    name: Build, Verify & Publish @sfield/*
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 (npm)
+        if: ${{ inputs.registry != 'github-packages' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          cache: "npm"
+
+      - name: Setup Node.js 22 (GitHub Packages)
+        if: ${{ inputs.registry == 'github-packages' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@sfield"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build all 8 @sfield/* packages & verify workspace
+        run: npm run build
+
+      - name: Run full test & conformance suite + CLI doctor
+        run: |
+          npm test
+          npm run sfield -- doctor
+
+      - name: Publish @sfield/* packages in dependency order
+        env:
+          NODE_AUTH_TOKEN: ${{ inputs.registry == 'github-packages' && secrets.GITHUB_TOKEN || secrets.NPM_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run == true && '--dry-run' || '' }}
+        run: |
+          for pkg in \
+            vendor/sfield/packages/core \
+            vendor/sfield/packages/testing \
+            vendor/sfield/packages/store-sqlite \
+            vendor/sfield/packages/store-postgres \
+            vendor/sfield/packages/telemetry-otel \
+            vendor/sfield/packages/preset-memory \
+            vendor/sfield/packages/preset-local \
+            vendor/sfield/packages/cli; do
+            echo "=== Publishing $pkg ==="
+            npm publish --workspace="$pkg" --access public $DRY_RUN
+          done
