@@ -65,7 +65,7 @@ function App() {
       showProfiles: query.get("view") === "profiles",
       showOverview: query.get("view") === "overview",
       profileId: adminChat ? null : (embedMode ? (query.get("personaId") || readProfileSession() || "demo-learner") : readProfileSession()),
-      embedBrand: query.get("brand")?.trim() || "CEP Assistant",
+      embedBrand: query.get("brand")?.trim() || "Your assistant",
       embedAccent: query.get("accent")?.trim() || "",
       embedPrompt: query.get("prompt")?.trim() || "",
     };
@@ -286,8 +286,13 @@ function App() {
       if (existing) {
         if (existing.status !== "working" && turn.status === "working") return previous;
         // A completed experience is issued once. Feedback refreshes the turn without rebuilding its form or chart.
-        const updated = existing.experience && existing.experience.experienceId === turn.experience?.experienceId
-          ? { ...turn, experience: existing.experience } : turn;
+        let updated = turn;
+        if (existing.experience && existing.experience.experienceId === turn.experience?.experienceId) {
+          updated = { ...turn, experience: existing.experience };
+        } else if (existing.previewExperience && turn.status === "working") {
+          // A poll started before the preview event can arrive after it.
+          updated = { ...turn, previewExperience: existing.previewExperience };
+        }
         return { ...previous, turns: previous.turns.map((item) => item.id === turn.id ? updated : item) };
       }
       return { ...previous, turns: [...previous.turns, turn] };
@@ -327,6 +332,14 @@ function App() {
             };
           }),
         } : previous);
+      });
+      stream.addEventListener("experience.preview", (event) => {
+        const sequence = Number(event.lastEventId);
+        if (!alive || sequence <= seen) return;
+        seen = sequence;
+        const { experience } = JSON.parse(event.data).payload as { experience: NonNullable<TurnView["previewExperience"]> };
+        setConversation((previous) => previous && { ...previous, turns: previous.turns.map((turn) =>
+          turn.id === id && turn.status === "working" && !turn.previewExperience ? { ...turn, previewExperience: experience } : turn) });
       });
       for (const type of ["experience.ready", "turn.failed", "turn.cancelled", "gap", "error"]) stream.addEventListener(type, refresh);
       const recoveryPoll = setInterval(refresh, 4000);
@@ -705,8 +718,7 @@ function App() {
         <a className="rail-home" href={adminChat ? adminPaths.tools : domainPack.path}>
           <LabMark />
           <span className="rail-brand-text">
-            <strong>{adminChat ? "Administration" : "CEP"}</strong>
-            {!adminChat && <small>{domainPack.label}</small>}
+            <strong>{adminChat ? "Administration" : domainPack.label}</strong>
           </span>
         </a>
         <button className="icon-button rail-collapse-desktop" type="button" aria-label="Collapse sidebar" title="Collapse sidebar"
@@ -1044,5 +1056,5 @@ function App() {
 
 installA2uiStyles();
 const root = createRoot(document.getElementById("root")!);
-document.title = (adminChat ? "Admin chat" : "Assistant") + " · CEP";
+document.title = adminChat ? "Admin chat" : "Your assistant";
 root.render(<App />);

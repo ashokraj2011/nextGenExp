@@ -887,7 +887,7 @@ export class ExperienceService {
               capabilities,
               prompt: scopedPrompt,
               gateway: domainTools.gateway,
-              onExchange: (operation, request, response) => runtime.captureTurnExchange(id, "flowRouting", operation, request, response),
+              onExchange: (operation, request, response, timing) => runtime.captureTurnExchange(id, "flowRouting", operation, request, response, timing),
               dataDir: domainTools.dataDir,
               recentSummary,
               signal,
@@ -1205,6 +1205,24 @@ export class ExperienceService {
       const showBalance = turn.trace.intentId === "show_balance";
       const showPortfolio = isPortfolioSummary(route);
       const showGoal = isHomeGoalSummary(route);
+      if (showPortfolio && !turn.public.previewExperience) {
+        stage = "portfolio";
+        this.store.progress(id, "portfolio", this.now());
+        let snapshot = turn.portfolioSnapshot;
+        if (!snapshot) {
+          const read = await runtime.registry(turn, "portfolioScopeId", 1, signal, (call) =>
+            call("portfolio", { ...asRef(turn), routeDecisionId: route.routeDecisionId }));
+          current();
+          if (read.status !== "succeeded") {
+            this.store.update(id, (row) => { row.trace.failures.push({ stage: "portfolio", code: read.error?.code ?? "PORTFOLIO_UNAVAILABLE" }); });
+            throw new TurnFailure("portfolio_unavailable");
+          }
+          snapshot = portfolioSnapshotSchema.parse(read.output);
+        }
+        this.store.publishPortfolio(id, snapshot, this.now());
+        turn = current();
+      }
+      stage = "ts";
       if (!turn.decision) {
         this.store.progress(id, "eligibility", this.now());
         const result = await runtime.registry(turn, "tsScopeId", 1, signal, (call) =>
@@ -1260,24 +1278,6 @@ export class ExperienceService {
         finishAccounts(compileRetirementView(accounts, intentId, expiresAt));
         return;
       }
-      if (showPortfolio && !turn.portfolioSnapshot) {
-        stage = "portfolio";
-        this.store.progress(id, "portfolio", this.now());
-        const result = await runtime.registry(turn, "portfolioScopeId", 1, signal, async (call) => (
-          call("portfolio", { ...asRef(turn), routeDecisionId: route.routeDecisionId })
-        ));
-        current();
-        if (result.status !== "succeeded") {
-          this.store.update(id, (row) => { row.trace.failures.push({ stage: "portfolio", code: result.error?.code ?? "PORTFOLIO_UNAVAILABLE" }); });
-          throw new TurnFailure("portfolio_unavailable");
-        }
-        const snapshot = portfolioSnapshotSchema.parse(result.output);
-        this.store.update(id, (row) => {
-          row.portfolioSnapshot = snapshot;
-          row.trace.markers.portfolioResolved = this.now();
-        });
-        turn = current();
-      }
       const portfolio = showPortfolio ? turn.portfolioSnapshot : undefined;
       emptyEligibility = decision.candidates.length === 0;
       const standaloneActions = (decision.actionRecommendations ?? []).flatMap((recommendation) => {
@@ -1288,7 +1288,7 @@ export class ExperienceService {
       if (emptyEligibility && (portfolio || standaloneActions.length)) {
         const result = compileExperience({
           status: "ready", outcome: "ready", introKey: standaloneActions.length ? "next_step" : "summary", question: null, portfolio, standaloneActions, expiresAt, partial: decision.partial,
-        });
+        }, turn.public.previewExperience);
         this.store.update(id, (row) => { row.trace.components = result.display.blocks.map((block) => block.component); });
         this.store.finish(id, { type: "completed", result }, this.now());
         return;
@@ -1346,20 +1346,25 @@ export class ExperienceService {
         expiresAt, approved: verified, proof, portfolio, goalProgress,
         workflows: offeredWorkflows(latest, verified.contentOrder), standaloneActions,
       } satisfies Parameters<typeof compileExperience>[0];
-      const composed = compileExperience(compilerInput);
-      runtime.captureTurnExchange(id, "compiler", "compileExperience", compilerInput, composed);
+      const compileStartedAt = this.now();
+      const composed = compileExperience(compilerInput, latest.public.previewExperience);
+      runtime.captureTurnExchange(id, "compiler", "compileExperience", compilerInput, composed, {
+        startedAt: compileStartedAt, durationMs: this.now() - compileStartedAt, status: "succeeded",
+      });
       const resultForDisplay = accounts ? compileRetirementView(accounts, intentId, expiresAt, {
         composed, reminder: decision.candidates.map(lookupContent).find((entry) => entry?.contentId === "beneficiary_update"),
         steps: /\bsteps?\b/i.test(turn.public.message),
       }) : composed;
       let lookupSummary: typeof latest.public.customerLookup;
       let companionNba: typeof latest.public.nextBestAction;
+      let customerEvaluation: typeof latest.trace.customerEvaluation;
       if (domainTools?.customer360) {
         const persona = findProfileById(conversation.personaId);
         if (persona) {
           const existingBlockTitles = resultForDisplay.display.blocks.flatMap((block) => (
             "title" in block.props && typeof block.props.title === "string" ? [block.props.title] : []
           ));
+          const startedAt = this.now();
           const evaluated = domainTools.customer360.evaluate({
             principalId: latest.scope.principalId,
             personaId: conversation.personaId,
@@ -1367,6 +1372,7 @@ export class ExperienceService {
             excludePromotions: Boolean(latest.public.emotionalState?.suppressPromotions) || runtime.experiences.execution.world.exclusions(latest),
             existingBlockTitles,
           });
+          customerEvaluation = { startedAt, durationMs: this.now() - startedAt, status: "succeeded" };
           lookupSummary = evaluated.lookup;
           if ((showBalance || showPortfolio) && resultForDisplay.display.status === "ready") {
             companionNba = evaluated.nba;
@@ -1381,7 +1387,8 @@ export class ExperienceService {
             : "plain_chat";
         if (lookupSummary) row.public.customerLookup = lookupSummary;
         if (companionNba) row.public.nextBestAction = companionNba;
-        const tsElapsed = Math.max(1, (row.trace.markers.tsResolved ?? this.now()) - (row.trace.markers.routeCommitted ?? row.trace.markers.tsResolved ?? this.now()));
+        if (customerEvaluation) row.trace.customerEvaluation = customerEvaluation;
+        const tsElapsed = row.trace.markers.tsResolved - row.trace.markers.eligibility;
         row.public.providerArbitration = {
           toolRef: recommendationArbitrateToolRef,
           domain: "wealth",
@@ -1393,14 +1400,14 @@ export class ExperienceService {
               providerLabel: "Treatment Selector (TS + CCRE)",
               status: "ok",
               candidateCount: decision.candidates.length,
-              elapsedMs: tsElapsed,
+              elapsedMs: Number.isFinite(tsElapsed) ? tsElapsed : 0,
             },
             {
               providerId: "customer360_nba",
               providerLabel: "Customer 360 NBA Engine",
               status: "ok",
               candidateCount: companionNba ? 1 : 0,
-              elapsedMs: 1,
+              elapsedMs: customerEvaluation?.durationMs ?? 0,
               ...(companionNba ? { note: `Winner: ${companionNba.title}` } : { note: "No higher-priority NBA required" }),
             },
             {
@@ -1451,6 +1458,16 @@ export class ExperienceService {
         }
       }
       const saved = this.store.turn(id);
+      if (saved?.public.previewExperience && saved.portfolioSnapshot && (stage === "ts" || stage === "compose")) {
+        const snapshot = compileExperience({ status: "ready", outcome: "ready", introKey: "summary", question: null,
+          portfolio: saved.portfolioSnapshot, expiresAt: saved.public.previewExperience.expiresAt, partial: true }, saved.public.previewExperience);
+        this.store.update(id, (row) => {
+          row.public.actionMode = "verified_experience";
+          row.trace.components = snapshot.display.blocks.map((block) => block.component);
+        });
+        this.store.finish(id, { type: "completed", result: snapshot }, now);
+        return;
+      }
       if (stage === "compose" && (mapped === "gateway_unavailable" || mapped === "verification_failed")
         && saved?.retirementAccounts?.selected && saved.route && saved.decision && !signal.aborted) {
         const expiresAt = Math.min(saved.route.expiresAt, saved.decision.expiresAt);

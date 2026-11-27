@@ -423,6 +423,7 @@ export const api = {
       : { domainId, ...(folderId ? { folderId } : {}) },
   ),
   turn: (id: string) => request<TurnView>("/api/turns/" + id),
+  portfolioDisplayed: (id: string) => request("/api/turns/" + id + "/portfolio-displayed", {}),
   send: (id: string, message: string, clientRequestId: string) => (
     request<TurnAccepted>("/api/conversations/" + id + "/turns", { message, clientRequestId })
   ),

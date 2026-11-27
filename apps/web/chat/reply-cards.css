@@ -37,17 +37,6 @@
 .skeleton-value { width: 43%; height: 23px; }
 .skeleton-detail { display: flex; gap: 12px; width: 60%; }
 .skeleton-detail span { width: 40%; height: 9px; }
-.reply-progress summary {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  width: fit-content;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: .8rem;
-}
-.reply-progress summary::-webkit-details-marker { display: none; }
-.reply-progress[open] summary svg { transform: rotate(180deg); }
 
 .editorial-thread .experience-flow:not(.published-ui) {
   > .experience-intro {
@@ -67,7 +56,8 @@
   }
   .content-kind { font-weight: 600; }
   .content-card.suggested-next-step {
-    background: linear-gradient(120deg, color-mix(in srgb, var(--teal) 5%, var(--surface)), var(--surface) 70%);
+    border-inline-start: 4px solid var(--teal);
+    background: linear-gradient(120deg, color-mix(in srgb, var(--teal) 7%, var(--surface)), var(--surface) 70%);
   }
   .portfolio-snapshot {
     container: portfolio / inline-size;
@@ -102,7 +92,8 @@
     padding-block-start: 16px;
     border-block-start: 1px solid var(--line);
   }
-  .portfolio-breakdown h4 { grid-column: 1 / -1; font-weight: 600; font-size: .84rem; }
+  .breakdown-heading { grid-column: 1 / -1; }
+  .portfolio-breakdown h4 { font-weight: 600; font-size: .84rem; }
   .portfolio-allocation-bar {
     height: auto;
     width: clamp(56px, 16cqi, 92px);

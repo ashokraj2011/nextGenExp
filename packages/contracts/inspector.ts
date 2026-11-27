@@ -8,7 +8,9 @@ export type InspectorPayload = {
   data?: JsonValue;
 };
 
-export type TurnExchange = { operation: string; request: InspectorPayload; response: InspectorPayload };
+export type CallTiming = { startedAt: number; durationMs: number };
+export type TimedCall = CallTiming & { status: string };
+export type TurnExchange = { operation: string; request: InspectorPayload; response: InspectorPayload; timing?: TimedCall };
 export type TurnExchangeStage = "submission" | "flowRouting" | "compiler";
 export type TurnHandoffs = {
   flowRouting?: TurnExchange;
@@ -56,6 +58,7 @@ export type ModelStagePayloads = {
     id: string;
     model: string;
     status: string;
+    timing?: CallTiming;
     exchange?: GatewayExchange;
     error?: InspectorPayload;
   }[];
@@ -65,6 +68,7 @@ export type ModelStagePayloads = {
 export type RegistryToolPayloads = {
   tool: string;
   status: string;
+  timing?: CallTiming;
   registryInput: InspectorPayload;
   result?: InspectorPayload;
   error?: InspectorPayload;
@@ -110,6 +114,14 @@ export type AgenticPayloads = {
   calls: RegistryToolPayloads[];
 };
 export type TurnPayloads = {
+  timing?: {
+    acceptedAt: number;
+    snapshotReadyAt?: number;
+    snapshotDisplayedAt?: number;
+    finishedAt?: number;
+    displayedAt?: number;
+    calls: (TimedCall & { label: string; parentLabel?: string })[];
+  };
   sentFlowList?: Pick<TurnFlowCatalog, "tenantId" | "domainId" | "audience"> & { flowIds: CepCapabilityId[] };
   handoffs?: TurnHandoffs;
   verifiedIntent?: { intentId: string; contextId: string };

@@ -357,26 +357,6 @@
   font-size: 0.9rem;
   line-height: 1.5;
 }
-.expertise-pro-strip {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-  padding: 4px 10px;
-  border-radius: 8px;
-  background: rgba(15, 23, 42, 0.06);
-  font-size: 0.7rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--muted);
-}
-.expertise-pro-strip span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-weight: 700;
-  color: var(--teal-dark, #0f766e);
-}
 .workspace[data-expertise="pro"] .content-card {
   padding: 12px 14px;
   font-size: 0.86rem;

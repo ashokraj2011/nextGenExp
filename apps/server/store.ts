@@ -18,7 +18,7 @@ import { SqliteDatabase } from "@sfield/store-sqlite";
 import type { UsageSummary } from "@sfield/core";
 import type { ContentEntry, CatalogSnapshot, ContentDecision, PropensityResult, RouteDecision, BalanceProof, Scope, SelectionMode } from "../../packages/contracts/domain";
 import type { Conversation, ConversationChange, ConversationFolder, FailureCode, Progress, PublicEvent, PublicEventType, TurnStatus, TurnView } from "../../packages/contracts/api";
-import type { GatewayExchange, OfferClick, TreatmentRun, TurnExchange, TurnExchangeStage } from "../../packages/contracts/inspector";
+import type { GatewayExchange, OfferClick, TimedCall, TreatmentRun, TurnExchange, TurnExchangeStage } from "../../packages/contracts/inspector";
 import type { GoalProgress } from "../../packages/contracts/goal-progress";
 import {
   asksAboutFunding, defaultAgentFundingWorkflow, fundingPreviewWorkflow, type ActionRecommendation, type TreatmentRecommendations, type WorkflowLaunch,
@@ -27,7 +27,7 @@ import type { PortfolioSnapshot } from "../../packages/contracts/portfolio";
 import type { RoutingIntentId } from "../../packages/contracts/routing-intents";
 import { defaultToolSetup, type MockCcreCondition, type MockCcreEvaluation, type ToolSetup, type TreatmentSource } from "../../packages/contracts/tool-setup";
 import type { CompiledExperience, IssuedAction } from "../../packages/experience/compile";
-import { buildSurface, makeId } from "../../packages/experience/compile";
+import { buildSurface, compileExperience, makeId } from "../../packages/experience/compile";
 import type { ContextScoresRequest, Rejection } from "../../packages/ts-adapter";
 import { defaultWorkspacePins, workspaceFundingContext, workspacePinsSchema, type WorkspaceActionLog, type WorkspacePin } from "../../packages/contracts/workspace";
 
@@ -46,6 +46,8 @@ export type StageTrace = Pick<UsageSummary, "elapsedMs" | "modelCalls" | "provid
   state: string; errorCode?: string;
 };
 export type TurnTrace = {
+  empathyCheck?: TimedCall & { model?: TimedCall };
+  customerEvaluation?: TimedCall;
   customerRead?: { toolRef: string; runId: string };
   surface: "chat";
   sourcePageContext: string | null;
@@ -960,6 +962,38 @@ export class Store {
     if (record) this.events.emit(id);
   }
 
+  publishPortfolio(id: string, snapshot: PortfolioSnapshot, now: number) {
+    const published = this.db.tx(() => {
+      const turn = this.turn(id);
+      if (turn?.public.status !== "working" || !turn.route || turn.public.previewExperience) return false;
+      const preview = compileExperience({ status: "ready", outcome: "ready", introKey: "summary", question: null,
+        partial: false, portfolio: snapshot, expiresAt: turn.route.expiresAt });
+      turn.portfolioSnapshot = snapshot;
+      turn.public.previewExperience = this.personalize(turn, preview).display;
+      turn.trace.markers.portfolioResolved = now;
+      turn.trace.markers.portfolioPublished = now;
+      this.saveTurn(turn);
+      this.addEvent(turn, "experience.preview", { experience: turn.public.previewExperience });
+      return true;
+    });
+    if (published) this.events.emit(id);
+  }
+
+  recordPortfolioDisplay(id: string, now: number) {
+    this.db.tx(() => {
+      const turn = this.turn(id);
+      if (!turn || turn.trace.markers.portfolioPublished === undefined || turn.trace.markers.portfolioDisplayed !== undefined) return;
+      turn.trace.markers.portfolioDisplayed = now;
+      this.saveTurn(turn);
+    });
+  }
+
+  private personalize(turn: TurnRecord, result: CompiledExperience) {
+    const profile = turn.scope.domainId === "wealth" && findProfileById(turn.scope.personaId);
+    return profile ? applyPersonalization(result, { firstName: firstNameOf(profile.displayName),
+      userMessage: turn.public.message, ordinal: turn.ordinal, emotionalState: turn.public.emotionalState }) : result;
+  }
+
   private applyUiLayout(turn: TurnRecord, result: CompiledExperience) {
     if (!turn.uiLayouts?.length) return result;
     const targets: UiTarget[] = [];
@@ -1041,15 +1075,8 @@ export class Store {
       turn.trace.markers.terminal = now;
       if (outcome.type === "completed") {
         const laidOut = this.applyUiLayout(turn, this.carryForwardOffers(turn, outcome.result, now));
-        const profile = turn.scope.domainId === "wealth" ? findProfileById(turn.scope.personaId) : undefined;
-        const { display, issued } = profile
-          ? applyPersonalization(laidOut, {
-              firstName: firstNameOf(profile.displayName),
-              userMessage: turn.public.message,
-              ordinal: turn.ordinal,
-              emotionalState: turn.public.emotionalState,
-            })
-          : laidOut;
+        const { display, issued } = this.personalize(turn, laidOut);
+        delete turn.public.previewExperience;
         if (turn.agentLaunch && "capability" in turn.agentLaunch) delete turn.agentLaunch.values;
         turn.public.experience = display;
         turn.trace.markers.compiled = now;

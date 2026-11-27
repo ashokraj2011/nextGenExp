@@ -51,8 +51,7 @@ export function Login() {
       <div className="login-brand">
         <LabMark small />
         <span className="rail-brand-text">
-          <strong>CEP</strong>
-          <small>Customer Engagement Platform</small>
+          <strong>Account access</strong>
         </span>
       </div>
       <ThemeToggle />

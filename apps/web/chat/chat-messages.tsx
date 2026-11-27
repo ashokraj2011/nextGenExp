@@ -5,7 +5,7 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { MessagePrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import {
-  ArrowUpRight, BookOpenText, ChevronDown, Columns2, GraduationCap, House, ListChecks, MapPin,
+  ArrowUpRight, BookOpenText, Columns2, GraduationCap, House, ListChecks, MapPin,
   RotateCcw, Sparkles, ThumbsDown, ThumbsUp,
 } from "lucide-react";
 import { progressLabels, type NextBestActionCard, type TurnView } from "../../../packages/contracts/api";
@@ -129,7 +129,7 @@ function ReplyLoading({ turn }: { turn: TurnView }) {
     const timer = setTimeout(() => setShowPlaceholder(true), 220);
     return () => clearTimeout(timer);
   }, []);
-  const { progress, harnessStages } = turn;
+  const { progress } = turn;
   return <div className="reply-loading">
     <p className="reply-status" role="status">{showPlaceholder ? progressLabels[progress] : "Preparing your reply"}…</p>
     {showPlaceholder && <div className="reply-skeleton" aria-hidden="true">
@@ -137,16 +137,6 @@ function ReplyLoading({ turn }: { turn: TurnView }) {
       <span className="skeleton-value" />
       <div className="skeleton-detail"><span /><span /></div>
     </div>}
-    {harnessStages && harnessStages.length > 0 && <details className="reply-progress">
-      <summary>View progress <ChevronDown size={13} aria-hidden="true" /></summary>
-      <ol className="dyn-harness-steps">
-        {harnessStages.map((step, index) => <li key={index} className={"is-" + step.status}>
-          <span className="dyn-harness-stage">{step.stage}</span>
-          <span>{step.summary}{step.thinking && <small className="dyn-harness-step-thought">{step.thinking}</small>}</span>
-          {step.durationMs !== undefined && <small>{step.durationMs}ms</small>}
-        </li>)}
-      </ol>
-    </details>}
   </div>;
 }
 
@@ -167,50 +157,48 @@ export function AssistantMessage() {
 
   return (
     <MessagePrimitive.Root ref={element} className="assistant-message"
-      data-live-reply={arrivedLive && turn.status === "completed" && !adminChat ? "" : undefined}>
+      data-live-reply={arrivedLive && (turn.previewExperience || turn.status === "completed") && !adminChat ? "" : undefined}>
       <div className="stream-assistant-row">
         <LabMark small />
         <div className="assistant-content">
           <header className="stream-meta-line">
-            <strong>CEP Assistant</strong>
+            <strong>Your assistant</strong>
             <span className="turn-meta">{timeFormat.format(new Date(turn.createdAt))}</span>
           </header>
 
-          {turn.status === "working" ? (
+          {turn.status === "working" && (
             adminChat ? <>
               <span className="sr-only" role="status">{progressLabels[turn.progress]}</span>
               <ReasoningPanel status={turn.status} progress={turn.progress} history={steps} />
-            </> : <ReplyLoading turn={turn} />
-          ) : (
-            <>
-              {adminChat && steps.length > 0 && turn.status === "completed" && (
-                <ReasoningPanel
-                  status={turn.status}
-                  progress={turn.progress}
-                  history={steps}
-                  experience={experience}
-                  actionMode={turn.actionMode}
-                  semanticRoute={turn.semanticRoute}
-                  customerLookup={turn.customerLookup}
-                  emotionalState={turn.emotionalState}
-                  providerArbitration={turn.providerArbitration}
-                  piiRedaction={turn.piiRedaction}
-                />
-              )}
-              {!adminChat && turn.status === "completed" && (
-                <ExpertiseTurnBanner mode={expertiseMode} turn={turn} />
-              )}
-              <MessagePrimitive.Parts />
-              {!adminChat && turn.nextBestAction && (
-                <NbaCompanionCard
-                  nba={turn.nextBestAction}
-                  personaId={activeProfile?.personaId}
-                  disabled={pending}
-                  onRunPrompt={runPrompt}
-                  onPreviewFunding={previewFunding}
-                />
-              )}
-            </>
+            </> : !turn.previewExperience && <ReplyLoading turn={turn} />
+          )}
+          {adminChat && steps.length > 0 && turn.status === "completed" && (
+            <ReasoningPanel
+              status={turn.status}
+              progress={turn.progress}
+              history={steps}
+              experience={experience}
+              actionMode={turn.actionMode}
+              semanticRoute={turn.semanticRoute}
+              customerLookup={turn.customerLookup}
+              emotionalState={turn.emotionalState}
+              providerArbitration={turn.providerArbitration}
+              piiRedaction={turn.piiRedaction}
+            />
+          )}
+          {!adminChat && turn.status === "completed" && (
+            <ExpertiseTurnBanner mode={expertiseMode} turn={turn} />
+          )}
+          {(turn.status !== "working" || turn.previewExperience) && <MessagePrimitive.Parts />}
+          {turn.status === "working" && turn.previewExperience && <p className="reply-status" role="status">Checking for recommendations…</p>}
+          {!adminChat && turn.status === "completed" && turn.nextBestAction && (
+            <NbaCompanionCard
+              nba={turn.nextBestAction}
+              personaId={activeProfile?.personaId}
+              disabled={pending}
+              onRunPrompt={runPrompt}
+              onPreviewFunding={previewFunding}
+            />
           )}
 
           {turn.status === "completed" && latest?.id === turn.id && <span className="sr-only" role="status">Response ready.</span>}

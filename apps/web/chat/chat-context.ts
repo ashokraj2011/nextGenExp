@@ -48,15 +48,16 @@ export const ConversationControls = createContext<ConversationOperations>({
 export function visibleMessages(turns: TurnView[]): ThreadMessageLike[] {
   return turns.flatMap((turn): ThreadMessageLike[] => {
     const { id, experience, status, failureCode } = turn;
+    const display = experience ?? (turn.previewExperience && { ...turn.previewExperience, previewTurnId: id });
+    const terminalText = status === "failed" ? failureCopy[failureCode ?? "internal_error"] : status === "cancelled" ? "Response stopped." : "";
     return [
       { id: id + "_user", role: "user", content: turn.message, createdAt: new Date(turn.createdAt) },
       {
         // Keep the same chat row when the server delivers its completed A2UI surface.
         id: id + "_assistant",
         role: "assistant", createdAt: new Date(turn.createdAt),
-        content: experience ? [{ type: "data", name: "experience-surface", data: experience }]
-          : status === "failed" ? failureCopy[failureCode ?? "internal_error"]
-          : status === "cancelled" ? "Response stopped." : "",
+        content: display ? [{ type: "data", name: "experience-surface", data: display },
+          ...(terminalText ? [{ type: "text" as const, text: terminalText }] : [])] : terminalText,
         status: status === "working" ? { type: "running" } : { type: "complete", reason: "stop" },
         metadata: { custom: { turn } },
       },

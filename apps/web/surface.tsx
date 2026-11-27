@@ -345,6 +345,12 @@ function FundingOptionsBlock({ methods }: FundingOptions) {
   </section>;
 }
 
+function ChatPortfolio(props: z.infer<typeof portfolioSnapshot.schema>) {
+  const { askPrompt } = useContext(ExperienceControls);
+  const { pendingPortfolio } = useContext(SurfaceActions);
+  return <PortfolioSnapshotBlock {...props} onExploreAllocation={askPrompt} allowSimulation={pendingPortfolio || Boolean(askPrompt)} />;
+}
+
 function ContentBlock({ block, form }: { block: DisplayBlock; form?: { experienceId: string; componentId: string; enabled: boolean } }) {
   const controls = useContext(ExperienceControls);
   if (block.component === retirementAccounts.name) return <RetirementAccountsCard {...block.props} />;
@@ -358,7 +364,7 @@ function ContentBlock({ block, form }: { block: DisplayBlock; form?: { experienc
   if (block.component === boundWidget.name) return <BoundWidgetBlock {...block.props} />;
   if (block.component === dynamicCanvas.name) return <DynamicCanvasBlock {...block.props} onFollowUp={controls.askPrompt} />;
   if (block.component === ruleCreation.name) return <RuleBlock {...block.props} />;
-  if (block.component === portfolioSnapshot.name) return <PortfolioSnapshotBlock {...block.props} onExploreAllocation={controls.askPrompt} />;
+  if (block.component === portfolioSnapshot.name) return <ChatPortfolio {...block.props} />;
   if (block.component === fundingPreview.name) return <FundingPreviewBlock {...block.props} />;
   if (block.component === fundingOptions.name) return <FundingOptionsBlock {...block.props} />;
   const { component, props } = block;
@@ -433,7 +439,7 @@ function Introduction({ intro, question, partial }: { intro: string; question: s
   </>;
 }
 
-const SurfaceActions = createContext({ enabled: false, preview: false });
+const SurfaceActions = createContext({ enabled: false, preview: false, pendingPortfolio: false });
 const pznCatalog = new Catalog<ReactCatalogComponent>(PZN_CATALOG_ID, "1.0", [
   createComponentImplementation(experienceRoot, ({ props, buildChild }) => {
     const { preview } = useContext(SurfaceActions);
@@ -457,10 +463,7 @@ const pznCatalog = new Catalog<ReactCatalogComponent>(PZN_CATALOG_ID, "1.0", [
   createComponentImplementation(metricSummary, ({ props }) => <ContentBlock block={{ component: metricSummary.name, props }} />),
   createComponentImplementation(retirementAccounts, ({ props }) => <RetirementAccountsCard {...props} />),
   createComponentImplementation(goalProgressCard, ({ props }) => <ContentBlock block={{ component: goalProgressCard.name, props }} />),
-  createComponentImplementation(portfolioSnapshot, ({ props }) => {
-    const controls = useContext(ExperienceControls);
-    return <PortfolioSnapshotBlock {...props} onExploreAllocation={controls.askPrompt} />;
-  }),
+  createComponentImplementation(portfolioSnapshot, ({ props }) => <ChatPortfolio {...props} />),
   createComponentImplementation(fundingPreview, ({ props }) => <FundingPreviewBlock {...props} />),
   createComponentImplementation(fundingOptions, ({ props }) => <FundingOptionsBlock {...props} />),
   createComponentImplementation(ruleCreation, ({ props }) => <RuleBlock {...props} />),
@@ -501,39 +504,58 @@ export function MountedSurface({ input, id, onAction, basic, onRendered }: {
   basic?: boolean;
   onRendered?: () => void;
 }) {
-  const [surface, setSurface] = useState<SurfaceModel<ReactCatalogComponent>>();
+  const [applied, setApplied] = useState<{ surface: SurfaceModel<ReactCatalogComponent>; input: unknown }>();
+  const binding = useRef<{ processor: MessageProcessor<ReactCatalogComponent>; previous?: CreateSurfaceMessage }>(undefined);
   const [error, setError] = useState<Error | null>(null);
   const callbacks = useRef({ onAction, onRendered });
   callbacks.current = { onAction, onRendered };
   // Attach the verified surface before the browser paints the finished message.
   useLayoutEffect(() => {
-    let message: CreateSurfaceMessage;
     const processor = new MessageProcessor<ReactCatalogComponent>(
       basic ? [basicCatalog] : [pznCatalog],
       (action) => { callbacks.current.onAction(ActionMessageSchema.parse({ version: "1.0", action })); },
     );
-    try {
-      message = basic ? CreateSurfaceMessageSchema.parse(input) : validatePznSurface(input, id);
-      processor.processMessages([message]);
-      const created = processor.getSurface(id);
-      if (!created) throw new Error("A2UI surface is missing");
-      setSurface(created);
-    } catch (reason) {
-      processor.dispose();
-      setError(reason instanceof Error ? reason : new Error("A2UI surface failed"));
-      return;
-    }
+    binding.current = { processor };
     return () => {
-      try { processor.processMessages([{ version: "1.0", deleteSurface: { surfaceId: id } }]); }
+      binding.current = undefined;
+      try { if (processor.getSurface(id)) processor.processMessages([{ version: "1.0", deleteSurface: { surfaceId: id } }]); }
       finally { processor.dispose(); }
     };
+  }, [id, basic]);
+  useLayoutEffect(() => {
+    const state = binding.current!;
+    const { processor, previous } = state;
+    try {
+      const message = basic ? CreateSurfaceMessageSchema.parse(input) : validatePznSurface(input, id);
+      const next = message.createSurface;
+      const extendsPrevious = !basic && previous?.createSurface.components?.every((old) =>
+        next.components?.some((node) => node.id === old.id && node.component === old.component));
+      if (previous && extendsPrevious && next.components) {
+        // Update the existing nodes so a customer can keep a slider or disclosure open.
+        const byId = new Map(previous.createSurface.components?.map((node) => [node.id, node]));
+        const changes = next.components.filter((node) => JSON.stringify(node) !== JSON.stringify(byId.get(node.id)));
+        if (changes.length) processor.processMessages([{ version: "1.0", updateComponents: { surfaceId: id, components: changes } }]);
+        if (previous.createSurface.dataModel?.intro !== next.dataModel?.intro) {
+          processor.processMessages([{ version: "1.0", updateDataModel: { surfaceId: id, path: "/intro", value: next.dataModel?.intro } }]);
+        }
+      } else {
+        if (previous) processor.processMessages([{ version: "1.0", deleteSurface: { surfaceId: id } }]);
+        processor.processMessages([message]);
+      }
+      const created = processor.getSurface(id);
+      if (!created) throw new Error("A2UI surface is missing");
+      state.previous = message;
+      setApplied({ surface: created, input });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason : new Error("A2UI surface failed"));
+    }
   }, [id, input, basic]);
 
   useEffect(() => {
-    if (surface) callbacks.current.onRendered?.();
-  }, [surface]);
+    if (applied && applied.input === input) callbacks.current.onRendered?.();
+  }, [applied, input]);
   if (error) throw error;
-  return surface ? <MarkdownComponentContext.Provider value={PlainText}><A2uiSurface surface={surface} /></MarkdownComponentContext.Provider> : null;
+  return applied ? <MarkdownComponentContext.Provider value={PlainText}><A2uiSurface surface={applied.surface} /></MarkdownComponentContext.Provider> : null;
 }
 
 class SurfaceBoundary extends Component<{ children: ReactNode; fallback: ReactNode }, { fallback: boolean }> {
@@ -548,19 +570,20 @@ type SurfaceControls = {
   askPrompt?: (prompt: string) => void;
   onWriteBack?: (updates: Record<string, string>) => Promise<string[]>;
   followUp: (id: string, envelope: ActionMessage) => void;
-  rendered: (id: string, fallback?: boolean) => void;
+  rendered: (id: string, fallback?: boolean, previewTurnId?: string) => void;
 };
 export const ExperienceControls = createContext<SurfaceControls>({
   followUp: () => undefined, rendered: () => undefined,
 });
 
-function CanonicalFallback({ experience, enabled }: { experience: DisplayExperience; enabled: boolean }) {
+type ChatSurface = DisplayExperience & { previewTurnId?: string };
+function CanonicalFallback({ experience, enabled }: { experience: ChatSurface; enabled: boolean }) {
   const controls = useContext(ExperienceControls);
   const { experienceId } = experience;
   const { preview } = useContext(SurfaceActions);
   const rendered = useRef(controls.rendered);
   rendered.current = controls.rendered;
-  useEffect(() => rendered.current(experienceId, true), [experienceId]);
+  useEffect(() => rendered.current(experienceId, true, experience.previewTurnId), [experienceId, experience.previewTurnId]);
   return <div className={surfaceClass({ ...experience, preview })} data-renderer="fallback">
     <Introduction intro={experience.intro} question={experience.question} partial={experience.partial} />
     {experience.blocks.map((block, index) => <div className="surface-child" key={index}>
@@ -581,7 +604,7 @@ function CanonicalFallback({ experience, enabled }: { experience: DisplayExperie
   </div>;
 }
 
-function ExperiencePart({ data, preview = false }: { data: DisplayExperience; preview?: boolean }) {
+function ExperiencePart({ data, preview = false }: { data: ChatSurface; preview?: boolean }) {
   const { experienceId, messages, expiresAt } = data;
   const controls = useContext(ExperienceControls);
   const [expired, setExpired] = useState(() => Date.now() >= expiresAt);
@@ -592,12 +615,12 @@ function ExperiencePart({ data, preview = false }: { data: DisplayExperience; pr
     return () => clearTimeout(timer);
   }, [expiresAt]);
   const enabled = !preview && controls.activeExperienceId === experienceId && !expired;
-  return <SurfaceActions.Provider value={{ enabled, preview }}>
+  return <SurfaceActions.Provider value={{ enabled, preview, pendingPortfolio: Boolean(data.previewTurnId) }}>
     <LiveSimulationProvider>
       <SurfaceBoundary key={experienceId} fallback={<CanonicalFallback experience={data} enabled={enabled} />}>
         <MountedSurface id={experienceId} input={messages[0]}
           onAction={(envelope) => controls.followUp(experienceId, envelope)}
-          onRendered={() => controls.rendered(experienceId)} />
+          onRendered={() => controls.rendered(experienceId, false, data.previewTurnId)} />
       </SurfaceBoundary>
     </LiveSimulationProvider>
   </SurfaceActions.Provider>;

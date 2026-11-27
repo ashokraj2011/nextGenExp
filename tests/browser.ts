@@ -35,7 +35,8 @@ async function readExchange(drawer: Locator) {
 }
 
 const preview = await startTestPreview(undefined, ({ envelope }) => (
-  envelope.request.toLowerCase().includes("slow") ? { delayMs: 4000 } : undefined
+  envelope.request.toLowerCase().includes("slow") ? { delayMs: 4000 }
+    : envelope.inputType === "PznContextRoutingInput" && envelope.request === "Let me know my portfolio summary." ? { delayMs: 600 } : undefined
 ));
 const executablePath = process.env.PZN_CHROME_PATH;
 let browser;
@@ -73,7 +74,7 @@ try {
   }), true);
   await page.getByRole("link", { name: "Start a conversation", exact: true }).click();
   await page.getByRole("heading", { name: "Welcome, Alice.", exact: true }).waitFor();
-  await page.getByRole("link", { name: "CEP Wealth Advisory", exact: true }).click();
+  await page.getByRole("link", { name: "Wealth Advisory", exact: true }).click();
   assert.equal(new URL(page.url()).pathname, "/wealth");
   await openAdmin(page, "help");
   await page.getByRole("heading", { name: "How CEP & sfield work", exact: true, level: 1 }).waitFor();
@@ -513,6 +514,7 @@ try {
   const restoredDefaults = await author.request.post(preview.url + "/api/admin/tools", { data: defaultToolSetup });
   assert.equal(restoredDefaults.status(), 200);
   const portfolioPage = await browser.newPage({ httpCredentials: { ...operatorCredentials, origin: preview.url }, viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  await portfolioPage.addInitScript(() => localStorage.setItem("cep_expertise_mode", "pro"));
   portfolioPage.setDefaultTimeout(12_000);
   portfolioPage.on("pageerror", (error) => pageErrors.push(error.message));
   await portfolioPage.goto(preview.url + "/planning");
@@ -537,17 +539,22 @@ try {
   await aliceProfileTrigger.waitFor();
   await portfolioPage.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Profiles, current profile Alice Morgan");
   const portfolioQuestion = portfolioPage.getByLabel("Your question");
-  // Hold the real turn read until the browser has painted the pending card.
+  // The preview must render from SSE even while the final turn read is held.
   const turnRead = /\/api\/turns\/[^/]+$/;
   const pendingReply = portfolioPage.locator(".assistant-message:has(.reply-loading)");
   const pendingCard = Promise.all([pendingReply.elementHandle(), pendingReply.locator(".reply-skeleton").boundingBox()]);
-  await portfolioPage.route(turnRead, async (route) => { await pendingCard; await route.continue(); });
+  let releaseFinal!: () => void;
+  const finalRead = new Promise<void>((resolve) => { releaseFinal = resolve; });
+  await portfolioPage.route(turnRead, async (route) => { await finalRead; await route.continue(); });
   await portfolioQuestion.fill("Let me know my portfolio summary.");
   await portfolioQuestion.press("Enter");
   const [pendingElement, placeholder] = await pendingCard;
   const snapshot = portfolioPage.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Portfolio snapshot" });
   await snapshot.getByText("$12,500", { exact: true }).waitFor();
-  await portfolioPage.unroute(turnRead);
+  await portfolioPage.getByText("Checking for recommendations…", { exact: true }).waitFor();
+  const earlyCard = await snapshot.elementHandle();
+  const cashRecommendation = portfolioPage.getByText("You have $12,500 in cash. Would you like to explore investing options?", { exact: true });
+  assert.equal(await cashRecommendation.count(), 0);
   assert.ok(await pendingElement.evaluate((row) => row.isConnected && row.hasAttribute("data-live-reply")));
   const finished = await snapshot.boundingBox();
   assert.ok(placeholder && finished);
@@ -555,13 +562,24 @@ try {
   assert.equal(finished.width, placeholder.width);
   assert.ok(Math.abs(finished.y - placeholder.y) < 2);
   assert.equal(await snapshot.evaluate((card) => getComputedStyle(card.closest(".surface-child")!).animationName), "none");
-  await portfolioPage.getByText("You have $12,500 in cash. Would you like to explore investing options?", { exact: true }).waitFor();
-  await portfolioPage.screenshot({ path: resolve(screenshots, "portfolio-learner-chat.png") });
   const simulation = snapshot.getByRole("button", { name: "Simulate cash deployment" });
+  await snapshot.getByRole("button", { name: "Show dollar amounts" }).click();
+  assert.equal(await snapshot.locator(".portfolio-allocation li").filter({ hasText: "Cash" }).locator("strong").innerText(), "$12,500");
+  await snapshot.getByRole("button", { name: "Show percentages" }).click();
   await simulation.click();
   await snapshot.getByRole("button", { name: "Growth (80/20)" }).click();
   const stockShare = () => snapshot.locator(".portfolio-allocation li").filter({ hasText: "Stocks" }).locator("strong").innerText();
   assert.equal(await stockShare(), "71%");
+  const discuss = snapshot.getByRole("button", { name: "Discuss this allocation" });
+  assert.ok(await discuss.isDisabled());
+  releaseFinal();
+  await cashRecommendation.waitFor();
+  await portfolioPage.unroute(turnRead);
+  assert.doesNotMatch(await pendingElement.innerText(), /mode=|exp=|blocks=|sources=|actions=/);
+  assert.ok(await earlyCard.evaluate((card) => card.isConnected));
+  assert.ok(await discuss.isEnabled());
+  assert.equal(await stockShare(), "71%");
+  await portfolioPage.screenshot({ path: resolve(screenshots, "portfolio-learner-chat.png") });
   const helpful = portfolioPage.getByRole("button", { name: "Helpful", exact: true });
   await helpful.click();
   await portfolioPage.getByRole("button", { name: "Helpful", exact: true, pressed: true }).waitFor();
@@ -569,6 +587,10 @@ try {
   assert.equal(await stockShare(), "71%");
   await openAdmin(portfolioPage, "logs");
   const portfolioLogs = portfolioPage.getByRole("region", { name: "Call log details" });
+  const timings = portfolioLogs.getByRole("region", { name: "Call timings" });
+  await timings.getByText("Portfolio card shown", { exact: true }).waitFor();
+  await timings.getByText("Final reply shown", { exact: true }).waitFor();
+  await timings.getByRole("rowheader", { name: "Treatment Selector", exact: true }).waitFor();
   for (const stage of ["Context Router · 1 attempt", "Treatment Selector · succeeded", "Portfolio Snapshot · succeeded", "Experience Composer · 1 attempt"]) {
     await portfolioLogs.getByText(stage, { exact: true }).waitFor();
   }
@@ -1010,6 +1032,10 @@ try {
   await signInAs("Jordan Lee");
   await currentProfile("Jordan Lee").waitFor();
   await welcomePortfolio.getByText("$10,000", { exact: true }).waitFor();
+  await welcomePortfolio.getByText("Value history", { exact: true }).click();
+  await welcomePortfolio.getByRole("button", { name: "3 months", exact: true }).click();
+  await welcomePortfolio.getByRole("img", { name: /Portfolio value from/ }).waitFor();
+  await welcomePortfolio.getByText("Value history", { exact: true }).click();
   await pendingActions.getByText("No pending actions.", { exact: true }).waitFor();
   await welcomePortfolio.getByRole("button", { name: "Ask about portfolio", exact: true }).click();
   await jordanCash.waitFor();

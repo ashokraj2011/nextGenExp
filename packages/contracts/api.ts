@@ -138,6 +138,8 @@ export type TurnView = {
   providerArbitration?: ProviderArbitrationTrace;
   piiRedaction?: PiiRedactionTrace;
   nextBestAction?: NextBestActionCard;
+  /** Read-only, verified account surface published while recommendations are pending. */
+  previewExperience?: DisplayExperience;
   experience?: DisplayExperience;
   failureCode?: FailureCode;
   retryOf?: string;
@@ -204,7 +206,7 @@ export type Bootstrap = {
   inspectorEnabled: boolean;
 };
 export type TurnAccepted = { turnId: string; eventsUrl: string; turn: TurnView; conversation: Conversation };
-export type PublicEventType = "turn.accepted" | "turn.status" | "experience.ready" | "turn.failed" | "turn.cancelled";
+export type PublicEventType = "turn.accepted" | "turn.status" | "experience.preview" | "experience.ready" | "turn.failed" | "turn.cancelled";
 export type PublicEvent = {
   eventId: string;
   sequence: number;

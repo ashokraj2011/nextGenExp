@@ -33,10 +33,25 @@
 .workspace-home { gap: 15px; }
 .workspace-home .overview-banner { padding: 4px 1px; border: 0; background: transparent; }
 .workspace-home .overview-banner h2 { margin: 0; font-size: clamp(1.7rem, 3vw, 2.25rem); }
-.workspace-home .portfolio-snapshot { border-color: #c8dfd3; background: linear-gradient(120deg, #edf6f0, #fff 68%); }
+.workspace-home .portfolio-snapshot { border-color: var(--line); background: var(--surface); }
 .workspace-home .portfolio-values { align-items: end; grid-template-columns: 1.25fr 1fr 1fr; }
 .workspace-home .portfolio-values > div:first-child dd { color: var(--teal-dark); font-size: clamp(1.23rem, 3vw, 2.05rem); }
 .portfolio-footer { padding-top: 13px; }
+.portfolio-values dt small { margin-inline-start: .45rem; color: var(--muted); font-size: .72rem; font-weight: 480; }
+.portfolio-mix { height: .55rem; overflow: hidden; border-radius: 99px; background: #b5cbd8; }
+.portfolio-mix > span { display: block; height: 100%; background: #358052; }
+.summary-history { border-block: 1px solid var(--line); margin-block-start: 16px; }
+.summary-history > summary { display: flex; align-items: center; gap: 8px; min-height: 42px; font-weight: 600; color: var(--teal-dark); cursor: pointer; list-style: none; }
+.summary-history > summary::-webkit-details-marker { display: none; }
+.summary-history > summary svg:last-child { margin-inline-start: auto; }
+.summary-history[open] > summary svg:last-child { transform: rotate(180deg); }
+.summary-history .portfolio-history { padding-block-end: 12px; }
+.summary-history .portfolio-history canvas { height: 142px; }
+.pending-heading, .breakdown-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 10px; }
+.pending-count { color: var(--teal-dark); background: var(--teal-pale); padding: .2rem .6rem; border-radius: 99px; font-size: .75rem; font-weight: 600; }
+.allocation-units { display: inline-flex; border: 1px solid var(--line); border-radius: 99px; background: var(--surface); }
+.allocation-units button { min-width: 32px; min-height: 30px; border: 0; border-radius: 99px; background: transparent; color: var(--muted); font: inherit; font-size: .8rem; }
+.allocation-units button[aria-pressed="true"] { color: var(--teal-dark); background: var(--teal-pale); font-weight: 700; }
 .pending-actions ul { display: grid; gap: 11px; margin: 13px 0 0; padding: 0; list-style: none; }
 .pending-actions li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; }
 .pending-actions li + li { border-top: 1px solid var(--line); padding-top: 11px; }

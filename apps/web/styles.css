@@ -402,6 +402,16 @@ button { color: inherit; }
 .call-log-selector .call-log-message { color: var(--ink); overflow-wrap: anywhere; }
 .call-log-list, .call-log-empty { color: var(--muted); font-size: .83rem; line-height: 1.5; }
 .call-log-list > p, .call-log-error { margin: 13px 0 9px; }
+.turn-timings { margin: 12px 0 20px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.turn-timings h3, .turn-timings p { margin: 0 0 6px; }
+.turn-timings dl { display: flex; flex-wrap: wrap; gap: 12px 28px; margin: 15px 0; }
+.turn-timings dd { margin: 0; color: var(--teal-dark); font-size: 1.12rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.turn-timings-table { overflow-x: auto; }
+.turn-timings table { width: 100%; border-collapse: collapse; text-align: left; font-variant-numeric: tabular-nums; }
+.turn-timings :is(th, td) { padding: 6px 9px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.turn-timings thead { background: var(--surface-subtle); }
+.turn-timings tbody th { font-weight: 540; }
+.turn-timings small { display: block; margin-top: 8px; }
 .call-log-error button { margin-top: 6px; }
 .call-log-list > .payload-stage { margin: 8px 0; padding: 8px 10px; }
 .payload-stage > summary { color: var(--ink); }

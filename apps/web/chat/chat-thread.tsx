@@ -137,8 +137,9 @@ export function Chat({
     const top = user.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop;
     scroll.scrollTop = Math.max(0, top - 24);
   }, []);
-  const rendered = useCallback((experienceId: string, fallback?: boolean) => {
-    void api.event(experienceId, fallback ? "render_fallback" : "rendered").catch(() => undefined);
+  const rendered = useCallback((experienceId: string, fallback?: boolean, previewTurnId?: string) => {
+    const receipt = previewTurnId ? api.portfolioDisplayed(previewTurnId) : api.event(experienceId, fallback ? "render_fallback" : "rendered");
+    void receipt.catch(() => undefined);
   }, []);
   const archived = conversation?.archivedAt !== undefined;
   const activeExperienceId = pending || running || archived ? undefined : latest?.experience?.experienceId;

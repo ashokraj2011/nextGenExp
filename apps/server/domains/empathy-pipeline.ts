@@ -41,6 +41,7 @@ export async function runEmpathyAssessmentPipeline(args: {
       .join(" | ");
 
     const emotionalState = await runtime.assessEmotionalState(
+      turnId,
       initialTurn.scope.principalId,
       initialTurn.scope,
       {

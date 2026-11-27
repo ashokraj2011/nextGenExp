@@ -1230,6 +1230,10 @@ export async function startApp(options: Options) {
       requireThread(thread);
       if (thread.audience === "admin" || (!operator && store.hasOperatorContent(thread.id))) requireOperator();
       if (method === "GET" && !operation) return json(res, visibleTurn(await experience.turnView(turn), operator));
+      if (method === "POST" && operation === "portfolio-displayed") {
+        store.recordPortfolioDisplay(id, now());
+        return json(res, { recorded: true });
+      }
       if (method === "POST" && operation === "cancel") return json(res, experience.cancel(turn));
       if (method === "POST" && operation === "retry") {
         const { clientRequestId } = await body(req, retryBody);

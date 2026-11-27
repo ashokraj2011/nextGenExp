@@ -179,22 +179,50 @@ export function FlowSelectionCall({ turn, log, focus }: {
   </>;
 }
 
+function elapsed(ms: number) {
+  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(2)} s`;
+}
+
+function CallTimings({ timing }: { timing: NonNullable<TurnPayloads["timing"]> }) {
+  const milestones = [
+    ["Snapshot published", timing.snapshotReadyAt], ["Portfolio card shown", timing.snapshotDisplayedAt],
+    ["Final reply ready", timing.finishedAt], ["Final reply shown", timing.displayedAt],
+  ] as const;
+  return <section className="turn-timings" aria-label="Call timings">
+    <h3>Call timings</h3>
+    <p>Times start when the server accepted the message. Display times come from the chat browser.</p>
+    <dl>{milestones.map(([label, at]) => at !== undefined && <div key={label}><dt>{label}</dt><dd>{elapsed(at - timing.acceptedAt)}</dd></div>)}</dl>
+    {timing.calls.length > 0 && <div className="turn-timings-table"><table aria-label="Recorded call timings">
+      <thead><tr><th scope="col">Call</th><th scope="col">Started at</th><th scope="col">Duration</th><th scope="col">Result</th></tr></thead>
+      <tbody>{timing.calls.map((call, index) => <tr key={index}>
+        <th scope="row">{call.parentLabel && <span aria-hidden="true">↳ </span>}{call.label}</th><td>{elapsed(call.startedAt - timing.acceptedAt)}</td><td>{elapsed(call.durationMs)}</td><td>{call.status}</td>
+      </tr>)}</tbody>
+    </table></div>}
+    {timing.calls.some((call) => call.parentLabel) && <small>The indented model call is included in the customer context check.</small>}
+  </section>;
+}
+
 function TurnPayloadLog({ turn }: { turn: TurnView }) {
   const [payloads, setPayloads] = useState<TurnPayloads>();
   const [failed, setFailed] = useState(false);
   const [reload, setReload] = useState(0);
   useEffect(() => {
     let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
     setFailed(false);
-    void api.payloads(turn.id).then(
-      (data) => {
+    async function read() {
+      try {
+        const data = await api.payloads(turn.id);
         if (disposed) return;
-        if (data.turnId === turn.id) setPayloads(data);
-        else setFailed(true);
-      },
-      () => { if (!disposed) setFailed(true); },
-    );
-    return () => { disposed = true; };
+        if (data.turnId !== turn.id) { setFailed(true); return; }
+        setPayloads(data);
+        const timing = data.timing;
+        if (timing && (timing.finishedAt === undefined ? turn.status === "working"
+          : timing.displayedAt === undefined && Date.now() - timing.finishedAt < 5000)) timer = setTimeout(read, 1000);
+      } catch { if (!disposed) setFailed(true); }
+    }
+    void read();
+    return () => { disposed = true; clearTimeout(timer); };
   }, [reload, turn.id, turn.progress, turn.status]);
   return <div className="call-log-list">
     <p>Gateway credentials and configured metadata values are redacted.</p>
@@ -203,6 +231,7 @@ function TurnPayloadLog({ turn }: { turn: TurnView }) {
       <button className="secondary-button" type="button" onClick={() => setReload((attempt) => attempt + 1)}>Retry loading logs</button>
     </div>}
     {payloads ? <>
+      {payloads.timing && <CallTimings timing={payloads.timing} />}
       {(turn.semanticRoute || payloads.handoffs?.flowRouting) && <section aria-label="App flow decision">
         <h3>1. App server · Choose the flow</h3>
         <FlowSelectionCall turn={turn} log={payloads} />
@@ -235,8 +264,8 @@ function TurnPayloadLog({ turn }: { turn: TurnView }) {
         {!payloads.catalogLookup && !payloads.topicScores && !payloads.router && <ModelStage title="Context Router" stage={null} />}
         {payloads.glossary && <ReadToolStage title="CCRE glossary" payloadLabel="Glossary" stage={payloads.glossary} />}
         {payloads.retirementAccounts && <ReadToolStage title="Retirement account records" stage={payloads.retirementAccounts} />}
-        <TreatmentStage stage={payloads.treatment} />
         {payloads.portfolio && <ReadToolStage title="Portfolio Snapshot" stage={payloads.portfolio} />}
+        <TreatmentStage stage={payloads.treatment} />
         {payloads.goal && <ReadToolStage title="Goal Progress" stage={payloads.goal} />}
         <ModelStage title="Experience Composer" stage={payloads.composer} />
       </>}

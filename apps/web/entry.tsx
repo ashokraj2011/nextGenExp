@@ -27,7 +27,7 @@ if (location.pathname === "/embed") {
   const personaParam = new URLSearchParams(location.search).get("personaId")?.trim();
   if (personaParam) {
     saveProfileSession(personaParam);
-    document.title = "Wealth Advisory · CEP";
+    document.title = "Wealth Advisory";
     void fetch("/api/profile-session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -38,37 +38,37 @@ if (location.pathname === "/embed") {
   } else if (readProfileSession() === "") {
     location.replace("/login" + location.search);
   } else {
-    document.title = "Wealth Advisory · CEP";
+    document.title = "Wealth Advisory";
     void import("./main");
   }
 } else if (isAdminPath(location.pathname) && location.pathname !== adminPaths.chat) {
-  document.title = "Administration · CEP";
+  document.title = "Administration";
   void import("./admin-workspace").then(({ AdminWorkspace }) => createRoot(document.getElementById("root")!).render(<AdminWorkspace />));
 } else if (location.pathname === "/integrations") {
-  document.title = "Integrations · CEP";
+  document.title = "Integrations";
   void import("./integrations-workspace").then(({ IntegrationsWorkspace }) => createRoot(document.getElementById("root")!).render(<IntegrationsWorkspace />));
 } else if (location.pathname === "/recommendations") {
-  document.title = "Recommendations Workspace · CEP";
+  document.title = "Recommendations Workspace";
   void import("./recommendation-workspace").then(({ RecommendationWorkspace }) => createRoot(document.getElementById("root")!).render(<RecommendationWorkspace />));
 } else if (location.pathname === "/advisor") {
-  document.title = "Advisor Co-Pilot & Shared Card Room · CEP";
+  document.title = "Advisor Co-Pilot & Shared Card Room";
   void import("./advisor-workspace").then(({ AdvisorWorkspace }) => createRoot(document.getElementById("root")!).render(<AdvisorWorkspace />));
 } else if (location.pathname === accountPortalPath) {
   document.title = "Account funding · Account portal";
   void import("./funding-portal").then(({ FundingPortal }) => createRoot(document.getElementById("root")!).render(<FundingPortal />));
 } else if (location.pathname === "/login") {
-  document.title = "Sign in · CEP";
+  document.title = "Sign in";
   void import("./login").then(({ Login }) => createRoot(document.getElementById("root")!).render(<Login />));
 } else if (location.pathname === "/planning") {
-  document.title = "Financial planning · CEP";
+  document.title = "Financial planning";
   void import("./landing").then(({ Landing }) => createRoot(document.getElementById("root")!).render(<Landing />));
 } else {
   const pathDomain = domainPackFromPath(location.pathname);
   if (pathDomain && pathDomain !== "wealth") {
     if (readProfileSession() === "") saveProfileSession("demo-learner");
-    document.title = `${getDomainPack(pathDomain).label} · CEP`;
+    document.title = `${getDomainPack(pathDomain).label}`;
   } else if (pathDomain === "wealth") {
-    document.title = "Wealth Advisory · CEP";
+    document.title = "Wealth Advisory";
   }
   void import("./main");
 }

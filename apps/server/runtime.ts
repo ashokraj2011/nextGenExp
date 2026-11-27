@@ -126,7 +126,7 @@ import { fixtureGoalProgressProvider, type GoalProgressProvider } from "../../pa
 import { contentCatalog, lookupContent, modelBundle, readDemoBalance, resolveCandidates } from "../../packages/experience/content";
 import { checkFresh, Rejected, requireCheck, verifyContextProposal, verifyExperience, verifyRoute } from "../../packages/experience/verify";
 import { makeId } from "../../packages/experience/compile";
-import type { GatewayExchange, TurnExchangeStage } from "../../packages/contracts/inspector";
+import type { GatewayExchange, TimedCall, TurnExchangeStage } from "../../packages/contracts/inspector";
 import { configureCopilotAcp } from "./copilot-acp";
 import { configureGateway, type GatewaySettings } from "./gateway";
 import { FundingAgent, fundingAgentInstructions } from "./funding-agent";
@@ -264,6 +264,7 @@ function runtimeConfig(settings: GatewaySettings, model: JsonObject, budget: Exe
 
 export class Runtime implements IntegrationTaskRuntime {
   private sf!: SField;
+  private readonly empathyObservers = new Map<string, (timing: TimedCall) => void>();
   readonly funding: FundingAgent;
   readonly experiences: ExperienceAgent;
   private constructor(
@@ -430,14 +431,14 @@ export class Runtime implements IntegrationTaskRuntime {
     return this.inspection && readTurnPayloads(this.sf, this.store, this.inspection, turn, conversation);
   }
 
-  captureTurnExchange(turnId: string, stage: TurnExchangeStage, operation: string, request: unknown, response: unknown) {
+  captureTurnExchange(turnId: string, stage: TurnExchangeStage, operation: string, request: unknown, response: unknown, timing?: TimedCall) {
     const inspection = this.inspection;
     if (!inspection) return;
     try {
       const safe = (value: unknown) => JSON.parse(JSON.stringify(value, (key, item) =>
         key === "principalId" || key === "requestSessionId" ? "[REDACTED]" : item)) as JsonValue;
       const captureRequest = stage === "flowRouting" ? inspection.requestPayload : inspection.payload;
-      this.store.saveTurnExchange(turnId, stage, { operation, request: captureRequest(safe(request)), response: inspection.payload(safe(response)) });
+      this.store.saveTurnExchange(turnId, stage, { operation, request: captureRequest(safe(request ?? null)), response: inspection.payload(safe(response)), ...(timing && { timing }) });
     } catch { /* An unavailable trace must not change the chat result. */ }
   }
 
@@ -531,21 +532,31 @@ export class Runtime implements IntegrationTaskRuntime {
     return { persona, agentGuided: true };
   }
 
-  private treatmentAdapter(state: FixtureState, setup: ToolSetup | undefined, scope: Pick<Scope, "principalId" | "personaId">) {
+  private treatmentAdapter(state: FixtureState, setup: ToolSetup | undefined, scope: Pick<Scope, "principalId" | "personaId">,
+    portfolios = this.portfolioSnapshots) {
     return adapterFromRecommendationProvider(
       this.recommendationRegistry.primaryEligibilityProvider("wealth"),
       {
         state,
         overrides: setup?.treatmentOverrides,
         ccreRules: setup?.ccreRules,
-        portfolios: this.portfolioSnapshots,
+        portfolios,
         funding: this.store.axe.fundingFact(scope),
       },
     );
   }
 
   private turnTreatmentAdapter(turn: TurnRecord, conversation: ConversationRecord) {
-    return this.treatmentAdapter({ scenarioId: conversation.scenarioId, ordinal: turn.ordinal }, turn.toolSetup, turn.scope);
+    const snapshot = turn.portfolioSnapshot;
+    const mid = snapshot && findProfileById(conversation.personaId)?.syntheticMid;
+    // Mock CCRE evaluates the same account observation that was sent to this chat.
+    const portfolios: PortfolioSnapshotProvider = snapshot && mid ? {
+      read: async (requestedMid, signal) => {
+        signal?.throwIfAborted();
+        return requestedMid === mid ? snapshot : this.portfolioSnapshots.read(requestedMid, signal);
+      },
+    } : this.portfolioSnapshots;
+    return this.treatmentAdapter({ scenarioId: conversation.scenarioId, ordinal: turn.ordinal }, turn.toolSetup, turn.scope, portfolios);
   }
 
   async workspaceNextStep(principalId: string, personaId: string): Promise<WorkspaceNextStep | null> {
@@ -653,6 +664,7 @@ export class Runtime implements IntegrationTaskRuntime {
    * execution to classify customer emotional state & life events from chat + Customer 360 notes.
    */
   async assessEmotionalState(
+    turnId: string,
     principalId: string,
     scope: Pick<Scope, "userId" | "personaId" | "domainId">,
     input: EmpathyAssessInput,
@@ -664,6 +676,10 @@ export class Runtime implements IntegrationTaskRuntime {
       preset: "read_only",
       budget: { maxToolCalls: 1 },
     });
+    const startedAt = this.now();
+    let status = "failed";
+    let model: TimedCall | undefined;
+    if (this.inspection) this.empathyObservers.set(execScope.id, (timing) => { model = timing; });
     try {
       const result = await execScope.registry.execute(
         empathyAssessToolRef,
@@ -677,11 +693,16 @@ export class Runtime implements IntegrationTaskRuntime {
         },
         { signal },
       );
+      status = result.status;
       if (result.status !== "succeeded" || !result.output) {
         throw new Error(result.error?.message ?? "Empathy assessment tool failed.");
       }
       return emotionalAssessmentSchema.parse(result.output);
     } finally {
+      this.empathyObservers.delete(execScope.id);
+      if (this.inspection) this.store.update(turnId, (turn) => {
+        turn.trace.empathyCheck = { startedAt, durationMs: this.now() - startedAt, status, ...(model && { model }) };
+      });
       await execScope.close();
     }
   }
@@ -1298,7 +1319,7 @@ export class Runtime implements IntegrationTaskRuntime {
         handler: async ({ turnRef, routeDecisionId }, ctx) => {
           const { turn, persona } = this.scopedRegistryTurn(turnRef, ctx, "portfolio");
           requireCheck(turn.route && turn.route.routeDecisionId === routeDecisionId && turn.catalog && turn.attempts.route
-            && turn.decision?.routeDecisionId === routeDecisionId && isPortfolioSummary(turn.route), "PORTFOLIO_ROUTE_REQUIRED");
+            && isPortfolioSummary(turn.route), "PORTFOLIO_ROUTE_REQUIRED");
           verifyRoute(turn.route, turn.catalog, turn.scope, turn.attempts.route.runId, this.now());
           const snapshot = turn.portfolioForRule ?? await this.portfolioSnapshots.read(persona.syntheticMid, ctx.signal);
           if (!snapshot) throw new ToolError("PORTFOLIO_SNAPSHOT_UNAVAILABLE");
@@ -1350,6 +1371,7 @@ export class Runtime implements IntegrationTaskRuntime {
         },
       }),
       ...createPlatformToolPack({
+        onEmpathyModelTiming: (scopeId, timing) => this.empathyObservers.get(scopeId)?.(timing),
         scopedSelectionTurn: (turnRef, ctx) => this.scopedRegistryTurn(turnRef, ctx, "selection"),
         effectiveFundingStatus: (persona, principalId) => this.effectiveFundingStatus(persona, principalId),
         buildArbitrator: (turn, conversation) => this.buildArbitrator(turn, conversation),

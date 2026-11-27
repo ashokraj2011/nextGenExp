@@ -34,7 +34,7 @@ type ExperienceInput = {
   standaloneActions?: { recommendation: ActionRecommendation; manifest: CapabilityManifest }[];
 };
 
-export function compileExperience(input: ExperienceInput): CompiledExperience {
+export function compileExperience(input: ExperienceInput, identity?: Pick<DisplayExperience, "experienceId" | "messageId">): CompiledExperience {
   const actionOnly = Boolean(input.standaloneActions?.length) && !input.approved?.blocks.length;
   const ready = Boolean(input.portfolio) || actionOnly;
   const intro = input.portfolio ? host.introCopy.summary : actionOnly ? host.introCopy.next_step
@@ -101,7 +101,7 @@ export function compileExperience(input: ExperienceInput): CompiledExperience {
   return buildSurface({
     status: ready ? "ready" : input.status, outcome: ready ? "ready" : input.outcome,
     intro, question: ready ? null : input.question, partial: input.partial, expiresAt: input.expiresAt,
-  }, blocks, issued);
+  }, blocks, issued, identity);
 }
 
 export function compileFundingPreview(preview: FundingPreview, expiresAt: number): CompiledExperience {

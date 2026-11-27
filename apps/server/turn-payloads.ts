@@ -71,15 +71,22 @@ async function modelPayloads(sf: SField, store: Store, inspection: Inspection, t
 function modelAttemptPayload(store: Store, inspection: Inspection, attempt: ModelAttemptRecord) {
   return {
     id: attempt.attemptId, model: attempt.model, status: attempt.status,
+    timing: recordedTiming(attempt.startedAt, attempt.durationMs),
     exchange: store.gatewayExchange(attempt.attemptId),
     error: attempt.error ? inspection.payload({ ...attempt.error }) : undefined,
   };
+}
+
+function recordedTiming(start: string, durationMs: number) {
+  const startedAt = Date.parse(start);
+  if (Number.isFinite(startedAt) && Number.isFinite(durationMs) && durationMs >= 0) return { startedAt, durationMs };
 }
 
 function registryPayload(inspection: Inspection, call: CallRecord): RegistryToolPayloads {
   return {
     tool: call.toolRef,
     status: call.result?.status ?? call.state,
+    timing: call.result && recordedTiming(call.createdAt, Date.parse(call.updatedAt) - Date.parse(call.createdAt)),
     registryInput: inspection.payload(call.invocation?.normalizedInputs ?? call.proposedArguments),
     result: call.result?.output === undefined ? undefined : inspection.payload(call.result.output),
     error: call.result?.error ? inspection.payload({ ...call.result.error }) : undefined,
@@ -202,7 +209,7 @@ async function workflowPayloads(sf: SField, store: Store, inspection: Inspection
           const payload = registryPayload(inspection, call);
           return [{
             ...payload, label: "Ask for a funding method",
-            ...(call.callId === input?.callId && { status: "waiting_input", result: undefined, error: undefined }),
+            ...(call.callId === input?.callId && { status: "waiting_input", result: undefined, error: undefined, timing: undefined }),
           }];
         }
         const key = fundingToolKey(call.toolRef);
@@ -283,6 +290,43 @@ function turnHandoffs(store: Store, inspection: Inspection, turn: TurnRecord): T
   };
 }
 
+function callTimings(turn: TurnRecord, payload: TurnPayloads): NonNullable<TurnPayloads["timing"]> {
+  const calls: NonNullable<TurnPayloads["timing"]>["calls"] = [];
+  function add(label: string, call: Pick<RegistryToolPayloads, "timing" | "status"> | null | undefined) {
+    if (call?.timing) calls.push({ label, ...call.timing, status: call.status });
+  }
+  function attempts(label: string, model?: ModelStagePayloads | null) {
+    model?.attempts.forEach((attempt, index, all) => add(all.length > 1 ? `${label} · attempt ${index + 1}` : label, attempt));
+  }
+  const check = turn.trace.empathyCheck;
+  if (check) {
+    calls.push({ label: "Customer context check", startedAt: check.startedAt, durationMs: check.durationMs, status: check.status });
+    if (check.model) calls.push({ label: "Customer context model", parentLabel: "Customer context check", ...check.model });
+  }
+  const flow = payload.handoffs?.flowRouting?.timing;
+  if (flow) calls.push({ label: "App flow selection", ...flow });
+  add("Supported topic catalog", payload.catalogLookup);
+  add("TS topic scores", payload.topicScores);
+  attempts("Context Router", payload.router);
+  add("Portfolio Snapshot", payload.portfolio);
+  add("Treatment Selector", payload.treatment);
+  add("Retirement account records", payload.retirementAccounts);
+  add("Goal Progress", payload.goal);
+  add("CCRE glossary", payload.glossary);
+  attempts("Experience Composer", payload.composer);
+  const compiler = payload.handoffs?.compiler?.timing;
+  if (compiler) calls.push({ label: "Compile chat UI", ...compiler });
+  if (turn.trace.customerEvaluation) calls.push({ label: "Customer 360 recommendations", ...turn.trace.customerEvaluation });
+  add("Customer record lookup", payload.customerLookup);
+  attempts("Workflow model", payload.workflow?.agent?.model);
+  payload.workflow?.calls.forEach((call) => add(call.label, call));
+  attempts("Experience Agent", payload.agentic?.model);
+  payload.agentic?.calls.forEach((call) => add(call.tool, call));
+  const markers = turn.trace.markers;
+  return { acceptedAt: turn.public.createdAt, snapshotReadyAt: markers.portfolioPublished, snapshotDisplayedAt: markers.portfolioDisplayed,
+    finishedAt: markers.terminal, displayedAt: markers.displayed, calls: calls.sort((a, b) => a.startedAt - b.startedAt) };
+}
+
 export async function readTurnPayloads(sf: SField, store: Store, inspection: Inspection, turn: TurnRecord, conversation: ConversationRecord): Promise<TurnPayloads> {
   const [discovery, router, glossary, treatment, portfolio, goal, composer, workflow, agentic, customerLookup, retirementAccounts] = await Promise.all([
     discoveryPayloads(sf, inspection, turn),
@@ -304,9 +348,10 @@ export async function readTurnPayloads(sf: SField, store: Store, inspection: Ins
   const clicks = turn.public.experience && (turn.decision?.workflowRecommendations?.length || turn.decision?.actionRecommendations?.length) ? store.workflowClicks(turn) : [];
   const handoffs = turnHandoffs(store, inspection, turn);
   const catalog = turn.flowCatalog;
-  return { handoffs,
+  const payloads: TurnPayloads = { handoffs,
     ...(handoffs.flowRouting && catalog && { sentFlowList: { tenantId: catalog.tenantId, domainId: catalog.domainId, audience: catalog.audience, flowIds: catalog.flows.map((flow) => flow.id) } }),
     ...(source && sourceTreatment && { sourceDecision: { turnId: source.public.id, message: source.public.message, treatment: sourceTreatment } }),
     ...(turn.route && turn.trace.intentId && { verifiedIntent: { intentId: turn.trace.intentId, contextId: turn.route.contextId } }),
     ...(clicks.length && { workflowClicks: clicks }), turnId: turn.public.id, ...discovery, router, glossary, treatment, portfolio, goal, composer, workflow, ...(retirementAccounts && { retirementAccounts }), ...(agentic && { agentic }), ...(customerLookup && { customerLookup }) };
+  return { ...payloads, timing: callTimings(turn, payloads) };
 }

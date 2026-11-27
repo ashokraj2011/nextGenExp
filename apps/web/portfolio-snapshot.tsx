@@ -1,15 +1,17 @@
 import { useId, useState, type CSSProperties, type ReactNode } from "react";
-import { ArrowUpRight, ChevronDown, ChevronUp, SlidersHorizontal } from "lucide-react";
-import { formatPortfolioAmount, type PortfolioSnapshot } from "../../packages/contracts/portfolio";
+import { ArrowUpRight, ChartNoAxesCombined, ChevronDown, ChevronUp, SlidersHorizontal } from "lucide-react";
+import { formatPortfolioAmount, type PortfolioHistoryPoint, type PortfolioSnapshot } from "../../packages/contracts/portfolio";
+import { PortfolioHistory } from "./portfolio-history";
 
 const asOfFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" });
 
-export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedIncomeCents, title = "Portfolio snapshot", compact = false, footer, onExploreAllocation }:
-  PortfolioSnapshot & { title?: string; compact?: boolean; footer?: ReactNode; onExploreAllocation?: (prompt: string) => void }) {
+export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedIncomeCents, title = "Portfolio snapshot", compact = false, history, footer, onExploreAllocation, allowSimulation = Boolean(onExploreAllocation) }:
+  PortfolioSnapshot & { title?: string; compact?: boolean; history?: PortfolioHistoryPoint[]; footer?: ReactNode; onExploreAllocation?: (prompt: string) => void; allowSimulation?: boolean }) {
   const titleId = useId();
   const deployId = useId();
   const splitId = useId();
   const [simOpen, setSimOpen] = useState(false);
+  const [showAmounts, setShowAmounts] = useState(false);
   const [deployDollars, setDeployDollars] = useState(() => Math.round((cashCents / 100) * 0.6 / 100) * 100);
   const [equitySplit, setEquitySplit] = useState(60);
 
@@ -45,11 +47,18 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
     <div className="portfolio-body">
       <dl className="portfolio-values">
         <div><dt>Total value</dt><dd>{formatPortfolioAmount(total)}</dd></div>
-        <div><dt>Invested</dt><dd>{formatPortfolioAmount(invested)}</dd></div>
-        <div><dt>Cash</dt><dd>{formatPortfolioAmount(cashCents)}</dd></div>
+        <div><dt>Invested{compact && total > 0 && <small>{Math.round(percent(invested))}%</small>}</dt><dd>{formatPortfolioAmount(invested)}</dd></div>
+        <div><dt>Cash{compact && total > 0 && <small>{Math.round(percent(cashCents))}%</small>}</dt><dd>{formatPortfolioAmount(cashCents)}</dd></div>
       </dl>
+      {compact && total > 0 && <div className="portfolio-mix" aria-hidden="true"><span style={{ width: percent(invested) + "%" }} /></div>}
       {!compact && <div className="portfolio-breakdown">
-        <h4>Portfolio breakdown</h4>
+        <div className="breakdown-heading">
+          <h4>Portfolio breakdown</h4>
+          <div className="allocation-units" role="group" aria-label="Allocation display">
+            <button type="button" aria-label="Show percentages" aria-pressed={!showAmounts} onClick={() => setShowAmounts(false)}>%</button>
+            <button type="button" aria-label="Show dollar amounts" aria-pressed={showAmounts} onClick={() => setShowAmounts(true)}>$</button>
+          </div>
+        </div>
         <div className={"portfolio-allocation-bar" + (total === 0 ? " is-empty" : "")} aria-hidden="true" style={{
           "--stocks-end": percent(simOpen ? simEquity : equityCents) + "%",
           "--bonds-end": percent(simOpen ? simEquity + simFixed : invested) + "%",
@@ -62,7 +71,8 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
             const next = Number(percent(item.simAmount).toFixed(1));
             const diff = Number((next - base).toFixed(1));
             return <li key={item.color}>
-              <span className={item.color} aria-hidden="true" />{item.label} <strong>{simOpen ? next : base}%</strong>
+              <span className={item.color} aria-hidden="true" />{item.label} <strong>{showAmounts
+                ? formatPortfolioAmount(simOpen ? item.simAmount : item.amount) : (simOpen ? next : base) + "%"}</strong>
               {simOpen && diff !== 0 && <em className={diff > 0 ? "alloc-delta-pos" : "alloc-delta-neg"}>({diff > 0 ? "+" : ""}{diff}%)</em>}
             </li>;
           })}
@@ -70,7 +80,7 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
       </div>}
     </div>
 
-    {onExploreAllocation && maxCashDollars >= 500 && (
+    {allowSimulation && maxCashDollars >= 500 && (
       <div className="portfolio-sim-wrap">
         <button type="button" className="portfolio-sim-toggle" aria-expanded={simOpen} onClick={() => setSimOpen((open) => !open)}>
           <SlidersHorizontal size={14} aria-hidden="true" />
@@ -114,8 +124,8 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
                 <span>Illustrative yield</span>
                 <strong>{simYield.toFixed(2)}% {yieldDelta !== 0 && <small>({yieldDelta > 0 ? "+" : ""}{yieldDelta.toFixed(2)}%)</small>}</strong>
               </div>
-              <button type="button" className="axe-primary-button" disabled={deployCents === 0} onClick={() => {
-                onExploreAllocation(
+              <button type="button" className="axe-primary-button" disabled={!onExploreAllocation || deployCents === 0} onClick={() => {
+                onExploreAllocation?.(
                   `I'd like to explore deploying ${formatPortfolioAmount(deployCents)} of my cash (${equitySplit}% into stocks and ${100 - equitySplit}% into fixed income), leaving ${formatPortfolioAmount(simCash)} in cash. What should I consider?`,
                 );
               }}>
@@ -127,6 +137,10 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
       </div>
     )}
 
+    {compact && history && history.length >= 2 && <details className="summary-history">
+      <summary><ChartNoAxesCombined size={16} aria-hidden="true" />Value history<ChevronDown size={15} aria-hidden="true" /></summary>
+      <PortfolioHistory history={history} embedded />
+    </details>}
     {footer && <div className="portfolio-footer">{footer}</div>}
   </section>;
 }

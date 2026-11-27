@@ -8,6 +8,8 @@ The app first chooses a flow from those enabled for the tenant, domain and audie
 
 `compileRouterInstructions` and `compileComposerInstructions` in `packages/experience/prompt-compiler.ts` supply the agent instructions. `Runtime.model` in `apps/server/runtime.ts` opens an sfield session and sends a JSON-encoded envelope. Inspect the field definitions in `packages/contracts/model-inputs.ts`. The router has an empty tool list. The host obtains topics and scores before invoking it. The composer receives verified intent and eligible candidates and can request the registered balance read. The host verifies the result before compiling cards.
 
+On a verified portfolio-summary turn, sfield reads `portfolio.snapshot.read` for the signed-in member. The server publishes the snapshot as an `experience.preview` event. Chat mounts the card immediately, and a reconnect can recover it from the saved turn. Treatment Selector then checks the member and context. When it returns eligible content, the composer selects a recommendation and the server publishes `experience.ready` for the same chat surface. Admin → Logs shows each call's duration and the browser receipts for the portfolio card and final reply.
+
 ### Run a tool before connecting it to chat
 
 From the repository root, run the checked-in example. It registers `savings.target.read@1.0.0` with `defineTool` and executes it through a read-only sfield scope using local data.

@@ -27,6 +27,7 @@ import type { GatewaySettings } from "../gateway";
 import { customer360ReadToolId, customer360ReadToolVersion } from "../mcp-exposure-store";
 import type { OpsIncidentStore } from "../ops-store";
 import { assessEmotionalState, firstNameOf } from "../response-personalizer";
+import type { TimedCall } from "../../../packages/contracts/inspector";
 import type { SalesDealStore } from "../sales-store";
 import type { ConversationRecord, TurnRecord } from "../store";
 
@@ -93,6 +94,7 @@ export const domainWriteResultJsonSchema = {
 } as const;
 
 export interface PlatformToolPackDeps {
+  onEmpathyModelTiming?: (scopeId: string, timing: TimedCall) => void;
   scopedSelectionTurn: (turnRef: unknown, ctx: ToolHandlerContext) => { turn: TurnRecord; conversation: ConversationRecord; persona: PersonaRecord };
   effectiveFundingStatus: (persona: Pick<PersonaRecord, "personaId" | "accountFundingStatus">, principalId: string) => "funded" | "unfunded";
   buildArbitrator: (turn?: TurnRecord, conversation?: ConversationRecord) => RecommendationArbitrator;
@@ -170,7 +172,15 @@ export function createPlatformToolPack(deps: PlatformToolPackDeps) {
         const llmJson = isLiveExternalGateway && gw && dataDir
           ? async (sys: string, usr: string, sig: AbortSignal) => {
               const { callConfiguredLlmJson } = await import("../dynamic-ui-generator");
-              return callConfiguredLlmJson(gw, dataDir, sys, usr, sig, undefined, { operation: "sfield:empathy_assess" });
+              const startedAt = deps.now();
+              let status = "failed";
+              try {
+                const value = await callConfiguredLlmJson(gw, dataDir, sys, usr, sig, undefined, { operation: "sfield:empathy_assess" });
+                if (value !== null) status = "succeeded";
+                return value;
+              } finally {
+                deps.onEmpathyModelTiming?.(ctx.runId, { startedAt, durationMs: deps.now() - startedAt, status: sig.aborted ? "cancelled" : status });
+              }
             }
           : undefined;
         return assessEmotionalState({

@@ -10,6 +10,7 @@ import {
   type SemanticRouteDecision,
 } from "../../packages/contracts/capabilities-catalog";
 import { runCopilotPrompt } from "./copilot-acp-client";
+import type { TimedCall } from "../../packages/contracts/inspector";
 import {
   isApprovalQueuePrompt,
   isConnectorActionPrompt,
@@ -156,7 +157,7 @@ export async function routeCapabilityUnified(input: {
   recentSummary?: string;
   capabilities?: readonly CepCapabilityDefinition[];
   signal?: AbortSignal;
-  onExchange?: (operation: string, request: unknown, response: unknown) => void;
+  onExchange?: (operation: string, request: unknown, response: unknown, timing: TimedCall) => void;
 }): Promise<SemanticRouteDecision> {
   const { prompt, gateway, dataDir, recentSummary, signal } = input;
   const clean = prompt.trim();
@@ -185,9 +186,10 @@ export async function routeCapabilityUnified(input: {
   const operation = gateway.profile === "copilot_acp" ? "ACP session/prompt" : "POST /chat/completions";
   let request: unknown;
   let received = false;
-  const capture = (response: unknown) => {
+  const startedAt = Date.now();
+  const capture = (response: unknown, status = "succeeded") => {
     received = true;
-    input.onExchange?.(operation, request, response);
+    input.onExchange?.(operation, request, response, { startedAt, durationMs: Date.now() - startedAt, status });
   };
   try {
     const userPrompt = recentSummary
@@ -228,7 +230,7 @@ export async function routeCapabilityUnified(input: {
       const body = await response.text();
       let payload: unknown;
       try { payload = JSON.parse(body); } catch { /* Some gateway errors return text. */ }
-      capture({ status: response.status, body: payload ?? body });
+      capture({ status: response.status, body: payload ?? body }, response.ok ? "succeeded" : "failed");
       if (response.ok) {
         const reply = chatReply.safeParse(payload);
         const content = reply.success && reply.data.choices[0]?.message.content;
@@ -249,7 +251,7 @@ export async function routeCapabilityUnified(input: {
       };
     }
   } catch {
-    if (request !== undefined && !received) capture({ error: controller.signal.aborted ? "request_aborted" : "provider_unavailable" });
+    if (!received) capture({ error: controller.signal.aborted ? "request_aborted" : "provider_unavailable" }, controller.signal.aborted ? "aborted" : "failed");
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", onParentAbort);

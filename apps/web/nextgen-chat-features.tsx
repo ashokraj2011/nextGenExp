@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, Bell, Bot, Brain, CheckCircle2, ChevronDown, Eye, GitCompare, Headphones, KeyRound, Layers,
-  Play, Plus, Radio, ShieldAlert, ShieldCheck, Sliders, Sparkles, Terminal, Trash2, X, Zap,
+  Play, Plus, Radio, ShieldAlert, ShieldCheck, Sliders, Sparkles, Trash2, X, Zap,
 } from "lucide-react";
 import type { DemoPersona, TurnView } from "../../packages/contracts/api";
 import type { CoBrowseSliders, HandoffTicket } from "../../packages/contracts/handoff";
@@ -591,7 +591,7 @@ export function LivingWatchcardsStrip({
 }
 
 /* ============================================================================
- * #4 Instant "Expertise Morph" Dial (Guided <-> Standard <-> Pro Terminal)
+ * Chat display preferences
  * ========================================================================== */
 
 export function ExpertiseMorphDial({
@@ -604,7 +604,7 @@ export function ExpertiseMorphDial({
   const options: Array<{ id: ExpertiseMode; label: string; icon: typeof Eye }> = [
     { id: "guided", label: "Guided", icon: Eye },
     { id: "standard", label: "Standard", icon: Layers },
-    { id: "pro", label: "Pro", icon: Terminal },
+    { id: "pro", label: "Compact", icon: Sliders },
   ];
   return (
     <div className="expertise-dial" role="group" aria-label="Display complexity mode">
@@ -625,27 +625,12 @@ export function ExpertiseMorphDial({
 }
 
 export function ExpertiseTurnBanner({ mode, turn }: { mode: ExpertiseMode; turn: TurnView }) {
-  if (mode === "standard" || !turn.experience) return null;
-  const blocks = turn.experience.blocks;
-  if (mode === "guided") {
-    const headline = turn.experience.intro.split(/(?<=[.!?])\s+/)[0] ?? turn.experience.intro;
-    return (
-      <div className="expertise-guided-card" role="note" aria-label="Plain-English takeaway">
-        <span className="rich-kicker"><Sparkles size={11} aria-hidden="true" /> PLAIN-ENGLISH TAKEAWAY</span>
-        <p>{headline}</p>
-      </div>
-    );
-  }
-  // Pro Terminal telemetry strip
-  const sourceCount = blocks.reduce((acc, b) => acc + (Array.isArray((b.props as { sources?: unknown[] }).sources) ? (b.props as { sources: unknown[] }).sources.length : 0), 0);
+  if (mode !== "guided" || !turn.experience) return null;
+  const headline = turn.experience.intro.split(/(?<=[.!?])\s+/)[0] ?? turn.experience.intro;
   return (
-    <div className="expertise-pro-strip" role="note" aria-label="Pro Terminal metadata">
-      <span><Terminal size={11} aria-hidden="true" /> PRO</span>
-      <code>mode={turn.actionMode ?? "verified"}</code>
-      <code>exp={turn.experience.experienceId.slice(0, 14)}</code>
-      <code>blocks={blocks.map((b) => b.component.replace(/^Pzn/, "")).join(",") || "text"}</code>
-      <code>sources={sourceCount}</code>
-      <code>actions={turn.experience.actions.length}</code>
+    <div className="expertise-guided-card" role="note" aria-label="Plain-English takeaway">
+      <span className="rich-kicker"><Sparkles size={11} aria-hidden="true" /> Plain-English takeaway</span>
+      <p>{headline}</p>
     </div>
   );
 }

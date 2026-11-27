@@ -128,7 +128,9 @@ function PendingActionsCard({ pendingActions, firstDepositConfirmedAt, disabled,
   const { items, failed, refresh } = pendingActions;
 
   return <section className="content-card pending-actions" aria-labelledby={title}>
-    <h3 id={title}>Pending actions</h3>
+    <header className="pending-heading"><h3 id={title}>Pending actions</h3>
+      {items && items.length > 0 && <span className="pending-count">{items.length} to review</span>}
+    </header>
     {items && (items.length ? <ul>
       {items.map(({ contentId, title: name, body, action }) => {
         const Icon = action.kind === "guide" ? ShieldCheck : Wallet;
@@ -183,7 +185,7 @@ export function WorkspaceHome({ activeProfile, pendingActions, disabled, modelUn
   return <div className="workspace-overview workspace-home">
     <WelcomeBanner displayName={activeProfile?.displayName} modelUnavailable={modelUnavailable} />
     {activeProfile && <>
-      {portfolio ? <PortfolioSnapshotBlock {...portfolio} compact title="Account summary" footer={
+      {portfolio ? <PortfolioSnapshotBlock {...portfolio} compact history={activeProfile.overview?.portfolioHistory} title="Account summary" footer={
         <button className="overview-action" type="button" disabled={actionsDisabled} onClick={onReviewPortfolio}>
           Ask about portfolio <ArrowUpRight size={15} aria-hidden="true" />
         </button>

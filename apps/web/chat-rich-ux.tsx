@@ -129,7 +129,7 @@ export function MemoryDrawer({ open, items, loading, error, onClose, onSave, onF
         <header className="rich-drawer-head">
           <div>
             <span className="rich-kicker"><Brain size={13} aria-hidden="true" /> PERSONAL MEMORY (sfield)</span>
-            <h2 id="memory-drawer-title">What CEP remembers for you</h2>
+            <h2 id="memory-drawer-title">What your assistant remembers</h2>
           </div>
           <button type="button" className="icon-button" aria-label="Close memory drawer" onClick={onClose}>
             <X size={18} aria-hidden="true" />
@@ -420,7 +420,7 @@ export function CitationsStrip({ experience, userMessage }: { experience?: Displ
 
 function buildTurnBriefMarkdown(turn: TurnView): string {
   const lines = [
-    `# CEP Advisory Brief`,
+    `# Advisory brief`,
     `Date: ${new Date(turn.createdAt).toLocaleString()}`,
     ``,
     `## Question`,

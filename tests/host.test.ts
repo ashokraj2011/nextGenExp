@@ -642,6 +642,16 @@ test("portfolio summaries combine the scoped snapshot with the cash treatment on
     assert.equal(trace.portfolioReadSucceeded, true);
     assert.deepEqual(trace.components, matched ? ["PznPortfolioSnapshot", "PznContentCard"] : ["PznPortfolioSnapshot"]);
     const [snapshot, recommendation] = turn.experience!.blocks;
+    const events = await (await client.response(`/api/turns/${turn.id}/events`)).text();
+    const published = [...events.matchAll(/^data: (.+)$/gm)].map((match) => JSON.parse(match[1]))
+      .filter((event) => event.type.startsWith("experience."));
+    assert.deepEqual(published.map((event) => event.type), ["experience.preview", "experience.ready"]);
+    const early = published[0].payload.experience;
+    assert.equal(early.experienceId, turn.experience!.experienceId);
+    assert.equal(early.messageId, turn.experience!.messageId);
+    assert.deepEqual(early.blocks, [snapshot]);
+    assert.deepEqual(early.actions, []);
+    assert.equal(turn.previewExperience, undefined);
     assert.equal(snapshot.component, "PznPortfolioSnapshot");
     assert.equal(snapshot.props.cashCents, cashCents);
     if (matched) {
@@ -656,6 +666,12 @@ test("portfolio summaries combine the scoped snapshot with the cash treatment on
     assert.equal(payloads.portfolio?.status, "succeeded");
     assert.deepEqual(payloads.portfolio?.registryInput.data, { turnRef: turn.id, routeDecisionId: trace.routeDecisionId });
     assert.deepEqual(payloads.portfolio?.result?.data, snapshot.props);
+    const timing = payloads.timing!;
+    assert.ok(timing.snapshotReadyAt! <= payloads.treatment!.timing!.startedAt);
+    assert.ok(timing.snapshotReadyAt! <= timing.finishedAt!);
+    assert.deepEqual(timing.calls.filter((call) => ["Context Router", "Portfolio Snapshot", "Treatment Selector", "Experience Composer"].includes(call.label))
+      .map((call) => call.label), ["Context Router", "Portfolio Snapshot", "Treatment Selector", ...(matched ? ["Experience Composer"] : [])]);
+    assert.ok(timing.calls.every((call) => Number.isFinite(call.durationMs) && call.durationMs >= 0));
     if (matched) {
       const composer = gateway.calls.at(-1)?.envelope;
       assert.equal(composer?.portfolioSnapshotIncluded, true);
@@ -672,6 +688,13 @@ test("portfolio summaries combine the scoped snapshot with the cash treatment on
   assert.deepEqual(summary.trace.components, ["PznPortfolioSnapshot"]);
   assert.equal(summary.trace.composerRunId, null);
   assert.equal(summary.turn.experience?.status, "ready");
+
+  await client.request("/api/admin/tools", { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, selection: false } });
+  const unavailable = await client.ask(empty.id, question);
+  assert.equal(unavailable.turn.status, "completed");
+  assert.deepEqual(unavailable.trace.components, ["PznPortfolioSnapshot"]);
+  assert.equal(unavailable.turn.experience?.partial, true);
+  assert.equal(unavailable.trace.composerRunId, null);
 
   await client.request("/api/admin/tools", { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, portfolio: false } });
   const missing = await client.ask(empty.id, question);

@@ -80,7 +80,7 @@ function drawHistory(canvas: HTMLCanvasElement, points: PortfolioHistoryPoint[])
   }
 }
 
-export function PortfolioHistory({ history }: { history: PortfolioHistoryPoint[] }) {
+export function PortfolioHistory({ history, embedded = false }: { history: PortfolioHistoryPoint[]; embedded?: boolean }) {
   const [range, setRange] = useState<Range>(ranges[2]);
   const canvas = useRef<HTMLCanvasElement>(null);
   const points = useMemo(() => historyFor(history, range), [history, range]);
@@ -97,9 +97,9 @@ export function PortfolioHistory({ history }: { history: PortfolioHistoryPoint[]
 
   const start = points[0];
   const end = points.at(-1);
-  return <section className="content-card portfolio-history" aria-label="Portfolio history">
+  return <section className={embedded ? "portfolio-history" : "content-card portfolio-history"} aria-label="Portfolio history">
     <header className="workspace-card-heading">
-      <h3>Portfolio history</h3>
+      {embedded ? <span className="sr-only">Portfolio history</span> : <h3>Portfolio history</h3>}
       {history.length >= 2 && <div className="history-ranges" role="group" aria-label="Portfolio date range">
         {ranges.map((option) => <button key={option.id} type="button" aria-pressed={range === option} onClick={() => setRange(option)}>{option.label}</button>)}
       </div>}
