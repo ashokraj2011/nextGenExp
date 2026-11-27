@@ -61,12 +61,20 @@ const result = await runtime.registry(turn, "goalScopeId", 1, signal, call =>
 
 Check `result.status` before consuming `result.output`. Open the turn in Logs to see its `toolRef`, `callId`, inputs and result. Agent-invoked tools also need the versioned reference in that agent's tool list and a handler that accepts that agent's scope. For a write, follow the registered `cep.domain.execute_write@1.0.0` path with its resource, confirmation and audit handling.
 
+### Emotional & life-event assessment (`cep.empathy.assess@1.0.0`)
+
+On wealth turns, the host invokes the registered `sfield` read tool `cep.empathy.assess@1.0.0` inside a scoped `read_only` execution (`purpose: "cep-empathy-assess"`). Its closed Ajv input and output contracts live in `packages/contracts/empathy.ts`, and its evaluator lives in `apps/server/response-personalizer.ts`.
+
+1. **Reads chat + Customer 360 `notes`**: The tool reads the customer's current message, recent context, and live `notes` from `CustomerProfileStore` (`customer-profiles.json`). When a live external LLM gateway is active, subtle emotional phrasing is classified through the PII Firewall with a 4-second timeout and deterministic heuristic fallback.
+2. **Writes new life events back**: When the customer shares a new major life event in chat (job loss, medical emergency, bereavement, family crisis, new family, or career milestone), `apps/server/service.ts` persists a deduplicated note to Customer 360 (`CustomerProfileStore.appendNote`, capped to 400 characters) and stores a `fact` in `sfield.memory`.
+3. **Drives personalization & promotion suppression**: `Store.finish` passes `turn.public.emotionalState` to `applyPersonalization` so every response opens with the customer's name and situation-aware tone. Whenever `emotionalState.suppressPromotions` is `true` (from chat or from an advisor's Customer 360 note), the host forwards `excludePromotions: true` to both `Customer360Service.evaluate` and `cep.recommendations.arbitrate@1.0.0`, pausing promotional investment offers across Recommendation Providers.
+
 ### Connect an existing service
 
 For a configurable external read, author a task in the **Integrations** workspace at `/integrations`. Declare its effect, input/output fields and transport binding, then publish it. For customer record lookups, configure **Customer chat** with the record ID, member ID and visible fields. `Runtime.registerPublishedTask` attempts a dedicated registration and can fall back to the integration dispatcher. Check the published task's execution route there. `packages/contracts/integration-task.ts` defines the contract and `apps/server/integration-tasks.ts` runs the transport.
 
 ### Reopen a thread and inspect what persists
 
-`PznChatHistory` in `apps/server/chat-history.ts` binds tenant, domain, user, session and thread to the sfield chat harness. Customer messages and assistant replies are stored in `sfield.sqlite`. Assistant records include the verified intent and displayed choice IDs so “the second one” can refer to a previous card. The host stores turn state and issued actions in `app.sqlite`. Both files live in the active tenant data directory.
+`PznChatHistory` in `apps/server/chat-history.ts` binds tenant, domain, user, session and thread to the sfield chat harness. Customer messages and assistant replies are stored in `sfield.sqlite`. Assistant records include the verified intent and displayed choice IDs so “the second one” can refer to a previous card. Long threads automatically compact older turns into rolling summaries via `sfield`'s `ConversationCompactor` (or on demand via `POST /api/conversations/:id/compact`). Conversations can be organized into folders with shared Project instructions (`POST /api/folders/:id/update`) and branched from any message (`POST /api/conversations/:id/fork`). The host stores turn state, folders, and issued actions in `app.sqlite`. Both files live in the active tenant data directory.
 
 Use the balance harness from Getting started to compare the stored transcript with the router's `recent` array after `/reopen`. `tests/chat-history.test.ts` exercises restart and thread scoping. `tests/host.test.ts` covers allowed and failed tool reads.

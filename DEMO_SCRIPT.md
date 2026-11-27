@@ -12,3 +12,22 @@ Open customer chat at `/` and Administration at `/admin/logs` in another tab. Us
 | 4:20–5:00 | Open **Experience Composer** on Alice’s turn, then return to her card. | “For Alice, the Experience Composer receives the eligible content. The app renders the account record and approved reminder together. For Jordan, the recorded beneficiary answers the question on its own.” |
 
 The steps describe how to update a designation in account settings. To show continuity, reopen Alice’s account-list chat in a second signed-in session and ask the follow-up there.
+
+---
+
+## Optional Add-On Demos (Empathy, Customer 360 Notes & Visual Drill-Downs)
+
+1. **Empathy & Bidirectional Customer 360 Notes (`cep.empathy.assess@1.0.0`)**
+   - In chat as **Alice Morgan**, ask: **“I just lost my job, what should I do?”**
+   - Point out the empathetic personalized opener, grounded **Job-Loss Financial Stability & Cash Runway** card, and paused promotional offers.
+   - Open **Administration → Customer 360** (`/admin/customers`) and show that the life-event note was automatically recorded in Alice’s `notes`.
+   - Now edit **Jordan Lee’s** `notes` in Customer 360 to `"Navigating company restructuring / layoff — prioritize liquidity"` and save. Return to chat as Jordan and ask a neutral question (**“Show all my stocks”**) — `cep.empathy.assess@1.0.0` reads the advisor note, responds supportively, and suppresses promotional cash-investing NBAs from Recommendation Providers.
+
+2. **Industry Drill-Down, Bubble Chart & Multi-Goal Planner**
+   - Ask **“I want to see drill down based on industry”** to render the grounded **Industry & Sector Drill-Down** pie chart + breakdown table.
+   - Ask **“Show my stock holdings as a bubble chart”** for the interactive bubble chart.
+   - Ask **“I want to set up another goal”** to create a live goal persisted in Customer 360.
+
+3. **Workspace Folders, Project Briefs & Branching**
+   - Create a sidebar folder, add shared **Folder Instructions**, move two threads into it, and ask **“Summarize all threads in this folder”** for a cross-thread **Folder Project Brief**.
+   - Click **Branch** on any turn to fork an alternate scenario, or open the **Context Health** pill to compact long threads via `sfield`.

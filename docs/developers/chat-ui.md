@@ -47,7 +47,11 @@ On each turn, `applyPublishedUi` in `packages/experience/ui-layout.ts` arranges 
 
 ### Build a view without a saved design
 
-Ask **“Build a savings calculator for $300 a month for 8 years.”** The custom UI flow can reuse a matching widget or assemble a calculator using supported controls. Adjusting a slider recalculates the view. If a requested chart needs records and has no connected source, chat can ask which source should supply them. The implementation is in `apps/server/dynamic-ui-generator.ts` and `apps/web/dynamic-canvas.tsx`. Publish a recurring design from **UI Builder** when domain owners want to manage it.
+Ask **“Build a savings calculator for $300 a month for 8 years.”**, **“Show my stock holdings as a bubble chart”**, **“I want to see drill down based on industry”**, or **“I want to set up another goal.”** The 4-stage Dynamic UI Harness (`apps/server/dynamic-ui-harness.ts` and `apps/server/dynamic-ui-generator.ts`) plans grounded data providers, fetches live records, composes native visual nodes (`metrics`, `chart`, `piechart`, `bubblechart`, `table`, `checklist`, `calculator`, `goal_creator`), and verifies/repairs the output before rendering in `apps/web/dynamic-canvas.tsx`.
+
+- **Single Recommendation Authority**: Any follow-up recommendation CTA shown on a Dynamic Canvas card comes strictly from the host-governed `cep.recommendations.arbitrate@1.0.0` `sfield` tool (stamped with a provider provenance badge via `recommendationSource`). Hardcoded generator follow-ups are stripped, recent-buy sell contradictions are suppressed, and `excludePromotions: true` is enforced whenever `cep.empathy.assess@1.0.0` detects hardship in chat or Customer 360 `notes`.
+- **Contextual Personalization**: `Store.finish` runs `applyPersonalization` (`apps/server/response-personalizer.ts`) using the customer's first name and `turn.emotionalState` so replies open naturally and empathetically instead of generic copy.
+- **Unconnected Source Guard**: If a requested chart needs records and has no connected source, chat pauses with clickable clarification choices instead of fabricating numbers. Publish a recurring design from **UI Builder** when domain owners want to manage it.
 
 ### Add a new component type in code
 

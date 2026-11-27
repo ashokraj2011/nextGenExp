@@ -1,6 +1,7 @@
 import {
-  ArrowRight, ArrowUpRight, CheckCircle2, Cpu, Database, HardDrive, KeyRound, Layers, Lock, Network, ShieldCheck, Sliders, Sparkles,
+  ArrowRight, ArrowUpRight, CheckCircle2, Cpu, Database, HardDrive, HeartHandshake, KeyRound, Layers, Lock, Network, ShieldCheck, Sliders, Sparkles,
 } from "lucide-react";
+import { empathyAssessToolRef } from "../../packages/contracts/empathy";
 import { recommendationArbitrateToolRef } from "../../packages/contracts/recommendation-provider";
 import { sfieldTools, toolKeys, toolVersion, type ToolKey } from "../../packages/contracts/tool-setup";
 
@@ -63,8 +64,8 @@ const executionLanes = [
     lane: "Host Read Scopes",
     preset: "read_only",
     caller: "CEP App Server (registry.execute)",
-    allowed: "Treatment Selector, Portfolio, Goal, cep.recommendations.arbitrate@1.0.0",
-    guarantee: "Deterministic arbitration & PII-safe data reads with full audit logs",
+    allowed: "Treatment Selector, Portfolio, Goal, cep.empathy.assess@1.0.0, cep.recommendations.arbitrate@1.0.0",
+    guarantee: "Deterministic arbitration, empathy & C360 note assessment, and PII-safe data reads with full audit logs",
   },
   {
     lane: "Host Governed Writes",
@@ -131,7 +132,7 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
           </div>
           <div className="help-proposal-choice">
             <span className="help-entity-icon"><Database size={16} aria-hidden="true" /></span>
-            <div><h3>Scoped read &amp; write tools</h3><p>Reads live domain data, arbitrates recommendations (<code>cep.recommendations.arbitrate</code>), and executes operator-confirmed writes (<code>cep.domain.execute_write</code>).</p></div>
+            <div><h3>Scoped read &amp; write tools</h3><p>Assesses emotional &amp; life-event context (<code>cep.empathy.assess</code>), reads live domain data, arbitrates recommendations (<code>cep.recommendations.arbitrate</code>), and executes operator-confirmed writes (<code>cep.domain.execute_write</code>).</p></div>
           </div>
         </li>
       </ol>
@@ -224,7 +225,20 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
           <div>
             <h4>Pluggable RecommendationProvider adapters</h4>
             <code>RecommendationProvider.evaluate(ctx, signal)</code>
-            <p>Fans out in parallel to <strong>Treatment Selector (TS + CCRE)</strong>, <strong>Customer 360 NBA</strong>, <strong>IT Ops Runbooks</strong>, <strong>Sales Deal Desk</strong>, or external engines (Pega CDH, ML Ranker).</p>
+            <p>Fans out in parallel to <strong>Treatment Selector (TS + CCRE)</strong>, <strong>Customer 360 NBA</strong>, <strong>IT Ops Runbooks</strong>, <strong>Sales Deal Desk</strong>, or external engines (Pega CDH, ML Ranker) — honoring <code>excludePromotions</code> during customer hardship.</p>
+          </div>
+        </div>
+        <div className="help-provider-path" aria-label="Empathy & Life-Event Assessment example" style={{ marginTop: "12px" }}>
+          <div>
+            <h4><HeartHandshake size={15} aria-hidden="true" style={{ verticalAlign: "-2px", marginRight: "6px" }} />Empathy &amp; Life-Event Assessor</h4>
+            <code>{empathyAssessToolRef}</code>
+            <p>Host-governed <code>read_only</code> <code>sfield</code> tool that evaluates the current message, recent context, and Customer 360 advisor <code>notes</code> (via PII-scrubbed LLM + heuristic fallback).</p>
+          </div>
+          <ArrowRight className="help-provider-arrow" size={20} aria-hidden="true" />
+          <div>
+            <h4>Customer 360 Notes &amp; Promotion Guard</h4>
+            <code>CustomerProfileStore.appendNote() · excludePromotions: true</code>
+            <p>Personalizes response tone by name and situation, persists newly disclosed major life events into Customer 360 <code>notes</code> + <code>sfield.memory</code>, and suppresses promotional offers during hardship.</p>
           </div>
         </div>
         <div className="help-provider-path" aria-label="Governed Write Tool example" style={{ marginTop: "12px" }}>
@@ -263,9 +277,19 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
       </div>
 
       <div className="help-sfield-subsection">
-        <h3>Host platform tools (Arbitration, Governed Writes &amp; External Connectors)</h3>
+        <h3>Host platform tools (Empathy, Arbitration, Governed Writes &amp; External Connectors)</h3>
         <p>These platform-level tools run exclusively inside host-owned sfield scopes and are never exposed to LLM agents directly.</p>
         <ul className="help-tool-registry" aria-label="sfield platform tools" role="list">
+          <li>
+            <div className="help-tool-name">
+              <a className="help-section-link" href="#contracts" onClick={() => selectContract("empathy")}>
+                Empathy &amp; Life-Event Assessor <ArrowUpRight size={13} aria-hidden="true" />
+              </a>
+              <code>{empathyAssessToolRef}</code>
+            </div>
+            <p>Assesses emotional state and life events from chat + Customer 360 notes, writes new life events back to Customer 360 &amp; sfield.memory, and signals promotion suppression to Recommendation Providers.</p>
+            <span className="help-tool-caller">Host · Read scope</span>
+          </li>
           <li>
             <div className="help-tool-name">
               <a className="help-section-link" href="#contracts" onClick={() => selectContract("providers")}>
@@ -273,7 +297,7 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
               </a>
               <code>{recommendationArbitrateToolRef}</code>
             </div>
-            <p>Fans out across registered RecommendationProvider adapters and returns one normalized, priority-arbitrated bundle.</p>
+            <p>Single recommendation authority across verified &amp; Dynamic Canvas surfaces — fans out across RecommendationProvider adapters, guards against recent-buy contradictions, and honors empathy promotion suppression.</p>
             <span className="help-tool-caller">Host · Read scope</span>
           </li>
           <li>

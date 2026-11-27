@@ -318,7 +318,7 @@ export function Help() {
         <div className="help-section-heading">
           <div>
             <h2 id="providers-title">Pluggable Recommendation Providers behind sfield</h2>
-            <p className="help-exchange-description">Recommendation engines are abstracted behind one host-governed <code>sfield</code> tool so the LLM never chooses between competing vendors and arbitration stays deterministic.</p>
+            <p className="help-exchange-description">Recommendation engines are abstracted behind one host-governed <code>sfield</code> tool — the single recommendation authority across both verified A2UI and Dynamic Canvas cards — enforcing deterministic arbitration, recent-trade contradiction checks, and <code>cep.empathy.assess@1.0.0</code> hardship promotion suppression.</p>
           </div>
           <a className="help-section-link" href="#contracts" onClick={() => setContractId("providers")}>
             Provider contract <ArrowUpRight size={14} aria-hidden="true" />

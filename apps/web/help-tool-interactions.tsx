@@ -47,7 +47,7 @@ const MODES: Record<ModeId, ModeSpec> = {
     summary: "For standard chat turns, context-router receives tools: [] and only picks an intent/context from the catalog. CEP then invokes Treatment Selector and domain read tools through sfield — the LLM never sees the full tool registry.",
     llmBadge: "0 tools (router) · max 1 (composer)",
     llmToolsList: ["context-router: [] (none)", "experience-composer: balances_read (max 1 call)"],
-    hiddenFromLlm: ["Treatment Selector / CCRE", "portfolio_read · goal_read · retirement_accounts", "int.* integration tasks", "cep.domain.execute_write (DENY)"],
+    hiddenFromLlm: ["cep.empathy.assess · Treatment Selector / CCRE", "portfolio_read · goal_read · retirement_accounts", "int.* integration tasks", "cep.domain.execute_write (DENY)"],
     policyPreset: "read_only",
     requestToolsJson: `{
   "agentId": "context-router",
@@ -490,7 +490,7 @@ const MODES: Record<ModeId, ModeSpec> = {
       },
       llm: {
         subtitle: ["Stage 3 Compose UI", "from grounded facts"],
-        detail: "In Stage 3, the LLM only receives already-fetched grounded records and allowed visual primitives (metric, chart, piechart, table, list) to compose the layout.",
+        detail: "In Stage 3, the LLM only receives already-fetched grounded records and allowed visual primitives (metric, chart, piechart, bubblechart, table, checklist, goal_creator) to compose the layout.",
         serverSide: "Zero direct database/API access; cannot invent unconnected data sources.",
       },
       proposal: {

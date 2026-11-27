@@ -33,6 +33,7 @@ For an office LLM gateway, configure **Model gateway** in Administration or set 
 | Add a new kind of card or control | `packages/contracts/surface.ts` and `apps/web/surface.tsx` | The chat reply and its Inspector entry |
 | Change what the model sees | `packages/experience/prompt-compiler.ts` and `packages/contracts/model-inputs.ts` | The model request in Logs |
 | Give sfield a new data read | `apps/server/runtime.ts` and the domain provider in `packages/` | The tool request, result and run ID |
+| Customize empathy, tone & Customer 360 notes | `packages/contracts/empathy.ts`, `apps/server/response-personalizer.ts` and `packages/customer-profiles/index.ts` | `turn.emotionalState`, personalized intro, and Customer 360 notes |
 | Change who qualifies or what a click runs | `packages/ts-adapter/index.ts` and `packages/contracts/customer-workflows.ts` | The source message and the separate click in Logs |
 
 ### Repeat a conversation from the terminal

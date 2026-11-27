@@ -14,6 +14,8 @@ import goalSource from "../../packages/contracts/goal-progress.ts?raw";
 import surfaceSource from "../../packages/contracts/surface.ts?raw";
 import inspectorSource from "../../packages/contracts/inspector.ts?raw";
 import recommendationProviderContractSource from "../../packages/contracts/recommendation-provider.ts?raw";
+import empathyContractSource from "../../packages/contracts/empathy.ts?raw";
+import { emotionalAssessmentJsonSchema, empathyAssessInputJsonSchema } from "../../packages/contracts/empathy";
 import recommendationArbitratorSource from "../../packages/recommendations/index.ts?raw";
 import treatmentAdapterSource from "../../packages/ts-adapter/index.ts?raw";
 import treatmentFormatsSource from "../../packages/ts-adapter/recommendations.ts?raw";
@@ -78,8 +80,26 @@ export const helpContracts = [
           ["GET /api/turns/:id", "Get the status and reply for a message."],
           ["POST /api/turns/:id/cancel", "Stop a request that is in progress."],
           ["POST /api/turns/:id/retry", "Try a saved request again."],
+          ["POST /api/conversations/:id/compact", "Trigger sfield ConversationCompactor on demand to summarize older turns."],
+          ["POST /api/conversations/:id/fork", "Branch a new thread from any previous turn."],
+          ["POST /api/folders/:id/update", "Save folder name or shared Project instructions."],
         ],
         files: [{ name: "http-inputs.ts", source: httpInputsSource }, { name: "api.ts", source: apiSource }],
+      },
+      {
+        id: "empathy",
+        title: "Empathy & life-event assessment (sfield)",
+        description: "Host-governed sfield read tool (cep.empathy.assess@1.0.0) that evaluates chat + Customer 360 notes, drives empathetic personalization, writes new life events back to Customer 360, and sets excludePromotions for Recommendation Providers.",
+        endpoints: [
+          ["GET /api/admin/customers", "Read Customer 360 profiles including persisted life-event notes."],
+          ["POST /api/admin/customers", "Update Customer 360 advisor notes read by cep.empathy.assess@1.0.0 on the next turn."],
+        ],
+        files: [
+          jsonFile("empathy-assess.tool.json", {
+            "cep.empathy.assess@1.0.0": { input: empathyAssessInputJsonSchema, output: emotionalAssessmentJsonSchema },
+          }),
+          { name: "empathy.ts", source: empathyContractSource },
+        ],
       },
       {
         id: "flow-selection",
