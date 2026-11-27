@@ -3,12 +3,13 @@ import { ArrowRight, ArrowUpRight, House, ShieldCheck, Wallet } from "lucide-rea
 import type { DemoPersona } from "../../packages/contracts/api";
 import type { GoalProgress } from "../../packages/contracts/goal-progress";
 import { formatPortfolioAmount, type PortfolioHistoryPoint, type PortfolioSnapshot } from "../../packages/contracts/portfolio";
-import type { WorkspaceNextStep, WorkspacePendingAction, WorkspacePin } from "../../packages/contracts/workspace";
+import type { WorkspaceNextStep, WorkspacePin } from "../../packages/contracts/workspace";
 import { api } from "./api";
 import { SavingsGrowthChart } from "./goal-progress";
 import { PortfolioHistory } from "./portfolio-history";
 import { PortfolioSnapshotBlock } from "./portfolio-snapshot";
 import { workspaceSections, type WorkspaceSection } from "./workspace-menu";
+import { PendingActionsCard, type PendingActions } from "./workspace-actions";
 import "./workspace-overview.css";
 
 const snapshotDate = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "UTC" });
@@ -97,72 +98,6 @@ function NextStepCard({ personaId, disabled, optional, onPreview }: {
   </section>;
 }
 
-export function usePendingActions(personaId?: string) {
-  const [result, setResult] = useState<{ personaId: string; items?: WorkspacePendingAction[]; failed?: true }>();
-  const [attempt, setAttempt] = useState(0);
-  useEffect(() => {
-    setResult(undefined);
-    if (!personaId) return;
-    let active = true;
-    void api.pendingActions(personaId).then(
-      (items) => { if (active) setResult({ personaId, items }); },
-      () => { if (active) setResult({ personaId, failed: true }); },
-    );
-    return () => { active = false; };
-  }, [personaId, attempt]);
-  const current = result?.personaId === personaId ? result : undefined;
-  const refresh = () => {
-    setResult(undefined);
-    setAttempt((value) => value + 1);
-  };
-  return { items: current?.items, failed: current?.failed, refresh };
-}
-
-export type PendingActions = ReturnType<typeof usePendingActions>;
-
-function PendingActionItem({ item, disabled, onReviewGuide, onPreviewFunding }: {
-  item: WorkspacePendingAction; disabled: boolean; onReviewGuide: (message: string) => void; onPreviewFunding: () => void;
-}) {
-  const { action } = item;
-  const Icon = action.kind === "guide" ? ShieldCheck : Wallet;
-  return <li>
-    <span className="pending-action-icon"><Icon size={17} aria-hidden="true" /></span>
-    <div><h4>{item.title}</h4><p>{item.body}</p></div>
-    <button className="overview-action" type="button" disabled={disabled}
-      onClick={() => action.kind === "guide" ? onReviewGuide(action.message) : onPreviewFunding()}>
-      {action.label} <ArrowUpRight size={15} aria-hidden="true" />
-    </button>
-  </li>;
-}
-
-function PendingActionsCard({ pendingActions, firstDepositConfirmedAt, disabled, onReviewGuide, onPreviewFunding }: {
-  firstDepositConfirmedAt?: number;
-  pendingActions: PendingActions; disabled: boolean; onReviewGuide: (message: string) => void; onPreviewFunding: () => void;
-}) {
-  const title = useId();
-  const { items, failed, refresh } = pendingActions;
-  const [first, ...remaining] = items ?? [];
-  const itemProps = { disabled, onReviewGuide, onPreviewFunding };
-
-  return <section className="content-card pending-actions" aria-labelledby={title}>
-    <h3 id={title}>Pending actions</h3>
-    {first && <ul><PendingActionItem item={first} {...itemProps} /></ul>}
-    {remaining.length > 0 && <details className="inline-details remaining-pending-actions">
-      <summary>Other pending actions ({remaining.length})</summary>
-      <ul>{remaining.map((item) => <PendingActionItem key={item.contentId} item={item} {...itemProps} />)}</ul>
-    </details>}
-    {items?.length === 0 && <p>No pending actions.</p>}
-    {!items && (failed ? <div className="next-step-error">
-      <p role="status">Couldn’t load pending actions.</p>
-      <button className="secondary-button" type="button" onClick={refresh}>Try again</button>
-    </div> : <p role="status">Checking pending actions…</p>)}
-    {firstDepositConfirmedAt !== undefined && <p className="pending-completion">
-      <strong>First deposit confirmed</strong> · <time dateTime={new Date(firstDepositConfirmedAt).toISOString()}>
-        {new Date(firstDepositConfirmedAt).toLocaleDateString(undefined, { dateStyle: "medium" })}</time>
-    </p>}
-  </section>;
-}
-
 function WelcomeBanner({ displayName, portfolio, modelUnavailable }: {
   displayName?: string; portfolio?: PortfolioSnapshot | null; modelUnavailable: boolean;
 }) {
@@ -221,7 +156,7 @@ export function WorkspaceHome({ activeProfile, pendingActions, disabled, modelUn
         <h3>Account summary</h3>
         <p>Portfolio information is unavailable.</p>
       </section>}
-      <PendingActionsCard pendingActions={pendingActions} firstDepositConfirmedAt={activeProfile.profile?.firstDepositConfirmedAt} disabled={actionsDisabled}
+      <PendingActionsCard pendingActions={pendingActions} firstDepositConfirmedAt={activeProfile.profile?.firstDepositConfirmedAt} disabled={disabled} modelUnavailable={modelUnavailable}
         onReviewGuide={onReviewGuide} onPreviewFunding={onPreviewFunding} />
     </>}
   </div>;

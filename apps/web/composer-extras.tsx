@@ -129,6 +129,7 @@ export function computeNextSuggestions(
   latestTurn?: TurnView,
   activeProfile?: DemoPersona,
   intentPrompts?: { intentId: string; label: string; prompt: string; isCustom: boolean }[],
+  fundingComplete = activeProfile?.profile?.accountFundingStatus === "funded",
 ): NextSuggestion[] {
   if (!latestTurn || latestTurn.status !== "completed") return [];
   const blocks = latestTurn.experience?.blocks.map((block) => block.component) ?? [];
@@ -160,7 +161,7 @@ export function computeNextSuggestions(
     candidates.push({ label: "Review portfolio mix", prompt: "Let me know my portfolio summary." });
     candidates.push({ label: "Explore retirement basics", prompt: "I'd like to learn about retirement." });
   } else if (blocks.includes("PznFundingOptions") || blocks.includes("PznFundingPreview")) {
-    candidates.push({ label: "Change deposit to $750", prompt: "Change it to $750" });
+    if (!fundingComplete) candidates.push({ label: "Change deposit to $750", prompt: "Change it to $750" });
     candidates.push({ label: "Check what's next for me", prompt: "What is next?" });
     candidates.push({ label: "Mailing address steps", prompt: "I need to update my mailing address." });
   } else if (blocks.includes("PznComparison") || blocks.includes("PznMetricSummary")) {

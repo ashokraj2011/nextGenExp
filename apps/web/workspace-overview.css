@@ -37,7 +37,25 @@
 .pending-actions ul { display: grid; gap: 11px; margin: 13px 0 0; padding: 0; list-style: none; }
 .pending-actions li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; }
 .pending-actions li + li { border-top: 1px solid var(--line); padding-top: 11px; }
-.pending-actions .pending-completion { border-top: 1px solid var(--line); padding-top: 12px; color: var(--teal-dark); }
+.pending-actions .pending-completion, .workspace-todos { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; }
+.pending-action-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; }
+.pending-action-controls:empty { display: none; }
+.todo-button {
+  display: inline-flex; align-items: center; gap: 6px; justify-content: center; min-height: 36px;
+  padding: 4px 6px; border: 1px solid transparent; border-radius: 8px; background: transparent;
+  color: var(--teal-dark); font-size: .76rem; font-weight: 630; text-align: start;
+}
+.todo-button:hover:not(:disabled) { background: var(--teal-pale); }
+.todo-button:disabled { opacity: .62; }
+.todo-notice { margin-top: 10px; color: var(--muted); font-size: .85rem; }
+.deposit-confirmation, .pending-actions .deposit-confirmation {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px;
+  color: var(--teal-dark); font-size: .83rem; line-height: 1.5;
+}
+.deposit-confirmation time { color: var(--muted); font-size: .79rem; }
+.funding-receipt { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: var(--teal-pale); }
+.funding-history { margin-top: 12px; }
+.funding-history[open] > summary { margin-bottom: 9px; }
 .pending-action-icon {
   display: grid; flex-shrink: 0; place-items: center; width: 34px; height: 34px;
   color: var(--teal-dark); background: var(--teal-pale); border-radius: 8px;
@@ -227,7 +245,7 @@
   .overview-banner { padding: 16px; border-radius: 13px; }
   .overview-summary { font-size: .86rem; }
   .pending-actions li { grid-template-columns: auto minmax(0, 1fr); align-items: start; }
-  .pending-actions li .overview-action { grid-column: 2; justify-self: start; }
+  .pending-action-controls { grid-column: 2; }
   .workspace-overview .content-card { padding: 14px; }
   .workspace-menu { padding-inline: 7px; }
   .workspace-customize span { display: none; }

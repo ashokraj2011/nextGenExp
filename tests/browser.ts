@@ -1115,20 +1115,48 @@ try {
   assert.doesNotMatch(await history.innerText(), /portfolio summary/i);
   await welcomePortfolio.getByText("$0", { exact: true }).first().waitFor();
   await pendingActions.getByRole("heading", { name: "Fund your account", exact: true }).waitFor();
-  await pendingActions.getByRole("button", { name: "Preview funding", exact: true }).click();
+  const todoList = pendingActions.getByRole("region", { name: "To-do list", exact: true });
+  await pendingActions.getByRole("button", { name: /Add Fund your account to to-do list/i }).click();
+  await todoList.getByRole("heading", { name: "Fund your account", exact: true }).waitFor();
+  assert.equal(await pendingActions.getByRole("heading", { name: "Fund your account", exact: true }).count(), 1);
+  await signInPage.reload();
+  const fundingAccepted = signInPage.waitForResponse((response) =>
+    response.status() === 202 && response.url().endsWith("/preview-funding")).then((response) => response.json());
+  await todoList.getByRole("button", { name: "Preview funding", exact: true }).click();
+  const fundingThread = (await fundingAccepted).conversation.id;
   const signedInResponse = signInPage.locator('[data-renderer="a2ui"]');
   await signedInResponse.getByRole("region", { name: "Funding options", exact: true }).waitFor();
+  await signInPage.getByRole("button", { name: "Overview", exact: true }).click();
+  const fundingResumed = signInPage.waitForResponse((response) =>
+    response.ok() && response.request().method() === "GET" && response.url().endsWith("/conversations/" + fundingThread));
+  await todoList.getByRole("button", { name: "Continue funding", exact: true }).click();
+  await fundingResumed;
+  await signedInResponse.getByRole("region", { name: "Funding options", exact: true }).waitFor();
+  assert.equal(await history.getByRole("button", { name: "Preview funding", exact: true }).count(), 1);
   await askAsProfile("Use the linked bank account.");
-  await signedInResponse.getByRole("region", { name: "Funding preview", exact: true }).waitFor();
+  const fundingPreview = signedInResponse.getByRole("region", { name: "Funding preview", exact: true });
+  const portalLink = fundingPreview.getByRole("link", { name: "Open account portal" });
+  const portalTab = await signInContext.newPage();
+  await portalLink.waitFor();
+  await portalTab.goto(preview.url + await portalLink.getAttribute("href"));
 
-  await signedInResponse.getByRole("region", { name: "Funding preview" }).getByRole("link", { name: "Open account portal" }).click();
-  await signInPage.getByRole("button", { name: "Mark account funded" }).click();
-  await signInPage.getByRole("status").getByText("Account funded", { exact: true }).waitFor();
+  await portalTab.getByRole("button", { name: "Mark account funded" }).click();
+  await portalTab.getByRole("status").getByText("Account funded", { exact: true }).waitFor();
+  await signInPage.bringToFront();
+  await fundingPreview.getByRole("status").getByText("First deposit confirmed", { exact: true }).waitFor();
+  assert.equal(await portalLink.count(), 0);
+  assert.equal(await signInPage.getByRole("button", { name: "Change deposit to $750", exact: true }).count(), 0);
+  await fundingPreview.getByText("View earlier funding preview", { exact: true }).click();
+  await fundingPreview.getByText("Linked bank account", { exact: true }).waitFor();
+  await portalTab.getByRole("link", { name: "Back to chat", exact: true }).click();
+  await portalTab.getByRole("region", { name: "Funding preview", exact: true }).getByText("First deposit confirmed", { exact: true }).waitFor();
+  await portalTab.close();
   await signOut.click();
   await signInAs("Marcus Reed");
-  await pendingActions.getByText("First deposit confirmed", { exact: true }).waitFor();
+  await todoList.getByText("First deposit confirmed", { exact: true }).waitFor();
   await pendingActions.getByText("No pending actions.", { exact: true }).waitFor();
   assert.equal(await pendingActions.getByRole("button", { name: "Preview funding" }).count(), 0);
+  assert.equal(await pendingActions.getByRole("button", { name: "Continue funding" }).count(), 0);
   await askAsProfile("what is next");
   await signedInResponse.getByRole("heading", { name: "Your first deposit is on file" }).waitFor();
 
@@ -1139,6 +1167,11 @@ try {
   await welcomePortfolio.getByText("$12,500", { exact: true }).waitFor();
   const pendingGuide = pendingActions.getByRole("button", { name: "See beneficiary update steps", exact: true });
   await pendingGuide.waitFor();
+  assert.equal(await todoList.count(), 0);
+  await pendingActions.getByRole("button", { name: /Add Update your beneficiaries to to-do list/i }).click();
+  await todoList.getByRole("button", { name: "See beneficiary update steps", exact: true }).waitFor();
+  await todoList.getByRole("button", { name: /Remove Update your beneficiaries from to-do list/i }).click();
+  await todoList.waitFor({ state: "hidden" });
   const loginLogs = await signInContext.newPage();
   await loginLogs.goto(preview.url + adminPaths.logs);
   await loginLogs.getByRole("link", { name: "Pending actions", exact: true }).click();

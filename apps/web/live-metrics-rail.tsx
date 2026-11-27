@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ArrowUpRight, ChevronDown, ChevronUp, Sparkles, Wallet } from "lucide-react";
 import type { DemoPersona } from "../../packages/contracts/api";
 import { formatPortfolioAmount } from "../../packages/contracts/portfolio";
-import type { PendingActions } from "./workspace-overview";
+import type { PendingActions } from "./workspace-actions";
 
 const asOfFormat = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "UTC" });
 

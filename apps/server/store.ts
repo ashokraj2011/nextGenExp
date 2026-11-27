@@ -29,7 +29,8 @@ import { defaultToolSetup, type MockCcreCondition, type MockCcreEvaluation, type
 import type { CompiledExperience, IssuedAction } from "../../packages/experience/compile";
 import { buildSurface, compileExperience, makeId } from "../../packages/experience/compile";
 import type { ContextScoresRequest, Rejection } from "../../packages/ts-adapter";
-import { defaultWorkspacePins, workspaceFundingContext, workspacePinsSchema, type WorkspaceActionLog, type WorkspacePin } from "../../packages/contracts/workspace";
+import { defaultWorkspacePins, overviewFundingOrigin, pendingActionsFundingOrigin, workspaceFundingContext, workspacePinsSchema,
+  type WorkspaceActionLog, type WorkspacePendingAction, type WorkspacePin } from "../../packages/contracts/workspace";
 
 export type Stage = "route" | "compose";
 export const stageAgent: Record<Stage, string> = { route: "context-router", compose: "experience-composer" };
@@ -178,6 +179,9 @@ export class Store {
       CREATE TABLE IF NOT EXISTS session_profiles (session_id TEXT PRIMARY KEY REFERENCES local_sessions(id), persona_id TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS workspace_preferences (
         principal_id TEXT NOT NULL, persona_id TEXT NOT NULL, pins TEXT NOT NULL, PRIMARY KEY (principal_id, persona_id)
+      );
+      CREATE TABLE IF NOT EXISTS workspace_todos (
+        persona_id TEXT NOT NULL, content_id TEXT NOT NULL, record TEXT NOT NULL, PRIMARY KEY (persona_id, content_id)
       );
       CREATE TABLE IF NOT EXISTS workspace_action_logs (
         id TEXT PRIMARY KEY, principal_id TEXT NOT NULL REFERENCES local_sessions(id), record TEXT NOT NULL
@@ -719,6 +723,54 @@ export class Store {
     this.db.run("INSERT INTO workspace_preferences VALUES (?, ?, ?) ON CONFLICT(principal_id, persona_id) DO UPDATE SET pins = excluded.pins",
       principalId, personaId, JSON.stringify(pins));
     return pins;
+  }
+
+  workspaceTodos(personaId: string) {
+    return this.db.all<{ record: string }>("SELECT record FROM workspace_todos WHERE persona_id = ? ORDER BY rowid DESC", personaId)
+      .map((row) => parse<WorkspacePendingAction>(row)!);
+  }
+
+  saveWorkspaceTodo(personaId: string, action: WorkspacePendingAction) {
+    this.db.run("INSERT OR IGNORE INTO workspace_todos (persona_id, content_id, record) VALUES (?, ?, ?)",
+      personaId, action.contentId, JSON.stringify(action));
+  }
+
+  removeWorkspaceTodo(personaId: string, contentId: string) {
+    this.db.run("DELETE FROM workspace_todos WHERE persona_id = ? AND content_id = ?", personaId, contentId);
+  }
+
+  workspaceFundingConversation(principalId: string, personaId: string, viewer: ThreadViewer, includeOperator: boolean) {
+    const visibility = includeOperator ? "" : `AND NOT EXISTS (
+      SELECT 1 FROM turns WHERE conversation_id = conversations.id AND ${operatorTurn}
+    )`;
+    return this.db.one<{ conversation_id: string }>(`
+      SELECT t.conversation_id FROM turns t
+      WHERE t.conversation_id IN (
+        SELECT id FROM conversations WHERE ${accessibleThreads}
+          AND json_extract(record, '$.domainId') = 'wealth'
+          AND json_extract(record, '$.personaId') = ?
+          AND json_extract(record, '$.audience') IS NULL
+          AND json_extract(record, '$.archivedAt') IS NULL
+          ${visibility}
+      )
+      AND t.request_id NOT LIKE 'fork:%'
+      AND (
+        (t.status = 'completed' AND EXISTS (
+          SELECT 1 FROM json_each(t.record, '$.public.experience.blocks')
+          WHERE json_extract(value, '$.component') IN ('PznFundingOptions', 'PznFundingPreview')
+        ))
+        OR (t.status = 'working' AND (
+          json_extract(t.record, '$.origin') IN (?, ?)
+          OR json_extract(t.record, '$.workflow.recommendation.id') = ?
+        ))
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM turns later WHERE later.conversation_id = t.conversation_id AND later.rowid > t.rowid
+          AND json_extract(later.record, '$.fundingRun.outcome') = 'cancelled'
+      )
+      ORDER BY t.rowid DESC LIMIT 1`, principalId, serverTenantId, viewer.customer ?? "", viewer.operator ?? "", personaId,
+    overviewFundingOrigin, pendingActionsFundingOrigin, fundingPreviewWorkflow.recommendation.id
+    )?.conversation_id;
   }
 
   saveWorkspaceActionLog(principalId: string, log: WorkspaceActionLog) {

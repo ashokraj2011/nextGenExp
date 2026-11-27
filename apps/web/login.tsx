@@ -37,8 +37,10 @@ export function Login() {
       setNotice("Couldn’t save your profile in this tab. Please try again.");
       return;
     }
-    if (new URLSearchParams(location.search).get("returnTo") === "funding") {
-      location.replace(accountPortalPath);
+    const query = new URLSearchParams(location.search);
+    if (query.get("returnTo") === "funding") {
+      const conversationId = query.get("conversationId");
+      location.replace(accountPortalPath + (conversationId ? "?" + new URLSearchParams({ conversationId }) : ""));
       return;
     }
     const destination = new URL(chatPath, location.origin);

@@ -17,7 +17,8 @@ import { DomainLiveHud, DomainWelcomeHome } from "../domain-pack-ui";
 import { LivingWatchcardsStrip, ParallelFuturesPane } from "../nextgen-chat-features";
 import { ExperienceControls, ExperienceDataUI } from "../surface";
 import type { WorkspaceSection } from "../workspace-menu";
-import { WorkspaceHome, WorkspaceOverview, type PendingActions } from "../workspace-overview";
+import type { PendingActions } from "../workspace-actions";
+import { WorkspaceHome, WorkspaceOverview } from "../workspace-overview";
 import { Composer } from "./chat-composer";
 import {
   ConversationControls, homeGoalPrompt, portfolioPrompt, visibleMessages,
@@ -33,6 +34,7 @@ export type ChatProps = {
   notice: string;
   activeProfile?: DemoPersona;
   pendingActions: PendingActions;
+  fundingExperienceId?: string;
   section: WorkspaceSection;
   pins: WorkspacePin[];
   progressHistory: Record<string, Progress[]>;
@@ -66,7 +68,7 @@ export type ChatProps = {
 const noTurns: TurnView[] = [];
 
 export function Chat({
-  adminChat, conversation, configuration, activeProfile, pendingActions, pending, draft, onDraft, onSend, onStop, onRetry,
+  adminChat, conversation, configuration, activeProfile, pendingActions, fundingExperienceId, pending, draft, onDraft, onSend, onStop, onRetry,
   onBranch, onFollowUp, onFeedback, notice, section, pins, progressHistory, domainPack, onSelect, onPreviewFunding,
   onRestore, onWriteBack, activeHandoff, onStartHandoff, onDismissHandoff, onOpenMemory, expertiseMode, futuresOpen,
   onToggleFutures, watchcards, onWatchcardsChange, watchCreatorOpen, onToggleWatchCreator, onOpenDelegate,
@@ -156,6 +158,11 @@ export function Chat({
   }, []);
   const archived = conversation?.archivedAt !== undefined;
   const activeExperienceId = pending || running || archived ? undefined : latest?.experience?.experienceId;
+  const funding = pendingActions.funding;
+  const fundingConfirmedAt = activeProfile?.profile?.firstDepositConfirmedAt;
+  const fundingCompletion = funding?.status === "completed" ? { confirmedAt: funding.confirmedAt }
+    : fundingConfirmedAt === undefined ? undefined : { confirmedAt: fundingConfirmedAt };
+  const fundingComplete = Boolean(fundingCompletion || activeProfile?.profile?.accountFundingStatus === "funded");
   const canWrite = Boolean(configuration) && !pending && !running && !archived;
   const showWelcomeCards = !adminChat && !turns.length && section === "summary";
   const showOverview = adminChat || section !== "summary";
@@ -172,8 +179,8 @@ export function Chat({
   const nextSuggestions = useMemo(() => {
     if (adminChat || latest?.nextBestAction || latest?.experience?.actions.length) return [];
     if (domainPack.id !== "wealth") return domainPack.quickPrompts;
-    return computeNextSuggestions(latest, activeProfile, configuration?.intentPrompts);
-  }, [adminChat, latest, activeProfile, configuration?.intentPrompts, domainPack]);
+    return computeNextSuggestions(latest, activeProfile, configuration?.intentPrompts, fundingComplete);
+  }, [adminChat, latest, activeProfile, configuration?.intentPrompts, domainPack, fundingComplete]);
 
   const composerEl = archived ? <div className="composer-area archived-conversation"><p>This conversation is archived.</p>
     <button className="secondary-button" type="button" disabled={pending} onClick={onRestore}>Restore conversation</button>
@@ -187,7 +194,11 @@ export function Chat({
     <ExperienceControls.Provider value={{
       activeExperienceId,
       allowRuleCreation: adminChat,
-      accountPortalAvailable: !adminChat && conversation?.domainId === "wealth",
+      accountFunding: !adminChat && conversation?.domainId === "wealth" ? {
+        conversationId: conversation.id, latestExperienceId: fundingExperienceId,
+        canResume: !archived && !pending && !running && funding?.status === "in_progress" && funding.conversationId === conversation.id,
+        completion: fundingCompletion,
+      } : undefined,
       simplifyBalanceComparison: !adminChat && domainPack.id === "wealth",
       askPrompt: canWrite ? (prompt) => void onSend(prompt) : undefined,
       onWriteBack,

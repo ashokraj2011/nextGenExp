@@ -5,7 +5,7 @@ import type { Bootstrap, Conversation, ConversationView, TurnAccepted } from "..
 import { fundingPreviewWorkflow } from "../packages/contracts/funding-workflow";
 import { decodeChatInput, type TurnPayloads } from "../packages/contracts/inspector";
 import { defaultToolSetup, type TreatmentPreview } from "../packages/contracts/tool-setup";
-import { defaultWorkspacePins, pendingActionsContext, type PortalFundingView, type WorkspaceActionLog, type WorkspaceNextStep, type WorkspacePendingAction } from "../packages/contracts/workspace";
+import { defaultWorkspacePins, pendingActionsContext, type PortalFundingView, type WorkspaceActionLog, type WorkspaceActionState, type WorkspaceNextStep, type WorkspacePendingAction } from "../packages/contracts/workspace";
 import { testClient } from "./client";
 import { startTestPreview } from "./preview";
 
@@ -64,14 +64,27 @@ test("a portal deposit follows Marcus's MID across sign-ins and TS captures the 
   const client = await testClient(preview.url);
   const personaId = "demo-new-account";
   const portal = "/api/account-portal/funding";
-  const actions = "/api/workspace/" + personaId + "/" + pendingActionsContext;
+  const workspace = "/api/workspace/" + personaId + "/";
+  const actions = workspace + pendingActionsContext;
+  const saveFunding = { operation: "save", contentId: "fund_account" };
+  const state = () => client.request<WorkspaceActionState>(workspace + "action-state");
   await client.request(portal, { personaId }, 403);
+  await client.request(workspace + "todos", saveFunding, 403);
   await client.request("/api/profile-session", { personaId });
   assert.ok((await client.request<WorkspacePendingAction[]>(actions)).some((item) => item.action.kind === "funding"));
+  await client.request(workspace + "todos", { ...saveFunding, contentId: "beneficiary_update" }, 409);
+  const [saved, duplicate] = await Promise.all([
+    client.request<WorkspacePendingAction[]>(workspace + "todos", saveFunding),
+    client.request<WorkspacePendingAction[]>(workspace + "todos", saveFunding),
+  ]);
+  assert.deepEqual(saved, duplicate);
+  assert.deepEqual(saved.map(({ contentId }) => contentId), ["fund_account"]);
+  assert.deepEqual(await state(), { funding: null, todos: saved });
   const thread = await client.conversation("normal", personaId);
   const previewTurn = await client.wait(await client.request<TurnAccepted>("/api/conversations/" + thread.id + "/preview-funding",
     { clientRequestId: randomUUID(), source: pendingActionsContext }, 202));
   assert.equal(previewTurn.turn.experience?.blocks[0]?.component, "PznFundingOptions");
+  assert.deepEqual(await state(), { funding: { status: "in_progress", conversationId: thread.id }, todos: saved });
   assert.equal((await client.request<PortalFundingView>(portal)).fundingStatus, "unfunded");
   const [first, retry] = await Promise.all([client.request<PortalFundingView>(portal, { personaId }), client.request<PortalFundingView>(portal, { personaId })]);
   assert.deepEqual(first.confirmation, retry.confirmation);
@@ -81,6 +94,9 @@ test("a portal deposit follows Marcus's MID across sign-ins and TS captures the 
   const fresh = await testClient(preview.url);
   await fresh.request("/api/profile-session", { personaId });
   assert.deepEqual(await fresh.request<PortalFundingView>(portal), first);
+  assert.deepEqual(await fresh.request<WorkspaceActionState>(workspace + "action-state"), {
+    funding: { status: "completed", conversationId: thread.id, confirmedAt: first.confirmation?.occurredAt }, todos: saved,
+  });
   assert.deepEqual(await fresh.request(actions), []);
   const [lookup] = await fresh.request<WorkspaceActionLog[]>("/api/admin/pending-action-logs");
   assert.ok(lookup.status === "succeeded");
@@ -106,7 +122,10 @@ test("a portal deposit follows Marcus's MID across sign-ins and TS captures the 
   assert.deepEqual(log.treatment?.mockInput?.data, { mid: "DEMO-MID-1003", context: "next-step" });
   const original = await fresh.request<TurnPayloads>("/api/admin/logs/" + previewTurn.turn.id);
   assert.equal(original.treatment?.fundingCheck, undefined);
+  assert.deepEqual(await fresh.request(workspace + "todos", { operation: "remove", contentId: "fund_account" }), []);
   await fresh.request("/api/profile-session", { personaId: "demo-learner" });
+  assert.deepEqual(await fresh.request<WorkspaceActionState>("/api/workspace/demo-learner/action-state"), { funding: null, todos: [] });
+  await fresh.request(workspace + "todos", saveFunding, 403);
   await fresh.request(portal, { personaId }, 409);
   assert.equal((await fresh.request<PortalFundingView>(portal)).confirmation, undefined);
   assert.deepEqual((await fresh.request<WorkspacePendingAction[]>("/api/workspace/demo-learner/pending-actions")).map((a) => a.contentId), ["beneficiary_update"]);

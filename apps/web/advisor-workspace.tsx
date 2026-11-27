@@ -186,7 +186,6 @@ export function AdvisorWorkspace() {
   const controlsValue = useMemo(() => ({
     activeExperienceId: sharedExperience?.experienceId,
     allowRuleCreation: false,
-    accountPortalAvailable: false,
     askPrompt: (prompt: string) => void askAgent(prompt),
     followUp: (_id: string, envelope: { action?: { context?: { actionId?: string } } }) => {
       const actionId = envelope.action?.context?.actionId;

@@ -21,7 +21,7 @@ import { applyTheme, readStoredTheme, ThemeToggle } from "./theme";
 import { installA2uiStyles } from "./surface";
 import { CEP_EMBED_PROTOCOL, type CepEmbedScreenContext } from "../../packages/embed-sdk";
 import type { ProactiveAlert } from "../../packages/contracts/proactive-events";
-import { usePendingActions } from "./workspace-overview";
+import { latestFundingExperienceId, usePendingActions } from "./workspace-actions";
 import { WorkspaceCustomization, WorkspaceMenu, workspaceSections, type WorkspaceSection } from "./workspace-menu";
 import { FolderSettings, ThreadList, ThreadSettings, type ThreadBadge } from "./thread-list";
 import type { HandoffTicket } from "../../packages/contracts/handoff";
@@ -63,6 +63,7 @@ function App() {
       topic: planningTopics.find(({ id }) => id === query.get("topic")),
       showProfiles: query.get("view") === "profiles",
       showOverview: query.get("view") === "overview",
+      conversationId: !adminChat && !embedMode ? query.get("conversationId") : null,
       profileId: adminChat ? null : (embedMode ? (query.get("personaId") || readProfileSession() || "demo-learner") : readProfileSession()),
       embedBrand: query.get("brand")?.trim() || "Your assistant",
       embedAccent: query.get("accent")?.trim() || "",
@@ -130,7 +131,8 @@ function App() {
   }, [activeSection, activeProfile, domainPack.id]);
 
   const chat = overviewOpen || conversation?.domainId !== domainPack.id ? undefined : conversation;
-  const pendingActions = usePendingActions(!adminChat && domainPack.id === "wealth" ? activeProfile?.personaId : undefined);
+  const fundingExperienceId = !adminChat && domainPack.id === "wealth" ? latestFundingExperienceId(chat?.turns) : undefined;
+  const pendingActions = usePendingActions(!adminChat && domainPack.id === "wealth" ? activeProfile?.personaId : undefined, fundingExperienceId);
   const draftKey = chat?.id ?? "new:" + (conversation?.personaId ?? signedInProfileId ?? "");
   const latest = chat?.turns.at(-1);
   const activeTurnIds = useMemo(
@@ -182,7 +184,8 @@ function App() {
       setConversations(threads);
       setFolders(data.folders ?? []);
       const matching = domainPack.id === "wealth" && entry.profileId ? threads.filter((row) => row.personaId === entry.profileId) : threads;
-      const preferred = matching.find((row) => row.id === readActiveConversation(adminChat, domainPack.id))
+      const preferred = matching.find((row) => row.id === entry.conversationId)
+        ?? matching.find((row) => row.id === readActiveConversation(adminChat, domainPack.id))
         ?? matching.find(({ archivedAt }) => archivedAt === undefined);
       if (preferred) {
         const restored = await api.conversation(preferred.id);
@@ -194,7 +197,7 @@ function App() {
         const key = preferred?.id ?? "new:" + (entry.profileId ?? "");
         setDrafts((all) => ({ ...all, [key]: all[key] ?? prompt }));
       }
-      if (entry.topic || entry.showProfiles || entry.showOverview) history.replaceState(history.state, "", location.pathname + location.hash);
+      if (entry.topic || entry.showProfiles || entry.showOverview || entry.conversationId) history.replaceState(history.state, "", location.pathname + location.hash);
       setConfiguration(data);
     }).catch((error: unknown) => { if (mounted) setNotice(messageFor(error)); });
     return () => { mounted = false; };
@@ -209,6 +212,12 @@ function App() {
     window.addEventListener("cep-domain-data-updated", onDomainUpdate);
     return () => window.removeEventListener("cep-domain-data-updated", onDomainUpdate);
   }, [domainPack.id]);
+
+  useEffect(() => {
+    if (pendingActions.funding?.status === "completed" && activeProfile?.profile?.accountFundingStatus === "unfunded") {
+      window.dispatchEvent(new Event("cep-domain-data-updated"));
+    }
+  }, [pendingActions.funding?.status, activeProfile?.profile?.accountFundingStatus]);
 
   useEffect(() => {
     if (adminChat) return;
@@ -485,6 +494,13 @@ function App() {
   const previewFunding = (source?: typeof pendingActionsContext) => {
     if (!configuration || !activeProfile) return;
     void exclusive(async () => {
+      if (pendingActions.funding?.status === "in_progress") {
+        const previous = await api.conversation(pendingActions.funding.conversationId);
+        if (previous.archivedAt === undefined) {
+          revealChat(previous);
+          return;
+        }
+      }
       const target = chat && !chat.turns.length && chat.scenarioId === configuration.defaultScenarioId
         ? chat : await createConversation(activeProfile.personaId, configuration.defaultScenarioId, domainPack.id);
       choose(target);
@@ -962,7 +978,7 @@ function App() {
         </div>
       )}
       <Chat key={draftKey} adminChat={adminChat} conversation={chat} configuration={configuration} activeProfile={activeProfile}
-        pendingActions={pendingActions} pending={pending} section={activeSection} pins={pins} progressHistory={progressHistory}
+        pendingActions={pendingActions} fundingExperienceId={fundingExperienceId} pending={pending} section={activeSection} pins={pins} progressHistory={progressHistory}
         domainPack={domainPack}
         onSelect={setSection} onPreviewFunding={previewFunding}
         onRestore={() => { if (chat) void changeConversation(chat.id, { operation: "restore" }); }}

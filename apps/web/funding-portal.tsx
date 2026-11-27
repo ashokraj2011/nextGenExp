@@ -6,6 +6,8 @@ import { saveProfileSession } from "./conversation-storage";
 import "./funding-portal.css";
 
 export function FundingPortal() {
+  const conversationId = new URLSearchParams(location.search).get("conversationId");
+  const backToChat = conversationId ? "/chat?" + new URLSearchParams({ conversationId }) : "/chat?view=overview";
   const [account, setAccount] = useState<PortalFundingView>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -14,11 +16,13 @@ export function FundingPortal() {
     let current = true;
     void api.portalFunding().then((view) => { if (current) setAccount(view); }, (cause) => {
       if (!current) return;
-      if (cause instanceof RequestError && cause.code === "profile_required") location.replace("/login?returnTo=funding");
+      if (cause instanceof RequestError && cause.code === "profile_required") {
+        location.replace("/login?" + new URLSearchParams({ returnTo: "funding", ...(conversationId && { conversationId }) }));
+      }
       else setError(toolSetupErrorMessage(cause));
     });
     return () => { current = false; };
-  }, [attempt]);
+  }, [attempt, conversationId]);
 
   async function confirm() {
     if (!account || busy) return;
@@ -59,6 +63,6 @@ export function FundingPortal() {
         setAccount(undefined); setError(""); setAttempt((value) => value + 1);
       }}>Reload account</button></div>}
     </section>
-    <a href="/chat?view=overview"><ArrowLeft size={16} aria-hidden="true" />Back to chat</a>
+    <a href={backToChat}><ArrowLeft size={16} aria-hidden="true" />Back to chat</a>
   </main>;
 }

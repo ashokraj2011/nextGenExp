@@ -46,6 +46,17 @@ export type WorkspacePendingAction = {
   action: { kind: "guide"; label: string; message: string } | { kind: "funding"; label: string };
 };
 
+export type WorkspaceFundingProgress =
+  | { status: "in_progress"; conversationId: string }
+  | { status: "completed"; conversationId?: string; confirmedAt?: number };
+
+export type WorkspaceActionState = {
+  funding: WorkspaceFundingProgress | null;
+  todos: WorkspacePendingAction[] | null;
+};
+
+export type WorkspaceTodoCommand = { operation: "save" | "remove"; contentId: string };
+
 export type WorkspaceActionLog = {
   id: string;
   personaId: string;

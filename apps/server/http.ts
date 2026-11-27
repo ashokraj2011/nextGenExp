@@ -124,7 +124,7 @@ import demo from "../../fixtures/host.json";
 import type { Bootstrap, Conversation, TurnView } from "../../packages/contracts/api";
 import type { SelectionMode } from "../../packages/contracts/domain";
 import { actionBody, conversationChangeBody, createBody, eventBody, folderCreateBody, folderRenameBody, folderUpdateBody, forkBody, idPattern, messageBody, previewFundingBody, retryBody } from "../../packages/contracts/http-inputs";
-import { accountPortalPath, pendingActionsContext, workspacePinsSchema, type PortalFundingView } from "../../packages/contracts/workspace";
+import { accountPortalPath, pendingActionsContext, workspacePinsSchema, type PortalFundingView, type WorkspaceActionState } from "../../packages/contracts/workspace";
 import { adminPaths, isAdminPath } from "../../packages/contracts/admin-paths";
 import { mockCcreRuleSchema, toolSetupSchema, treatmentPreviewSchema } from "../../packages/contracts/tool-setup";
 import { createDefaultTsAdapterFactory, createTreatmentSelectorRecommendationProvider, tsFixtures, type TsAdapterFactory } from "../../packages/ts-adapter";
@@ -915,6 +915,30 @@ export async function startApp(options: Options) {
       }
       if (operation === pendingActionsContext && method === "GET") {
         return json(res, await readWorkspacePendingActions(store, principalId, workspacePersona, portfolioSnapshots, inspectorEnabled, now(), recommendationRegistry));
+      }
+      if (operation === "action-state" && method === "GET") {
+        const conversationId = store.workspaceFundingConversation(principalId, personaId, viewer, Boolean(operator));
+        const fact = store.axe.fundingFact({ principalId, personaId });
+        const completed = fact || (conversationId && workspacePersona.accountFundingStatus === "funded");
+        return json(res, {
+          funding: completed ? { status: "completed", conversationId, confirmedAt: typeof fact === "object" ? fact.occurredAt : undefined }
+            : conversationId ? { status: "in_progress", conversationId } : null,
+          todos: selectedProfile === personaId ? store.workspaceTodos(personaId) : null,
+        } satisfies WorkspaceActionState);
+      }
+      if (operation === "todos" && method === "POST") {
+        if (selectedProfile !== personaId) throw new ApiError(403, "profile_required", "Sign in to manage your to-do list.");
+        const { operation: command, contentId } = await body(req, z.object({
+          operation: z.enum(["save", "remove"]), contentId: z.string().regex(idPattern),
+        }).strict());
+        if (command === "remove") store.removeWorkspaceTodo(personaId, contentId);
+        else if (!store.workspaceTodos(personaId).some((item) => item.contentId === contentId)) {
+          const items = await readWorkspacePendingActions(store, principalId, workspacePersona, portfolioSnapshots, inspectorEnabled, now(), recommendationRegistry);
+          const item = items.find((action) => action.contentId === contentId);
+          if (!item) throw new ApiError(409, "pending_action_unavailable", "This action is no longer available to save.");
+          store.saveWorkspaceTodo(personaId, item);
+        }
+        return json(res, store.workspaceTodos(personaId));
       }
       if (operation === "preferences" && method === "POST") {
         const { pins } = await body(req, z.object({ pins: workspacePinsSchema }).strict());

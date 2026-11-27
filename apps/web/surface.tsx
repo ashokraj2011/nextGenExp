@@ -21,6 +21,7 @@ import {
 import { DynamicCanvasBlock } from "./dynamic-canvas";
 import { PortfolioSnapshotBlock } from "./portfolio-snapshot";
 import { GoalProgressDetails } from "./goal-progress";
+import { DepositConfirmation } from "./workspace-actions";
 
 const RuleCreationBlock = lazy(() => import("./rule-creation-block").then(({ RuleCreationBlock }) => ({ default: RuleCreationBlock })));
 
@@ -290,24 +291,41 @@ function surfaceClass({ layout, theme, preview }: { layout?: string; theme?: str
 }
 
 function FundingPortalLink() {
-  const { enabled, preview } = useContext(SurfaceActions);
-  const { accountPortalAvailable } = useContext(ExperienceControls);
-  if (!enabled || preview || !accountPortalAvailable) return null;
-  return <a className="overview-action" href={accountPortalPath}>Open account portal <ArrowUpRight size={15} aria-hidden="true" /></a>;
+  const { enabled, preview, experienceId } = useContext(SurfaceActions);
+  const { accountFunding } = useContext(ExperienceControls);
+  if (preview || !accountFunding || accountFunding.completion) return null;
+  if (!enabled && !(experienceId === accountFunding.latestExperienceId && accountFunding.canResume)) return null;
+  const query = new URLSearchParams({ conversationId: accountFunding.conversationId });
+  return <a className="overview-action" href={accountPortalPath + "?" + query}>Open account portal <ArrowUpRight size={15} aria-hidden="true" /></a>;
+}
+
+function FundingCard({ title, note, children }: { title: string; note?: string; children: ReactNode }) {
+  const { completedFunding } = useContext(SurfaceActions);
+  return <section className="content-card" aria-label={title}>
+    <h3>{completedFunding ? "Account funding" : title}</h3>
+    {completedFunding ? <>
+      <div className="funding-receipt"><DepositConfirmation confirmedAt={completedFunding.confirmedAt} /></div>
+      <details className="inline-details funding-history">
+        <summary>View earlier {title.toLowerCase()}</summary>
+        {children}
+      </details>
+    </> : <>
+      {children}
+      <div className="content-footer">{note && <p className="disclosure">{note}</p>}<FundingPortalLink /></div>
+    </>}
+  </section>;
 }
 
 function FundingPreviewBlock({ amountCents, method }: FundingPreview) {
-  const { enabled, preview } = useContext(SurfaceActions);
-  return <section className="content-card" aria-label="Funding preview">
-    <h3>Funding preview</h3>
-    {!enabled && !preview && <p className="disclosure">Earlier preview</p>}
+  const { enabled, preview, completedFunding } = useContext(SurfaceActions);
+  return <FundingCard title="Funding preview" note="The preview ends at review.">
+    {!enabled && !preview && !completedFunding && <p className="disclosure">Earlier preview</p>}
     <p className="content-body">{formatPortfolioAmount(amountCents)} by {method.label.toLowerCase()}</p>
     <dl className="compare-grid">
       <div className="compare-column"><dt>From</dt><dd>{method.from}</dd></div>
       <div className="compare-column"><dt>To</dt><dd>{method.to}</dd></div>
     </dl>
-    <div className="content-footer"><p className="disclosure">The preview ends at review.</p><FundingPortalLink /></div>
-  </section>;
+  </FundingCard>;
 }
 
 function RetirementAccountsCard(view: z.infer<typeof retirementAccounts.schema>) {
@@ -330,8 +348,7 @@ function RetirementAccountsCard(view: z.infer<typeof retirementAccounts.schema>)
 }
 
 function FundingOptionsBlock({ methods }: FundingOptions) {
-  return <section className="content-card" aria-label="Funding options">
-    <h3>Funding options</h3>
+  return <FundingCard title="Funding options">
     <div className="compare-grid">
       {methods.map(({ methodId, label, from, to }) => <section key={methodId} className="compare-column">
         <h4>{label}</h4>
@@ -341,8 +358,7 @@ function FundingOptionsBlock({ methods }: FundingOptions) {
         </dl>
       </section>)}
     </div>
-    <div className="content-footer"><FundingPortalLink /></div>
-  </section>;
+  </FundingCard>;
 }
 
 function ChatPortfolio(props: z.infer<typeof portfolioSnapshot.schema>) {
@@ -455,7 +471,8 @@ function ContentBlock({ block, form }: { block: DisplayBlock; form?: { experienc
 }
 
 function Introduction({ intro, question, partial }: { intro: string; question: string | null; partial: boolean }) {
-  const { balanceComparison } = useContext(SurfaceActions);
+  const { balanceComparison, completedFunding } = useContext(SurfaceActions);
+  if (completedFunding) return null;
   const genericComparisonIntro = /^(?:(?:Hi [^,]+,|Thanks for asking, [^—]+ —)\s*)?here[’']s (?:how the terms compare|a comparison)\.$/i;
   const showIntro = !balanceComparison || !genericComparisonIntro.test(intro.trim());
   return <>
@@ -475,7 +492,8 @@ function SurfaceFollowUps({ children }: { children: ReactNode[] }) {
 }
 
 const SurfaceActions = createContext({
-  enabled: false, preview: false, pendingPortfolio: false,
+  enabled: false, preview: false, pendingPortfolio: false, experienceId: "",
+  completedFunding: undefined as { confirmedAt?: number } | undefined,
   balanceComparison: false, hiddenActionComponents: [] as string[],
 });
 const pznCatalog = new Catalog<ReactCatalogComponent>(PZN_CATALOG_ID, "1.0", [
@@ -602,7 +620,12 @@ class SurfaceBoundary extends Component<{ children: ReactNode; fallback: ReactNo
   render() { return this.state.fallback ? this.props.fallback : this.props.children; }
 }
 type SurfaceControls = {
-  accountPortalAvailable?: boolean;
+  accountFunding?: {
+    conversationId: string;
+    latestExperienceId?: string;
+    canResume: boolean;
+    completion?: { confirmedAt?: number };
+  };
   activeExperienceId?: string;
   allowRuleCreation?: boolean;
   simplifyBalanceComparison?: boolean;
@@ -654,6 +677,8 @@ function ExperiencePart({ data, preview = false }: { data: ChatSurface; preview?
     return () => clearTimeout(timer);
   }, [expiresAt]);
   const enabled = !preview && controls.activeExperienceId === experienceId && !expired;
+  const completedFunding = !preview && controls.accountFunding?.latestExperienceId === experienceId
+    ? controls.accountFunding.completion : undefined;
   const [block] = data.blocks;
   const balanceComparison = Boolean(controls.simplifyBalanceComparison && !preview && !data.layout && !data.theme
     && data.blocks.length === 1 && block?.component === comparison.name
@@ -662,7 +687,7 @@ function ExperiencePart({ data, preview = false }: { data: ChatSurface; preview?
   const hiddenActionComponents = balanceComparison
     ? data.actions.filter(({ label }) => label === "Compare balance terms").map(({ componentId }) => componentId)
     : [];
-  return <SurfaceActions.Provider value={{ enabled, preview, pendingPortfolio: Boolean(data.previewTurnId), balanceComparison, hiddenActionComponents }}>
+  return <SurfaceActions.Provider value={{ enabled, preview, experienceId, completedFunding, pendingPortfolio: Boolean(data.previewTurnId), balanceComparison, hiddenActionComponents }}>
     <LiveSimulationProvider>
       <SurfaceBoundary key={experienceId} fallback={<CanonicalFallback experience={data} enabled={enabled} />}>
         <MountedSurface id={experienceId} input={messages[0]}
