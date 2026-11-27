@@ -17,6 +17,8 @@ import { applyMockCcreRules, matchesCondition } from "./mock-ccre";
 import { scoreContexts } from "./propensity";
 import { normalizeRecommendations, type Recommendation, type TreatmentV3 } from "./recommendations";
 import { getActiveSelfServicePznProvider, pznTextContentToCatalogEntry } from "../recommendations/self-service-engine";
+import { createTreatmentSelectorProvider } from "../recommendations";
+import type { RecommendationEligibilityScope, RecommendationProvider } from "../contracts/recommendation-provider";
 import agenticRecommendations from "../../fixtures/agentic-recommendations.json";
 
 const rejectionSchema = z.object({
@@ -230,6 +232,95 @@ export function createDefaultTsAdapterFactory(env: NodeJS.ProcessEnv = process.e
     });
   }
   return createFixtureTsAdapterFactory();
+}
+
+function scopeToTsContext(scope: RecommendationEligibilityScope): TsAdapterContext {
+  return {
+    state: {
+      scenarioId: scope.scenarioId ?? host.defaultScenarioId,
+      ordinal: scope.ordinal ?? 1,
+    },
+    overrides: scope.overrides as readonly TreatmentOverride[] | undefined,
+    ccreRules: scope.ccreRules as readonly MockCcreRule[] | undefined,
+    portfolios: scope.portfolios as PortfolioSnapshotProvider | undefined,
+    funding: scope.funding as FundingFact | undefined,
+  };
+}
+
+/**
+ * Exposes Treatment Selector (local fixture mock OR remote HTTP endpoint) as a standard,
+ * optional RecommendationProvider — one provider among many, never special-cased by CEP.
+ */
+export function createTreatmentSelectorRecommendationProvider(
+  factory: TsAdapterFactory = createDefaultTsAdapterFactory(),
+): RecommendationProvider {
+  const base = createTreatmentSelectorProvider((mid, contextId, signal) =>
+    factory({ state: { scenarioId: host.defaultScenarioId, ordinal: 1 } })
+      .selectEligibleContent({ mid, context: contextId }, signal),
+  );
+  return {
+    ...base,
+    listContexts: (scope, signal) => factory(scopeToTsContext(scope)).listContexts(signal),
+    scoreContexts: (scope, request, signal) => factory(scopeToTsContext(scope)).getContextScores(request, signal),
+    selectEligible: (scope, request, signal) => factory(scopeToTsContext(scope)).selectEligibleContent(request, signal),
+    selectRecommendations: (scope, request, signal) => factory(scopeToTsContext(scope)).selectRecommendations(request, signal),
+  };
+}
+
+/**
+ * Adapts any optional RecommendationProvider (or `undefined` when no recommendation provider
+ * is configured) to the eligibility/discovery contract. When no provider is installed, returns
+ * empty contexts/scores/recommendations cleanly without failing.
+ */
+export function adapterFromRecommendationProvider(
+  provider: RecommendationProvider | undefined,
+  ctx: TsAdapterContext,
+): TsAdapter {
+  const scope: RecommendationEligibilityScope = {
+    scenarioId: ctx.state.scenarioId,
+    ordinal: ctx.state.ordinal,
+    overrides: ctx.overrides,
+    ccreRules: ctx.ccreRules,
+    portfolios: ctx.portfolios,
+    funding: ctx.funding,
+  };
+  const emptySelection = (): TreatmentSelectionResult => ({
+    contentIds: [],
+    portfolio: null,
+    workflowMatches: [],
+    actionMatches: [],
+    recommendations: { schemaVersion: "2.0", recommendations: [] },
+    decision: { schemaVersion: "2.1", recommendations: [] },
+  });
+  return {
+    async listContexts(signal) {
+      if (provider?.listContexts) return await provider.listContexts(scope, signal) as ContextCatalog;
+      return { ...catalog, contexts: [] };
+    },
+    async getContextScores(request, signal) {
+      if (provider?.scoreContexts) return await provider.scoreContexts(scope, request, signal) as PropensityResult;
+      return { scores: [] } as unknown as PropensityResult;
+    },
+    async getRankedEligibleIds(request, signal) {
+      return (await this.selectEligibleContent(request, signal)).contentIds;
+    },
+    async selectEligibleContent(request, signal) {
+      if (provider?.selectEligible) {
+        return await provider.selectEligible(scope, request, signal) as TreatmentSelectionResult;
+      }
+      return emptySelection();
+    },
+    async selectRecommendations(request, signal) {
+      if (provider?.selectRecommendations) {
+        return await provider.selectRecommendations(scope, request, signal) as TreatmentRecommendationsResult;
+      }
+      const selection = await this.selectEligibleContent(request, signal);
+      return {
+        ...selection,
+        response: { schemaVersion: "3.0", recommendations: normalizeRecommendations(selection.decision) },
+      };
+    },
+  };
 }
 
 function fixtureRuleFor(state: FixtureState, context: string) {

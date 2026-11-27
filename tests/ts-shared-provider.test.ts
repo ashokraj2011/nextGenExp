@@ -7,7 +7,7 @@ import test from "node:test";
 import { startApp } from "../apps/server/http";
 import { sfieldTools } from "../packages/contracts/tool-setup";
 import { createTreatmentSelectorProvider, RecommendationArbitrator } from "../packages/recommendations";
-import { createDefaultTsAdapterFactory, createRemoteTsAdapterFactory, RemoteTsAdapter } from "../packages/ts-adapter";
+import { createDefaultTsAdapterFactory, createRemoteTsAdapterFactory, createTreatmentSelectorRecommendationProvider, RemoteTsAdapter } from "../packages/ts-adapter";
 
 test("TS is categorized as a recommendation_provider tool and apps/server has zero direct FixtureTsAdapter instantiations", async () => {
   assert.equal(sfieldTools.selection.category, "recommendation_provider");
@@ -83,7 +83,8 @@ test("Shared RemoteTsAdapterFactory delivers identical decisions for Marcus acro
     port: 0,
     operatorAuth: "off",
     startScheduledJobs: false,
-    tsAdapterFactory: createRemoteTsAdapterFactory({ endpoint }),
+    tsAdapterFactory: undefined,
+    recommendationProviders: [createTreatmentSelectorRecommendationProvider(createRemoteTsAdapterFactory({ endpoint }))],
   });
 
   try {
@@ -126,5 +127,97 @@ test("Shared RemoteTsAdapterFactory delivers identical decisions for Marcus acro
     await app.close();
     await new Promise<void>((resolve) => mockRemoteTs.close(() => resolve()));
     await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("CEP runs cleanly with ZERO recommendation providers (no TS installed) and with a custom non-TS RecommendationProvider", async () => {
+  // 1. Zero recommendation providers (no TS at all)
+  const emptyDataDir = await mkdtemp(join(tmpdir(), "cep-no-rec-"));
+  const emptyApp = await startApp({
+    dataDir: emptyDataDir,
+    projectRoot: process.cwd(),
+    gateway: null,
+    port: 0,
+    operatorAuth: "off",
+    startScheduledJobs: false,
+    recommendationProviders: [],
+  });
+  try {
+    const pendingRes = await fetch(`${emptyApp.url}/api/workspace/demo-new-account/pending-actions`);
+    assert.equal(pendingRes.status, 200);
+    assert.deepEqual(await pendingRes.json(), []);
+
+    const previewRes = await fetch(`${emptyApp.url}/api/admin/treatment-preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scenarioId: "normal",
+        contextId: "pending-actions",
+        personaId: "demo-new-account",
+        ordinal: 1,
+        enabled: true,
+        output: null,
+        ccreRules: [],
+      }),
+    });
+    assert.equal(previewRes.status, 200);
+    assert.deepEqual(await previewRes.json(), { status: "disabled" });
+  } finally {
+    await emptyApp.close();
+    await rm(emptyDataDir, { recursive: true, force: true });
+  }
+
+  // 2. Custom non-TS RecommendationProvider (no TS adapter involved)
+  const customDataDir = await mkdtemp(join(tmpdir(), "cep-custom-rec-"));
+  const customApp = await startApp({
+    dataDir: customDataDir,
+    projectRoot: process.cwd(),
+    gateway: null,
+    port: 0,
+    operatorAuth: "off",
+    startScheduledJobs: false,
+    recommendationProviders: [{
+      id: "custom_ml_ranker",
+      label: "Custom ML Ranker",
+      description: "Arbitrary custom recommendation provider without Treatment Selector.",
+      domains: ["wealth"],
+      async evaluate() {
+        return [{
+          id: "ml:beneficiary_update",
+          providerId: "custom_ml_ranker",
+          providerLabel: "Custom ML Ranker",
+          kind: "content",
+          priority: 1,
+          title: "Review beneficiaries",
+          contentId: "beneficiary_update",
+        }];
+      },
+      async selectEligible() {
+        return {
+          contentIds: ["beneficiary_update"],
+          portfolio: null,
+          workflowMatches: [],
+          actionMatches: [],
+          recommendations: {
+            schemaVersion: "2.0",
+            recommendations: [{ kind: "content", id: "beneficiary_update" }],
+          },
+          decision: {
+            schemaVersion: "2.1",
+            recommendations: [{ kind: "content", id: "beneficiary_update" }],
+          },
+        };
+      },
+    }],
+  });
+  try {
+    const pendingRes = await fetch(`${customApp.url}/api/workspace/demo-new-account/pending-actions`);
+    assert.equal(pendingRes.status, 200);
+    const pending = await pendingRes.json() as Array<{ contentId: string }>;
+    assert.equal(pending.length, 1);
+    assert.equal(pending[0].contentId, "beneficiary_update");
+  } finally {
+    await customApp.close();
+    await rm(customDataDir, { recursive: true, force: true });
   }
 });

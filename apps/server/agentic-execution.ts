@@ -8,7 +8,8 @@ import type { PortfolioSnapshotProvider } from "../../packages/portfolio-snapsho
 import type { GoalProgressProvider } from "../../packages/goal-progress";
 import { makeId } from "../../packages/experience/compile";
 import { Rejected, requireCheck } from "../../packages/experience/verify";
-import { createDefaultTsAdapterFactory, type TsAdapter, type TsAdapterFactory } from "../../packages/ts-adapter";
+import { adapterFromRecommendationProvider, createTreatmentSelectorRecommendationProvider, type TsAdapter } from "../../packages/ts-adapter";
+import { RecommendationProviderRegistry } from "../../packages/recommendations";
 import { normalizeRecommendations } from "../../packages/ts-adapter/recommendations";
 import { formatPortfolioAmount } from "../../packages/contracts/portfolio";
 import { capabilityTools, type CapabilityTool } from "../../packages/capabilities";
@@ -86,7 +87,7 @@ export class AgenticExecution {
   constructor(
     readonly store: Store, readonly sf: () => SField, readonly now: () => number, readonly current: (turnId: string) => TurnRecord,
     private readonly portfolios: PortfolioSnapshotProvider, private readonly goals: GoalProgressProvider, readonly budget: ExecutionBudget,
-    private readonly tsAdapterFactory: TsAdapterFactory = createDefaultTsAdapterFactory(),
+    private readonly recommendationRegistry: RecommendationProviderRegistry = new RecommendationProviderRegistry([createTreatmentSelectorRecommendationProvider()]),
   ) {
     this.registry = new CapabilityRegistry(store);
     this.world = new CustomerWorldModel(store, now);
@@ -101,13 +102,16 @@ export class AgenticExecution {
 
   adapter(turn: TurnRecord): TsAdapter {
     const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
-    return this.tsAdapterFactory({
-      state: { scenarioId: conversation.scenarioId, ordinal: turn.ordinal },
-      overrides: turn.toolSetup?.treatmentOverrides,
-      ccreRules: turn.toolSetup?.ccreRules,
-      portfolios: this.portfolios,
-      funding: this.store.axe.fundingFact(turn.scope),
-    });
+    return adapterFromRecommendationProvider(
+      this.recommendationRegistry.primaryEligibilityProvider("wealth"),
+      {
+        state: { scenarioId: conversation.scenarioId, ordinal: turn.ordinal },
+        overrides: turn.toolSetup?.treatmentOverrides,
+        ccreRules: turn.toolSetup?.ccreRules,
+        portfolios: this.portfolios,
+        funding: this.store.axe.fundingFact(turn.scope),
+      },
+    );
   }
 
   trace(turn: TurnRecord, runId: string, type: string, detail?: unknown, journeyId?: string) {

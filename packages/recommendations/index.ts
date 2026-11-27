@@ -242,3 +242,44 @@ export class RecommendationArbitrator {
     };
   }
 }
+
+/**
+ * Domain-agnostic registry of optional RecommendationProviders.
+ * A deployment may register zero, one, or many providers (e.g. Treatment Selector,
+ * Customer 360 NBA, IT Ops Runbooks, Sales Deal Desk, or external REST/MCP services).
+ * Core CEP routes never assume any specific provider (such as TS) is installed.
+ */
+export class RecommendationProviderRegistry {
+  private readonly providers: RecommendationProvider[];
+
+  constructor(providers: readonly RecommendationProvider[] = []) {
+    this.providers = [...providers];
+  }
+
+  list(): RecommendationProvider[] {
+    return [...this.providers];
+  }
+
+  get(id: string): RecommendationProvider | undefined {
+    return this.providers.find((provider) => provider.id === id);
+  }
+
+  has(id: string): boolean {
+    return this.providers.some((provider) => provider.id === id);
+  }
+
+  /**
+   * Returns the first registered provider supporting rich eligibility selection
+   * (optionally filtered by domain), or `undefined` if none is configured.
+   */
+  primaryEligibilityProvider(domain?: RecommendationProvider["domains"][number]): RecommendationProvider | undefined {
+    return this.providers.find((provider) =>
+      typeof provider.selectEligible === "function"
+      && (!domain || provider.domains.includes(domain)),
+    );
+  }
+
+  descriptors(): RecommendationProviderDescriptor[] {
+    return new RecommendationArbitrator(this.providers).descriptors();
+  }
+}

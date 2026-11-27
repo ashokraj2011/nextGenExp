@@ -32,7 +32,8 @@ import { compileDynamicCanvas, makeId } from "../../../packages/experience/compi
 import type { ExperienceRegistryStore } from "../../../packages/experience-registry";
 import type { GoalProgressProvider } from "../../../packages/goal-progress";
 import type { PortfolioSnapshotProvider } from "../../../packages/portfolio-snapshot";
-import { activeContexts, type TsAdapterFactory } from "../../../packages/ts-adapter";
+import { activeContexts } from "../../../packages/ts-adapter";
+import type { RecommendationProviderRegistry } from "../../../packages/recommendations";
 import type { ApprovalStore } from "../approval-store";
 import type { CapabilityRegistry } from "../capability-registry";
 import type { ConnectorStore } from "../connector-store";
@@ -91,7 +92,7 @@ export interface AdminStudioRouteDeps {
   };
   portfolioSnapshots: PortfolioSnapshotProvider;
   goalProgressProvider: GoalProgressProvider;
-  tsAdapterFactory: TsAdapterFactory;
+  recommendationRegistry: RecommendationProviderRegistry;
   opsStore: OpsIncidentStore;
   salesStore: SalesDealStore;
   profileStore: CustomerProfileStore;
@@ -128,7 +129,7 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
   const {
     req, res, url, origin, resource, id, operation, method, principalId, viewer, inspectorEnabled,
     store, runtime, gateway, dataDir, experience, registry, membership, portfolioSnapshots,
-    goalProgressProvider, tsAdapterFactory, opsStore, salesStore, profileStore, customer360, experienceRegistry,
+    goalProgressProvider, recommendationRegistry, opsStore, salesStore, profileStore, customer360, experienceRegistry,
     widgetLibrary, widgetLibraries, omnichannelStore, evalRunner, uxEvolution, tradeStore,
     approvalStore, connectorStore, workflowEngine, writeAudit, mcpExposure, integrationService,
     knowledgeBase, scheduledJobs, verticalFactory, piiFirewall, now, json, body,
@@ -409,7 +410,7 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
   if (id === "treatment-preview" && method === "POST") {
     const input = await body(req, treatmentPreviewSchema, toolSetupLimit);
     const funding = store.axe.fundingFact({ principalId, personaId: input.personaId });
-    json(res, await previewTreatmentSelector(input, portfolioSnapshots, funding, tsAdapterFactory));
+    json(res, await previewTreatmentSelector(input, portfolioSnapshots, funding, recommendationRegistry));
     return true;
   }
   if (id === "ccre-rules" && method === "POST") {

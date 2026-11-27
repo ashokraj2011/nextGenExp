@@ -12,7 +12,8 @@ import { contentCatalog } from "../../packages/experience/content";
 import { builtInContentById, getEffectiveContentEntries } from "../../packages/experience-registry/registry";
 import type { PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import { mockRuleGlossary } from "../../packages/rule-glossary";
-import { createDefaultTsAdapterFactory, fixtureEligibleSets, type FundingFact, scenariosById, treatmentContexts, TreatmentSelectorTimeout, type TsAdapterFactory, tsFixtures } from "../../packages/ts-adapter";
+import { adapterFromRecommendationProvider, createTreatmentSelectorRecommendationProvider, fixtureEligibleSets, type FundingFact, scenariosById, treatmentContexts, TreatmentSelectorTimeout, tsFixtures } from "../../packages/ts-adapter";
+import { RecommendationProviderRegistry } from "../../packages/recommendations";
 import { ApiError } from "./store";
 
 const fixtureIds = new Set(fixtureEligibleSets.flat());
@@ -100,7 +101,7 @@ export async function previewTreatmentSelector(
   input: TreatmentPreviewInput,
   portfolios?: PortfolioSnapshotProvider,
   funding?: FundingFact,
-  tsAdapterFactory: TsAdapterFactory = createDefaultTsAdapterFactory(),
+  recommendationRegistry: RecommendationProviderRegistry = new RecommendationProviderRegistry([createTreatmentSelectorRecommendationProvider()]),
 ): Promise<TreatmentPreview> {
   const { scenarioId, contextId, personaId, ordinal, enabled, output, ccreRules = [] } = input;
   validateMock(scenarioId, contextId, output);
@@ -113,8 +114,10 @@ export async function previewTreatmentSelector(
   const persona = findProfileById(personaId);
   if (!persona || !persona.allowedScenarios.includes(scenarioId)) throw new ApiError(400, "invalid_mock_persona", "Choose a demo persona allowed for this scenario.");
   if (!enabled) return { status: "disabled" };
+  const provider = recommendationRegistry.primaryEligibilityProvider("wealth");
+  if (!provider) return { status: "disabled" };
   const source = output ? "override" : "fixture";
-  const adapter = tsAdapterFactory({
+  const adapter = adapterFromRecommendationProvider(provider, {
     state: { scenarioId, ordinal },
     overrides: output ? [{ scenarioId, contextId, output }] : [],
     ccreRules,

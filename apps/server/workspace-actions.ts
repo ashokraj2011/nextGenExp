@@ -5,19 +5,22 @@ import { pendingActionsContext, type WorkspaceActionLog, type WorkspacePendingAc
 import { makeId } from "../../packages/experience/compile";
 import { lookupContent } from "../../packages/experience/content";
 import type { PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
-import { createDefaultTsAdapterFactory, TreatmentSelectorTimeout, type TreatmentSelectionResult, type TsAdapterFactory } from "../../packages/ts-adapter";
+import { adapterFromRecommendationProvider, createTreatmentSelectorRecommendationProvider, TreatmentSelectorTimeout, type TreatmentSelectionResult } from "../../packages/ts-adapter";
+import { RecommendationProviderRegistry } from "../../packages/recommendations";
 import { nextStepRecommendation } from "./funding-offer";
 import { ApiError, type Store } from "./store";
 
 export async function readWorkspacePendingActions(
   store: Store, principalId: string, persona: Pick<PersonaRecord, "personaId" | "syntheticMid">,
   portfolios: PortfolioSnapshotProvider, inspection: boolean, now: number,
-  tsAdapterFactory: TsAdapterFactory = createDefaultTsAdapterFactory(),
+  recommendationRegistry: RecommendationProviderRegistry = new RecommendationProviderRegistry([createTreatmentSelectorRecommendationProvider()]),
 ): Promise<WorkspacePendingAction[]> {
   const { personaId, syntheticMid } = persona;
   const setup = store.toolSetup("wealth");
   if (!setup.enabled.selection) throw new ApiError(503, "selection_disabled", "Pending actions are unavailable.");
-  const adapter = tsAdapterFactory({
+  const provider = recommendationRegistry.primaryEligibilityProvider("wealth");
+  if (!provider) return [];
+  const adapter = adapterFromRecommendationProvider(provider, {
     state: { scenarioId: host.defaultScenarioId, ordinal: 1 },
     overrides: setup.treatmentOverrides,
     ccreRules: setup.ccreRules,

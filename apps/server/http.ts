@@ -127,7 +127,9 @@ import { actionBody, conversationChangeBody, createBody, eventBody, folderCreate
 import { accountPortalPath, pendingActionsContext, workspacePinsSchema, type PortalFundingView } from "../../packages/contracts/workspace";
 import { adminPaths, isAdminPath } from "../../packages/contracts/admin-paths";
 import { mockCcreRuleSchema, toolSetupSchema, treatmentPreviewSchema } from "../../packages/contracts/tool-setup";
-import { createDefaultTsAdapterFactory, tsFixtures, type TsAdapterFactory } from "../../packages/ts-adapter";
+import { createDefaultTsAdapterFactory, createTreatmentSelectorRecommendationProvider, tsFixtures, type TsAdapterFactory } from "../../packages/ts-adapter";
+import type { RecommendationProvider } from "../../packages/contracts/recommendation-provider";
+import { RecommendationProviderRegistry } from "../../packages/recommendations";
 import { fixturePortfolioHistory, fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import { fixtureGoalProgressProvider, type GoalProgressProvider } from "../../packages/goal-progress";
 import type { GatewaySettings } from "./gateway";
@@ -160,6 +162,13 @@ type Options = {
   inspectorEnabled?: boolean;
   portfolioSnapshots?: PortfolioSnapshotProvider;
   goalProgressProvider?: GoalProgressProvider;
+  /**
+   * Optional pluggable RecommendationProviders (e.g. Treatment Selector, custom REST/MCP
+   * recommenders, or `[]` to run CEP without any built-in TS provider).
+   * When omitted, registers the default Treatment Selector provider.
+   */
+  recommendationProviders?: RecommendationProvider[];
+  /** @deprecated Prefer `recommendationProviders: [createTreatmentSelectorRecommendationProvider(factory)]`. */
   tsAdapterFactory?: TsAdapterFactory;
   goalBudget?: ExecutionBudget;
 };
@@ -261,7 +270,11 @@ export async function startApp(options: Options) {
   const sessionPattern = new RegExp("(?:^|;\\s*)" + sessionCookie + "=(local_[a-f0-9]{32})(?:;|$)");
   const portfolioSnapshots = options.portfolioSnapshots ?? fixturePortfolioSnapshotProvider;
   const goalProgressProvider = options.goalProgressProvider ?? fixtureGoalProgressProvider;
-  const tsAdapterFactory = options.tsAdapterFactory ?? createDefaultTsAdapterFactory();
+  const recommendationRegistry = new RecommendationProviderRegistry(
+    options.recommendationProviders ?? [
+      createTreatmentSelectorRecommendationProvider(options.tsAdapterFactory ?? createDefaultTsAdapterFactory()),
+    ],
+  );
   async function loadBootstrapPersonas(principalId: string, allowed: (id: string) => boolean, selected?: string): Promise<Bootstrap["personas"]> {
     return Promise.all(profileStore.list().filter(({ personaId }) => allowed(personaId)).map(async ({
       personaId, displayName, allowedScenarios, beneficiaryStatus, accountFundingStatus, syntheticMid, notes,
@@ -383,7 +396,7 @@ export async function startApp(options: Options) {
   try {
     runtime = options.gateway
       ? await Runtime.open(store, sfieldPath, options.gateway, now, inspectorEnabled, portfolioSnapshots, goalProgressProvider, options.goalBudget, {
-          customer360, opsStore, salesStore, profileStore, writeAudit, connectorStore, selfServicePzn, approvalStore, integrationTasks, piiFirewall, telemetry, tsAdapterFactory,
+          customer360, opsStore, salesStore, profileStore, writeAudit, connectorStore, selfServicePzn, approvalStore, integrationTasks, piiFirewall, telemetry, recommendationRegistry,
         })
       : null;
     await offline?.init({ namespace: sfieldNamespace, ownerId: newId("owner") });
@@ -900,7 +913,7 @@ export async function startApp(options: Options) {
         return json(res, await runtime?.workspaceNextStep(principalId, personaId) ?? null);
       }
       if (operation === pendingActionsContext && method === "GET") {
-        return json(res, await readWorkspacePendingActions(store, principalId, workspacePersona, portfolioSnapshots, inspectorEnabled, now(), tsAdapterFactory));
+        return json(res, await readWorkspacePendingActions(store, principalId, workspacePersona, portfolioSnapshots, inspectorEnabled, now(), recommendationRegistry));
       }
       if (operation === "preferences" && method === "POST") {
         const { pins } = await body(req, z.object({ pins: workspacePinsSchema }).strict());
@@ -1000,7 +1013,7 @@ export async function startApp(options: Options) {
     if (await handleAdminStudioRoutes({
       req, res, url, origin, resource, id, operation, method, principalId, viewer, inspectorEnabled,
       store, runtime, gateway: options.gateway ?? null, dataDir: options.dataDir, experience,
-      registry, membership, portfolioSnapshots, goalProgressProvider, tsAdapterFactory, opsStore, salesStore,
+      registry, membership, portfolioSnapshots, goalProgressProvider, recommendationRegistry, opsStore, salesStore,
       profileStore, customer360, experienceRegistry, widgetLibrary, widgetLibraries,
       omnichannelStore, evalRunner, uxEvolution, tradeStore, approvalStore, connectorStore,
       workflowEngine, writeAudit, mcpExposure, integrationService, knowledgeBase, scheduledJobs,

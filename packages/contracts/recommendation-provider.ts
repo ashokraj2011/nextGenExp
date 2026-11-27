@@ -153,6 +153,22 @@ export interface RecommendationProviderContext {
   existingBlockTitles?: string[];
 }
 
+export interface RecommendationEligibilityScope {
+  scenarioId?: string;
+  ordinal?: number;
+  overrides?: readonly unknown[];
+  ccreRules?: readonly unknown[];
+  portfolios?: unknown;
+  funding?: unknown;
+}
+
+export interface RecommendationEligibilityRequest {
+  mid: string;
+  context: string;
+  accountId?: string;
+  overrideCashCents?: number;
+}
+
 export interface RecommendationProvider {
   readonly id: string;
   readonly label: string;
@@ -160,4 +176,12 @@ export interface RecommendationProvider {
   readonly domains: RecommendationDomain[];
   readonly toolRef?: string;
   evaluate(ctx: RecommendationProviderContext, signal: AbortSignal): Promise<NormalizedRecommendation[]>;
+  /** Optional: list placement/topic contexts this recommendation provider supports. */
+  listContexts?(scope: RecommendationEligibilityScope, signal?: AbortSignal): Promise<unknown>;
+  /** Optional: score topic/context propensity for a customer identifier. */
+  scoreContexts?(scope: RecommendationEligibilityScope, request: { mid: string; contextIds: string[] }, signal?: AbortSignal): Promise<unknown>;
+  /** Optional: return detailed eligibility & workflow selection for surfaces like Pending Actions, Chat, or Admin preview. */
+  selectEligible?(scope: RecommendationEligibilityScope, request: RecommendationEligibilityRequest, signal?: AbortSignal): Promise<unknown>;
+  /** Optional: return normalized v3 recommendations for multi-step agentic execution. */
+  selectRecommendations?(scope: RecommendationEligibilityScope, request: RecommendationEligibilityRequest, signal?: AbortSignal): Promise<unknown>;
 }
