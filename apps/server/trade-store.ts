@@ -49,6 +49,17 @@ const NAME_TO_SYMBOL: [RegExp, string][] = [
   [/\b(pfizer|pfe)\b/i, "PFE"],
 ];
 
+export function parseStockPositionPrompt(prompt: string): string | undefined {
+  const message = prompt.trim();
+  const selection = message.match(/^Show details and analysis for (\S+) · /)?.[1]
+    ?? message.match(/^Show full details for (\S+) in my portfolio$/)?.[1]
+    ?? message.match(/^(?:show|view) my (.+?) (?:stock )?(?:position|holding)[.!?]?$/i)?.[1];
+  if (!selection) return undefined;
+  const ticker = selection.startsWith("$") ? selection.slice(1).toUpperCase() : selection;
+  if (ticker.length <= 12 && /^[A-Z][A-Z0-9]*(?:[.-][A-Z0-9]+)*$/.test(ticker)) return ticker;
+  return NAME_TO_SYMBOL.find(([alias]) => alias.exec(selection)?.[0] === selection)?.[1];
+}
+
 export interface ParsedStockTradePrompt {
   side: TradeSide;
   symbol: string;

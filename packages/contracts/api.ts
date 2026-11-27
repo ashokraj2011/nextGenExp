@@ -114,6 +114,7 @@ export type SemanticRouteTrace = {
   method: "llm_semantic" | "deterministic";
   confidence: number;
   reasoning: string;
+  extractedParams?: { symbol: string };
 };
 import type { EmotionalAssessment } from "./empathy";
 export type LiveHarnessStage = {

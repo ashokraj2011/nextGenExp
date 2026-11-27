@@ -6,6 +6,7 @@
 import type { ActionFlow } from "../../../packages/contracts/action-flow";
 import type { SemanticRouteDecision } from "../../../packages/contracts/capabilities-catalog";
 import type { DynamicCanvasNode, DynamicCanvasProps } from "../../../packages/contracts/dynamic-canvas";
+import type { PortfolioBalanceSnapshot } from "../../../packages/contracts/trading";
 import type { ApprovalStore } from "../approval-store";
 import type { ConnectorStore } from "../connector-store";
 import { connectorInvokeToolRef, domainWriteToolRef } from "../runtime";
@@ -371,12 +372,61 @@ export function buildStockTradeCanvas(
   };
 }
 
+function buildStockPositionCanvas(snapshot: PortfolioBalanceSnapshot, symbol: string, prompt: string): { intro: string; canvas: DynamicCanvasProps } {
+  const holding = snapshot.holdings.find((item) => item.symbol === symbol && item.shares > 0);
+  const base = {
+    badge: "Stock position",
+    generatedBy: "synthesizer" as const,
+    dataSource: "Portfolio holdings",
+    recordId: symbol,
+    prompt: prompt.slice(0, 600),
+    disclaimer: "Values use the prices recorded in your portfolio snapshot.",
+  };
+  if (!holding) return {
+    intro: `Your portfolio has no active ${symbol} position.`,
+    canvas: {
+      ...base,
+      title: `${symbol} position`,
+      nodes: [{ type: "callout", tone: "info", body: "Ask to see all your stocks for the list of current positions." }],
+    },
+  };
+
+  const costCents = holding.shares * holding.avgCostCents;
+  const marketCents = holding.shares * holding.priceCents;
+  const unrealizedCents = marketCents - costCents;
+  const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+  const signedMoney = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", signDisplay: "exceptZero" });
+  const unrealizedPercent = costCents > 0 ? new Intl.NumberFormat("en-US", {
+    style: "percent", signDisplay: "exceptZero", maximumFractionDigits: 2,
+  }).format(unrealizedCents / costCents) : undefined;
+  const allocation = snapshot.totalCents > 0 ? new Intl.NumberFormat("en-US", {
+    style: "percent", maximumFractionDigits: 1,
+  }).format(marketCents / snapshot.totalCents) : undefined;
+
+  return {
+    intro: allocation ? `${symbol} makes up **${allocation}** of your portfolio value.` : `Here’s your ${symbol} position.`,
+    canvas: {
+      ...base,
+      title: `${symbol} · ${holding.name}`,
+      subtitle: `${holding.sector} · ${holding.holdingPeriod === "long_term" ? "Long-term holding" : "Short-term holding"}`,
+      nodes: [{ type: "metrics", items: [
+        { label: "Shares held", value: holding.shares.toLocaleString("en-US") },
+        { label: "Position value", value: money.format(marketCents / 100), delta: `${money.format(holding.priceCents / 100)} per share` },
+        { label: "Total cost basis", value: money.format(costCents / 100), delta: `${money.format(holding.avgCostCents / 100)} average per share` },
+        { label: "Unrealized gain or loss", value: signedMoney.format(unrealizedCents / 100), delta: unrealizedPercent },
+      ] }],
+    },
+  };
+}
+
 export function buildStockHoldingsCanvas(
   tradeStore: TradeStore,
   personaId: string,
   prompt: string,
+  symbol?: string,
 ): { intro: string; canvas: DynamicCanvasProps } {
   const snapshot = tradeStore.snapshotFor(personaId);
+  if (symbol) return buildStockPositionCanvas(snapshot, symbol, prompt);
   const usd = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const activeHoldings = snapshot.holdings.filter((h) => h.shares > 0);
   const marketTotalCents = activeHoldings.reduce((sum, h) => sum + h.shares * h.priceCents, 0);

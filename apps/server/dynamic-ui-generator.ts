@@ -15,7 +15,7 @@ import type { TradeDraftState, TradeLegInput } from "../../packages/contracts/tr
 import type { ConnectorStore } from "./connector-store";
 import type { ApprovalStore } from "./approval-store";
 import type { ActionFlowStore } from "./action-flow-store";
-import { parseStockTradePrompt, type SettlementCallback, type TradeStore } from "./trade-store";
+import { parseStockPositionPrompt, parseStockTradePrompt, type SettlementCallback, type TradeStore } from "./trade-store";
 import { connectorInvokeToolRef, domainWriteToolRef } from "./runtime";
 import { generateWidgetFromText } from "./widget-library";
 import { runDynamicUiHarness } from "./dynamic-ui-harness";
@@ -945,11 +945,13 @@ export async function generateDynamicUi(input: {
   }
 
   const capId = semanticRoute?.capabilityId;
+  const positionSymbol = parseStockPositionPrompt(prompt);
   if (tradeStore && (capId === "stock_trade" || (!capId && stockTradeTrigger.test(prompt)))) {
     return buildStockTradeCanvas(tradeStore, personaId || "demo-learner", requesterName, prompt, semanticRoute?.extractedParams, { conversationId });
   }
-  if (tradeStore && (capId === "stock_holdings" || (!capId && stockHoldingsTrigger.test(prompt)))) {
-    return buildStockHoldingsCanvas(tradeStore, personaId || "demo-learner", prompt);
+  if (tradeStore && (capId === "stock_holdings" || (!capId && (positionSymbol || stockHoldingsTrigger.test(prompt))))) {
+    const symbol = positionSymbol ?? semanticRoute?.extractedParams?.symbol?.toUpperCase();
+    return buildStockHoldingsCanvas(tradeStore, personaId || "demo-learner", prompt, symbol);
   }
   if (approvalStore && (capId === "hitl_approvals" || (!capId && isApprovalQueuePrompt(prompt)))) {
     return buildApprovalQueueCanvas(approvalStore, prompt);

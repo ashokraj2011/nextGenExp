@@ -21,7 +21,7 @@ import {
   isStockTradePrompt,
 } from "./dynamic-ui-generator";
 import type { GatewaySettings } from "./gateway";
-import { parseStockTradePrompt } from "./trade-store";
+import { parseStockPositionPrompt, parseStockTradePrompt } from "./trade-store";
 
 const nonDynamicGuard = /\b(weather|stock price|tomorrow|create a? ?rule)\b/i;
 const chatReply = z.object({ choices: z.array(z.object({ message: z.object({ content: z.string() }) })) });
@@ -47,7 +47,7 @@ function routingPrompt(catalog: readonly CepCapabilityDefinition[]) {
       (c) => `- ${c.id} (${c.domain}): ${c.description} Examples: ${c.examples.map((e) => `"${e}"`).join(", ")}`,
     ),
     "Critical disambiguation rules:",
-    ...whenRegistered("stock_holdings", "Choose 'stock_holdings' whenever the user asks to see individual stocks, tickers, shares owned, equity book, cost basis, or which positions are up/down or losing money."),
+    ...whenRegistered("stock_holdings", "Choose 'stock_holdings' for individual stock positions, shares owned, equity book, cost basis, or unrealized gains/losses. Include extractedParams.symbol for a request about one specific position, using its ticker. For the full list or several positions, omit symbol."),
     ...whenRegistered("stock_trade", "Choose 'stock_trade' whenever the user wants to buy, sell, trim, liquidate, or simulate trading stocks, or wants tax-loss harvesting analysis/offset trades. Extract optional extractedParams: { side?: 'buy'|'sell', symbol?: 'AAPL'|'MSFT'|'NVDA'|'INTC'|'BA'|'PFE', percent?: number (1-100, e.g. 'a third'->33, 'half'->50), shares?: integer }."),
     ...whenRegistered("verified_experience", "Choose 'verified_experience' for high-level portfolio summary/allocation ('portfolio summary', 'how can I invest more'), balance definitions/comparisons, home down-payment goal, retirement/beneficiaries, address change, funding/transfers, 'what is next', creating rules, live market price/weather queries, or plain greetings/thanks."),
     ...whenRegistered("hitl_approvals", "Choose 'hitl_approvals' for questions about pending approvals, items awaiting sign-off, or the HITL queue."),
@@ -62,6 +62,17 @@ function routingPrompt(catalog: readonly CepCapabilityDefinition[]) {
 
 export function deterministicCapabilityRoute(prompt: string): SemanticRouteDecision {
   const clean = prompt.trim();
+  const positionSymbol = parseStockPositionPrompt(clean);
+  if (positionSymbol) {
+    return {
+      capabilityId: "stock_holdings",
+      capabilityLabel: capabilityLabelFor("stock_holdings"),
+      method: "deterministic",
+      confidence: 0.99,
+      reasoning: `Matched a request to view the ${positionSymbol} position.`,
+      extractedParams: { symbol: positionSymbol },
+    };
+  }
   if (clean.length < 4 || nonDynamicGuard.test(clean)) {
     return {
       capabilityId: "verified_experience",

@@ -447,6 +447,40 @@ test("All Dynamic Canvas recommendations come strictly from Recommendation Provi
   }
 });
 
+test("a stock drill-down reads the selected position or reports that it is not held", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "cep-stock-position-"));
+  const gateway = await startFixtureGateway();
+  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: gateway.settings });
+  t.after(async () => { await app.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
+  const client = await testClient(app.url);
+  const chat = await client.conversation("normal", "demo-learner");
+
+  const position = async (prompt: string, symbol: string) => {
+    const { turn } = await client.ask(chat.id, prompt);
+    assert.equal(turn.semanticRoute?.capabilityId, "stock_holdings");
+    assert.deepEqual(turn.semanticRoute?.extractedParams, { symbol });
+    const canvas = turn.experience?.blocks.find((block) => block.component === "PznDynamicCanvas")?.props;
+    assert.ok(canvas);
+    assert.equal(canvas.recordId, symbol);
+    assert.equal(canvas.nodes.some((node) => node.type === "table" || node.type === "trade_ticket"), false);
+    return canvas;
+  };
+  const apple = await position("Show details and analysis for AAPL · Apple Inc.", "AAPL");
+  assert.equal(apple.title, "AAPL · Apple Inc.");
+  assert.deepEqual(apple.nodes[0], { type: "metrics", items: [
+    { label: "Shares held", value: "50" },
+    { label: "Position value", value: "$11,400.00", delta: "$228.00 per share" },
+    { label: "Total cost basis", value: "$7,400.00", delta: "$148.00 average per share" },
+    { label: "Unrealized gain or loss", value: "+$4,000.00", delta: "+54.05%" },
+  ] });
+  const pfizer = await position("Show full details for PFE in my portfolio", "PFE");
+  assert.match(JSON.stringify(pfizer.nodes), /-\$816\.00/);
+  assert.equal((await position("Show my Microsoft position.", "MSFT")).title, "MSFT · Microsoft Corp.");
+  const missing = await position("Show my ZZZZ position.", "ZZZZ");
+  assert.equal(missing.title, "ZZZZ position");
+  assert.equal(missing.nodes[0]?.type, "callout");
+});
+
 test("Contextual personalization, empathetic job-loss support, and industry sector drill-down", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "cep-personalize-empathy-"));
   const gateway = await startFixtureGateway();

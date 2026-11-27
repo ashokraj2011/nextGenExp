@@ -1193,6 +1193,13 @@ try {
   await loginLogs.close();
   await pendingGuide.click();
   await signedInResponse.getByRole("heading", { name: "Update your beneficiaries", exact: true }).waitFor();
+  await askAsProfile("Show all my stocks.");
+  const holdingsTable = signedInResponse.getByRole("region", { name: "Live Stock Holdings & Tax-Lot Positions" });
+  await holdingsTable.getByRole("row", { name: /^AAPL · Apple Inc\./ }).click();
+  const applePosition = signedInResponse.getByRole("region", { name: "AAPL · Apple Inc.", exact: true });
+  await applePosition.getByText("$11,400.00", { exact: true }).waitFor();
+  await applePosition.getByText("+$4,000.00", { exact: true }).waitFor();
+  assert.equal(await applePosition.getByRole("table").count(), 0);
   await signOut.click();
   await signInAs("Jordan Lee");
   await signInPage.getByRole("heading", { name: "Welcome, Jordan.", exact: true }).waitFor();

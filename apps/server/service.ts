@@ -907,6 +907,8 @@ export class ExperienceService {
             method: semanticRoute.method,
             confidence: semanticRoute.confidence,
             reasoning: semanticRoute.reasoning,
+            ...(semanticRoute.capabilityId === "stock_holdings" && semanticRoute.extractedParams?.symbol
+              ? { extractedParams: { symbol: semanticRoute.extractedParams.symbol } } : {}),
           };
         });
         if (semanticRoute.capabilityId === "custom_dynamic_ui" && showSavedWidget(false)) return;
