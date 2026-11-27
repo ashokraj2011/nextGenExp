@@ -8,7 +8,7 @@
 
 | Package | Role | Key Exports |
 | :--- | :--- | :--- |
-| **`@sfield/core`** | Runtime, model gateway, closed-schema tool pipeline, HITL approvals, MCP server/client, PII firewall, resilience, delegation, streaming, artifacts & vector memory | `SField`, `defineTool`, `AnthropicProvider`, `GeminiProvider`, `OpenAICompatibleProvider`, `SFieldMcpServer`, `McpClient`, `createMcpProxyTools`, `createPiiFirewallHook`, `createToolResilienceGuard`, `DelegationService`, `streamRun`, `FilesystemArtifactStore`, `VectorMemoryIndex` |
+| **`@sfield/core`** | Runtime, model gateway, closed-schema tool pipeline, deterministic Data-to-UI `SurfaceBinder`, HITL approvals, MCP 2026 server/client (Elicitation + Async Tasks), PII firewall, resilience, delegation, streaming, artifacts & vector memory | `SField`, `defineTool`, `SurfaceBinderService` (`sf.surfaces`), `AnthropicProvider`, `GeminiProvider`, `OpenAICompatibleProvider`, `SFieldMcpServer`, `McpClient`, `createMcpProxyTools`, `createPiiFirewallHook`, `createToolResilienceGuard`, `DelegationService`, `streamRun`, `FilesystemArtifactStore`, `VectorMemoryIndex` |
 | **`@sfield/preset-memory`** | Zero-boilerplate ephemeral preset for tests & scripts | `preset: "memory"` (`EphemeralPersistence`, `InMemoryArtifactStore`, `createDevAuthorizer`) |
 | **`@sfield/preset-local`** | Zero-boilerplate durable local preset | `preset: "local"` (`SqlitePersistence`, `FilesystemArtifactStore`, `createDevAuthorizer`) |
 | **`@sfield/store-sqlite`** | `durable_single` persistence over built-in `node:sqlite` | `sqlitePersistence`, `SqlitePersistence`, `SqliteMemoryRepository` |
@@ -45,6 +45,26 @@ const res = await sf.registry.execute({ toolRef: "demo.greet@1.0.0", inputs: { n
 console.log(res.output); // { greeting: "Hello, Ada!" }
 await sf.close();
 ```
+
+---
+
+## Deterministic Data-to-UI Stitching (`sf.surfaces`)
+
+`sf.surfaces` (`SurfaceBinderService`) lets `sfield` own the entire Data-to-UI stitch and action dispatch boundary so host app servers can blindly render stitched envelopes and blindly forward action clicks:
+
+- **Schema Auto-Discovery (`sf.surfaces.inspectSchemas()`)**: Inspects registered tool JSON Schemas to advertise bindable output/input paths; `strictSchemaValidation: true` rejects mistyped `$ref` paths before render.
+- **Declarative Stitching (`sf.surfaces.stitch(...)`)**: Executes read sources via `ExecutionScope`, resolves `$ref` (including `principal.identifiers.*`), iterates arrays via `$repeat` (`$item` / `$index`), applies deterministic formatters (`usd_cents`, `usd`, `percent`, `date`, etc.), and cryptographically seals every action with **HMAC-SHA256** bound to `{ tenantId, subjectId, surfaceId, actionId, toolRef, preset, resolvedInputs, inputSlots }`.
+- **Tamper-Proof Action Dispatch (`sf.surfaces.dispatchAction(...)`)**: Verifies the HMAC seal and `Principal` identity (rejecting tampered arguments or cross-principal replay with `INVALID_ACTION_SEAL`), merges only declared `$input` form slots, and returns normalized outcomes (`succeeded`, `pending_approval`, `input_required`, `denied`, `failed`).
+
+---
+
+## MCP 2026 (`2026-07-28`) Elicitation & Async Tasks
+
+`sf.createMcpServer()` and `createMcpClient()` implement MCP `2026-07-28` (backwards-compatible with `2025-03-26`):
+
+- **Stateless Discovery (`server/discover`)**: Advertises capabilities, protocol versions, and allowlisted tools without requiring a stateful session.
+- **Elicitation (`elicitation/create` / `elicitation/respond`)**: Tools can suspend mid-flight via `ctx.elicit({ message, requestedSchema })`, returning `status: "input_required"` and validating user answers against the closed JSON Schema before resuming.
+- **Async Tasks (`tasks/get`, `tasks/result`, `tasks/cancel`)**: Long-running tool invocations return a tenant-isolated `taskId` immediately, support mid-flight elicitation, and can be polled or cancelled cleanly.
 
 ---
 

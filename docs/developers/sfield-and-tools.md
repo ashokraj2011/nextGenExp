@@ -69,9 +69,9 @@ On wealth turns, the host invokes the registered `sfield` read tool `cep.empathy
 2. **Writes new life events back**: When the customer shares a new major life event in chat (job loss, medical emergency, bereavement, family crisis, new family, or career milestone), `apps/server/service.ts` persists a deduplicated note to Customer 360 (`CustomerProfileStore.appendNote`, capped to 400 characters) and stores a `fact` in `sfield.memory`.
 3. **Drives personalization & promotion suppression**: `Store.finish` passes `turn.public.emotionalState` to `applyPersonalization` so every response opens with the customer's name and situation-aware tone. Whenever `emotionalState.suppressPromotions` is `true` (from chat or from an advisor's Customer 360 note), the host forwards `excludePromotions: true` to both `Customer360Service.evaluate` and `cep.recommendations.arbitrate@1.0.0`, pausing promotional investment offers across Recommendation Providers.
 
-### Expose `sfield` as a governed MCP Server (`sf.createMcpServer`)
+### Expose `sfield` as a governed MCP 2026 Server (`sf.createMcpServer`)
 
-`@sfield/core` ships a built-in, transport-agnostic MCP Server (`2025-03-26` JSON-RPC 2.0) in `vendor/sfield/packages/core/src/mcp/server.ts`. Any `sfield` app can expose an allowlisted subset of its registered tools over **Streamable HTTP** (`handleRequest`) or **stdio** (`serveStdio`):
+`@sfield/core` ships a built-in, transport-agnostic MCP Server supporting **`2026-07-28`** (backwards-compatible with `2025-03-26` JSON-RPC 2.0) in `vendor/sfield/packages/core/src/mcp/server.ts` and `vendor/sfield/packages/core/src/mcp/extensions.ts`. Any `sfield` app can expose an allowlisted subset of its registered tools over **Streamable HTTP** (`handleRequest`) or **stdio** (`serveStdio`):
 
 ```ts
 const mcp = sf.createMcpServer({
@@ -85,7 +85,16 @@ const mcp = sf.createMcpServer({
 // Local CLI / Claude Desktop / Cursor: await mcp.serveStdio({ principal })
 ```
 
-Every `tools/call` runs inside a real `sfield` `ExecutionScope` (`executions.open` / `executions.resume`), preserving `Authorizer` policy checks, Ajv closed schema validation, HITL approval suspension (`APPROVAL_REQUIRED` → `status: "pending_approval"` with `approvalId` + `callId`), and `sfield.sqlite` audit receipts (`sfieldRunId`). CEP wires `POST /api/mcp` onto `runtime.createMcpServer(...)` in `apps/server/cep-mcp-server.ts`, exposing `cep.empathy.assess@1.0.0`, published `int.*` Integration Tasks, and `cep.knowledge.search@1.0.0`.
+Every `tools/call` runs inside a real `sfield` `ExecutionScope` (`executions.open` / `executions.resume`), preserving `Authorizer` policy checks, Ajv closed schema validation, HITL approval suspension (`APPROVAL_REQUIRED` → `status: "pending_approval"` with `approvalId` + `callId`), **MCP 2026 Elicitation** (`elicitation/create` → `status: "input_required"` → `elicitation/respond`), **MCP 2026 Async Tasks** (`tasks/get`, `tasks/result`, `tasks/cancel` with tenant isolation), stateless **`server/discover`**, and `sfield.sqlite` audit receipts (`sfieldRunId`). CEP wires `POST /api/mcp` onto `runtime.createMcpServer(...)` in `apps/server/cep-mcp-server.ts`, exposing `cep.empathy.assess@1.0.0`, published `int.*` Integration Tasks, and `cep.knowledge.search@1.0.0`.
+
+### Deterministic Data-to-UI Stitching (`sf.surfaces`) & Blind Pass-Through
+
+`@sfield/core` includes **`SurfaceBinderService`** (`vendor/sfield/packages/core/src/ui/surface-binder.ts`), attached directly to `sf.surfaces`. Instead of writing custom per-screen data-to-UI glue in the host server, `sfield` executes read sources, resolves declarative `$ref` / `$repeat` / `$input` bindings (with formatters like `usd_cents`, `percent`, `date` and optional `strictSchemaValidation: true`), and seals every action button with **HMAC-SHA256** bound to `{ tenantId, subjectId, surfaceId, actionId, toolRef, preset, resolvedInputs, inputSlots }`.
+
+CEP mounts three thin blind pass-through routes in `apps/server/routes/collaboration.ts`:
+- `GET /api/surfaces/schemas` → `runtime.sfieldInstance.surfaces.inspectSchemas()`
+- `POST /api/surfaces/stitch` → `runtime.sfieldInstance.surfaces.stitch(...)`
+- `POST /api/surfaces/action` → `runtime.sfieldInstance.surfaces.dispatchAction(...)` (verifies HMAC seal & `Principal`, rejects tampered inputs or cross-principal replay, and handles `succeeded`, `pending_approval`, `input_required`, `denied`, `failed`)
 
 ### Core `@sfield/*` SDK workspace packages & primitives
 
@@ -102,8 +111,9 @@ Beyond CEP-specific tools, the `sfield` SDK (`vendor/sfield/packages/*`) ships s
 - **OpenTelemetry GenAI Sink (`@sfield/telemetry-otel`)** — `createOtelTelemetrySink` records `gen_ai.*` spans & metrics and exports OTLP/HTTP JSON (`v1/traces`) to any collector (dogfooded by CEP's `CepTelemetry`).
 - **PostgreSQL Service Store + Durable JSON Fallback (`@sfield/store-postgres`)** — `PostgresPersistence` + `PostgresMemoryRepository` (`deployment: "service"`), `POSTGRES_SCHEMA_SQL` production DDL, `createPgPoolAdapter(pool)` for `pg`, and **`createPostgresOrJsonPersistence()`** falling back automatically to conformance-verified durable **`JsonFilePersistence`** when Postgres is unavailable.
 - **Eval Runner & Release Gate (`@sfield/testing`)** — `runEvalSuite` executes guardrail cases, writes `EvalReportRecord` into `sf.lock.evalReports()`, and `evaluateReleaseGate` enforces pass-rate, latency, and cost budgets.
-- **Standalone CLI (`@sfield/cli`)** — run `npm run sfield -- init | validate | eval | lock status | lock approve | inspect <runId> | doctor | mcp serve` to scaffold, diagnose, validate configs, run eval gates, manage lock approvals, inspect persisted runs, or launch a stdio MCP server.
-- **CI & Publishing Pipelines** — `.github/workflows/ci.yml` verifies build, 145+ tests, and Playwright suites; `.github/workflows/release.yml` publishes all 8 `@sfield/*` packages to npm or GitHub Packages.
+- **Standalone CLI (`@sfield/cli`)** — run `npm run sfield -- init | validate | eval | lock status | lock approve | inspect <runId> | doctor | studio | mcp serve` to scaffold, diagnose, validate configs, run eval gates, manage lock approvals, inspect persisted runs, launch `@sfield/studio`, or run a stdio MCP server.
+- **Governance Workbench (`@sfield/studio`)** — standalone or embeddable zero-framework workbench (`createStudioHandler`, `startStudioServer`), mounted in CEP at `/admin/sfield-studio` with Host Plugins.
+- **CI & Publishing Pipelines** — `.github/workflows/ci.yml` verifies build, 151 tests, and Playwright suites; `.github/workflows/release.yml` publishes all 9 `@sfield/*` packages to npm or GitHub Packages.
 
 ### Connect an existing service
 

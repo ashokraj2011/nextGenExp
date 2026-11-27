@@ -10,7 +10,7 @@
 
 | Package | Role | Key exports |
 | --- | --- | --- |
-| `@sfield/core` | Core runtime & enterprise primitives | `SField`, `defineTool`, `AnthropicProvider`, `GeminiProvider`, `OpenAICompatibleProvider`, `SFieldMcpServer`, `McpClient`, `createMcpProxyTools`, `createPiiFirewallHook`, `createToolResilienceGuard`, `DelegationService`, `streamRun`, `FilesystemArtifactStore`, `VectorMemoryIndex` |
+| `@sfield/core` | Core runtime & enterprise primitives | `SField`, `defineTool`, `SurfaceBinderService` (`sf.surfaces`), `AnthropicProvider`, `GeminiProvider`, `OpenAICompatibleProvider`, `SFieldMcpServer` (MCP 2026), `McpClient`, `createMcpProxyTools`, `createPiiFirewallHook`, `createToolResilienceGuard`, `DelegationService`, `streamRun`, `FilesystemArtifactStore`, `VectorMemoryIndex` |
 | `@sfield/preset-memory` | Zero-boilerplate ephemeral preset | `preset: "memory"` (`EphemeralPersistence`, `InMemoryArtifactStore`, `createDevAuthorizer`) |
 | `@sfield/preset-local` | Zero-boilerplate durable local preset | `preset: "local"` (`SqlitePersistence`, `FilesystemArtifactStore`, `createDevAuthorizer`) |
 | `@sfield/store-sqlite` | Single-node durable store | `sqlitePersistence`, `SqlitePersistence`, `SqliteMemoryRepository` (over built-in `node:sqlite`) |
@@ -46,6 +46,31 @@ const sf = await SField.create({
 const res = await sf.registry.execute({ toolRef: "demo.greet@1.0.0", inputs: { name: "Ada" } });
 await sf.close();
 ```
+
+---
+
+### Deterministic Data-to-UI Stitching (`sf.surfaces`) & Blind Pass-Through
+
+`sf.surfaces` (`SurfaceBinderService`) eliminates bespoke per-screen server glue and prevents LLMs from fabricating financial figures in UI payloads:
+
+1. **`sf.surfaces.inspectSchemas()`** — auto-discovers bindable output/input paths from registered `sfield` tool JSON Schemas.
+2. **`sf.surfaces.stitch({ principal, template, sources, strictSchemaValidation })`** — executes read sources via `ExecutionScope`, resolves `$ref` (including `principal.identifiers.*`), expands `$repeat` (`$item` / `$index`), formats values (`usd_cents`, `percent`, `date`, etc.), and seals every action with **HMAC-SHA256** bound to the principal and resolved arguments.
+3. **`sf.surfaces.dispatchAction({ principal, action, formInputs })`** — verifies the HMAC seal and `Principal` match (blocking tampering & cross-principal replay), merges only declared `$input` slots, and returns normalized outcomes (`succeeded`, `pending_approval`, `input_required`, `denied`, `failed`).
+
+CEP exposes these directly as zero-glue blind pass-through endpoints in `apps/server/routes/collaboration.ts`:
+- `GET /api/surfaces/schemas`
+- `POST /api/surfaces/stitch`
+- `POST /api/surfaces/action`
+
+---
+
+### MCP 2026 (`2026-07-28`) Elicitation & Async Tasks
+
+`sf.createMcpServer()` and `createMcpClient()` negotiate `2026-07-28` (while remaining backwards-compatible with `2025-03-26`), adding:
+
+- **Stateless `server/discover`** for lightweight capability & tool discovery.
+- **Structured Elicitation (`elicitation/create` / `elicitation/respond`)** so tools can pause mid-flight with `status: "input_required"` and validate structured user input against a closed JSON Schema.
+- **Tenant-Isolated Async Tasks (`tasks/get`, `tasks/result`, `tasks/cancel`)** supporting long-running execution, mid-flight elicitation, and cancellation.
 
 ---
 

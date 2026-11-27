@@ -228,11 +228,11 @@
         <a href="#architecture">Architecture</a>
         <a href="#packages">9 Packages</a>
         <a href="#primitives">Enterprise Primitives</a>
+        <a href="#surfaces">SurfaceBinder</a>
         <a href="#persistence">Postgres + JSON Fallback</a>
         <a href="#quickstart">Code &amp; CLI</a>
         <a href="/admin/sfield-studio">sfield Studio</a>
         <a href="/admin/help">CEP Admin Docs</a>
-        <a href="/admin/gateway">Model Gateway</a>
         <button id="themeToggle" class="btn" type="button" aria-label="Toggle color theme">Dark mode</button>
       </nav>
     </div>
@@ -256,7 +256,7 @@
         <div class="metric"><strong>9 Packages</strong><span>Publishable <code>@sfield/*</code> workspaces</span></div>
         <div class="metric"><strong>4 Model Backends</strong><span>Gemini, Anthropic, OpenAI-compat, Copilot ACP</span></div>
         <div class="metric"><strong>3 Storage Modes</strong><span>Memory, SQLite, Postgres + JSON fallback</span></div>
-        <div class="metric"><strong>148+ Tests</strong><span>Unit, Studio, MCP &amp; Conformance verified</span></div>
+        <div class="metric"><strong>151 Tests</strong><span>Unit, Studio, MCP 2026, SurfaceBinder &amp; Conformance</span></div>
       </div>
     </section>
 
@@ -264,62 +264,69 @@
       <h2>Runtime Architecture</h2>
       <p class="section-desc">Every model call, tool invocation, memory write, MCP request, and sub-agent delegation flows through the same deterministic governance boundary.</p>
       <div class="diagram-box">
-        <svg viewBox="0 0 980 260" width="100%" style="min-width:700px;height:auto;display:block" role="img" aria-label="sfield SDK architecture diagram">
+        <svg viewBox="0 0 980 286" width="100%" style="min-width:700px;height:auto;display:block" role="img" aria-label="sfield SDK architecture diagram">
           <defs>
             <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M 0 1 L 10 5 L 0 9 z" fill="#1d6f42" />
             </marker>
           </defs>
           <!-- Host / Apps -->
-          <rect x="14" y="24" width="190" height="210" rx="12" fill="#e4f3ea" stroke="#1d6f42" stroke-width="1.5" />
-          <text x="109" y="54" text-anchor="middle" font-size="14" font-weight="700" fill="#14261d">Host Applications</text>
-          <text x="109" y="84" text-anchor="middle" font-size="12" fill="#355244">CEP (Wealth / Ops / Sales)</text>
-          <text x="109" y="108" text-anchor="middle" font-size="12" fill="#355244">External MCP Clients</text>
-          <text x="109" y="132" text-anchor="middle" font-size="12" fill="#355244">@sfield/cli (init · eval · doctor)</text>
-          <text x="109" y="164" text-anchor="middle" font-size="11" fill="#1d6f42" font-weight="600">Principal · Tenant · Preset</text>
-          <text x="109" y="186" text-anchor="middle" font-size="11" fill="#1d6f42" font-weight="600">streamRun() · SSE / AG-UI</text>
+          <rect x="14" y="20" width="194" height="244" rx="12" fill="#e4f3ea" stroke="#1d6f42" stroke-width="1.5" />
+          <text x="111" y="48" text-anchor="middle" font-size="14" font-weight="700" fill="#14261d">Host Applications</text>
+          <text x="111" y="76" text-anchor="middle" font-size="11.5" fill="#355244">CEP (Wealth / Ops / Sales)</text>
+          <text x="111" y="98" text-anchor="middle" font-size="11.5" fill="#355244">Blind UI Pass-Through (/api/surfaces/*)</text>
+          <text x="111" y="120" text-anchor="middle" font-size="11.5" fill="#355244">@sfield/studio Workbench</text>
+          <text x="111" y="142" text-anchor="middle" font-size="11.5" fill="#355244">External MCP 2026 Clients</text>
+          <text x="111" y="164" text-anchor="middle" font-size="11.5" fill="#355244">@sfield/cli (init · eval · studio)</text>
+          <text x="111" y="200" text-anchor="middle" font-size="11" fill="#1d6f42" font-weight="600">Principal · Identifiers · OBO</text>
+          <text x="111" y="222" text-anchor="middle" font-size="11" fill="#1d6f42" font-weight="600">streamRun() · SSE / AG-UI</text>
+          <text x="111" y="244" text-anchor="middle" font-size="11" fill="#1d6f42" font-weight="600">sf.surfaces.stitch / dispatch</text>
 
           <!-- sfield core -->
-          <rect x="256" y="16" width="430" height="226" rx="14" fill="#155331" stroke="#0f3c23" stroke-width="1.5" />
-          <text x="471" y="44" text-anchor="middle" font-size="15" font-weight="700" fill="#ffffff">@sfield/core Runtime Kernel</text>
+          <rect x="256" y="14" width="430" height="256" rx="14" fill="#155331" stroke="#0f3c23" stroke-width="1.5" />
+          <text x="471" y="40" text-anchor="middle" font-size="15" font-weight="700" fill="#ffffff">@sfield/core Runtime Kernel</text>
 
-          <rect x="276" y="60" width="185" height="44" rx="8" fill="#1d6f42" />
-          <text x="368" y="80" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">Authorizer &amp; Policy Presets</text>
-          <text x="368" y="96" text-anchor="middle" font-size="10.5" fill="#d8f2e2">read_only · supervised · bounded_auto</text>
+          <rect x="276" y="54" width="185" height="44" rx="8" fill="#1d6f42" />
+          <text x="368" y="74" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">Authorizer &amp; Policy Presets</text>
+          <text x="368" y="90" text-anchor="middle" font-size="10.5" fill="#d8f2e2">read_only · supervised · bounded_auto</text>
 
-          <rect x="480" y="60" width="185" height="44" rx="8" fill="#1d6f42" />
-          <text x="572" y="80" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">PII Firewall &amp; Resilience</text>
-          <text x="572" y="96" text-anchor="middle" font-size="10.5" fill="#d8f2e2">Egress Scrub · TokenBucket · Breaker</text>
+          <rect x="480" y="54" width="185" height="44" rx="8" fill="#1d6f42" />
+          <text x="572" y="74" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">PII Firewall &amp; Resilience</text>
+          <text x="572" y="90" text-anchor="middle" font-size="10.5" fill="#d8f2e2">Egress Scrub · TokenBucket · Breaker</text>
 
-          <rect x="276" y="116" width="185" height="44" rx="8" fill="#1d6f42" />
-          <text x="368" y="136" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">Closed Ajv Tools &amp; HITL</text>
-          <text x="368" y="152" text-anchor="middle" font-size="10.5" fill="#d8f2e2">Digest-bound Approvals · Resume</text>
+          <rect x="276" y="108" width="185" height="44" rx="8" fill="#1d6f42" />
+          <text x="368" y="128" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">Closed Ajv Tools &amp; HITL</text>
+          <text x="368" y="144" text-anchor="middle" font-size="10.5" fill="#d8f2e2">Digest-bound Approvals · Resume</text>
 
-          <rect x="480" y="116" width="185" height="44" rx="8" fill="#1d6f42" />
-          <text x="572" y="136" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">MCP Server + Federation</text>
-          <text x="572" y="152" text-anchor="middle" font-size="10.5" fill="#d8f2e2">RBAC Server · McpClient · Delegation</text>
+          <rect x="480" y="108" width="185" height="44" rx="8" fill="#1d6f42" />
+          <text x="572" y="128" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">MCP 2026 Server + Client</text>
+          <text x="572" y="144" text-anchor="middle" font-size="10.5" fill="#d8f2e2">Elicitation · Async Tasks · Delegation</text>
 
-          <rect x="276" y="172" width="389" height="52" rx="8" fill="#0f3c23" />
-          <text x="471" y="194" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">ModelGateway · AgenticHarness · Compactor · VectorMemoryIndex</text>
-          <text x="471" y="212" text-anchor="middle" font-size="10.5" fill="#b7e4c8">Lock-Manifest Governance · Budgets · Eval Reports · OTel gen_ai.* Sink</text>
+          <rect x="276" y="162" width="389" height="42" rx="8" fill="#1d6f42" />
+          <text x="471" y="180" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">SurfaceBinder (sf.surfaces) — Deterministic Data-to-UI Stitch</text>
+          <text x="471" y="196" text-anchor="middle" font-size="10.5" fill="#d8f2e2">$ref · $repeat · $input · Schema Validation · HMAC-SHA256 Sealed Actions</text>
+
+          <rect x="276" y="214" width="389" height="44" rx="8" fill="#0f3c23" />
+          <text x="471" y="232" text-anchor="middle" font-size="11.5" font-weight="700" fill="#ffffff">ModelGateway · AgenticHarness · Compactor · VectorMemoryIndex</text>
+          <text x="471" y="248" text-anchor="middle" font-size="10.5" fill="#b7e4c8">Lock-Manifest Governance · Budgets · Eval Reports · OTel gen_ai.* Sink</text>
 
           <!-- Backends -->
-          <rect x="740" y="16" width="224" height="104" rx="12" fill="#eef5f0" stroke="#1d6f42" stroke-width="1.5" />
-          <text x="852" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="#14261d">Native Model Providers</text>
-          <text x="852" y="64" text-anchor="middle" font-size="11.5" fill="#355244">GeminiProvider (v1beta SSE)</text>
-          <text x="852" y="84" text-anchor="middle" font-size="11.5" fill="#355244">AnthropicProvider · OpenAI-Compat</text>
-          <text x="852" y="104" text-anchor="middle" font-size="11.5" fill="#355244">GitHub Copilot ACP</text>
+          <rect x="740" y="16" width="224" height="114" rx="12" fill="#eef5f0" stroke="#1d6f42" stroke-width="1.5" />
+          <text x="852" y="44" text-anchor="middle" font-size="13" font-weight="700" fill="#14261d">Native Model Providers</text>
+          <text x="852" y="68" text-anchor="middle" font-size="11.5" fill="#355244">GeminiProvider (v1beta SSE)</text>
+          <text x="852" y="88" text-anchor="middle" font-size="11.5" fill="#355244">AnthropicProvider · OpenAI-Compat</text>
+          <text x="852" y="108" text-anchor="middle" font-size="11.5" fill="#355244">GitHub Copilot ACP</text>
 
-          <rect x="740" y="134" width="224" height="108" rx="12" fill="#eef5f0" stroke="#1d6f42" stroke-width="1.5" />
-          <text x="852" y="160" text-anchor="middle" font-size="13" font-weight="700" fill="#14261d">Persistence &amp; Telemetry</text>
-          <text x="852" y="182" text-anchor="middle" font-size="11.5" fill="#355244">Postgres + Auto JSON Fallback</text>
-          <text x="852" y="202" text-anchor="middle" font-size="11.5" fill="#355244">SQLite · FilesystemArtifactStore</text>
-          <text x="852" y="222" text-anchor="middle" font-size="11.5" fill="#355244">@sfield/telemetry-otel (OTLP)</text>
+          <rect x="740" y="144" width="224" height="122" rx="12" fill="#eef5f0" stroke="#1d6f42" stroke-width="1.5" />
+          <text x="852" y="172" text-anchor="middle" font-size="13" font-weight="700" fill="#14261d">Persistence &amp; Telemetry</text>
+          <text x="852" y="196" text-anchor="middle" font-size="11.5" fill="#355244">Postgres + Auto JSON Fallback</text>
+          <text x="852" y="216" text-anchor="middle" font-size="11.5" fill="#355244">SQLite · FilesystemArtifactStore</text>
+          <text x="852" y="236" text-anchor="middle" font-size="11.5" fill="#355244">@sfield/telemetry-otel (OTLP)</text>
 
           <!-- Arrows -->
-          <line x1="204" y1="128" x2="252" y2="128" stroke="#1d6f42" stroke-width="2.2" marker-end="url(#arr)" />
-          <line x1="686" y1="68" x2="736" y2="68" stroke="#1d6f42" stroke-width="2.2" marker-end="url(#arr)" />
-          <line x1="686" y1="188" x2="736" y2="188" stroke="#1d6f42" stroke-width="2.2" marker-end="url(#arr)" />
+          <line x1="208" y1="142" x2="252" y2="142" stroke="#1d6f42" stroke-width="2.2" marker-end="url(#arr)" />
+          <line x1="686" y1="73" x2="736" y2="73" stroke="#1d6f42" stroke-width="2.2" marker-end="url(#arr)" />
+          <line x1="686" y1="205" x2="736" y2="205" stroke="#1d6f42" stroke-width="2.2" marker-end="url(#arr)" />
         </svg>
       </div>
     </section>
@@ -336,7 +343,7 @@
             <tr>
               <td><code>@sfield/core</code></td>
               <td>Core runtime kernel</td>
-              <td><code>SField</code>, <code>defineTool</code>, <code>GeminiProvider</code>, <code>AnthropicProvider</code>, <code>OpenAICompatibleProvider</code>, <code>SFieldMcpServer</code>, <code>McpClient</code>, <code>createMcpProxyTools</code>, <code>createPiiFirewallHook</code>, <code>createToolResilienceGuard</code>, <code>DelegationService</code>, <code>streamRun</code>, <code>FilesystemArtifactStore</code>, <code>VectorMemoryIndex</code></td>
+              <td><code>SField</code>, <code>defineTool</code>, <code>SurfaceBinderService</code> (<code>sf.surfaces</code>), <code>GeminiProvider</code>, <code>AnthropicProvider</code>, <code>OpenAICompatibleProvider</code>, <code>SFieldMcpServer</code> (MCP 2026), <code>McpClient</code>, <code>createMcpProxyTools</code>, <code>createPiiFirewallHook</code>, <code>createToolResilienceGuard</code>, <code>DelegationService</code>, <code>streamRun</code>, <code>FilesystemArtifactStore</code>, <code>VectorMemoryIndex</code></td>
             </tr>
             <tr>
               <td><code>@sfield/preset-memory</code></td>
@@ -415,6 +422,29 @@
           <h3>Eval Gates &amp; Lock Manifests <span class="pill">CI / CD</span></h3>
           <p><code>runEvalSuite</code> persists signed <code>EvalReportRecord</code> evidence into <code>sf.lock.evalReports()</code>; <code>evaluateReleaseGate</code> and <code>sfield lock approve</code> gate <code>deployment: "service"</code> rollouts.</p>
         </article>
+        <article class="card">
+          <h3>Deterministic SurfaceBinder <span class="pill">sf.surfaces</span></h3>
+          <p>Stitches live tool outputs into declarative <code>$ref</code> / <code>$repeat</code> / <code>$input</code> UI templates with strict JSON Schema validation and <strong>HMAC-SHA256 sealed actions</strong> so host servers blindly render &amp; dispatch without custom glue.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="surfaces">
+      <h2>Deterministic Data-to-UI Stitching (<code>sf.surfaces</code>)</h2>
+      <p class="section-desc">Instead of letting LLMs copy financial numbers into UI JSON or writing bespoke per-screen server glue, <code>sfield</code> executes read sources, resolves declarative bindings, and cryptographically seals every button action. Host apps like CEP expose thin blind pass-through routes (<code>GET /api/surfaces/schemas</code>, <code>POST /api/surfaces/stitch</code>, <code>POST /api/surfaces/action</code>).</p>
+      <div class="grid">
+        <article class="card">
+          <h3>1. Schema Auto-Discovery <span class="pill">inspectSchemas()</span></h3>
+          <p>Walks every registered tool’s closed JSON Schema to advertise exact bindable output/input paths to UI Builders and LLMs. With <code>strictSchemaValidation: true</code>, mistyped <code>$ref</code> paths are rejected before render.</p>
+        </article>
+        <article class="card">
+          <h3>2. Declarative Stitch <span class="pill">$ref · $repeat · format</span></h3>
+          <p><code>sf.surfaces.stitch()</code> runs read sources through <code>ExecutionScope</code>, resolves <code>$ref</code> (including <code>principal.identifiers.*</code>), loops arrays via <code>$repeat</code> (<code>$item</code> / <code>$index</code>), and applies deterministic formatters (<code>usd_cents</code>, <code>percent</code>, <code>date</code>).</p>
+        </article>
+        <article class="card">
+          <h3>3. Sealed Action Dispatch <span class="pill">HMAC-SHA256</span></h3>
+          <p>Every action carries an HMAC seal bound to <code>{ tenantId, subjectId, toolRef, resolvedInputs, inputSlots }</code>. <code>sf.surfaces.dispatchAction()</code> blocks argument tampering and cross-principal replay, merges only declared <code>$input</code> slots, and supports HITL &amp; MCP Elicitation.</p>
+        </article>
       </div>
     </section>
 
@@ -442,8 +472,9 @@
       <p class="section-desc">Copy-pasteable recipes verified against the live workspace.</p>
       <div class="tabs" role="tablist" aria-label="Code examples">
         <button class="tab-btn" role="tab" aria-selected="true" data-tab="hello">5-Line Quick Start</button>
+        <button class="tab-btn" role="tab" aria-selected="false" data-tab="surface">SurfaceBinder (Data → UI)</button>
         <button class="tab-btn" role="tab" aria-selected="false" data-tab="service">Postgres + JSON Fallback</button>
-        <button class="tab-btn" role="tab" aria-selected="false" data-tab="mcp">MCP Federation</button>
+        <button class="tab-btn" role="tab" aria-selected="false" data-tab="mcp">MCP 2026 Federation</button>
         <button class="tab-btn" role="tab" aria-selected="false" data-tab="cli">sfield CLI</button>
       </div>
 
@@ -470,6 +501,39 @@ const sf = await SField.create({
 const res = await sf.registry.execute({ toolRef: "demo.greet@1.0.0", inputs: { name: "Ada" } });
 console.log(res.output); // { greeting: "Hello from sfield, Ada!" }
 await sf.close();</code></pre>
+      </div>
+
+      <div id="tab-surface" class="tab-panel">
+        <button class="copy-btn" type="button">Copy</button>
+        <pre><code>// 1. Stitch live tool data into a declarative UI template with sealed actions
+const envelope = await sf.surfaces.stitch({
+  principal,
+  strictSchemaValidation: true,
+  sources: { portfolio: { toolRef: "portfolio.read@1.0.0", inputs: { accountId: "acct-1" } } },
+  template: {
+    surfaceId: "portfolio-card",
+    title: { $ref: "principal.identifiers.mid", fallback: "Portfolio" },
+    components: [
+      { id: "bal", type: "Metric", props: { label: "Cash", value: { $ref: "portfolio.cashCents", format: "usd_cents" } } },
+    ],
+    actions: [
+      {
+        actionId: "deposit",
+        label: "Deposit",
+        toolRef: "funding.deposit@1.0.0",
+        preset: "supervised",
+        inputs: { accountId: { $ref: "portfolio.accountId" }, amountCents: { $input: "amountCents" } },
+      },
+    ],
+  },
+});
+
+// 2. Host app server blindly forwards user clicks + formInputs back to sfield
+const result = await sf.surfaces.dispatchAction({
+  principal,
+  action: envelope.actions[0], // HMAC-SHA256 verified against principal &amp; toolRef
+  formInputs: { amountCents: 25000 },
+});</code></pre>
       </div>
 
       <div id="tab-service" class="tab-panel">
@@ -506,7 +570,7 @@ const proxyTools = await createMcpProxyTools(client, { namespace: "partner" });<
 
       <div id="tab-cli" class="tab-panel">
         <button class="copy-btn" type="button">Copy</button>
-        <pre><code># Diagnose Node runtime, 8 @sfield/* packages, config, persistence &amp; OTel
+        <pre><code># Diagnose Node runtime, 9 @sfield/* packages, config, persistence &amp; OTel
 npm run sfield -- doctor --config ./sfield.config.yaml --db ./state.sqlite
 
 # Scaffold a standalone project &amp; validate deterministically (offline-safe)
@@ -517,7 +581,8 @@ npm run sfield -- validate ./my-agent/sfield.config.yaml
 npm run sfield -- eval ./suite.mjs --db ./state.sqlite --config ./my-agent/sfield.config.yaml --gate-min-pass 0.95
 npm run sfield -- lock approve --db ./state.sqlite --config ./my-agent/sfield.config.yaml --approver release-bot
 
-# Inspect a persisted run or serve governed tools over MCP stdio
+# Launch standalone @sfield/studio workbench, inspect runs, or serve MCP 2026 stdio
+npm run sfield -- studio --db ./state.sqlite --port 4310
 npm run sfield -- inspect &lt;runId&gt; --db ./state.sqlite
 npm run sfield -- mcp serve --db ./state.sqlite --config ./my-agent/sfield.config.yaml</code></pre>
       </div>

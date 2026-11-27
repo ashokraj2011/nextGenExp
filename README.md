@@ -35,7 +35,7 @@ Edit the Markdown under `docs/developers/` to update both versions. Vite renders
 | **Chat Workspace, Folders & Context Compaction** | Collapsible sidebar **Conversation Folders** with shared **Project Instructions** and cross-thread **Folder Project Briefs**, live running/unread indicators, 1-click message **Branch/Fork** (`/api/conversations/:id/fork`), single smart **Play (`▶`) / End (`■`)** composer control, and a **Context Health & Compact Now** pill backed by `sfield` `ConversationCompactor`. |
 | **Conversational Trade & Tax-Loss Harvesting Engine** | Simulate buying/selling shares by count or `%`, run **Tax-Loss Harvesting Analysis** with editable loss-offset recommendations and a real **30-day Wash-Sale Ledger**, drive drafts conversationally (`"yes"`, `"change to 50%"`, `"execute bundle"`), and execute **durable SSE-streamed timed jobs** with mid-flight **Cancel** and automatic `sfield` settlement. |
 | **Multi-Domain Reusability** | Declarative Domain Packs (**Wealth Advisory**, **IT Operations & SRE**, **Sales & Revenue Ops**) with sidebar Domain Pack Switcher, live operational HUDs, persisted JSON/SQLite stores (`incidents.json`, `deals.json`, `customer-profiles.json`), and full Admin Entity CRUD at `/admin/customers`. |
-| **Unified `sfield` Governance, MCP Server & HITL Approvals** | Four host-governed platform tools: **`cep.empathy.assess@1.0.0`** (emotional & life-event intelligence), **`cep.recommendations.arbitrate@1.0.0`** (single recommendation authority across verified & Dynamic Canvas surfaces with recent-trade contradiction guard & hardship promo suppression), **`cep.domain.execute_write@1.0.0`** (resource-bound mutations), and **`cep.connector.invoke@1.0.0`** (external REST/MCP actions) — protected by a SHA-256 digest-bound **Human-in-the-Loop Approval Queue** surfaced both inline in **Chat** and at `/admin/logs?source=approvals` (with optional **4-eyes dual control** and high-value trade gating). `@sfield/core` also includes a built-in **`SFieldMcpServer`** (`sf.createMcpServer`, Streamable HTTP + stdio) powering CEP's `POST /api/mcp` endpoint. |
+| **Unified `sfield` Governance, MCP 2026 Server, SurfaceBinder & HITL Approvals** | Four host-governed platform tools: **`cep.empathy.assess@1.0.0`** (emotional & life-event intelligence), **`cep.recommendations.arbitrate@1.0.0`** (single recommendation authority across verified & Dynamic Canvas surfaces with recent-trade contradiction guard & hardship promo suppression), **`cep.domain.execute_write@1.0.0`** (resource-bound mutations), and **`cep.connector.invoke@1.0.0`** (external REST/MCP actions) — protected by a SHA-256 digest-bound **Human-in-the-Loop Approval Queue** surfaced both inline in **Chat** and at `/admin/logs?source=approvals` (with optional **4-eyes dual control** and high-value trade gating). `@sfield/core` also includes **`SFieldMcpServer`** (MCP `2026-07-28` Elicitation + Async Tasks, powering `POST /api/mcp`), **`SurfaceBinderService`** (`sf.surfaces` deterministic Data-to-UI stitch & HMAC-sealed actions, powering blind pass-through `/api/surfaces/*`), and **`@sfield/studio`** mounted at `/admin/sfield-studio`. |
 | **No-Code Admin Control Plane** | Manage Customer 360 & domain records (`/admin/customers`), Intents, Content, NBA Rules & **No-Code Action Flows** (`/admin/intents`), **UI Builder & Widget Studio** with pre-seeded **IT Ops** & **Sales RevOps** templates (`/admin/ui`), Tool Setup, CCRE Rules & **External REST/MCP Connector Registry** (`/admin`), **Closed-Loop Engagement Analytics & Write Audit Log** (`/admin/logs`), and interactive **14-Step Architecture Docs** (`/admin/help`). |
 | **Light & Dark Theme** | Persistent Light/Dark design system across Customer Chat, Admin Control Plane, UI Builder, and Architecture Docs. |
 
@@ -45,12 +45,15 @@ Edit the Markdown under `docs/developers/` to update both versions. Vite renders
 
 Requires **Node 22.13+** and **npm 10+**. The standalone **`sfield` Agent SDK** monorepo is vendored under `vendor/sfield/packages/` as local npm workspaces:
 
-- `@sfield/core` — Governed runtime, closed Ajv tool contracts, HITL approvals, `GeminiProvider` / `AnthropicProvider` / `OpenAICompatibleProvider`, `SFieldMcpServer` + `McpClient`, `PiiFirewall`, `ToolResilienceGuard`, `DelegationService`, `streamRun`
+- `@sfield/core` — Governed runtime, closed Ajv tool contracts, deterministic `SurfaceBinderService` (`sf.surfaces`), HITL approvals, `GeminiProvider` / `AnthropicProvider` / `OpenAICompatibleProvider`, MCP 2026 `SFieldMcpServer` (Elicitation + Async Tasks) + `McpClient`, `PiiFirewall`, `ToolResilienceGuard`, `DelegationService`, `streamRun`, `FilesystemArtifactStore`, `VectorMemoryIndex`
+- `@sfield/preset-memory` — Zero-boilerplate ephemeral preset (`preset: "memory"`) for tests & scripts
+- `@sfield/preset-local` — Zero-boilerplate durable local preset (`preset: "local"`) backed by SQLite + disk artifacts
 - `@sfield/store-sqlite` — `durable_single` persistence over built-in `node:sqlite`
-- `@sfield/store-postgres` — `deployment: "service"` PostgreSQL persistence (`POSTGRES_SCHEMA_SQL`, `createPgPoolAdapter`, `createServiceMemoryPersistence`)
+- `@sfield/store-postgres` — `deployment: "service"` PostgreSQL persistence with automatic durable JSON-file fallback (`POSTGRES_SCHEMA_SQL`, `createPgPoolAdapter`, `createPostgresOrJsonPersistence`)
 - `@sfield/telemetry-otel` — OpenTelemetry `gen_ai.*` `TelemetrySink` with OTLP/HTTP JSON trace export
+- `@sfield/studio` — Standalone & embeddable zero-framework governance workbench (`createStudioHandler`, `startStudioServer`), mounted in CEP at `/admin/sfield-studio`
 - `@sfield/testing` — Deterministic fake providers, conformance helpers, and generic `runEvalSuite` / `evaluateReleaseGate`
-- `@sfield/cli` — Standalone CLI (`npm run sfield -- init | validate | lock status | lock approve | inspect | mcp serve`)
+- `@sfield/cli` — Standalone CLI (`npm run sfield -- init | validate | eval | lock status | lock approve | inspect | doctor | studio | mcp serve`)
 
 ```sh
 npm ci
@@ -161,7 +164,8 @@ In `/integrations`, the **Customer chat** settings on a read task map the record
 | `/admin/ui` | **UI Builder** (drag-and-drop multi-namespace `customer.*` / `incident.*` / `deal.*` / `custom.*` bindings + starter templates) and **Widget Studio**. |
 | `/admin/logs` | **Chat calls**, **Pending actions**, **Approvals (HITL)** (`?source=approvals`), **Write audit (sfield)** (`?source=write_audit`), and **Engagement analytics** (`?source=analytics`). |
 | `/admin/inspector` | Deep turn decision trace, verified Experience IR, and `sfield` run inspection. |
-| `/admin/help` | **Architecture & Playbook**: a clickable diagram from tenant and domain flow selection through intent, recommendations and A2UI delivery, **`sfield` Runtime Architecture**, downloadable contracts, and **5-Minute Demo Playbook**. |
+| `/admin/sfield-studio` | Embedded **`@sfield/studio`** governance workbench (Runs, Principal/Tool Playground, HITL Approvals, Locks, Evals, Memory, PII Lab, OTel & Host Plugins). |
+| `/admin/help` | **Architecture & Playbook**: a clickable diagram from tenant and domain flow selection through intent, recommendations and A2UI delivery, **`sfield` Runtime Architecture**, downloadable contracts, and **5-Minute Demo Playbook** (standalone HTML SDK architecture page at `/sfield-sdk.html`). |
 
 ---
 
@@ -171,7 +175,7 @@ In `/integrations`, the **Customer chat** settings on a read task map the record
 # Full TypeScript check (including vendor/sfield) + Vite production build
 npm run build
 
-# Full unit & integration test suite (127 tests covering sfield, verifiers, empathy & C360 notes, recommendation providers, compaction, folders, SSE, CCRE, recovery)
+# Full unit & integration test suite (151 tests covering sfield, SurfaceBinder, MCP 2026 Elicitation/Tasks, Studio, verifiers, empathy & C360 notes, recommendation providers, compaction, folders, SSE, CCRE, recovery)
 npm test
 
 # Targeted host test suite
@@ -194,4 +198,4 @@ npm run chat:harness
 - **`packages/experience/`** — Host verifiers (`verify.ts`), deterministic A2UI v1.0 compiler (`compile.ts`), UI Builder layout applicator (`ui-layout.ts`), and dynamic prompt compiler (`prompt-compiler.ts`).
 - **`packages/recommendations/`** — Pluggable `RecommendationProvider` arbitrator and adapters (TS + CCRE, Customer 360 NBA, IT Ops Runbooks, Sales Deal Desk, External REST/MCP).
 - **`packages/customer-profiles/`** — Live Customer 360 profile store, multi-namespace binding resolver, and single-source-of-truth equity ledger bridge.
-- **`vendor/sfield/`** — Vendored `@sfield/core`, `@sfield/store-sqlite`, and `@sfield/testing` workspaces.
+- **`vendor/sfield/`** — Vendored standalone `sfield` SDK monorepo (`@sfield/core`, `@sfield/preset-memory`, `@sfield/preset-local`, `@sfield/store-sqlite`, `@sfield/store-postgres`, `@sfield/telemetry-otel`, `@sfield/studio`, `@sfield/testing`, `@sfield/cli`).

@@ -53,6 +53,14 @@ Ask **“Build a savings calculator for $300 a month for 8 years.”**, **“Sho
 - **Contextual Personalization**: `Store.finish` runs `applyPersonalization` (`apps/server/response-personalizer.ts`) using the customer's first name and `turn.emotionalState` so replies open naturally and empathetically instead of generic copy.
 - **Unconnected Source Guard**: If a requested chart needs records and has no connected source, chat pauses with clickable clarification choices instead of fabricating numbers. Publish a recurring design from **UI Builder** when domain owners want to manage it.
 
+### Stitch UI directly from `sfield` tools (`sf.surfaces` & `/api/surfaces/*`)
+
+For screens or widgets that bind directly to registered `sfield` tools without custom server glue, `@sfield/core` provides **`SurfaceBinderService`** (`sf.surfaces`), exposed in CEP as three blind pass-through routes (`apps/server/routes/collaboration.ts`):
+
+- `GET /api/surfaces/schemas` — returns auto-discovered bindable output/input paths from every registered `sfield` tool's closed JSON Schema.
+- `POST /api/surfaces/stitch` — executes the declared read `sources` via `sfield`, resolves `$ref` (including `principal.identifiers.*`), `$repeat` (`$item` / `$index`), and deterministic formatters (`usd_cents`, `percent`, `date`), and returns a stitched surface with **HMAC-SHA256 sealed actions**.
+- `POST /api/surfaces/action` — blindly forwards a clicked sealed action plus user `formInputs` back to `sf.surfaces.dispatchAction(...)`, which verifies the principal-bound seal, merges only declared `$input` slots, and handles `succeeded`, `pending_approval` (HITL), or `input_required` (MCP Elicitation).
+
 ### Add a new component type in code
 
 Use the home-buying goal card as a working example.

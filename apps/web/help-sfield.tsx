@@ -75,11 +75,18 @@ const executionLanes = [
     guarantee: "Explicit business resource binding (domain_record) + immutable Write Audit entry",
   },
   {
-    lane: "External MCP Clients",
+    lane: "External MCP 2026 Clients",
     preset: "read_only / supervised",
     caller: "sf.createMcpServer() (POST /api/mcp · stdio)",
     allowed: "Allowlisted sfield tools (e.g. cep.empathy.assess@1.0.0), published int.* tasks, KB RAG",
-    guarantee: "Authorizer + Ajv schemas + HITL approval suspension (pending_approval) + sfieldRunId audit",
+    guarantee: "Authorizer + Ajv schemas + HITL approvals + MCP 2026 Elicitation (input_required) & Async Tasks + sfieldRunId audit",
+  },
+  {
+    lane: "Blind Surface Stitch & Sealed Actions",
+    preset: "read_only (stitch) / supervised (action)",
+    caller: "sf.surfaces (/api/surfaces/schemas · stitch · action)",
+    allowed: "Declarative $ref / $repeat / $input UI templates bound to registered sfield tools",
+    guarantee: "Closed schema path validation + HMAC-SHA256 principal-bound action seals (blocks tampering & cross-principal replay)",
   },
 ];
 
@@ -108,7 +115,7 @@ const sdkPackages = [
   {
     pkg: "@sfield/core",
     role: "Governed Agent Kernel",
-    highlights: "SField runtime, closed Ajv tool contracts, HITL approvals, Anthropic / Gemini / OpenAI-compatible providers, SFieldMcpServer + McpClient, PiiFirewall, ToolResilienceGuard, DelegationService, streamRun, FilesystemArtifactStore & VectorMemoryIndex.",
+    highlights: "SField runtime, closed Ajv tool contracts, SurfaceBinderService (sf.surfaces deterministic Data-to-UI stitch & HMAC-sealed actions), HITL approvals, Anthropic / Gemini / OpenAI-compatible providers, MCP 2026 SFieldMcpServer (Elicitation + Async Tasks) + McpClient, PiiFirewall, ToolResilienceGuard, DelegationService, streamRun, FilesystemArtifactStore & VectorMemoryIndex.",
   },
   {
     pkg: "@sfield/preset-memory",
@@ -245,7 +252,7 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
       </div>
 
       <div className="help-sfield-subsection">
-        <h3>Standalone <code>@sfield/*</code> SDK packages (8 publishable workspaces)</h3>
+        <h3>Standalone <code>@sfield/*</code> SDK packages (9 publishable workspaces)</h3>
         <p>Every enterprise capability built for CEP lives as a reusable, domain-agnostic package under <code>vendor/sfield/packages/</code>, verified by CI (<code>.github/workflows/ci.yml</code>) and publishable via <code>.github/workflows/release.yml</code>:</p>
         <div className="help-sfield-table-wrap">
           <table className="help-sfield-table">
