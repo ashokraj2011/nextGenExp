@@ -216,6 +216,12 @@ export {
   type GraphRunRecord,
   type GraphExecutionHost,
 } from "./graph/state-graph.js";
+export {
+  SlashCommandService,
+  normalizeSlashCommand,
+  type SlashCommandDefinition,
+  type ListSlashCommandsOptions,
+} from "./commands/slash-commands.js";
 export { PluginManager, CORE_API_VERSION, CORE_VERSION } from "./plugins/manager.js";
 export { EnvSecretResolver, CompositeSecretResolver } from "./secrets.js";
 export { checkLockApproved, approveLock, effectiveRequireApproved } from "./governance/lock.js";

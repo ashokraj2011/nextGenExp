@@ -37,11 +37,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { command: "/upload", label: "Attach document", hint: "Upload invoice, CSV, log, or image", action: "upload" },
 ];
 
-export function matchSlashCommands(draft: string): SlashCommand[] {
+export function matchSlashCommands(draft: string, commands: readonly SlashCommand[] = SLASH_COMMANDS): SlashCommand[] {
   const trimmed = draft.trimStart();
   if (!trimmed.startsWith("/") || trimmed.includes(" ")) return [];
   const q = trimmed.toLowerCase();
-  return SLASH_COMMANDS.filter((c) => c.command.startsWith(q) || c.label.toLowerCase().includes(q.slice(1)));
+  return commands.filter((c) => c.command.startsWith(q) || c.label.toLowerCase().includes(q.slice(1)));
 }
 
 export function SlashCommandMenu({ commands, activeIndex, onPick }: {

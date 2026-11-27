@@ -1,4 +1,5 @@
 import { serverTenantId } from "./tenant";
+import { hydrateTenantSlashCommands } from "./slash-commands";
 import type { EvaluationRow } from "../../packages/contracts/evaluation";
 import { axeBudget, experienceAgentId, type ExecutionBudget } from "../../packages/contracts/agentic";
 import { availableFundingOptions, fundingPreviewFrom } from "../../packages/capabilities";
@@ -421,6 +422,7 @@ export class Runtime implements IntegrationTaskRuntime {
         grants: { effects: ["read", "write"], autonomousWrites: true, interactionTools: ["ask_user"] },
       },
     });
+    hydrateTenantSlashCommands(runtime.sf.commands, dirname(path), serverTenantId);
     return runtime;
   }
 

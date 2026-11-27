@@ -7,7 +7,7 @@ import { useAui } from "@assistant-ui/react";
 import { Mic, MicOff, Paperclip, Play, Square } from "lucide-react";
 import { MAX_MESSAGE_LENGTH } from "../../../packages/contracts/domain";
 import type { DomainPack } from "../../../packages/contracts/domain-packs";
-import { matchSlashCommands, SlashCommandMenu, type SlashCommand } from "../chat-rich-ux";
+import { matchSlashCommands, SLASH_COMMANDS, SlashCommandMenu, type SlashCommand } from "../chat-rich-ux";
 import {
   AttachmentChipList, composeMessageWithAttachments, createSampleAttachment,
   NextSuggestionChips, readAttachmentFile, SAMPLE_UPLOAD_DOCUMENTS, useVoiceInput,
@@ -46,7 +46,22 @@ export function Composer({
   const [dragOver, setDragOver] = useState(false);
   const [sampleMenuOpen, setSampleMenuOpen] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
-  const slashCommands = useMemo(() => matchSlashCommands(draft), [draft]);
+  const [tenantSlashCommands, setTenantSlashCommands] = useState<SlashCommand[]>(SLASH_COMMANDS);
+  useEffect(() => {
+    let active = true;
+    const domainId = domainPack?.id;
+    const domainQuery = domainId ? `?domain=${encodeURIComponent(domainId)}` : "";
+    fetch(`/api/slash-commands${domainQuery}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { commands?: SlashCommand[] } | null) => {
+        if (active && Array.isArray(data?.commands)) {
+          setTenantSlashCommands(data.commands);
+        }
+      })
+      .catch(() => { /* keep fallback defaults */ });
+    return () => { active = false; };
+  }, [domainPack?.id]);
+  const slashCommands = useMemo(() => matchSlashCommands(draft, tenantSlashCommands), [draft, tenantSlashCommands]);
   useEffect(() => { setSlashIndex(0); }, [slashCommands.length, draft]);
 
   const runSlashCommand = (cmd: SlashCommand) => {

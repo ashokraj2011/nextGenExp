@@ -23,6 +23,9 @@ import type { IntegrationTaskService } from "../integration-tasks";
 import type { KnowledgeBaseStore } from "../knowledge-base";
 import type { McpExposureStore } from "../mcp-exposure-store";
 import { domainWriteToolRef, principalFor, type Runtime } from "../runtime";
+import { SlashCommandService } from "@sfield/core";
+import { hydrateTenantSlashCommands, persistTenantSlashCommands } from "../slash-commands";
+import { serverTenantId } from "../tenant";
 import type { ExperienceService } from "../service";
 import { ApiError, type Store } from "../store";
 import type { WatchcardStore } from "../watchcard-store";
@@ -552,6 +555,63 @@ export async function handleCollaborationAndProtocolRoutes(deps: CollaborationRo
         formInputs: input.formInputs as Record<string, import("@sfield/core").JsonValue> | undefined,
       });
       json(res, outcome, outcome.status === "denied" ? 403 : outcome.status === "pending_approval" ? 202 : 200);
+      return true;
+    }
+  }
+
+  // ── Tenant-Configurable Slash Commands (backed by sf.commands) ────────────
+  if (resource === "slash-commands") {
+    const getCommandService = (): SlashCommandService => {
+      if (runtime?.sfieldInstance) return runtime.sfieldInstance.commands;
+      const offline = new SlashCommandService();
+      hydrateTenantSlashCommands(offline, dataDir, serverTenantId);
+      return offline;
+    };
+
+    if (!id && !operation && method === "GET") {
+      const domain = url.searchParams.get("domain") || undefined;
+      const includeDisabled = url.searchParams.get("includeDisabled") === "true" && Boolean(operator);
+      const svc = getCommandService();
+      json(res, {
+        tenantId: serverTenantId,
+        hasOverride: svc.hasTenantOverride(serverTenantId),
+        commands: svc.list({ tenantId: serverTenantId, ...(domain ? { domain } : {}), includeDisabled }),
+      });
+      return true;
+    }
+    if (!id && !operation && method === "POST") {
+      requireOperator();
+      const input = await body(req, z.object({
+        command: z.string().trim().min(1).max(34),
+        label: z.string().trim().min(1).max(80),
+        hint: z.string().trim().max(160).default(""),
+        action: z.string().trim().min(1).max(32).default("prompt"),
+        prompt: z.string().max(600).optional(),
+        toolRef: z.string().max(120).optional(),
+        domain: z.string().max(48).optional(),
+        enabled: z.boolean().optional(),
+      }).strict(), 16 * 1024);
+      const svc = getCommandService();
+      const saved = svc.upsert(serverTenantId, input);
+      persistTenantSlashCommands(svc, dataDir, serverTenantId);
+      json(res, {
+        tenantId: serverTenantId,
+        command: saved,
+        commands: svc.list({ tenantId: serverTenantId, includeDisabled: true }),
+      }, 201);
+      return true;
+    }
+    if (!operation && method === "DELETE" && (id || url.searchParams.get("command"))) {
+      requireOperator();
+      const target = id ? decodeURIComponent(id) : String(url.searchParams.get("command") ?? "");
+      const svc = getCommandService();
+      const removed = svc.remove(serverTenantId, target);
+      persistTenantSlashCommands(svc, dataDir, serverTenantId);
+      json(res, {
+        tenantId: serverTenantId,
+        removed,
+        commands: svc.list({ tenantId: serverTenantId, includeDisabled: true }),
+      });
       return true;
     }
   }

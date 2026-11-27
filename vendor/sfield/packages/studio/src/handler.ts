@@ -22,6 +22,7 @@ import {
   nowIso,
   requestElicitation,
   SFieldError,
+  SlashCommandService,
   type ActingForIdentity,
   type ExecutionPersistence,
   type JsonObject,
@@ -211,6 +212,7 @@ export function createStudioHandler(options: StudioOptions): (req: IncomingMessa
       open: async () => { throw new SFieldError("STATE_UNAVAILABLE", "Runtime offline"); },
     },
   });
+  const commandService = options.runtime?.commands ?? new SlashCommandService();
 
   type RebalanceState = {
     accountId: string;
@@ -837,6 +839,58 @@ export function createStudioHandler(options: StudioOptions): (req: IncomingMessa
       if (rel === "/api/redteam/run" && method === "POST") {
         const result = await runRedTeamProofSuite();
         sendJson(res, result);
+        return true;
+      }
+
+      // GET /api/commands — list tenant-scoped slash commands from sf.commands
+      if (rel === "/api/commands" && method === "GET") {
+        const tenantId = url.searchParams.get("tenantId") || options.runtime?.devPrincipal?.tenantId || "pzn-local";
+        const domain = url.searchParams.get("domain") || undefined;
+        const includeDisabled = url.searchParams.get("includeDisabled") === "true";
+        sendJson(res, {
+          tenantId,
+          hasOverride: commandService.hasTenantOverride(tenantId),
+          commands: commandService.list({ tenantId, ...(domain ? { domain } : {}), includeDisabled }),
+        });
+        return true;
+      }
+
+      // POST /api/commands — upsert a tenant-scoped slash command
+      if (rel === "/api/commands" && method === "POST") {
+        assertWritable();
+        const body = await readJsonBody(req);
+        const tenantId = typeof body["tenantId"] === "string" && body["tenantId"].trim()
+          ? body["tenantId"].trim()
+          : (options.runtime?.devPrincipal?.tenantId || "pzn-local");
+        const saved = commandService.upsert(tenantId, {
+          command: String(body["command"] ?? ""),
+          label: String(body["label"] ?? ""),
+          hint: String(body["hint"] ?? ""),
+          action: String(body["action"] ?? "prompt"),
+          ...(typeof body["prompt"] === "string" ? { prompt: body["prompt"] } : {}),
+          ...(typeof body["toolRef"] === "string" && body["toolRef"].trim() ? { toolRef: body["toolRef"].trim() } : {}),
+          ...(typeof body["domain"] === "string" && body["domain"].trim() ? { domain: body["domain"].trim() } : {}),
+          enabled: body["enabled"] !== false,
+        });
+        sendJson(res, {
+          tenantId,
+          command: saved,
+          commands: commandService.list({ tenantId, includeDisabled: true }),
+        }, 201);
+        return true;
+      }
+
+      // DELETE /api/commands/:cmd — remove a slash command for a tenant
+      if (rel.startsWith("/api/commands/") && method === "DELETE") {
+        assertWritable();
+        const cmd = decodeURIComponent(rel.slice("/api/commands/".length));
+        const tenantId = url.searchParams.get("tenantId") || options.runtime?.devPrincipal?.tenantId || "pzn-local";
+        const removed = commandService.remove(tenantId, cmd);
+        sendJson(res, {
+          tenantId,
+          removed,
+          commands: commandService.list({ tenantId, includeDisabled: true }),
+        });
         return true;
       }
 

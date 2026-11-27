@@ -171,6 +171,7 @@ export function renderStudioHtml(opts: {
       { id: "graphs", label: "Graphs & Time-Travel" },
       { id: "redteam", label: "Red-Team Proofs" },
       { id: "tools", label: "Tools & Playground" },
+      { id: "commands", label: "Slash Commands" },
       { id: "mcp2026", label: "MCP 2026 Elicitation & Tasks" },
       { id: "approvals", label: "HITL Approvals" },
       { id: "evals", label: "Evals & Gate" },
@@ -179,7 +180,7 @@ export function renderStudioHtml(opts: {
       { id: "telemetry", label: "OTel Telemetry" },
     ];
     let activeTab = "overview";
-    let state = { overview: null, runs: [], selectedRun: null, tools: [], approvals: [], evals: [], memory: [], telemetry: null, mcp2026: null, mcpLastOut: null, graphs: null, selectedGraphRunId: null, redteam: null };
+    let state = { overview: null, runs: [], selectedRun: null, tools: [], approvals: [], evals: [], memory: [], telemetry: null, mcp2026: null, mcpLastOut: null, graphs: null, selectedGraphRunId: null, redteam: null, commands: null, commandTenant: "pzn-local" };
 
     async function api(path, opts) {
       const res = await fetch(API + path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
@@ -262,6 +263,10 @@ export function renderStudioHtml(opts: {
           const data = await api("/tools");
           state.tools = data.tools || [];
           renderTools(root);
+        } else if (activeTab === "commands") {
+          heading.textContent = "Tenant Slash Commands (sf.commands)";
+          state.commands = await api("/commands?includeDisabled=true&tenantId=" + encodeURIComponent(state.commandTenant || "pzn-local"));
+          renderCommands(root);
         } else if (activeTab === "mcp2026") {
           heading.textContent = "MCP 2026 · Elicitation & Async Tasks";
           state.mcp2026 = await api("/mcp2026/state");
@@ -852,6 +857,73 @@ export function renderStudioHtml(opts: {
           root.innerHTML = '<div class="notice err">' + esc(e.message) + '</div>';
         }
       };
+    }
+
+    function renderCommands(root) {
+      const c = state.commands || { tenantId: state.commandTenant || "pzn-local", commands: [], hasOverride: false };
+      const rows = (c.commands || []).map((cmd) =>
+        '<tr>' +
+          '<td><code>' + esc(cmd.command) + '</code></td>' +
+          '<td><strong>' + esc(cmd.label) + '</strong><div class="muted" style="font-size:12px">' + esc(cmd.hint || "") + '</div></td>' +
+          '<td>' + pill(cmd.action, "accent") + (cmd.domain ? " " + pill(cmd.domain) : "") + '</td>' +
+          '<td>' + pill(cmd.enabled === false ? "disabled" : "active", cmd.enabled === false ? "err" : "ok") + '</td>' +
+          '<td>' + (!BOOT.readOnly ? '<button class="btn err" type="button" data-del-cmd="' + esc(cmd.command) + '">Remove</button>' : '') + '</td>' +
+        '</tr>'
+      ).join("");
+
+      root.innerHTML =
+        '<div class="card stack">' +
+          '<div class="row" style="justify-content:space-between"><div><h2>Tenant Slash Command Registry (<code>sf.commands</code>)</h2><div class="muted">Configure the <code>/</code> commands surfaced in chat for each tenant and optional domain.</div></div>' +
+          '<div class="row"><input id="cmd-tenant" value="' + esc(c.tenantId) + '" style="width:160px" placeholder="tenantId" /><button class="btn" id="cmd-load-btn" type="button">Load Tenant</button></div></div>' +
+          (!BOOT.readOnly
+            ? '<div class="grid-2">' +
+                '<label class="field">Command (starts with /)<input id="cmd-trigger" placeholder="/triage" /></label>' +
+                '<label class="field">Label<input id="cmd-label" placeholder="Incident Triage" /></label>' +
+                '<label class="field">Hint<input id="cmd-hint" placeholder="Summarize active P1 alerts" /></label>' +
+                '<label class="field">Domain (optional)<input id="cmd-domain" placeholder="wealth / it_ops / sales_revops" /></label>' +
+              '</div>' +
+              '<label class="field">Prompt (for action=prompt)<input id="cmd-prompt" placeholder="Show active P1 incidents and rollback status." /></label>' +
+              '<div class="row"><button class="btn primary" id="cmd-save-btn" type="button">Save Command for Tenant</button></div>'
+            : '') +
+        '</div>' +
+        '<div class="card stack">' +
+          '<h2>Effective Commands for <code>' + esc(c.tenantId) + '</code> (' + (c.commands ? c.commands.length : 0) + ')</h2>' +
+          (c.commands && c.commands.length
+            ? '<table><thead><tr><th>Command</th><th>Label &amp; Hint</th><th>Action / Domain</th><th>Status</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>'
+            : '<div class="empty">No slash commands configured for this tenant.</div>') +
+        '</div>';
+
+      document.getElementById("cmd-load-btn").onclick = async () => {
+        state.commandTenant = document.getElementById("cmd-tenant").value.trim() || "pzn-local";
+        await loadActiveTab();
+      };
+      const saveBtn = document.getElementById("cmd-save-btn");
+      if (saveBtn) {
+        saveBtn.onclick = async () => {
+          const tenantId = document.getElementById("cmd-tenant").value.trim() || "pzn-local";
+          state.commandTenant = tenantId;
+          await api("/commands", {
+            method: "POST",
+            body: JSON.stringify({
+              tenantId,
+              command: document.getElementById("cmd-trigger").value.trim(),
+              label: document.getElementById("cmd-label").value.trim(),
+              hint: document.getElementById("cmd-hint").value.trim(),
+              domain: document.getElementById("cmd-domain").value.trim() || undefined,
+              action: "prompt",
+              prompt: document.getElementById("cmd-prompt").value.trim(),
+            }),
+          });
+          await loadActiveTab();
+        };
+      }
+      root.querySelectorAll("button[data-del-cmd]").forEach((btn) => {
+        btn.onclick = async () => {
+          const tenantId = document.getElementById("cmd-tenant").value.trim() || "pzn-local";
+          await api("/commands/" + encodeURIComponent(btn.dataset.delCmd) + "?tenantId=" + encodeURIComponent(tenantId), { method: "DELETE" });
+          await loadActiveTab();
+        };
+      });
     }
 
     function renderPlugin(root, plugin) {
