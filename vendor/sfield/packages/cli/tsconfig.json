@@ -15,6 +15,12 @@
       "path": "../store-sqlite"
     },
     {
+      "path": "../studio"
+    },
+    {
+      "path": "../telemetry-otel"
+    },
+    {
       "path": "../testing"
     }
   ]

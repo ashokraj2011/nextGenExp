@@ -120,6 +120,11 @@ export class CepTelemetry implements TelemetrySink {
     return this.sdkOtelSink.snapshot();
   }
 
+  /** Exposes the underlying @sfield/telemetry-otel sink for @sfield/studio live trace inspection. */
+  get otelSink(): OtelTelemetrySink {
+    return this.sdkOtelSink;
+  }
+
   private empty(): PersistedTelemetry {
     return {
       updatedAt: new Date().toISOString(),

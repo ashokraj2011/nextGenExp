@@ -1,0 +1,525 @@
+/**
+ * HTTP handler and standalone server for @sfield/studio.
+ *
+ * Works in two modes:
+ *   1. Standalone CLI/process: `await startStudioServer({ runtime, telemetry, port: 4310 })`
+ *   2. Embeddable middleware: `const handle = createStudioHandler({ runtime, basePath: "/admin/sfield-studio", authorize })`
+ */
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
+import {
+  approveLock,
+  createPiiFirewall,
+  createPrincipal,
+  isoAfter,
+  newId,
+  nowIso,
+  type ActingForIdentity,
+  type ExecutionPersistence,
+  type JsonObject,
+  type MemoryItem,
+  type Principal,
+  type RunState,
+} from "@sfield/core";
+import type { StudioOptions, StudioServerHandle, StudioServerOptions } from "./types.js";
+import { renderStudioHtml } from "./ui.js";
+
+function normalizeBasePath(raw?: string): string {
+  if (!raw || raw === "/") return "";
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
+function sendJson(res: ServerResponse, data: unknown, status = 200): void {
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
+  res.end(JSON.stringify(data));
+}
+
+async function readJsonBody(req: IncomingMessage, maxBytes = 128 * 1024): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buf.length;
+    if (total > maxBytes) {
+      throw Object.assign(new Error("Request body too large."), { statusCode: 413 });
+    }
+    chunks.push(buf);
+  }
+  const text = Buffer.concat(chunks).toString("utf8").trim();
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Expected a JSON object.");
+    }
+    return parsed as Record<string, unknown>;
+  } catch (err) {
+    throw Object.assign(
+      new Error(err instanceof Error ? err.message : "Invalid JSON body."),
+      { statusCode: 400 },
+    );
+  }
+}
+
+function getPersistence(options: StudioOptions): ExecutionPersistence | undefined {
+  return options.runtime?.persistence ?? options.persistence;
+}
+
+function extractIdentifiers(raw: unknown): Record<string, string> {
+  const identifiers: Record<string, string> = {};
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof v === "string" && v.trim()) identifiers[k] = v.trim();
+    }
+  }
+  return identifiers;
+}
+
+function buildPrincipalFromBody(raw: unknown, fallbackTenant = "studio", fallbackSubject = "studio-user"): Principal {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return createPrincipal({ tenantId: fallbackTenant, subjectId: fallbackSubject });
+  }
+  const obj = raw as Record<string, unknown>;
+  const tenantId = typeof obj["tenantId"] === "string" && obj["tenantId"].trim() ? obj["tenantId"].trim() : fallbackTenant;
+  const subjectId = typeof obj["subjectId"] === "string" && obj["subjectId"].trim() ? obj["subjectId"].trim() : fallbackSubject;
+  const kind = obj["kind"] === "agent" || obj["kind"] === "service" ? obj["kind"] : "human";
+  const identifiers = extractIdentifiers(obj["identifiers"]);
+
+  let actingFor: ActingForIdentity | undefined;
+  if (obj["actingFor"] && typeof obj["actingFor"] === "object" && !Array.isArray(obj["actingFor"])) {
+    const obo = obj["actingFor"] as Record<string, unknown>;
+    const oboSub = typeof obo["subjectId"] === "string" && obo["subjectId"].trim() ? obo["subjectId"].trim() : undefined;
+    if (oboSub) {
+      const oboIds = extractIdentifiers(obo["identifiers"]);
+      actingFor = {
+        subjectId: oboSub,
+        kind: obo["kind"] === "service" ? "service" : "human",
+        ...(Object.keys(oboIds).length > 0 ? { identifiers: oboIds } : {}),
+      };
+    }
+  }
+
+  return createPrincipal({
+    tenantId,
+    subjectId,
+    kind,
+    ...(Object.keys(identifiers).length > 0 ? { identifiers } : {}),
+    ...(actingFor ? { actingFor } : {}),
+  });
+}
+
+/**
+ * Creates a reusable Node.js HTTP request handler for `@sfield/studio`.
+ * Returns `true` when the request path matched `basePath` and was handled; `false` otherwise.
+ */
+export function createStudioHandler(options: StudioOptions): (req: IncomingMessage, res: ServerResponse) => Promise<boolean> {
+  const basePath = normalizeBasePath(options.basePath);
+  const title = options.title ?? "sfield Studio";
+  const readOnly = Boolean(options.readOnly);
+  const plugins = options.plugins ?? [];
+  const pii = options.piiFirewall ?? createPiiFirewall();
+  const html = renderStudioHtml({ title, basePath, readOnly, plugins });
+
+  const assertWritable = () => {
+    if (readOnly) {
+      throw Object.assign(new Error("Studio is running in read-only mode."), { statusCode: 403 });
+    }
+  };
+
+  return async (req: IncomingMessage, res: ServerResponse): Promise<boolean> => {
+    const rawUrl = req.url ?? "/";
+    const url = new URL(rawUrl, "http://127.0.0.1");
+    const pathname = url.pathname;
+
+    if (basePath) {
+      if (pathname !== basePath && !pathname.startsWith(`${basePath}/`)) {
+        return false;
+      }
+    }
+
+    if (options.authorize) {
+      const allowed = await options.authorize(req);
+      if (!allowed) {
+        sendJson(res, { error: "unauthorized", message: "Studio access requires authorization." }, 401);
+        return true;
+      }
+    }
+
+    const rel = basePath ? pathname.slice(basePath.length) || "/" : pathname;
+    const method = (req.method ?? "GET").toUpperCase();
+
+    try {
+      // Root HTML UI
+      if ((rel === "/" || rel === "") && method === "GET") {
+        res.writeHead(200, {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store",
+        });
+        res.end(html);
+        return true;
+      }
+
+      const persistence = getPersistence(options);
+
+      // GET /api/overview
+      if (rel === "/api/overview" && method === "GET") {
+        const health = options.runtime
+          ? await options.runtime.health()
+          : persistence
+            ? { ok: (await persistence.health()).ok, persistence: await persistence.health() }
+            : { ok: true, detail: "no persistence attached" };
+        const configDigest = options.runtime?.config.digest() ?? null;
+        const effective = options.runtime?.config.effective();
+        const lockRecord = persistence
+          ? (configDigest ? await persistence.lockApprovals.get(configDigest) : await persistence.lockApprovals.latest())
+          : null;
+        const runs = persistence ? await persistence.listRuns({ limit: 50 }) : [];
+        const pendingApprovals = persistence ? await persistence.listApprovals({ status: ["pending"] }) : [];
+        const evalReports = persistence ? await persistence.evalReports.list({}) : [];
+        const tools = options.runtime ? options.runtime.registry.list() : [];
+        const spans = options.telemetry ? options.telemetry.snapshot().spans : [];
+
+        sendJson(res, {
+          title,
+          readOnly,
+          hasRuntime: Boolean(options.runtime),
+          deployment: options.runtime ? (health as { deployment?: string }).deployment ?? persistence?.mode : persistence?.mode ?? "none",
+          health,
+          configDigest,
+          models: effective ? Object.keys(effective.models) : [],
+          agents: effective ? Object.keys(effective.agents) : [],
+          lock: {
+            digest: configDigest ?? lockRecord?.digest ?? null,
+            approved: Boolean(lockRecord),
+            record: lockRecord,
+          },
+          counts: {
+            tools: tools.length,
+            runs: runs.length,
+            pendingApprovals: pendingApprovals.length,
+            evalReports: evalReports.length,
+            spans: spans.length,
+          },
+          plugins,
+        });
+        return true;
+      }
+
+      // GET /api/runs
+      if (rel === "/api/runs" && method === "GET") {
+        if (!persistence) {
+          sendJson(res, { runs: [] });
+          return true;
+        }
+        const limitRaw = Number(url.searchParams.get("limit") ?? "50");
+        const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, Math.floor(limitRaw))) : 50;
+        const tenantId = url.searchParams.get("tenantId") || undefined;
+        const stateParam = url.searchParams.get("state");
+        const state = stateParam ? (stateParam.split(",") as RunState[]) : undefined;
+        const runs = await persistence.listRuns({
+          ...(tenantId ? { tenantId } : {}),
+          ...(state ? { state } : {}),
+          limit,
+        });
+        sendJson(res, { runs });
+        return true;
+      }
+
+      // GET /api/runs/:runId
+      if (rel.startsWith("/api/runs/") && method === "GET") {
+        const runId = decodeURIComponent(rel.slice("/api/runs/".length));
+        if (!persistence) {
+          sendJson(res, { error: "persistence_unavailable", message: "No persistence store attached." }, 404);
+          return true;
+        }
+        const run = await persistence.getRun(runId);
+        if (!run) {
+          sendJson(res, { error: "run_not_found", message: `Run "${runId}" not found.` }, 404);
+          return true;
+        }
+        const [calls, modelAttempts, audit, events] = await Promise.all([
+          persistence.listCalls(runId),
+          persistence.listModelAttempts(runId),
+          persistence.readAudit({ runId, limit: 200 }),
+          persistence.readEvents(runId, 0, 200),
+        ]);
+        sendJson(res, { run, calls, modelAttempts, audit, events: events.events });
+        return true;
+      }
+
+      // GET /api/tools
+      if (rel === "/api/tools" && method === "GET") {
+        const tools = options.runtime ? options.runtime.registry.list() : [];
+        sendJson(res, { tools });
+        return true;
+      }
+
+      // POST /api/tools/invoke — interactive Principal & Tool Playground
+      if (rel === "/api/tools/invoke" && method === "POST") {
+        assertWritable();
+        if (!options.runtime) {
+          sendJson(res, { error: "runtime_required", message: "A live SField runtime is required to invoke tools." }, 400);
+          return true;
+        }
+        const body = await readJsonBody(req);
+        const toolRef = typeof body["toolRef"] === "string" ? body["toolRef"].trim() : "";
+        if (!toolRef) {
+          sendJson(res, { error: "invalid_input", message: "toolRef is required." }, 400);
+          return true;
+        }
+        const args = (body["args"] && typeof body["args"] === "object" && !Array.isArray(body["args"]))
+          ? (body["args"] as JsonObject)
+          : {};
+        const principal = buildPrincipalFromBody(body["principal"]);
+        const preset = body["preset"] === "read_only" || body["preset"] === "bounded_auto" ? body["preset"] : "supervised";
+
+        const scope = await options.runtime.executions.open({
+          principal,
+          purpose: `studio:${toolRef}`,
+          preset,
+        });
+        try {
+          const result = await scope.registry.execute(toolRef, args);
+          sendJson(res, {
+            ...result,
+            runId: scope.id,
+            principal,
+          });
+        } finally {
+          await scope.close();
+        }
+        return true;
+      }
+
+      // GET /api/approvals
+      if (rel === "/api/approvals" && method === "GET") {
+        const approvals = persistence ? await persistence.listApprovals({}) : [];
+        sendJson(res, { approvals });
+        return true;
+      }
+
+      // POST /api/approvals/:id/decide
+      if (rel.startsWith("/api/approvals/") && rel.endsWith("/decide") && method === "POST") {
+        assertWritable();
+        if (!persistence) {
+          sendJson(res, { error: "persistence_unavailable", message: "No persistence store attached." }, 400);
+          return true;
+        }
+        const id = decodeURIComponent(rel.slice("/api/approvals/".length, -"/decide".length));
+        const body = await readJsonBody(req);
+        const decision = body["decision"] === "approve" || body["decision"] === "deny" ? body["decision"] : null;
+        if (!decision) {
+          sendJson(res, { error: "invalid_input", message: 'decision must be "approve" or "deny".' }, 400);
+          return true;
+        }
+        const actorId = typeof body["actorId"] === "string" && body["actorId"].trim() ? body["actorId"].trim() : "studio-approver";
+        const comment = typeof body["comment"] === "string" ? body["comment"] : undefined;
+        const existingApproval = await persistence.getApproval(id);
+        const result = await persistence.decideApproval({
+          id,
+          actor: { tenantId: existingApproval?.tenantId ?? "studio", subjectId: actorId, roles: ["studio-approver"] },
+          decision,
+          ...(comment ? { comment } : {}),
+          now: nowIso(),
+        });
+        sendJson(res, result);
+        return true;
+      }
+
+      // GET /api/locks
+      if (rel === "/api/locks" && method === "GET") {
+        const digest = options.runtime?.config.digest() ?? url.searchParams.get("digest") ?? null;
+        const record = persistence
+          ? (digest ? await persistence.lockApprovals.get(digest) : await persistence.lockApprovals.latest())
+          : null;
+        sendJson(res, { digest: digest ?? record?.digest ?? null, approved: Boolean(record), record });
+        return true;
+      }
+
+      // POST /api/locks/approve
+      if (rel === "/api/locks/approve" && method === "POST") {
+        assertWritable();
+        if (!persistence) {
+          sendJson(res, { error: "persistence_unavailable", message: "No persistence store attached." }, 400);
+          return true;
+        }
+        const body = await readJsonBody(req);
+        const digest = (typeof body["digest"] === "string" && body["digest"].trim())
+          ? body["digest"].trim()
+          : options.runtime?.config.digest();
+        if (!digest) {
+          sendJson(res, { error: "invalid_input", message: "digest is required." }, 400);
+          return true;
+        }
+        const approver = typeof body["approver"] === "string" && body["approver"].trim() ? body["approver"].trim() : "studio-operator";
+        const comment = typeof body["comment"] === "string" && body["comment"].trim() ? body["comment"].trim() : undefined;
+        const noBaseline = body["noBaseline"] !== false;
+        const result = await approveLock(
+          { digest, approver, ...(comment ? { comment } : {}), noBaseline },
+          undefined,
+          { lockApprovals: persistence.lockApprovals, evalReports: persistence.evalReports },
+        );
+        sendJson(res, { ok: true, ...result });
+        return true;
+      }
+
+      // GET /api/evals
+      if (rel === "/api/evals" && method === "GET") {
+        const reports = persistence ? await persistence.evalReports.list({}) : [];
+        sendJson(res, { reports });
+        return true;
+      }
+
+      // GET /api/memory
+      if (rel === "/api/memory" && method === "GET") {
+        if (!persistence?.memory) {
+          sendJson(res, { items: [] });
+          return true;
+        }
+        const tenantId = url.searchParams.get("tenantId") || options.runtime?.devPrincipal?.tenantId || "demo-tenant";
+        const subjectId = url.searchParams.get("subjectId") || undefined;
+        const text = url.searchParams.get("text") || undefined;
+        const page = await persistence.memory.list(
+          tenantId,
+          {
+            ...(subjectId ? { scope: { kind: "subject", tenantId, subjectId } } : {}),
+            ...(text ? { text } : {}),
+          },
+          { limit: 100 },
+        );
+        sendJson(res, { items: page.items });
+        return true;
+      }
+
+      // POST /api/memory
+      if (rel === "/api/memory" && method === "POST") {
+        assertWritable();
+        if (!persistence?.memory) {
+          sendJson(res, { error: "memory_unavailable", message: "Memory repository is not attached." }, 400);
+          return true;
+        }
+        const body = await readJsonBody(req);
+        const tenantId = typeof body["tenantId"] === "string" && body["tenantId"].trim() ? body["tenantId"].trim() : "demo-tenant";
+        const subjectId = typeof body["subjectId"] === "string" && body["subjectId"].trim() ? body["subjectId"].trim() : "studio-user";
+        const content = typeof body["content"] === "string" ? body["content"].trim() : "";
+        const kind = body["kind"] === "preference" || body["kind"] === "summary" ? body["kind"] : "fact";
+        if (!content) {
+          sendJson(res, { error: "invalid_input", message: "content is required." }, 400);
+          return true;
+        }
+        const now = nowIso();
+        const memItem: MemoryItem = {
+          id: newId("mem"),
+          version: "1",
+          scope: { kind: "subject", tenantId, subjectId },
+          kind,
+          content,
+          origin: "user_explicit",
+          provenance: [{ sourceType: "host", sourceId: "sfield-studio", observedAt: now }],
+          classification: "internal",
+          expiresAt: isoAfter(365 * 24 * 3600 * 1000),
+          status: "active",
+          createdAt: now,
+          updatedAt: now,
+        };
+        const created = await persistence.memory.create(tenantId, memItem, newId("idem"));
+        sendJson(res, { item: created.item }, 201);
+        return true;
+      }
+
+      // DELETE /api/memory/:id
+      if (rel.startsWith("/api/memory/") && method === "DELETE") {
+        assertWritable();
+        if (!persistence?.memory) {
+          sendJson(res, { error: "memory_unavailable", message: "Memory repository is not attached." }, 400);
+          return true;
+        }
+        const id = decodeURIComponent(rel.slice("/api/memory/".length));
+        const tenantId = url.searchParams.get("tenantId") || options.runtime?.devPrincipal?.tenantId || "demo-tenant";
+        const receipt = await persistence.memory.delete(tenantId, [id], newId("idem"));
+        sendJson(res, { deleted: true, receipt });
+        return true;
+      }
+
+      // POST /api/pii/test
+      if (rel === "/api/pii/test" && method === "POST") {
+        const body = await readJsonBody(req);
+        const text = typeof body["text"] === "string" ? body["text"] : "";
+        const result = pii.scrubText(text);
+        const rehydrated = pii.rehydrateText(result.scrubbed, result.tokenMap);
+        sendJson(res, {
+          scrubbed: result.scrubbed,
+          rehydrated,
+          redactions: result.tokens,
+        });
+        return true;
+      }
+
+      // GET /api/telemetry
+      if (rel === "/api/telemetry" && method === "GET") {
+        if (!options.telemetry) {
+          sendJson(res, { spans: [], metrics: [] });
+          return true;
+        }
+        const snap = options.telemetry.snapshot();
+        sendJson(res, {
+          serviceName: snap.serviceName,
+          spans: snap.spans,
+          metrics: snap.metrics,
+        });
+        return true;
+      }
+
+      // GET /api/telemetry/otlp
+      if (rel === "/api/telemetry/otlp" && method === "GET") {
+        sendJson(res, options.telemetry ? options.telemetry.buildOtlpTracePayload() : { resourceSpans: [] });
+        return true;
+      }
+
+      sendJson(res, { error: "not_found", message: `Unknown Studio route: ${method} ${rel}` }, 404);
+      return true;
+    } catch (err) {
+      const status = typeof (err as { statusCode?: number }).statusCode === "number"
+        ? (err as { statusCode: number }).statusCode
+        : 500;
+      sendJson(res, { error: "studio_error", message: err instanceof Error ? err.message : String(err) }, status);
+      return true;
+    }
+  };
+}
+
+/** Starts a standalone `@sfield/studio` HTTP workbench server. */
+export async function startStudioServer(options: StudioServerOptions = {}): Promise<StudioServerHandle> {
+  const host = options.host ?? "127.0.0.1";
+  const port = options.port ?? 4310;
+  const handler = createStudioHandler(options);
+
+  const server = createServer((req, res) => {
+    void handler(req, res).then((handled) => {
+      if (!handled && !res.writableEnded) {
+        sendJson(res, { error: "not_found" }, 404);
+      }
+    });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, host, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+
+  const addr = server.address() as AddressInfo;
+  const basePath = normalizeBasePath(options.basePath);
+  return {
+    host,
+    port: addr.port,
+    url: `http://${host}:${addr.port}${basePath}`,
+    close: () => new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
+  };
+}

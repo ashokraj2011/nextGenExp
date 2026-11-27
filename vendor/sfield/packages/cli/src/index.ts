@@ -15,6 +15,8 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { SField, EphemeralPersistence, approveLock, createDevAuthorizer, LOCAL_DEV_PRINCIPAL, nowIso, type JsonObject } from "@sfield/core";
 import { sqlitePersistence } from "@sfield/store-sqlite";
+import { startStudioServer } from "@sfield/studio";
+import { createOtelTelemetrySink } from "@sfield/telemetry-otel";
 import { runEvalSuite, evaluateReleaseGate, type EvalCaseDefinition } from "@sfield/testing";
 
 export interface CliIo {
@@ -53,6 +55,10 @@ Usage:
 
   sfield mcp serve --db <sqlitePath> [--config <configPath>] [--name <name>] [--preset <preset>]
       Expose the SField runtime's governed tools over MCP stdio (JSON-RPC 2.0).
+
+  sfield studio [--db <sqlitePath>] [--config <configPath>] [--port 4310] [--host 127.0.0.1] [--read-only]
+      Launch the @sfield/studio web workbench to inspect runs, principals,
+      tools, HITL approvals, governance locks, evals, memory, PII firewall, and OTel spans.
 
   sfield --help | help
       Show this usage summary.
@@ -542,6 +548,7 @@ async function cmdDoctor(args: ParsedArgs, cwd: string, out: (s: string) => void
     "@sfield/store-sqlite",
     "@sfield/store-postgres",
     "@sfield/telemetry-otel",
+    "@sfield/studio",
     "@sfield/testing",
     "@sfield/cli",
   ];
@@ -691,6 +698,70 @@ async function cmdMcpServe(args: ParsedArgs, cwd: string, err: (s: string) => vo
   }
 }
 
+async function cmdStudio(args: ParsedArgs, cwd: string, out: (s: string) => void): Promise<number> {
+  const dbFlag = flagString(args.flags, "db");
+  const configFlag = flagString(args.flags, "config");
+  const host = flagString(args.flags, "host") ?? "127.0.0.1";
+  const portRaw = Number(flagString(args.flags, "port") ?? "4310");
+  const port = Number.isFinite(portRaw) && portRaw >= 0 ? Math.floor(portRaw) : 4310;
+  const readOnly = flagBool(args.flags, "read-only");
+  const title = flagString(args.flags, "title") ?? "sfield Studio";
+
+  const telemetry = createOtelTelemetrySink({ serviceName: "sfield-studio" });
+  const persistence = dbFlag ? sqlitePersistence({ path: resolve(cwd, dbFlag) }) : new EphemeralPersistence();
+
+  let runtime: SField | undefined;
+  if (configFlag) {
+    runtime = await SField.create({
+      config: resolve(cwd, configFlag),
+      deployment: dbFlag ? "durable_single" : "ephemeral",
+      persistence,
+      telemetry,
+      authorizer: createDevAuthorizer(),
+      devPrincipal: LOCAL_DEV_PRINCIPAL,
+      quiet: true,
+    });
+  } else {
+    runtime = await SField.create({
+      config: { version: 1, models: {}, agents: {} },
+      deployment: dbFlag ? "durable_single" : "ephemeral",
+      persistence,
+      telemetry,
+      authorizer: createDevAuthorizer(),
+      devPrincipal: LOCAL_DEV_PRINCIPAL,
+      quiet: true,
+    });
+  }
+
+  const studio = await startStudioServer({
+    runtime,
+    telemetry,
+    host,
+    port,
+    readOnly,
+    title,
+  });
+
+  out(`sfield Studio listening on ${studio.url}\n`);
+  out(`  persistence : ${dbFlag ? resolve(cwd, dbFlag) : "ephemeral (in-memory)"}\n`);
+  out(`  mode        : ${readOnly ? "read-only" : "interactive"}\n`);
+  out(`Press Ctrl+C to stop.\n`);
+
+  await new Promise<void>((resolveWait) => {
+    const shutdown = () => {
+      process.off("SIGINT", shutdown);
+      process.off("SIGTERM", shutdown);
+      resolveWait();
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+  });
+
+  await studio.close();
+  await runtime.close();
+  return 0;
+}
+
 /**
  * Programmatic CLI entrypoint. Returns process exit code (0 = success, non-zero = failure).
  */
@@ -723,6 +794,8 @@ export async function runCli(argv: string[], io: CliIo = {}): Promise<number> {
         return await cmdDoctor(args, cwd, out);
       case "mcp":
         return await cmdMcpServe(args, cwd, err);
+      case "studio":
+        return await cmdStudio(args, cwd, out);
       default:
         err(`Unknown command "${cmd}". Run "sfield --help" for usage.\n`);
         return 1;

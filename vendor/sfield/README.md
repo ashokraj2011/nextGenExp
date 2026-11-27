@@ -14,8 +14,9 @@
 | **`@sfield/store-sqlite`** | `durable_single` persistence over built-in `node:sqlite` | `sqlitePersistence`, `SqlitePersistence`, `SqliteMemoryRepository` |
 | **`@sfield/store-postgres`** | `deployment: "service"` PostgreSQL persistence **with automatic durable JSON-file fallback** | `PostgresPersistence`, `PostgresMemoryRepository`, `POSTGRES_SCHEMA_SQL`, `createPgPoolAdapter`, `JsonFilePersistence`, `createPostgresOrJsonPersistence` |
 | **`@sfield/telemetry-otel`** | Zero-dependency OpenTelemetry `gen_ai.*` `TelemetrySink` | `createOtelTelemetrySink`, `OtelTelemetrySink` (OTLP/HTTP JSON `v1/traces`) |
+| **`@sfield/studio`** | Standalone & embeddable governance workbench UI + HTTP handler (zero UI framework dependencies) | `createStudioHandler`, `startStudioServer`, `renderStudioHtml`, `StudioPluginTab` |
 | **`@sfield/testing`** | Conformance suites, deterministic fake providers & guardrail eval runner | `persistenceConformance`, `runEvalSuite`, `evaluateReleaseGate`, `FakeModelProvider` |
-| **`@sfield/cli`** | Standalone CLI (`sfield`) | `init`, `validate`, `eval`, `lock status`, `lock approve`, `inspect`, `mcp serve` |
+| **`@sfield/cli`** | Standalone CLI (`sfield`) | `init`, `validate`, `eval`, `lock status`, `lock approve`, `inspect`, `doctor`, `studio`, `mcp serve` |
 
 ---
 
@@ -88,6 +89,9 @@ npm run sfield -- inspect <runId> --db ./state.sqlite
 
 # Expose governed sfield tools over MCP stdio
 npm run sfield -- mcp serve --db ./state.sqlite --config ./my-agent/sfield.config.yaml
+
+# Launch the standalone @sfield/studio governance workbench
+npm run sfield -- studio --db ./state.sqlite --port 4310
 ```
 
 ---

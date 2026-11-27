@@ -1,7 +1,7 @@
 {
   "name": "@sfield/cli",
   "version": "0.1.0",
-  "description": "Standalone CLI for the sfield Agent SDK: init, validate, eval, lock status/approve, inspect, doctor, and mcp serve.",
+  "description": "Standalone CLI for the sfield Agent SDK: init, validate, eval, lock status/approve, inspect, doctor, studio, and mcp serve.",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
@@ -38,6 +38,8 @@
   "dependencies": {
     "@sfield/core": "0.1.0",
     "@sfield/store-sqlite": "0.1.0",
+    "@sfield/studio": "0.1.0",
+    "@sfield/telemetry-otel": "0.1.0",
     "@sfield/testing": "0.1.0"
   }
 }

@@ -1,0 +1,41 @@
+{
+  "name": "@sfield/studio",
+  "version": "0.1.0",
+  "description": "Standalone and embeddable governance workbench UI & HTTP handler for the sfield Agent SDK: runs, traces, tool & Principal playground, HITL approvals, locks, evals, memory, PII firewall, and OTel telemetry.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "keywords": [
+    "sfield",
+    "studio",
+    "ai-agents",
+    "governance",
+    "observability",
+    "hitl",
+    "mcp"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ashokraj2011/nextGenExp.git",
+    "directory": "vendor/sfield/packages/studio"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@sfield/core": "0.1.0",
+    "@sfield/telemetry-otel": "0.1.0"
+  }
+}

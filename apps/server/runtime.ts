@@ -280,6 +280,11 @@ export class Runtime implements IntegrationTaskRuntime {
     this.experiences = new ExperienceAgent(execution, () => this.sf);
   }
 
+  /** Exposes the underlying @sfield/core SField runtime (e.g., for mounting @sfield/studio). */
+  get sfieldInstance(): SField {
+    return this.sf;
+  }
+
   static async open(
     store: Store, path: string, settings: GatewaySettings, now: () => number,
     inspectorEnabled = false, portfolioSnapshots = fixturePortfolioSnapshotProvider, goalProgressProvider = fixtureGoalProgressProvider, goalBudget: ExecutionBudget = axeBudget,

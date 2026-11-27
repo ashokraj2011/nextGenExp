@@ -53,7 +53,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build all 8 @sfield/* packages & verify workspace
+      - name: Build all 9 @sfield/* packages & verify workspace
         run: npm run build
 
       - name: Run full test & conformance suite + CLI doctor
@@ -74,6 +74,7 @@ jobs:
             vendor/sfield/packages/telemetry-otel \
             vendor/sfield/packages/preset-memory \
             vendor/sfield/packages/preset-local \
+            vendor/sfield/packages/studio \
             vendor/sfield/packages/cli; do
             echo "=== Publishing $pkg ==="
             npm publish --workspace="$pkg" --access public $DRY_RUN

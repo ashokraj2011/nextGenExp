@@ -1,4 +1,5 @@
 import { domainPackIds } from "../../packages/contracts/domain-packs";
+import { createStudioHandler } from "@sfield/studio";
 import { handleCollaborationAndProtocolRoutes } from "./routes/collaboration";
 import { handleDomainsOpsSalesRoutes } from "./routes/domains-ops-sales";
 import { handleIntegrationsAndPznRoutes } from "./routes/integrations-pzn";
@@ -671,6 +672,19 @@ export async function startApp(options: Options) {
     }) ?? record;
     return { approval: finalRecord, execution: { summary, sfieldRunId: "offline", audit } };
   }
+  const sfieldStudioHandler = createStudioHandler({
+    runtime: runtime?.sfieldInstance,
+    telemetry: telemetry.otelSink,
+    title: "sfield Studio · CEP",
+    basePath: "/admin/sfield-studio",
+    plugins: [
+      { id: "pzn-studio", label: "Self-Service PZN Studio", description: "Treatment Selector & CCRE rule authoring", badge: "CEP", href: "/recommendations" },
+      { id: "customer-360", label: "Customer 360 Admin", description: "Wealth profiles, balances, goals & NBA preview", badge: "Wealth", href: adminPaths.customers },
+      { id: "ui-builder", label: "UI Builder & Widgets", description: "Bind custom A2UI layouts & Copilot widgets", badge: "A2UI", href: adminPaths.builder },
+      { id: "integrations", label: "Integrations Workspace", description: "Task contracts, connectors & MCP discovery", badge: "MCP", href: "/integrations" },
+      { id: "cep-logs", label: "CEP Admin Logs", description: "Turn-level payloads, TS decisions & inspector", badge: "CEP", href: adminPaths.logs },
+    ],
+  });
   let vite: ViteDevServer | undefined;
   const streams = new Set<ServerResponse>();
   const server = createServer((req, res) => {
@@ -726,6 +740,14 @@ export async function startApp(options: Options) {
     if (pathname === "/.well-known/agent.json" && req.method === "GET") {
       res.setHeader("Access-Control-Allow-Origin", "*");
       return json(res, buildA2aAgentCard(origin, integrationService));
+    }
+    if (pathname === "/admin/sfield-studio" || pathname.startsWith("/admin/sfield-studio/")) {
+      requireOperator();
+      if (req.method !== "GET" && ((req.headers.origin && req.headers.origin !== origin) || req.headers["sec-fetch-site"] === "cross-site")) {
+        throw new ApiError(403, "origin_unavailable", "Use the local demo address.");
+      }
+      await sfieldStudioHandler(req, res);
+      return;
     }
     if (!pathname.startsWith("/api/")) {
       if (pathname === "/it-ops" || pathname === "/revops") requireChatDomain(pathname === "/it-ops" ? "it_ops" : "sales_revops", "");

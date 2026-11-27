@@ -422,7 +422,7 @@ test("@sfield/cli doctor diagnoses runtime, packages, config, and SQLite persist
     assert.equal(report.ok, true);
     assert.equal(report.checks.find((c) => c.name === "node_runtime")?.status, "pass");
     assert.equal(report.checks.find((c) => c.name === "sdk_packages")?.status, "pass");
-    assert.ok(report.checks.find((c) => c.name === "sdk_packages")?.detail.includes("8/8 installed"));
+    assert.ok(report.checks.find((c) => c.name === "sdk_packages")?.detail.includes("9/9 installed"));
     assert.equal(report.checks.find((c) => c.name === "config")?.status, "pass");
     assert.equal(report.checks.find((c) => c.name === "persistence")?.status, "pass");
 
