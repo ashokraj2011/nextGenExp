@@ -6,8 +6,8 @@ import {
 import { dataDictionary, type DataBindingKey } from "../../packages/contracts/data-bindings";
 import type { Customer360AdminRecord } from "../../packages/contracts/customer-360";
 import {
-  bindingDomain, recordIntentOption, type RecordIntent, layoutComponents, layoutTargetDomain, maxLayoutDescription, maxLayoutSlots, maxLayoutTargets, maxLayouts, targetKey,
-  type BoundWidgetMetric, type CustomFormField, type CustomFormFieldType, type LayoutComponent, type LayoutSlot, type UiDesign, type UiLayoutCatalog, type UiLayoutChange, type UiLayoutRecord,
+  bindingDomain, layoutWidgets, recordIntentOption, widgetSequence, type RecordIntent, layoutComponents, layoutTargetDomain, maxLayoutDescription, maxLayoutSlots, maxLayoutTargets, maxLayouts, targetKey,
+  type BoundWidgetMetric, type CustomFormField, type CustomFormFieldType, type LayoutComponent, type LayoutSlot, type UiDesign, type UiLayoutCatalog, type UiLayoutChange, type UiLayoutRecord, type WidgetSlot,
 } from "../../packages/contracts/ui-layout";
 import type { DisplayExperience } from "../../packages/contracts/surface";
 import type { SavedWidget } from "../../packages/contracts/widget";
@@ -404,10 +404,10 @@ function NamedIntentEditor({ domain, value, attach }: {
 }
 
 function SlotAccordion({
-  slot, domainId, index, count, expanded, onToggle, change, move, remove,
+  slot, domainId, index, count, expanded, onToggle, change, move, remove, widgets,
   onDragStart, onDragOver, onDrop, onDragEnd, isDragging, isDragOver, customOptions,
 }: {
-  slot: LayoutSlot; domainId: DomainPackId; index: number; count: number;
+  slot: LayoutSlot; domainId: DomainPackId; index: number; count: number; widgets: ReadonlyMap<string, WidgetSlot>;
   expanded: boolean;
   onToggle: () => void;
   change: (slot: LayoutSlot) => void;
@@ -427,6 +427,11 @@ function SlotAccordion({
     : slot.kind === "widget" ? (slot.title.trim() || "Data-bound widget")
     : (slot.heading.trim() || "Text section");
   const editable = slot.kind !== "block";
+  const destination = slot.kind === "widget" && slot.nextWidgetId ? widgets.get(slot.nextWidgetId) : undefined;
+  const nextWidgets = slot.kind === "widget" ? [...widgets.values()].filter((candidate) => {
+    const { steps, issue } = widgetSequence(candidate, widgets);
+    return !issue && steps.every(({ id }) => id !== slot.id);
+  }) : [];
 
   function updateField(fieldIndex: number, nextField: CustomFormField) {
     if (slot.kind !== "form") return;
@@ -479,7 +484,7 @@ function SlotAccordion({
           </span>
           <span className="ui-slot-label-group">
             <strong>{label}</strong>
-            <small>{slotMetaSummary(slot)}</small>
+            <small>{slotMetaSummary(slot)}{destination && ` · Next → ${destination.title || "Untitled widget"}`}</small>
           </span>
         </button>
         <div className="ui-slot-controls">
@@ -724,11 +729,21 @@ function SlotAccordion({
                     id={id + "-wcta"}
                     value={slot.ctaLabel ?? ""}
                     maxLength={48}
-                    placeholder="e.g. Review portfolio"
+                    placeholder={slot.nextWidgetId ? "Continue" : "e.g. Review portfolio"}
                     onChange={(e) => change({ ...slot, ctaLabel: e.target.value || undefined })}
                   />
                 </div>
                 <div>
+                  <label htmlFor={id + "-waction"}>On button click</label>
+                  <select id={id + "-waction"} value={slot.nextWidgetId ?? ""}
+                    onChange={(e) => change({ ...slot, nextWidgetId: e.target.value || undefined })}>
+                    <option value="">Send a chat prompt</option>
+                    {nextWidgets.length > 0 && <optgroup label="Show another widget">
+                      {nextWidgets.map(({ id, title }) => <option key={id} value={id}>{title || "Untitled widget"}</option>)}
+                    </optgroup>}
+                  </select>
+                </div>
+                {!slot.nextWidgetId && <div>
                   <label htmlFor={id + "-wprompt"}>CTA chat prompt</label>
                   <input
                     id={id + "-wprompt"}
@@ -737,8 +752,9 @@ function SlotAccordion({
                     placeholder="Let me know my portfolio summary."
                     onChange={(e) => change({ ...slot, ctaPrompt: e.target.value || undefined })}
                   />
-                </div>
+                </div>}
               </div>
+              {widgets.size < 2 && <p className="ui-advanced-note">Add a second widget to link this button to another step.</p>}
             </div>
           </details>
         </div>
@@ -798,6 +814,7 @@ function UiWorkspace({ initial, customers }: {
   const record = records.find(({ id }) => id === selected);
   const domainId = record?.domainId ?? newDomain;
   const activeDesign = edits[selected] ?? record?.draft ?? domainStarters[domainId]();
+  const widgetsById = layoutWidgets(activeDesign.slots);
   useEffect(() => {
     if (!initial.domains.includes(domainId)) return;
     let active = true;
@@ -1404,6 +1421,7 @@ function UiWorkspace({ initial, customers }: {
                     <SlotAccordion
                       key={slot.id}
                       slot={slot}
+                      widgets={widgetsById}
                       index={index}
                       count={activeDesign.slots.length}
                       expanded={expandedSlotId === slot.id}
@@ -1426,7 +1444,9 @@ function UiWorkspace({ initial, customers }: {
                       move={(direction) => moveSlot(index, direction)}
                       remove={() => {
                         if (expandedSlotId === slot.id) setExpandedSlotId(null);
-                        edit({ ...activeDesign, slots: activeDesign.slots.filter(({ id }) => id !== slot.id) });
+                        const slots = activeDesign.slots.filter(({ id }) => id !== slot.id).map((item) =>
+                          item.kind === "widget" && item.nextWidgetId === slot.id ? { ...item, nextWidgetId: undefined } : item);
+                        edit({ ...activeDesign, slots });
                       }}
                       change={(next) => edit({ ...activeDesign, slots: activeDesign.slots.map((item) => item.id === next.id ? next : item) })}
                     />

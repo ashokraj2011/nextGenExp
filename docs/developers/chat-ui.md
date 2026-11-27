@@ -10,6 +10,12 @@ A layout controls how an existing result appears. Its attachment identifies the 
 4. **Save draft**. In **Layout preview → Try a chat turn**, ask **“Compare available and current balances.”** The expected result says **Draft layout applied** and includes your heading. Layout preview uses sample blocks and reads the selected profile for supported data bindings. The chat check runs the configured model and domain rules.
 5. **Publish**, then ask the same question in customer chat. In **Inspector → Published UI**, check the design name and revision. **Design library → Use as template** gives another owner an editable copy. Publishing an edit affects subsequent turns. Earlier turns retain their recorded UI.
 
+### Link widgets into steps
+
+Add each widget to the same layout. Expand the starting widget, open **Advanced (Badge, Progress Bar & CTA)**, and choose the destination under **On button click → Show another widget**. Give the button a label such as **See service impact**. Repeat on the next widget if you need more steps. **Layout preview** shows exactly one linked card at a time and adds **Back** after the first step.
+
+Publish the layout with its chat intent, then open the card in chat. The steps use the data that was resolved for that reply. To continue the conversation from the last step, use **Send a chat prompt** on that widget and fill in its button label and prompt.
+
 ### Publish an interactive experience
 
 Use **New experience** in UI Builder when you want to connect a chat request directly to a registered sfield task and design the result. Choose the tenant’s workspace, the intended audience, and the version of each published read task. Add chat phrases with input placeholders such as `Track delivery {{orderId}}` and bind the card’s fields to that task’s result.

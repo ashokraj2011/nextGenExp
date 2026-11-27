@@ -1572,3 +1572,5 @@
 .ui-experience-editor .ui-experience-check input { width: auto; }
 .ui-experience-section > button { justify-self: start; }
 .ui-experience-persona { margin: .8rem 1rem; }
+
+.ui-advanced-note { margin: 0; color: var(--builder-muted); font-size: .85rem; }

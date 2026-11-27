@@ -107,6 +107,7 @@ export const layoutBoundWidgetSchema = z.object({
   progressBinding: dataBindingKeySchema.optional(),
   ctaLabel: z.string().trim().max(48).optional(),
   ctaPrompt: z.string().trim().max(200).optional(),
+  nextWidgetId: slotId.optional(),
 }).strict();
 export type LayoutBoundWidget = z.infer<typeof layoutBoundWidgetSchema>;
 
@@ -139,6 +140,32 @@ export const layoutSlotSchema = z.discriminatedUnion("kind", [
   layoutBoundWidgetSchema.extend({ kind: z.literal("widget"), id: slotId }),
 ]);
 export type LayoutSlot = z.infer<typeof layoutSlotSchema>;
+export type WidgetSlot = Extract<LayoutSlot, { kind: "widget" }>;
+
+export function layoutWidgets(slots: LayoutSlot[]) {
+  return new Map(slots.flatMap((slot) => slot.kind === "widget" ? [[slot.id, slot] as const] : []));
+}
+
+export function widgetSequence(start: WidgetSlot, widgets: ReadonlyMap<string, WidgetSlot>) {
+  const steps = [start];
+  const visited = new Set([start.id]);
+  let current = start;
+  while (current.nextWidgetId) {
+    if (visited.has(current.nextWidgetId)) return { steps, issue: "cycle" as const };
+    const next = widgets.get(current.nextWidgetId);
+    if (!next) return { steps, issue: "missing_widget" as const };
+    steps.push(next);
+    visited.add(next.id);
+    current = next;
+  }
+  return { steps, issue: undefined };
+}
+
+export const widgetWizardSchema = z.object({
+  wizardId: slotId,
+  steps: z.array(resolvedBoundWidgetSchema).min(2).max(maxLayoutSlots),
+}).strict();
+
 const recordIntentSchema = z.object({
   id: z.string().regex(/^(it_ops|sales_revops)_intent_[a-z0-9_]{1,35}$/),
   label: z.string().trim().min(1).max(60),

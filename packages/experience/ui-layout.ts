@@ -1,14 +1,53 @@
 import { interpolateBindingTokens, type DataBindingValues } from "../contracts/data-bindings";
 import type { DisplayBlock, DisplayExperience } from "../contracts/surface";
-import type { AppliedUiLayout, UiDesign, UiPublication, UiTarget } from "../contracts/ui-layout";
-import { targetKey } from "../contracts/ui-layout";
+import {
+  layoutWidgets, targetKey, widgetSequence,
+  type AppliedUiLayout, type ResolvedBoundWidgetProps, type UiDesign, type UiPublication, type UiTarget, type WidgetSlot,
+} from "../contracts/ui-layout";
 import { buildSurface, type CompiledExperience } from "./compile";
 
 type SlotBlock = { block: DisplayBlock; index?: number };
 
+function resolveWidget(slot: WidgetSlot, bindings?: DataBindingValues, linking = false): ResolvedBoundWidgetProps {
+  const progressEntry = slot.progressBinding ? bindings?.[slot.progressBinding] : undefined;
+  return {
+    badge: interpolateBindingTokens(slot.badge, bindings),
+    title: interpolateBindingTokens(slot.title || "Live customer widget", bindings),
+    body: interpolateBindingTokens(slot.body, bindings),
+    accentTop: slot.accentTop,
+    ...(bindings?.["customer.displayName"] ? { hydratedFor: bindings["customer.displayName"].display } : {}),
+    metrics: slot.metrics.map((metric) => {
+      const resolved = metric.binding ? bindings?.[metric.binding] : undefined;
+      return {
+        id: metric.id,
+        label: metric.label,
+        value: resolved ? resolved.display : (metric.staticValue || "—"),
+        subtext: interpolateBindingTokens(metric.subtext, bindings),
+        tone: metric.tone,
+        ...(metric.binding ? { boundKey: metric.binding } : {}),
+      };
+    }),
+    ...(slot.progressLabel ? { progressLabel: interpolateBindingTokens(slot.progressLabel, bindings) } : {}),
+    ...(progressEntry?.percent !== undefined ? { progressPercent: progressEntry.percent, progressDisplay: progressEntry.display } : {}),
+    ...(slot.ctaLabel ? { ctaLabel: slot.ctaLabel } : {}),
+    ...(!linking && slot.ctaPrompt ? { ctaPrompt: interpolateBindingTokens(slot.ctaPrompt, bindings) } : {}),
+  };
+}
+
 function arrange(design: UiDesign, original: DisplayBlock[], bindings?: DataBindingValues) {
   const positions = new Set<number>();
   const mapped: SlotBlock[] = [];
+  const widgets = layoutWidgets(design.slots);
+  const destinationIds = new Set([...widgets.values()].map(({ nextWidgetId }) => nextWidgetId));
+  const wizards = new Map<string, WidgetSlot[]>();
+  const laterStepIds = new Set<string>();
+  for (const widget of widgets.values()) {
+    if (!widget.nextWidgetId || destinationIds.has(widget.id)) continue;
+    const { steps, issue } = widgetSequence(widget, widgets);
+    if (issue) continue;
+    wizards.set(widget.id, steps);
+    for (const step of steps.slice(1)) laterStepIds.add(step.id);
+  }
   for (const slot of design.slots) {
     if (slot.kind === "text") {
       if (slot.heading || slot.body) {
@@ -48,34 +87,15 @@ function arrange(design: UiDesign, original: DisplayBlock[], bindings?: DataBind
       continue;
     }
     if (slot.kind === "widget") {
-      const progressEntry = slot.progressBinding ? bindings?.[slot.progressBinding] : undefined;
-      mapped.push({
-        block: {
-          component: "PznBoundWidget",
-          props: {
-            badge: interpolateBindingTokens(slot.badge, bindings),
-            title: interpolateBindingTokens(slot.title || "Live customer widget", bindings),
-            body: interpolateBindingTokens(slot.body, bindings),
-            accentTop: slot.accentTop,
-            ...(bindings?.["customer.displayName"] ? { hydratedFor: bindings["customer.displayName"].display } : {}),
-            metrics: slot.metrics.map((metric) => {
-              const resolved = metric.binding ? bindings?.[metric.binding] : undefined;
-              return {
-                id: metric.id,
-                label: metric.label,
-                value: resolved ? resolved.display : (metric.staticValue || "—"),
-                subtext: interpolateBindingTokens(metric.subtext, bindings),
-                tone: metric.tone,
-                ...(metric.binding ? { boundKey: metric.binding } : {}),
-              };
-            }),
-            ...(slot.progressLabel ? { progressLabel: interpolateBindingTokens(slot.progressLabel, bindings) } : {}),
-            ...(progressEntry?.percent !== undefined ? { progressPercent: progressEntry.percent, progressDisplay: progressEntry.display } : {}),
-            ...(slot.ctaLabel ? { ctaLabel: slot.ctaLabel } : {}),
-            ...(slot.ctaPrompt ? { ctaPrompt: interpolateBindingTokens(slot.ctaPrompt, bindings) } : {}),
-          },
-        },
-      });
+      if (laterStepIds.has(slot.id)) continue;
+      const steps = wizards.get(slot.id);
+      const block: DisplayBlock = steps
+        ? { component: "PznWidgetWizard", props: {
+          wizardId: slot.id,
+          steps: steps.map((step, index) => resolveWidget(step, bindings, index < steps.length - 1)),
+        } }
+        : { component: "PznBoundWidget", props: resolveWidget(slot, bindings) };
+      mapped.push({ block });
       continue;
     }
     const index = original.findIndex((block, i) => block.component === slot.component && !positions.has(i));
@@ -105,7 +125,8 @@ export function applyPublishedUi(
     if (!publication) continue;
     const { design, id, revision } = publication;
     const { mapped, positions } = arrange(design, display.blocks, bindings);
-    const hasCustomBlock = mapped.some((entry) => entry.block.component === "PznCustomForm" || entry.block.component === "PznBoundWidget");
+    const hasCustomBlock = mapped.some((entry) => entry.block.component === "PznCustomForm" || entry.block.component === "PznBoundWidget"
+      || entry.block.component === "PznWidgetWizard");
     if (!positions.size && !hasCustomBlock) continue;
     for (const [index, block] of display.blocks.entries()) {
       if (!positions.has(index)) mapped.push({ block, index });

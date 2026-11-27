@@ -8,7 +8,7 @@ import { goalProgressSchema } from "./goal-progress";
 import { portfolioSnapshotSchema } from "./portfolio";
 import { contributionSchema, projectionSchema } from "../capabilities/calculations";
 import { inputFieldSchema } from "./agentic";
-import { layoutFormSchema, layoutTextSchema, resolvedBoundWidgetSchema } from "./ui-layout";
+import { layoutFormSchema, layoutTextSchema, resolvedBoundWidgetSchema, widgetWizardSchema } from "./ui-layout";
 import { ruleGlossarySchema } from "./rule-glossary";
 import { dynamicCanvasSchema, type DynamicCanvasProps } from "./dynamic-canvas";
 
@@ -77,16 +77,17 @@ export type CapabilityFormProps = z.infer<typeof capabilityForm.schema>;
 export const layoutText = { name: "PznLayoutText", schema: layoutTextSchema } as const;
 export const customForm = { name: "PznCustomForm", schema: layoutFormSchema } as const;
 export const boundWidget = { name: "PznBoundWidget", schema: resolvedBoundWidgetSchema } as const;
+export const widgetWizard = { name: "PznWidgetWizard", schema: widgetWizardSchema } as const;
 export const dynamicCanvas = { name: "PznDynamicCanvas", schema: dynamicCanvasSchema } as const;
 export type { DynamicCanvasProps };
 
 export const catalogApis = [
   experienceRoot, contentCard, comparison, stepList, metricSummary, goalProgressCard, portfolioSnapshot, retirementAccounts,
-  fundingPreview, fundingOptions, followUpButton, ruleCreation, savingsChart, savingsMetric, factSummary, capabilityForm, layoutText, customForm, boundWidget, dynamicCanvas,
+  fundingPreview, fundingOptions, followUpButton, ruleCreation, savingsChart, savingsMetric, factSummary, capabilityForm, layoutText, customForm, boundWidget, widgetWizard, dynamicCanvas,
 ] as const;
 type BlockApi = typeof contentCard | typeof comparison | typeof stepList | typeof metricSummary | typeof goalProgressCard
   | typeof retirementAccounts | typeof portfolioSnapshot | typeof fundingPreview | typeof fundingOptions
-  | typeof savingsChart | typeof savingsMetric | typeof factSummary | typeof capabilityForm | typeof layoutText | typeof customForm | typeof boundWidget | typeof dynamicCanvas;
+  | typeof savingsChart | typeof savingsMetric | typeof factSummary | typeof capabilityForm | typeof layoutText | typeof customForm | typeof boundWidget | typeof widgetWizard | typeof dynamicCanvas;
 type ShapeFor<T extends BlockApi> = T extends BlockApi ? { component: T["name"]; props: z.infer<T["schema"]> } : never;
 export type DisplayBlock = ShapeFor<BlockApi> | { component: typeof ruleCreation.name; props: RuleCreationProps };
 export type DisplayAction = { actionId: string; componentId: string; label: string };

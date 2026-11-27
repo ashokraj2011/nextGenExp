@@ -16,7 +16,7 @@ import type { SalesDealStore } from "./sales-store";
 import { allRoutingIntents, type IntentDefinition } from "../../packages/contracts/routing-intents";
 import type { DisplayBlock } from "../../packages/contracts/surface";
 import { CEP_CAPABILITIES } from "../../packages/contracts/capabilities-catalog";
-import { bindingDomain, layoutTargetDomain, normalizedIntentPhrase, recordIntentOption, recordCapabilities, recordIntentId, recordLayoutCapabilities, recordViews, targetKey, type LayoutComponent, type UiDesign, type UiTargetOption } from "../../packages/contracts/ui-layout";
+import { bindingDomain, layoutTargetDomain, layoutWidgets, widgetSequence, normalizedIntentPhrase, recordIntentOption, recordCapabilities, recordIntentId, recordLayoutCapabilities, recordViews, targetKey, type LayoutComponent, type UiDesign, type UiTargetOption } from "../../packages/contracts/ui-layout";
 import { conversationalTextAllowed } from "../../packages/experience/chat-policy";
 import { contentCatalog, readDemoBalance } from "../../packages/experience/content";
 import { findEffectiveContentById } from "../../packages/experience-registry/registry";
@@ -67,7 +67,8 @@ export function uiTargetOptions(registry: CapabilityRegistry, principalId: strin
 }
 
 export function slotBindingKeys(slot: UiDesign["slots"][number]) {
-  const keys = [...JSON.stringify(slot).matchAll(/\{\{\s*([^{}\s]+)\s*\}\}/g)].map((match) => match[1]);
+  const content = slot.kind === "widget" && slot.nextWidgetId ? { ...slot, ctaPrompt: undefined } : slot;
+  const keys = [...JSON.stringify(content).matchAll(/\{\{\s*([^{}\s]+)\s*\}\}/g)].map((match) => match[1]);
   if (slot.kind === "widget") {
     keys.push(...slot.metrics.flatMap((metric) => metric.binding ? [metric.binding] : []));
     if (slot.progressBinding) keys.push(slot.progressBinding);
@@ -82,6 +83,12 @@ export function validateUiDesign(design: UiDesign, options: UiTargetOption[], pu
       throw new ApiError(400, "interactive_layout_mixed", "Use a separate design for tool-driven chat actions and layout attachments.");
     }
     return;
+  }
+  const widgets = layoutWidgets(design.slots);
+  for (const widget of widgets.values()) {
+    const { issue } = widgetSequence(widget, widgets);
+    if (issue === "missing_widget") throw new ApiError(400, "ui_widget_link_invalid", "Link to a widget in this layout.");
+    if (issue === "cycle") throw new ApiError(400, "ui_widget_link_invalid", "Widget links must move forward without looping. Chat adds a Back button to each step.");
   }
   const declaration = design.recordIntent;
   if (declaration) {

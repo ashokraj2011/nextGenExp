@@ -16,6 +16,7 @@ function displayTitle({ component, props }: DisplayBlock) {
     case "PznFundingPreview": return "Funding preview";
     case "PznPortfolioSnapshot": return "Portfolio snapshot";
     case "PznRuleCreation": return "Rule editor";
+    case "PznWidgetWizard": return props.steps[0].title;
   }
 }
 

@@ -13,7 +13,7 @@ import { decodeChatInput } from "../packages/contracts/inspector";
 import type { DisplayExperience } from "../packages/contracts/surface";
 import type { EvalRunReport } from "../packages/contracts/eval-suite";
 import type { UxProposal } from "../packages/contracts/ux-evolution";
-import type { UiDesign, UiLayoutCatalog, UiLayoutRecord } from "../packages/contracts/ui-layout";
+import type { UiDesign, UiLayoutCatalog, UiLayoutRecord, WidgetSlot } from "../packages/contracts/ui-layout";
 import { operatorHeader, reviewer, startApp } from "./operator-fixture";
 import { testClient, testProject } from "./client";
 import { startFixtureGateway } from "./gateway-fixture";
@@ -87,6 +87,45 @@ test("layout generation sends only the selected workspace fields and returns a p
     assert.match(prompt, /incident\.severity/);
     assert.doesNotMatch(prompt, /portfolio\.total|customer\.displayName|deal\.id/);
   }
+});
+
+test("linked widgets form a single ordered surface and invalid links are rejected", async (t) => {
+  const app = await startTestPreview();
+  t.after(() => app.close());
+  const client = await testClient(app.url);
+  const widget = (id: string, title: string): WidgetSlot => ({
+    id, title, kind: "widget", badge: "", body: "", accentTop: false, metrics: [],
+  });
+  const start = { ...widget("overview", "Overview for {{incident.id}}"), nextWidgetId: "impact", ctaLabel: "Review impact",
+    ctaPrompt: "Earlier button for {{incident.id}}" };
+  const impact = { ...widget("impact", "Impact"), nextWidgetId: "recovery" };
+  const recovery = { ...widget("recovery", "Recovery"), ctaLabel: "Open timeline", ctaPrompt: "Show timeline for {{incident.id}}" };
+  const design: UiDesign = {
+    name: "Incident walkthrough", description: "Review the incident in steps.", layout: "stack",
+    targets: [{ kind: "intent", id: "it_ops_detail" }],
+    slots: [recovery, start, impact, widget("contact", "On-call contacts")],
+  };
+  const preview = (draft: UiDesign) => client.request<DisplayExperience>(previewPath + "?domain=it_ops", draft);
+  const { blocks } = await preview(design);
+  assert.deepEqual(blocks.map(({ component }) => component), ["PznWidgetWizard", "PznBoundWidget"]);
+  const [wizard] = blocks;
+  assert.ok(wizard.component === "PznWidgetWizard");
+  assert.deepEqual(wizard.props.steps.map(({ title }) => title), ["Overview for INC-4821", "Impact", "Recovery"]);
+  assert.equal(wizard.props.steps[0].ctaLabel, "Review impact");
+  assert.equal(wizard.props.steps[0].ctaPrompt, undefined);
+  assert.equal(wizard.props.steps[2].ctaPrompt, "Show timeline for INC-4821");
+
+  const published = await client.request<UiLayoutRecord>(settingsPath, { operation: "publish", domainId: "it_ops", design });
+  assert.equal(published.published?.revision, 1);
+  for (const nextWidgetId of ["missing", "overview"]) {
+    const invalid = { ...design, slots: [{ ...recovery, nextWidgetId }, start, impact] };
+    const error = await client.request<{ code: string }>(settingsPath, {
+      operation: "publish", domainId: "it_ops", id: published.id, revision: published.revision, design: invalid,
+    }, 400);
+    assert.equal(error.code, "ui_widget_link_invalid");
+  }
+  const catalog = await client.request<UiLayoutCatalog>(settingsPath);
+  assert.deepEqual(catalog.layouts.find(({ id }) => id === published.id)?.published?.design, published.published?.design);
 });
 
 test("approved feedback replays the original request and detects when its card is unpublished", async (t) => {

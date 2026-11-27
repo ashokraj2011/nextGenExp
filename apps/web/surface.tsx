@@ -3,19 +3,19 @@ import type { z } from "zod";
 import { CapabilityForm, FactSummary, LiveSimulationProvider, SavingsChart, SavingsMetric, formEnvelope } from "./agentic-experience";
 import "./agentic.css";
 import { RichText, renderInlineMarkdown } from "./markdown";
-import { Component, createContext, lazy, Suspense, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Component, createContext, lazy, Suspense, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import { A2uiSurface, createComponentImplementation, MarkdownComponentContext, type ReactCatalogComponent } from "@a2ui/react";
 import {
   ActionMessageSchema, Catalog, CreateSurfaceMessageSchema, MessageProcessor, basicCatalog, injectBasicCatalogStyles,
   type ActionMessage, type CreateSurfaceMessage, type SurfaceModel,
 } from "@a2ui/web_core/v1_0";
-import { ArrowUpRight, BookOpenText, ChartNoAxesColumnIncreasing, ChevronDown, Columns2, FileText, House, ListChecks } from "lucide-react";
+import { ArrowRight, ArrowUpRight, BookOpenText, ChartNoAxesColumnIncreasing, ChevronDown, Columns2, FileText, House, ListChecks } from "lucide-react";
 import { makeAssistantDataUI } from "@assistant-ui/react";
 import type { FundingOptions, FundingPreview } from "../../packages/contracts/funding-workflow";
 import { accountPortalPath } from "../../packages/contracts/workspace";
 import { formatPortfolioAmount } from "../../packages/contracts/portfolio";
 import {
-  PZN_CATALOG_ID, FOLLOW_UP_EVENT, boundWidget, contentCard, comparison, stepList, metricSummary, experienceRoot, followUpButton, ruleCreation, portfolioSnapshot,
+  PZN_CATALOG_ID, FOLLOW_UP_EVENT, boundWidget, widgetWizard, contentCard, comparison, stepList, metricSummary, experienceRoot, followUpButton, ruleCreation, portfolioSnapshot,
   capabilityForm, customForm, factSummary, layoutText, dynamicCanvas, savingsChart, savingsMetric, fundingOptions, fundingPreview, goalProgressCard, retirementAccounts, validatePznSurface, type DisplayBlock, type DisplayExperience,
 } from "../../packages/contracts/surface";
 import { DynamicCanvasBlock } from "./dynamic-canvas";
@@ -212,12 +212,20 @@ function CustomFormBlock({ title, description, submitLabel, writeBack = true, fi
   );
 }
 
+type WidgetNavigation = {
+  position: string;
+  heading: Ref<HTMLHeadingElement>;
+  back?: () => void;
+  next?: () => void;
+};
+
 function BoundWidgetBlock({
-  badge, title, body, accentTop, hydratedFor, metrics, progressLabel, progressPercent, progressDisplay, ctaLabel, ctaPrompt,
-}: z.infer<typeof boundWidget.schema>) {
+  badge, title, body, accentTop, hydratedFor, metrics, progressLabel, progressPercent, progressDisplay, ctaLabel, ctaPrompt, navigation,
+}: z.infer<typeof boundWidget.schema> & { navigation?: WidgetNavigation }) {
   const { enabled, preview } = useContext(SurfaceActions);
   const controls = useContext(ExperienceControls);
   const hasBindings = metrics.some((m) => Boolean(m.boundKey)) || progressPercent !== undefined;
+  const buttonLabel = navigation?.next ? ctaLabel || "Continue" : (!navigation || ctaPrompt ? ctaLabel : undefined);
 
   return (
     <section className={"content-card pzn-bound-widget" + (accentTop ? " has-accent-top" : "")} aria-label={title}>
@@ -227,7 +235,8 @@ function BoundWidgetBlock({
           <span className="pzn-bw-live-pill">Live data · {hydratedFor}</span>
         )}
       </div>
-      <h3>{title}</h3>
+      {navigation && <p className="pzn-bw-step" aria-live="polite">{navigation.position}</p>}
+      <h3 ref={navigation?.heading} tabIndex={navigation ? -1 : undefined}>{title}</h3>
       {body && <p className="pzn-bw-body">{body}</p>}
       {metrics.length > 0 && (
         <dl className="pzn-bw-metrics">
@@ -253,22 +262,56 @@ function BoundWidgetBlock({
           </div>
         </div>
       )}
-      {ctaLabel && (
+      {(buttonLabel || navigation?.back) && (
         <div className="pzn-bw-actions">
-          <button
+          {navigation?.back && <button type="button" className="secondary-button" onClick={navigation.back}>Back</button>}
+          {buttonLabel && <button
             type="button"
             className="axe-primary-button"
-            disabled={!preview && !enabled}
-            onClick={() => {
+            disabled={!navigation?.next && !preview && !enabled}
+            onClick={navigation?.next ?? (() => {
               if (!preview && enabled && ctaPrompt && controls.askPrompt) controls.askPrompt(ctaPrompt);
-            }}
+            })}
           >
-            {ctaLabel} <ArrowUpRight size={14} aria-hidden="true" />
-          </button>
+            {buttonLabel} {navigation?.next ? <ArrowRight size={14} aria-hidden="true" /> : <ArrowUpRight size={14} aria-hidden="true" />}
+          </button>}
         </div>
       )}
     </section>
   );
+}
+
+function WidgetWizardBlock({ wizardId, steps }: z.infer<typeof widgetWizard.schema>) {
+  const { experienceId, preview } = useContext(SurfaceActions);
+  const storageKey = preview ? undefined : `pzn.widget-step:${experienceId}:${wizardId}`;
+  const [step, setStep] = useState(() => {
+    if (!storageKey) return 0;
+    try {
+      const saved = Number(sessionStorage.getItem(storageKey));
+      return Number.isInteger(saved) && saved >= 0 && saved < steps.length ? saved : 0;
+    } catch { return 0; }
+  });
+  const current = Math.min(step, steps.length - 1);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const didNavigate = useRef(false);
+  useLayoutEffect(() => {
+    if (didNavigate.current) heading.current?.focus();
+  }, [current]);
+
+  function open(next: number) {
+    didNavigate.current = true;
+    setStep(next);
+    if (storageKey) {
+      try { sessionStorage.setItem(storageKey, String(next)); } catch { /* Navigation still works in memory. */ }
+    }
+  }
+
+  return <BoundWidgetBlock {...steps[current]} navigation={{
+    position: `Step ${current + 1} of ${steps.length}`,
+    heading,
+    ...(current > 0 && { back: () => open(current - 1) }),
+    ...(current < steps.length - 1 && { next: () => open(current + 1) }),
+  }} />;
 }
 
 function RuleBlock(props: Extract<DisplayBlock, { component: "PznRuleCreation" }>["props"]) {
@@ -408,6 +451,7 @@ function ContentBlock({ block, form }: { block: DisplayBlock; form?: { experienc
   if (block.component === layoutText.name) return <LayoutText {...block.props} />;
   if (block.component === customForm.name) return <CustomFormBlock {...block.props} />;
   if (block.component === boundWidget.name) return <BoundWidgetBlock {...block.props} />;
+  if (block.component === widgetWizard.name) return <WidgetWizardBlock {...block.props} />;
   if (block.component === dynamicCanvas.name) return <DynamicCanvasBlock {...block.props} onFollowUp={controls.askPrompt}
     onAction={form?.enabled ? (actionId) => controls.followUp(form.experienceId, {
       version: "1.0", action: { name: FOLLOW_UP_EVENT, surfaceId: form.experienceId, sourceComponentId: form.componentId,
@@ -530,6 +574,7 @@ const pznCatalog = new Catalog<ReactCatalogComponent>(PZN_CATALOG_ID, "1.0", [
   createComponentImplementation(layoutText, ({ props }) => <LayoutText {...props} />),
   createComponentImplementation(customForm, ({ props }) => <CustomFormBlock {...props} />),
   createComponentImplementation(boundWidget, ({ props }) => <BoundWidgetBlock {...props} />),
+  createComponentImplementation(widgetWizard, ({ props }) => <WidgetWizardBlock {...props} />),
   createComponentImplementation(dynamicCanvas, ({ props, context }) => {
     const controls = useContext(ExperienceControls);
     const { enabled } = useContext(SurfaceActions);

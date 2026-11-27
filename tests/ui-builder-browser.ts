@@ -191,8 +191,47 @@ try {
   await domain.selectOption("it_ops");
   await preview.getByRole("heading", { name: /INC-4821/ }).waitFor();
 
+  await page.getByRole("button", { name: "Add block", exact: true }).click();
+  await page.getByRole("menu").getByRole("button", { name: "Data-bound widget", exact: true }).click();
+  await page.getByLabel("Title", { exact: true }).fill("Service impact");
+  await page.getByLabel("Body copy", { exact: true }).fill("Affected service {{incident.service}}.");
+  const overviewSlot = page.getByRole("list", { name: "Layout blocks" }).getByRole("listitem").first();
+  await overviewSlot.getByRole("button", { name: /^\{\{incident\.id\}\}/ }).click();
+  await overviewSlot.getByText("Advanced (Badge, Progress Bar & CTA)", { exact: true }).click();
+  await overviewSlot.getByLabel("CTA button label", { exact: true }).fill("See service impact");
+  await overviewSlot.getByLabel("On button click", { exact: true }).selectOption({ label: "Service impact" });
+  await preview.getByText("Step 1 of 2", { exact: true }).waitFor();
+  assert.equal(await preview.getByRole("heading", { name: "Service impact", exact: true }).count(), 0);
+  await preview.getByRole("button", { name: "See service impact", exact: true }).click();
+  await preview.getByRole("heading", { name: "Service impact", exact: true }).waitFor();
+  await preview.getByText("Step 2 of 2", { exact: true }).waitFor();
+  await preview.getByRole("button", { name: "Back", exact: true }).click();
+  await preview.getByText("Step 1 of 2", { exact: true }).waitFor();
+
+  await page.getByLabel("Attach intent or capability").selectOption("capability:ops_incident");
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await page.getByText("Published to the shared design library.", { exact: true }).waitFor();
+  await preview.getByRole("link", { name: "Open chat", exact: true }).click();
+  const itQuestion = page.getByRole("textbox", { name: "Your question" });
+  await itQuestion.fill("Show details for incident INC-4821.");
+  await itQuestion.press("Enter");
+  const wizard = page.locator('[data-renderer="a2ui"]').getByText("Step 1 of 2", { exact: true });
+  await wizard.waitFor();
+  const submissions: string[] = [];
+  page.on("request", (req) => {
+    const path = new URL(req.url()).pathname;
+    if (req.method() === "POST" && /^\/api\/(conversations|experiences)\/[^/]+\/(turns|actions)$/.test(path)) submissions.push(path);
+  });
+  await page.getByRole("button", { name: "See service impact", exact: true }).click();
+  await page.getByRole("heading", { name: "Service impact", exact: true }).waitFor();
+  await page.reload();
+  await page.getByRole("heading", { name: "Service impact", exact: true }).waitFor();
+  await page.getByRole("region", { name: "Service impact", exact: true }).getByRole("button", { name: "Back", exact: true }).click();
+  await wizard.waitFor();
+  assert.deepEqual(submissions, []);
+
   assert.deepEqual(pageErrors, []);
-  console.log("UI builder preview, publishing, intent routing, Inspector, Widget Studio, interactive actions, and responsive layout passed.");
+  console.log("UI builder preview, publishing, intent routing, Inspector, Widget Studio, interactive actions, linked widgets, and responsive layout passed.");
 } finally {
   await browser.close();
   await app.close();
