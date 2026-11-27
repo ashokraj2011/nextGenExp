@@ -62,8 +62,15 @@ import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import { principalFor, type Runtime } from "./runtime";
 import { PznChatHistory, resolveClarificationReply } from "./chat-history";
 import { collectCrossThreadStatus, isThreadStatusPrompt, runThreadStatusHarness } from "./thread-status";
-import { CustomerGoalStore, inferSuggestedGoalFromPrompt, isGoalSetupPrompt } from "./goal-store";
+import { CustomerGoalStore, isGoalSetupPrompt } from "./goal-store";
 import { buildHardshipSupportCanvas, isHardshipLifeEvent, isStandaloneHardshipPrompt } from "./response-personalizer";
+import { handleAttachedDocumentTurn } from "./domains/document-action-handler";
+import { runEmpathyAssessmentPipeline } from "./domains/empathy-pipeline";
+import {
+  arbitrateCanvasRecommendation,
+  buildFolderProjectBriefResponse,
+  buildGoalPlannerResponse,
+} from "./domains/workspace-assistants";
 
 class TurnFailure extends Error {
   constructor(readonly code: FailureCode) { super(code); }
@@ -502,158 +509,35 @@ export class ExperienceService {
         // 0. Multimodal Document-to-Action interception ([Attached: ...])
         const attachedDoc = hasAttachedDocumentBlock(initial.public.message);
         if (attachedDoc && domain === "wealth") {
-          const extracted = await extractDocumentAction({
-            fileName: attachedDoc.fileName,
-            content: attachedDoc.body,
+          const docOutcome = await handleAttachedDocumentTurn({
+            attachedDoc,
+            message: initial.public.message,
+            conversation,
+            principalId: initial.scope.principalId,
+            operatorName: initial.operatorName,
+            persona,
             gateway: domainTools.gateway,
             dataDir: domainTools.dataDir,
+            workflowEngine: domainTools.workflowEngine,
+            tradeStore: domainTools.tradeStore,
+            approvalStore: domainTools.approvalStore,
+            onTradeSettle: domainTools.onTradeSettle,
+            allows: (cap) => allows(cap),
+            onProgress: () => {
+              stage = "compose";
+              this.store.progress(id, "composition", this.now());
+            },
+            now: this.now,
             signal,
           });
-          if (extracted) {
-            stage = "compose";
-            this.store.progress(id, "composition", this.now());
-            const now = this.now();
-            if (extracted.actionType === "wire_workflow" && initial.operatorName && domainTools.workflowEngine) {
-              const started = await domainTools.workflowEngine.startRun("wire_transfer_governed", {
-                personaId: conversation.personaId,
-                actorName: persona?.displayName ?? "Customer",
-                conversationId: conversation.id,
-                initialInputs: extracted.extractedFields,
-              });
-              const canvas = {
-                title: `Document-to-Action · ${started.definition.name}`,
-                badge: `Extracted from ${extracted.fileName}`,
-                subtitle: extracted.summary,
-                generatedBy: "synthesizer" as const,
-                dataSource: `Document Extractor (${extracted.fileName}) → Workflow Engine`,
-                recordId: started.run.runId,
-                prompt: initial.public.message,
-                nodes: [
-                  {
-                    type: "callout" as const,
-                    tone: "highlight" as const,
-                    title: `Auto-Extracted Fields from ${extracted.fileName}`,
-                    body: `Recipient: ${extracted.extractedFields.recipientName} · Amount: $${extracted.extractedFields.amountUsd.toLocaleString("en-US")} · Rail: ${extracted.extractedFields.rail}. Pre-populated below for verification.`,
-                  },
-                  {
-                    type: "workflow_runner" as const,
-                    runId: started.run.runId,
-                    workflowId: started.definition.id,
-                    workflowName: started.definition.name,
-                  },
-                ],
-                disclaimer: "Document fields extracted automatically. Review pre-filled inputs before continuing through compliance gates.",
-              };
-              const dynamicResult = compileDynamicCanvas(
-                `Extracted wire payment details from **${extracted.fileName}** and pre-populated the **Governed Wire Transfer Pipeline** below.`,
-                canvas,
-                now + DECISION_TTL,
-              );
-              this.store.update(id, (row) => {
-                row.public.actionMode = "dynamic_ui";
-                row.public.semanticRoute = {
-                  capabilityId: "external_connector",
-                  capabilityLabel: `Document-to-Action · Wire Workflow`,
-                  method: "deterministic",
-                  confidence: extracted.confidence,
-                  reasoning: extracted.summary,
-                };
-                row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
-              });
-              this.store.finish(id, { type: "completed", result: dynamicResult }, now);
-              return;
-            }
-            if (extracted.actionType === "stock_trade" && allows("stock_trade") && domainTools.tradeStore) {
-              const syntheticPrompt = `${extracted.extractedFields.side} ${
-                extracted.extractedFields.percent ? `${extracted.extractedFields.percent}%` : `${extracted.extractedFields.shares ?? 10} shares`
-              } of ${extracted.extractedFields.symbol}`;
-              const generated = await generateDynamicUi({
-                prompt: syntheticPrompt,
-                gateway: domainTools.gateway,
-                dataDir: domainTools.dataDir,
-                tradeStore: domainTools.tradeStore,
-                approvalStore: domainTools.approvalStore,
-                personaId: conversation.personaId,
-                conversationId: conversation.id,
-                principalId: initial.scope.principalId,
-                onTradeSettle: domainTools.onTradeSettle,
-                requesterName: initial.operatorName ?? persona?.displayName,
-                semanticRoute: {
-                  capabilityId: "stock_trade",
-                  capabilityLabel: "Document-to-Action · Equity Order",
-                  method: "deterministic",
-                  confidence: extracted.confidence,
-                  reasoning: extracted.summary,
-                  extractedParams: extracted.extractedFields,
-                },
-                signal,
-              });
-              const dynamicResult = compileDynamicCanvas(
-                `Extracted order instruction from **${extracted.fileName}**: ${extracted.summary}`,
-                generated.canvas,
-                now + DECISION_TTL,
-              );
-              this.store.update(id, (row) => {
-                row.public.actionMode = "dynamic_ui";
-                row.public.semanticRoute = {
-                  capabilityId: "stock_trade",
-                  capabilityLabel: "Document-to-Action · Equity Order",
-                  method: "deterministic",
-                  confidence: extracted.confidence,
-                  reasoning: extracted.summary,
-                };
-                row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
-              });
-              this.store.finish(id, { type: "completed", result: dynamicResult }, now);
-              return;
-            }
-            if (extracted.actionType === "ops_incident" && allows("ops_incident")) {
-              const canvas = {
-                title: `Document-to-Action · Outage Log Triage (${extracted.extractedFields.serviceName})`,
-                badge: `Parsed ${extracted.fileName}`,
-                subtitle: extracted.summary,
-                generatedBy: "synthesizer" as const,
-                dataSource: `Log Extractor (${extracted.fileName}) + Live Incident Store`,
-                prompt: initial.public.message,
-                nodes: [
-                  {
-                    type: "metrics" as const,
-                    items: [
-                      { label: "Service", value: extracted.extractedFields.serviceName },
-                      { label: "5xx Error Rate", value: `${extracted.extractedFields.errorRatePct}%`, delta: "Above 2.0% P1 threshold" },
-                      { label: "p95 Latency", value: `${extracted.extractedFields.p95LatencyMs}ms`, delta: "Above 350ms SLO" },
-                      { label: "Release", value: extracted.extractedFields.releaseTag },
-                    ],
-                  },
-                  {
-                    type: "callout" as const,
-                    tone: "caution" as const,
-                    title: `Extracted Log Evidence (${extracted.fileName})`,
-                    body: extracted.extractedFields.logExcerpt,
-                  },
-                ],
-                disclaimer: "Parsed from uploaded diagnostic log. Trigger the P1 rollback workflow or PagerDuty connector for governed remediation.",
-                suggestedFollowUp: "Build an IT incident triage dashboard for our active P1 alert",
-              };
-              const dynamicResult = compileDynamicCanvas(
-                `Analyzed **${extracted.fileName}** and extracted live P1 outage telemetry for **${extracted.extractedFields.serviceName}** (${extracted.extractedFields.releaseTag}).`,
-                canvas,
-                now + DECISION_TTL,
-              );
-              this.store.update(id, (row) => {
-                row.public.actionMode = "dynamic_ui";
-                row.public.semanticRoute = {
-                  capabilityId: "ops_incident",
-                  capabilityLabel: "Document-to-Action · Outage Log Triage",
-                  method: "deterministic",
-                  confidence: extracted.confidence,
-                  reasoning: extracted.summary,
-                };
-                row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
-              });
-              this.store.finish(id, { type: "completed", result: dynamicResult }, now);
-              return;
-            }
+          if (docOutcome) {
+            this.store.update(id, (row) => {
+              row.public.actionMode = "dynamic_ui";
+              row.public.semanticRoute = docOutcome.semanticRoute;
+              row.trace.components = docOutcome.result.display.blocks.map((block) => block.component);
+            });
+            this.store.finish(id, { type: "completed", result: docOutcome.result }, docOutcome.completedAt);
+            return;
           }
         }
 
@@ -874,71 +758,16 @@ export class ExperienceService {
         // 0b. Multi-goal setup & management ("I want to set up another goal", "create a college goal", "manage my goals")
         if (conversation.domainId === "wealth" && domainTools.goalStore && isGoalSetupPrompt(scopedPrompt)) {
           stage = "compose";
-          this.store.progress(id, "planning", this.now());
           const startedAt = this.now();
-          const goals = domainTools.goalStore.list(conversation.personaId);
-          const suggested = inferSuggestedGoalFromPrompt(scopedPrompt);
-          const profile = findProfileById(conversation.personaId);
-          const actorName = profile?.displayName ?? "Customer";
-          const totalTargetCents = goals.reduce((sum, g) => sum + g.targetCents, 0);
-          const totalSavedCents = goals.reduce((sum, g) => sum + g.savedCents, 0);
+          this.store.progress(id, "planning", startedAt);
           const now = this.now();
-          const canvas = {
-            title: suggested.suggestedName ? `Set Up ${suggested.suggestedName}` : "Financial Goals Planner",
-            badge: "Goal Builder",
-            subtitle: `${actorName} · ${goals.length} active goal${goals.length === 1 ? "" : "s"} tracked in Customer 360`,
-            generatedBy: "synthesizer" as const,
-            dataSource: "Customer 360 Goals · sfield Governed Write",
-            prompt: scopedPrompt.slice(0, 600),
-            nodes: [
-              {
-                type: "metrics" as const,
-                items: [
-                  { label: "Active Goals", value: String(goals.length), delta: "Tracked live" },
-                  { label: "Total Saved", value: `$${Math.round(totalSavedCents / 100).toLocaleString("en-US")}` },
-                  { label: "Combined Target", value: `$${Math.round(totalTargetCents / 100).toLocaleString("en-US")}` },
-                ],
-              },
-              {
-                type: "goal_creator" as const,
-                personaId: conversation.personaId,
-                actorName,
-                ...(suggested.suggestedName ? { suggestedName: suggested.suggestedName } : {}),
-                ...(suggested.suggestedCategory ? { suggestedCategory: suggested.suggestedCategory } : {}),
-                ...(suggested.suggestedTargetUsd ? { suggestedTargetUsd: suggested.suggestedTargetUsd } : {}),
-                goals: goals.map((g) => ({
-                  id: g.id,
-                  name: g.name,
-                  category: g.category,
-                  targetCents: g.targetCents,
-                  savedCents: g.savedCents,
-                  monthlyContributionCents: g.monthlyContributionCents,
-                  targetDate: g.targetDate,
-                  ...(g.builtIn ? { builtIn: true } : {}),
-                })),
-              },
-            ],
-            disclaimer: "New goals persist via sfield governed writes and immediately appear in your portfolio & goals tracking.",
-            harnessTrace: {
-              resolvedGoal: suggested.suggestedName
-                ? `Open interactive goal creator pre-filled for ${suggested.suggestedName}`
-                : "Open interactive multi-goal planner & creator",
-              thinking: `Matched multi-goal creation intent for ${actorName}. Loaded ${goals.length} existing goal(s) and opened the governed Goal Creator card.`,
-              fetchedSources: ["CustomerGoalStore", "Customer 360"],
-              visualTargets: ["metrics", "goal_creator"],
-              repaired: false,
-              stages: [
-                { stage: "plan" as const, status: "ok" as const, summary: "Matched goal setup & management request", durationMs: 2 },
-                { stage: "fetch" as const, status: "ok" as const, summary: `Loaded ${goals.length} existing goal(s) for ${actorName}`, durationMs: Math.max(1, now - startedAt) },
-                { stage: "compose" as const, status: "ok" as const, summary: "Composed interactive Goal Creator & tracker", durationMs: 1 },
-                { stage: "verify" as const, status: "ok" as const, summary: "Verified schema and governed write endpoint", durationMs: 1 },
-              ],
-            },
-          };
-          const intro = suggested.suggestedName
-            ? `Let’s set up your **${suggested.suggestedName}** goal! I’ve pre-filled a starting target below — adjust the name, target, monthly contribution, or target date and click **Create Goal**.`
-            : `You currently have **${goals.length} goal${goals.length === 1 ? "" : "s"}** tracked. Pick a preset or enter custom details below to set up another goal — it will save immediately to your profile.`;
-          const dynamicResult = compileDynamicCanvas(intro, canvas, now + DECISION_TTL);
+          const dynamicResult = buildGoalPlannerResponse({
+            scopedPrompt,
+            personaId: conversation.personaId,
+            goalStore: domainTools.goalStore,
+            startedAt,
+            now,
+          });
           this.store.update(id, (row) => {
             row.public.actionMode = "dynamic_ui";
             row.public.semanticRoute = {
@@ -959,108 +788,27 @@ export class ExperienceService {
         if (isFolderSummary) {
           stage = "compose";
           this.store.progress(id, "planning", this.now());
-          const allFolders = this.store.listFolders(conversation.principalId, conversation.domainId);
-          const lowerPrompt = scopedPrompt.toLowerCase();
-          const matchedFolder = (conversation.folderId ? this.store.getFolder(conversation.folderId, conversation.principalId) : undefined)
-            ?? allFolders.find((f) => lowerPrompt.includes(f.name.toLowerCase()));
           const now = this.now();
-          if (matchedFolder) {
-            const folderConvs = this.store.folderConversations(matchedFolder.id, conversation.principalId);
-            const threadSummaries = folderConvs.map((c) => {
-              const turns = this.store.conversationTurns(c.id).filter((t) => t.public.id !== id);
-              const completed = turns.filter((t) => t.public.status === "completed");
-              const working = turns.filter((t) => t.public.status === "working");
-              const last = completed.at(-1) ?? turns.at(-1);
-              return {
-                title: c.title,
-                completedCount: completed.length,
-                workingCount: working.length,
-                lastPrompt: last?.public.message ?? "No messages yet",
-                lastReply: last?.public.experience?.intro ?? last?.public.experience?.question ?? "Waiting for first turn",
-              };
-            });
-            const totalCompleted = threadSummaries.reduce((sum, t) => sum + t.completedCount, 0);
-            const totalWorking = threadSummaries.reduce((sum, t) => sum + t.workingCount, 0);
-            const nodes: import("../../packages/contracts/dynamic-canvas").DynamicCanvasNode[] = [
-              {
-                type: "metrics",
-                items: [
-                  { label: "Folder", value: matchedFolder.name.slice(0, 34), delta: matchedFolder.instructions ? "Shared rules on" : "No shared rules" },
-                  { label: "Threads", value: String(threadSummaries.length) },
-                  { label: "Completed Turns", value: String(totalCompleted) },
-                  { label: "In Progress", value: String(totalWorking), delta: totalWorking > 0 ? "Live" : "All clear" },
-                ],
-              },
-            ];
-            if (matchedFolder.instructions) {
-              nodes.push({
-                type: "callout",
-                tone: "highlight",
-                title: `Shared Project Instructions (${matchedFolder.name})`,
-                body: matchedFolder.instructions,
-              });
-            }
-            if (threadSummaries.length > 0) {
-              nodes.push({
-                type: "table",
-                caption: `Threads in "${matchedFolder.name}"`,
-                columns: ["Thread", "Turns", "Latest Question", "Latest Outcome"],
-                rows: threadSummaries.slice(0, 10).map((t) => [
-                  t.title.slice(0, 40),
-                  `${t.completedCount} done${t.workingCount ? ` · ${t.workingCount} live` : ""}`,
-                  t.lastPrompt.slice(0, 60),
-                  t.lastReply.slice(0, 76),
-                ]),
-              });
-              const highlights = threadSummaries
-                .filter((t) => t.completedCount > 0)
-                .slice(0, 6)
-                .map((t) => `${t.title}: ${t.lastReply.slice(0, 110)}`);
-              if (highlights.length) {
-                nodes.push({
-                  type: "checklist",
-                  title: "Key Takeaways Across Folder",
-                  items: highlights,
-                });
-              }
-            }
-            const canvas = {
-              title: `${matchedFolder.name} — Folder Project Brief`,
-              badge: "Folder Brief",
-              subtitle: `Synthesized across ${threadSummaries.length} thread${threadSummaries.length === 1 ? "" : "s"} in ${matchedFolder.name}`,
-              generatedBy: "synthesizer" as const,
-              dataSource: "SQLite Folders · sfield Chat Transcripts",
-              prompt: scopedPrompt.slice(0, 600),
-              nodes,
-              disclaimer: "Synthesized directly from your persisted threads and folder instructions.",
-              harnessTrace: {
-                resolvedGoal: `Synthesize all threads and instructions in folder "${matchedFolder.name}"`,
-                thinking: `Loaded ${threadSummaries.length} thread(s) and ${totalCompleted} completed turn(s) from folder "${matchedFolder.name}"${matchedFolder.instructions ? " along with shared folder instructions" : ""}.`,
-                fetchedSources: ["ConversationFolders", "sfield.chat_threads"],
-                visualTargets: ["metrics", "table", "checklist"],
-                repaired: false,
-                stages: [
-                  { stage: "plan" as const, status: "ok" as const, summary: `Matched folder summary request for "${matchedFolder.name}"`, durationMs: 1 },
-                  { stage: "fetch" as const, status: "ok" as const, summary: `Scanned ${threadSummaries.length} thread(s) (${totalCompleted} turns)`, durationMs: 2 },
-                  { stage: "compose" as const, status: "ok" as const, summary: "Built cross-thread Folder Project Brief", durationMs: 1 },
-                  { stage: "verify" as const, status: "ok" as const, summary: "Verified grounded thread summaries", durationMs: 1 },
-                ],
-              },
-            };
-            const intro = `Here is the project brief across **${threadSummaries.length} thread${threadSummaries.length === 1 ? "" : "s"}** in **${matchedFolder.name}** (${totalCompleted} completed turn${totalCompleted === 1 ? "" : "s"}).`;
-            const dynamicResult = compileDynamicCanvas(intro, canvas, now + DECISION_TTL);
+          const folderBrief = buildFolderProjectBriefResponse({
+            store: this.store,
+            conversation,
+            currentTurnId: id,
+            scopedPrompt,
+            now,
+          });
+          if (folderBrief) {
             this.store.update(id, (row) => {
               row.public.actionMode = "dynamic_ui";
               row.public.semanticRoute = {
                 capabilityId: "custom_dynamic_ui",
-                capabilityLabel: `Folder Brief · ${matchedFolder.name}`,
+                capabilityLabel: `Folder Brief · ${folderBrief.folderName}`,
                 method: "deterministic",
                 confidence: 0.96,
-                reasoning: `Synthesized cross-thread summary for folder "${matchedFolder.name}".`,
+                reasoning: `Synthesized cross-thread summary for folder "${folderBrief.folderName}".`,
               };
-              row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
+              row.trace.components = folderBrief.result.display.blocks.map((block) => block.component);
             });
-            this.store.finish(id, { type: "completed", result: dynamicResult }, now);
+            this.store.finish(id, { type: "completed", result: folderBrief.result }, now);
             return;
           }
         }
@@ -1071,43 +819,18 @@ export class ExperienceService {
           || entry.intentId === "retirement_learning"
           || /\bretir|62|leaving your job/i.test(`${entry.request} ${entry.clarificationQuestion ?? ""} ${entry.assistantReply ?? ""}`),
         );
-        let emotionalState: EmotionalAssessment | undefined;
-        if (conversation.domainId === "wealth") {
-          try {
-            const liveProfile = domainTools.profileStore?.findByPersonaId(conversation.personaId) ?? findProfileById(conversation.personaId);
-            const shortRecent = recentForRoute.slice(-2).map((entry) => `${entry.request} -> ${entry.assistantReply ?? entry.clarificationQuestion ?? ""}`).join(" | ");
-            emotionalState = await runtime.assessEmotionalState(
-              initial.scope.principalId,
-              initial.scope,
-              {
-                personaId: conversation.personaId,
-                userMessage: scopedPrompt,
-                ordinal: initial.ordinal,
-                ...(shortRecent ? { recentSummary: shortRecent } : {}),
-                ...(liveProfile?.notes ? { customerNotes: liveProfile.notes } : {}),
-                hasRetirementHistory,
-              },
-              signal,
-            );
-            this.store.update(id, (row) => {
-              row.public.emotionalState = emotionalState;
-            });
-            // Persist newly disclosed major life events back into Customer 360 notes + sfield Memory
-            if (emotionalState.fromCurrentMessage && emotionalState.customerNoteToSave) {
-              const savedNote = domainTools.profileStore?.appendNote(conversation.personaId, emotionalState.customerNoteToSave);
-              if (savedNote?.added) {
-                void runtime.rememberMemory(initial.scope.principalId, {
-                  kind: "fact",
-                  content: emotionalState.customerNoteToSave,
-                  key: `life_event:${emotionalState.lifeEvent}`,
-                  origin: "trusted_source",
-                }).catch(() => undefined);
-              }
-            }
-          } catch {
-            // Emotional assessment is best-effort and must never fail a turn.
-          }
-        }
+        const emotionalState = await runEmpathyAssessmentPipeline({
+          turnId: id,
+          initialTurn: initial,
+          conversation,
+          scopedPrompt,
+          recentForRoute,
+          hasRetirementHistory,
+          runtime,
+          store: this.store,
+          profileStore: domainTools.profileStore,
+          signal,
+        });
         const suppressPromotionsForEmpathy = Boolean(emotionalState?.suppressPromotions);
         const isFreshHardship = !hasRetirementHistory && (
           isStandaloneHardshipPrompt(scopedPrompt, hasRetirementHistory)
@@ -1248,130 +971,21 @@ export class ExperienceService {
           : generatedRaw;
         current();
         const now = this.now();
-        const arbDomain: ProviderArbitrationTrace["domain"] = semanticRoute.capabilityId === "ops_incident"
-          ? "operations"
-          : semanticRoute.capabilityId === "sales_deal_desk"
-            ? "sales"
-            : "wealth";
-        let providerArbitration: ProviderArbitrationTrace | undefined;
-        let governedWinner: { providerLabel: string; title: string; ctaLabel?: string; ctaPrompt?: string } | undefined;
-        const recentBuys = domainTools.tradeStore?.recentlyBoughtSymbols(conversation.personaId) ?? new Set<string>();
-        const symbolNames: Record<string, RegExp> = {
-          AAPL: /\b(aapl|apple)\b/i,
-          MSFT: /\b(msft|microsoft)\b/i,
-          NVDA: /\b(nvda|nvidia)\b/i,
-          INTC: /\b(intc|intel)\b/i,
-          BA: /\b(ba|boeing)\b/i,
-          PFE: /\b(pfe|pfizer)\b/i,
-        };
-        const contradictsRecentBuy = (text: string) => {
-          if (!/\b(sell|trim|liquidate|harvest)\b/i.test(text)) return false;
-          for (const sym of recentBuys) {
-            const rx = symbolNames[sym] ?? new RegExp(`\\b${sym}\\b`, "i");
-            if (rx.test(text)) return true;
-          }
-          return false;
-        };
-        const pickEligibleRecommendation = (
-          items: Array<{ providerLabel: string; title: string; ctaLabel?: string; ctaPrompt?: string }>,
-        ) => items.find((item) => {
-          if (!item.ctaPrompt?.trim()) return false;
-          const combined = `${item.title} ${item.ctaLabel ?? ""} ${item.ctaPrompt}`;
-          if (contradictsRecentBuy(combined)) return false;
-          return true;
+        const { governedCanvas, providerArbitration } = await arbitrateCanvasRecommendation({
+          capabilityId: semanticRoute.capabilityId,
+          canvas: generated.canvas,
+          runtime,
+          currentTurn: current,
+          initialTurn: initial,
+          conversation,
+          persona,
+          suppressPromotionsForEmpathy,
+          lookupInfo,
+          opsStore: domainTools.opsStore,
+          salesStore: domainTools.salesStore,
+          tradeStore: domainTools.tradeStore,
+          signal,
         });
-        try {
-          if (arbDomain === "operations" && domainTools.opsStore) {
-            const opsArb = await new RecommendationArbitrator([
-              createOpsRunbookProvider(() => domainTools!.opsStore!.list().filter((r) => !generated.canvas.recordId || r.id === generated.canvas.recordId)),
-            ]).arbitrate({
-              principalId: initial.scope.principalId,
-              personaId: conversation.personaId,
-              syntheticMid: persona?.syntheticMid ?? "ops",
-              contextId: "it_ops",
-              domain: "operations",
-              fundingStatus: "funded",
-              excludePromotions: false,
-            }, signal);
-            governedWinner = pickEligibleRecommendation(opsArb.recommendations);
-            providerArbitration = {
-              toolRef: recommendationArbitrateToolRef,
-              domain: "operations",
-              decisionId: opsArb.decisionId,
-              winnerTitle: governedWinner?.title ?? opsArb.topNba?.title,
-              providers: [
-                ...opsArb.providers,
-                { providerId: "treatment_selector", providerLabel: "Treatment Selector (TS + CCRE)", status: "skipped", candidateCount: 0, elapsedMs: 0, note: 'Domain "operations" outside wealth scope' },
-                { providerId: "customer360_nba", providerLabel: "Customer 360 NBA Engine", status: "skipped", candidateCount: 0, elapsedMs: 0, note: 'Domain "operations" outside customer scope' },
-                { providerId: "sales_deal_desk", providerLabel: "Sales Deal Desk Recommender", status: "skipped", candidateCount: 0, elapsedMs: 0, note: 'Domain "operations" outside sales scope' },
-              ],
-            };
-          } else if (arbDomain === "sales" && domainTools.salesStore) {
-            const salesArb = await new RecommendationArbitrator([
-              createSalesDealDeskProvider(() => domainTools!.salesStore!.list().filter((r) => !generated.canvas.recordId || r.id === generated.canvas.recordId)),
-            ]).arbitrate({
-              principalId: initial.scope.principalId,
-              personaId: conversation.personaId,
-              syntheticMid: persona?.syntheticMid ?? "sales",
-              contextId: "sales_revops",
-              domain: "sales",
-              fundingStatus: "funded",
-              excludePromotions: false,
-            }, signal);
-            governedWinner = pickEligibleRecommendation(salesArb.recommendations);
-            providerArbitration = {
-              toolRef: recommendationArbitrateToolRef,
-              domain: "sales",
-              decisionId: salesArb.decisionId,
-              winnerTitle: governedWinner?.title ?? salesArb.topNba?.title,
-              providers: [
-                ...salesArb.providers,
-                { providerId: "treatment_selector", providerLabel: "Treatment Selector (TS + CCRE)", status: "skipped", candidateCount: 0, elapsedMs: 0, note: 'Domain "sales" outside wealth scope' },
-                { providerId: "customer360_nba", providerLabel: "Customer 360 NBA Engine", status: "skipped", candidateCount: 0, elapsedMs: 0, note: 'Domain "sales" outside customer scope' },
-                { providerId: "ops_runbook", providerLabel: "IT Ops Runbook Recommender", status: "skipped", candidateCount: 0, elapsedMs: 0, note: 'Domain "sales" outside operations scope' },
-              ],
-            };
-          } else {
-            const wealthContext = semanticRoute.capabilityId === "stock_holdings" || semanticRoute.capabilityId === "stock_trade"
-              ? "portfolio"
-              : "goals";
-            const wealthArb = await runtime.arbitrateRecommendations(current(), {
-              contextId: wealthContext,
-              domain: "wealth",
-              excludePromotions: suppressPromotionsForEmpathy || runtime.experiences.execution.world.exclusions(initial),
-              existingBlockTitles: [generated.canvas.title],
-            }, signal);
-            governedWinner = pickEligibleRecommendation(wealthArb.recommendations);
-            providerArbitration = {
-              toolRef: wealthArb.toolRef,
-              domain: "wealth",
-              decisionId: wealthArb.decisionId,
-              winnerTitle: governedWinner?.title ?? wealthArb.topNba?.title,
-              providers: wealthArb.providers,
-            };
-          }
-        } catch {
-          // Fallback to Customer 360 NBA provider result if arbitrator call is skipped
-          if (lookupInfo?.nba?.prompt && !contradictsRecentBuy(`${lookupInfo.nba.title} ${lookupInfo.nba.prompt}`)) {
-            governedWinner = {
-              providerLabel: "Customer 360 NBA Engine",
-              title: lookupInfo.nba.title,
-              ctaLabel: lookupInfo.nba.ctaLabel,
-              ctaPrompt: lookupInfo.nba.prompt,
-            };
-          }
-        }
-        // Enforce single recommendation authority: strip any ad-hoc generator/LLM suggestedFollowUp
-        // and attach ONLY the governed Recommendation Provider winner (with provenance).
-        const governedCanvas: import("../../packages/contracts/dynamic-canvas").DynamicCanvasProps = { ...generated.canvas };
-        delete governedCanvas.suggestedFollowUp;
-        delete governedCanvas.recommendationLabel;
-        delete governedCanvas.recommendationSource;
-        if (governedWinner?.ctaPrompt) {
-          governedCanvas.suggestedFollowUp = governedWinner.ctaPrompt.slice(0, 160);
-          governedCanvas.recommendationLabel = (governedWinner.ctaLabel || governedWinner.title).slice(0, 80);
-          governedCanvas.recommendationSource = governedWinner.providerLabel.slice(0, 80);
-        }
         const dynamicResult = compileDynamicCanvas(generated.intro, governedCanvas, now + DECISION_TTL);
         this.store.update(id, (row) => {
           row.public.actionMode = "dynamic_ui";

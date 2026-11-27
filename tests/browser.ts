@@ -76,7 +76,7 @@ try {
   await page.getByRole("link", { name: "CEP Wealth Advisory", exact: true }).click();
   assert.equal(new URL(page.url()).pathname, "/wealth");
   await openAdmin(page, "help");
-  await page.getByRole("heading", { name: "How CEP works", exact: true, level: 1 }).waitFor();
+  await page.getByRole("heading", { name: "How CEP & sfield work", exact: true, level: 1 }).waitFor();
   await page.getByRole("navigation", { name: "Help sections" }).getByRole("link", { name: "Developer docs" }).click();
   await page.getByRole("heading", { name: "Run the app and trace a chat turn" }).waitFor();
   const guides = page.getByRole("navigation", { name: "Developer guides" });
@@ -846,7 +846,7 @@ try {
   await mobileMessage.fill("");
   const mobileMenu = mobile.getByRole("button", { name: "Show conversations" });
   await openAdmin(mobile, "help");
-  await mobile.getByRole("heading", { name: "How CEP works", exact: true }).waitFor();
+  await mobile.getByRole("heading", { name: "How CEP & sfield work", exact: true }).waitFor();
   const mobileJourney = mobile.getByRole("region", { name: "Customer interaction map" });
   await mobileJourney.getByRole("link", { name: /Build the reply/ }).press("Enter");
   await mobileJourney.getByRole("table", { name: "Exchanges for Build the reply" }).waitFor();
