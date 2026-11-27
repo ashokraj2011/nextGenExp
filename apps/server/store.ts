@@ -1,3 +1,5 @@
+import { interactivePhraseKey, type InteractiveTurnState } from "../../packages/contracts/interactive-experience";
+import type { InteractiveInvocation } from "./interactive-experiences";
 import { serverTenantId } from "./tenant";
 import { digestJson } from "@sfield/core";
 import { inheritedFlows, resolveTurnFlows, type FlowCatalogSetup, type FlowOverrides, type FlowScope, type TurnFlowCatalog } from "../../packages/contracts/routing-flows";
@@ -88,7 +90,14 @@ export type FundingRun = {
   waiting?: { requestId: string; expiresAt: number };
   outcome?: string;
 };
-export type WatchSource = { kind: "deal" | "task"; ref: string; recordId: string; target: string; label: string };
+export type WatchSource = { ref: string; recordId: string; target: string; label: string } & (
+  { kind: "deal" | "task" } | { kind: "experience"; key: string; invocation: InteractiveInvocation; operator: boolean }
+);
+export type InteractiveCompletion = {
+  state: InteractiveTurnState;
+  callId?: string;
+  watch?: { source: Extract<WatchSource, { kind: "experience" }>; value: string };
+};
 export type StoredWatch = WatchSource & { id: string; conversationId: string; principalId: string; personaId: string; value: string; state: "watching" | "reached"; updatedAt: number };
 export type TurnRecord = {
   public: TurnView;
@@ -106,6 +115,9 @@ export type TurnRecord = {
   toolSetup?: ToolSetup;
   flowCatalog?: TurnFlowCatalog;
   uiLayouts?: UiPublication[];
+  interactive?: InteractiveInvocation;
+  interactiveCallId?: string;
+  interactiveWatchId?: string;
   attempts: Partial<Record<Stage, StageAttempt>>;
   trace: TurnTrace;
   catalogScopeId?: string;
@@ -158,8 +170,9 @@ function inaccessible(): never {
   throw new ApiError(404, "not_found", "This item is unavailable.");
 }
 
-const operatorTurn = `json_extract(record, '$.public.actionMode') = 'dynamic_ui'
-  AND json_extract(record, '$.public.semanticRoute.capabilityId') IN ('hitl_approvals','external_connector','ops_incident','sales_deal_desk')`;
+const operatorTurn = `(json_extract(record, '$.interactive.publication.design.experience.audience') = 'operator'
+  OR (json_extract(record, '$.public.actionMode') = 'dynamic_ui'
+    AND json_extract(record, '$.public.semanticRoute.capabilityId') IN ('hitl_approvals','external_connector','ops_incident','sales_deal_desk')))`;
 
 export class Store {
   private readonly db: SqliteDatabase;
@@ -302,9 +315,11 @@ export class Store {
   }
 
   watch(conversation: ConversationRecord, source: WatchSource, value: string) {
-    const id = [conversation.id, source.kind, source.ref, source.recordId, source.target].join(":");
+    const id = source.kind === "experience" ? [conversation.id, "experience", source.key].join(":")
+      : [conversation.id, source.kind, source.ref, source.recordId, source.target].join(":");
     const record: StoredWatch = { ...source, id, conversationId: conversation.id, principalId: conversation.principalId, personaId: conversation.personaId, value, state: "watching", updatedAt: Date.now() };
     this.db.run("INSERT OR IGNORE INTO record_watches(id,conversation_id,checked_at,record) VALUES(?,?,?,?)", id, conversation.id, Date.now(), JSON.stringify(record));
+    return id;
   }
 
   watches(conversation: ConversationRecord) {
@@ -323,7 +338,8 @@ export class Store {
 
   observeWatch(w: StoredWatch, value?: string) {
     const now = Date.now();
-    const next = value === undefined || value === w.value ? w : { ...w, value, updatedAt: now, state: value === w.target ? "reached" : "watching" };
+    const state = value === w.target ? "reached" : "watching";
+    const next = value === undefined || (value === w.value && w.state === state) ? w : { ...w, value, updatedAt: now, state };
     this.db.run("UPDATE record_watches SET record=?, checked_at=? WHERE id=? AND json_extract(record,'$.state')='watching'", JSON.stringify(next), now, w.id);
   }
 
@@ -442,6 +458,15 @@ export class Store {
         const phrases = new Set(draft.recordIntent?.phrases.map(normalizedIntentPhrase));
         if (others.some((item) => item.design.recordIntent?.phrases.some((phrase) => phrases.has(normalizedIntentPhrase(phrase))))) {
           throw new ApiError(409, "ui_phrase_taken", "Another published intent in this domain already uses this phrase.");
+        }
+        if (draft.experience) {
+          const authored = draft.experience;
+          const entries = authored.actions.flatMap(({ phrases }) => phrases.map(interactivePhraseKey));
+          const existing = new Set(others.flatMap(({ design }) => design.experience?.audience === authored.audience
+            ? design.experience.actions.flatMap(({ phrases }) => phrases.map(interactivePhraseKey)) : []));
+          if (new Set(entries).size !== entries.length || entries.some((entry) => existing.has(entry))) {
+            throw new ApiError(409, "ui_phrase_taken", "Use distinct chat phrases for each published experience action.");
+          }
         }
         const conflict = others.find((item) => item.design.targets.some((target) => keys.has(targetKey(target))));
         if (conflict) {
@@ -626,6 +651,8 @@ export class Store {
           forked.id, forked.tenantId, forked.domainId, forked.userId,
         );
       }
+      const clonedTurns = new Map<string, string>();
+      const watches = new Map(this.watches(source).map((watch) => [watch.id, watch]));
       cut.forEach((orig, idx) => {
         const clonedTurnId = makeId("turn");
         const cloned: TurnRecord = {
@@ -639,10 +666,29 @@ export class Store {
             conversationId: forked.id,
           },
         };
+        let copied: CompiledExperience | undefined;
+        if (orig.interactive && orig.public.experience && orig.public.interactiveExperience) {
+          const { actions } = this.experience(orig.public.experience.experienceId, source.principalId);
+          copied = buildSurface(orig.public.experience, orig.public.experience.blocks, actions);
+          const sourceTurnId = orig.interactive.sourceTurnId && clonedTurns.get(orig.interactive.sourceTurnId);
+          const watch = orig.interactiveWatchId ? watches.get(orig.interactiveWatchId) : undefined;
+          const state = orig.public.interactiveExperience;
+          cloned.scope.turnId = clonedTurnId;
+          cloned.interactive = { ...orig.interactive, sourceTurnId };
+          cloned.interactiveWatchId = undefined;
+          cloned.public.experience = copied.display;
+          cloned.public.interactiveExperience = {
+            ...state, sourceTurnId,
+            state: state.state === "watching" ? watch?.state === "reached" ? "reached" : "ready" : state.state,
+            ...(state.completion && watch && { completion: { ...state.completion, value: watch.value } }),
+          };
+        }
         this.db.run(
           "INSERT INTO turns (id, conversation_id, request_id, ordinal, status, record) VALUES (?, ?, ?, ?, ?, ?)",
           clonedTurnId, forked.id, `fork:${orig.public.id}:${clonedTurnId}`, cloned.ordinal, cloned.public.status, JSON.stringify(cloned),
         );
+        if (copied) this.db.run("INSERT INTO experiences VALUES (?, ?, ?)", copied.display.experienceId, clonedTurnId, JSON.stringify(copied.issued));
+        clonedTurns.set(orig.public.id, clonedTurnId);
       });
       return forked;
     });
@@ -902,7 +948,7 @@ export class Store {
   accept(input: {
     conversation: ConversationRecord; requestId: string; origin: string; message: string; selectionMode: SelectionMode; now: number;
     retry?: TurnRecord; workflow?: WorkflowLaunch; agentLaunch?: AgentLaunch; operatorName?: string; requestSessionId?: string;
-    tenantOperator?: boolean;
+    tenantOperator?: boolean; interactive?: InteractiveInvocation;
   }) {
     let created = false;
     const turn = this.db.tx(() => {
@@ -927,7 +973,9 @@ export class Store {
       const setup = conversation.preview?.tools ?? this.toolSetup(conversation.domainId);
       const publications = this.publishedUiLayouts(conversation.domainId);
       const draft = conversation.preview?.layout;
-      const uiLayouts = draft ? [draft, ...publications] : publications;
+      const uiLayouts = draft
+        ? [draft, ...publications.filter(({ id, design }) => id !== draft.id && (!draft.design.experience || !design.experience))]
+        : publications;
       const workflowDefinition = setup.fundingWorkflow ?? defaultAgentFundingWorkflow;
       const fundingInput = typeof explicitInputs(message).methodId === "string"
         && !/\b(?:compare|balance|portfolio|retire|address|goal|savings)\b/i.test(message);
@@ -953,6 +1001,7 @@ export class Store {
         operatorName: input.operatorName, requestSessionId: input.requestSessionId,
         flowCatalog: this.routingFlows(conversation, Boolean(input.tenantOperator)),
         agentLaunch: input.agentLaunch ?? retry?.agentLaunch,
+        interactive: input.interactive ?? retry?.interactive,
         fundingRun: continuation,
         ...(uiLayouts.length && { uiLayouts }),
         toolSetup: continuation ? latest?.toolSetup : setup.fundingWorkflow ? setup : { ...setup, fundingWorkflow: workflowDefinition },
@@ -1047,7 +1096,7 @@ export class Store {
   }
 
   private applyUiLayout(turn: TurnRecord, result: CompiledExperience) {
-    if (!turn.uiLayouts?.length) return result;
+    if (turn.interactive || !turn.uiLayouts?.length) return result;
     const targets: UiTarget[] = [];
     const capability = turn.public.semanticRoute?.capabilityId;
     if (turn.trace.intentId) targets.push({ kind: "intent", id: turn.trace.intentId });
@@ -1117,13 +1166,16 @@ export class Store {
 
   finish(
     id: string,
-    outcome: { type: "completed"; result: CompiledExperience } | { type: "failed"; code: FailureCode } | { type: "cancelled" },
+    outcome: { type: "completed"; result: CompiledExperience; interactive?: InteractiveCompletion } | { type: "failed"; code: FailureCode } | { type: "cancelled" },
     now: number,
   ) {
     const record = this.db.tx(() => {
       const turn = this.turn(id);
       if (!turn || turn.public.status !== "working") return undefined;
       turn.public.status = outcome.type;
+      if (outcome.type !== "completed" && turn.public.interactiveExperience?.state === "running") {
+        turn.public.interactiveExperience.state = "failed";
+      }
       turn.trace.markers.terminal = now;
       if (outcome.type === "completed") {
         const laidOut = this.applyUiLayout(turn, this.carryForwardOffers(turn, outcome.result, now));
@@ -1131,6 +1183,16 @@ export class Store {
         delete turn.public.previewExperience;
         if (turn.agentLaunch && "capability" in turn.agentLaunch) delete turn.agentLaunch.values;
         turn.public.experience = display;
+        if (outcome.interactive) {
+          const { state, callId, watch } = outcome.interactive;
+          turn.public.interactiveExperience = state;
+          turn.interactiveCallId = callId;
+          turn.trace.components = display.blocks.map(({ component }) => component);
+          if (watch) {
+            const conversation = this.conversation(turn.scope.conversationId, turn.scope.principalId);
+            turn.interactiveWatchId = this.watch(conversation, watch.source, watch.value);
+          }
+        }
         turn.trace.markers.compiled = now;
         this.db.run("INSERT INTO experiences VALUES (?, ?, ?)", display.experienceId, id, JSON.stringify(issued));
         this.addEvent(turn, "experience.ready", {

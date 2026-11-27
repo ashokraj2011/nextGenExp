@@ -135,6 +135,7 @@ export type TurnView = {
   actionMode?: ActionMode;
   semanticRoute?: SemanticRouteTrace;
   customerLookup?: CustomerLookupSummary;
+  interactiveExperience?: import("./interactive-experience").InteractiveTurnState;
   emotionalState?: EmotionalAssessment;
   providerArbitration?: ProviderArbitrationTrace;
   piiRedaction?: PiiRedactionTrace;

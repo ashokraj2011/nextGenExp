@@ -795,6 +795,37 @@ export class IntegrationTaskService {
       && this.store.integration(c.integrationId)?.enabled && this.store.latestPublished(c.integrationId, c.taskId)?.ref === c.ref);
   }
 
+  interactiveReadContract(ref: string) {
+    const task = this.store.contract(ref);
+    if (task?.status === "published" && task.effect === "read" && task.resultKind === "data" && task.executionMode === "sync"
+      && task.approvalPolicy.mode === "none" && this.store.integration(task.integrationId)?.enabled) return task;
+  }
+
+  interactiveReadContracts() {
+    return this.store.published().flatMap(({ ref }) => {
+      const task = this.interactiveReadContract(ref);
+      return task ? [task] : [];
+    });
+  }
+
+  async interactiveRead(principal: string, ref: string, inputs: Record<string, string | number | boolean>,
+    source: "message" | "click", scope: { mid: string } | { operator: true }) {
+    const task = this.interactiveReadContract(ref);
+    if (!task) return;
+    const member = "mid" in scope ? task.customerExperience?.memberField : undefined;
+    const resource = task.resourceIdField;
+    if ("mid" in scope && (!member || !resource || typeof inputs[resource] !== "string" || Object.hasOwn(inputs, member))) return;
+    const input = member && "mid" in scope ? { ...inputs, [member]: scope.mid } : inputs;
+    const provenance: Record<string, FieldProvenance> = Object.fromEntries(Object.keys(inputs).map((key) =>
+      [key, source === "click" ? "system_resolved" : "user_entered"]));
+    if (member) provenance[member] = "system_resolved";
+    const { run } = await this.run(principal, { toolRef: ref, input, requestedBy: principal, provenance });
+    const output = run.output as Record<string, unknown> | undefined;
+    const verified = run.state === "succeeded" && run.outcome?.success && output
+      && (!("mid" in scope) || (output[member!] === scope.mid && output[resource!] === inputs[resource!]));
+    return { run, output: verified ? output : undefined };
+  }
+
   async customerRead(principal: string, mid: string, ref: string, id: string) {
     const contract = this.customerReads().find((c) => c.ref === ref);
     if (!contract?.customerExperience || !contract.resourceIdField) return;

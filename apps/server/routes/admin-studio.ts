@@ -1,3 +1,4 @@
+import { interactiveToolInputs, validateInteractiveExperience } from "../interactive-experiences";
 /**
  * Admin Studio & Control Plane HTTP routes: UI layouts, widgets, Customer 360 admin,
  * Experience Registry, Capabilities, Routing Flows, Tool Setup, Omnichannel, Evals,
@@ -140,6 +141,7 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
   if (resource !== "admin" || !inspectorEnabled || operation) return false;
 
   const toolSetupLimit = 768 * 1024;
+  const experienceTool = (ref: string) => integrationService.interactiveReadContract(ref);
   if (id === "treatment-runs" && method === "GET") {
     const query = z.object({
       personaId: z.string().regex(idPattern),
@@ -169,6 +171,14 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
       domains,
       layouts: store.listUiLayouts(principalId, actor).filter((layout) => domains.includes(layout.domainId)),
       library: store.publishedUiLayouts().filter((layout) => visibleDomains.includes(layout.domainId)),
+      experienceTools: integrationService.interactiveReadContracts().map((task) => ({
+        ref: task.ref, description: task.description, customer: Boolean(task.customerExperience),
+        inputs: interactiveToolInputs(task, "operator"), outputSchema: task.outputSchema,
+        ...(task.customerExperience && {
+          customerInputs: interactiveToolInputs(task, "customer"),
+          customerFields: [task.resourceIdField!, ...task.customerExperience.fields.map(({ key }) => key)],
+        }),
+      })),
       targets: [...uiTargetOptions(registry, principalId), ...store.publishedUiLayouts().flatMap(({ design }) =>
         design.recordIntent ? [recordIntentOption(design.recordIntent)] : [])].filter(({ target }) => visibleDomains.includes(layoutTargetDomain(target))),
     });
@@ -180,6 +190,7 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
     if (change.operation !== "unpublish") {
       const domain = change.domainId ?? ("id" in change ? store.listUiLayouts(principalId, actor).find((layout) => layout.id === change.id)?.domainId : undefined) ?? "wealth";
       validateUiDesign(change.design, uiTargetOptions(registry, principalId), change.operation === "publish", change.operation === "publish" ? domain : undefined);
+      if (change.operation === "publish" && change.design.experience) validateInteractiveExperience(change.design.experience, domain, experienceTool);
     }
     json(res, store.changeUiLayout(principalId, actor, membership.authoring(actor), change, now()));
     return true;
@@ -212,6 +223,7 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
       personaId: z.string().regex(idPattern).optional(),
     }).strict(), 32 * 1024);
     validateUiDesign(design, uiTargetOptions(registry, principalId), true, domainId);
+    if (design.experience) validateInteractiveExperience(design.experience, domainId, experienceTool);
     const draft = { id: makeId("ui"), revision: 1, design };
     const actor = requireOperator();
     const profile = domainId === "wealth" ? personaId ?? demo.defaultPersonaId : actor;

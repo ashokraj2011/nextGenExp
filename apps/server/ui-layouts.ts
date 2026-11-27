@@ -77,6 +77,12 @@ function slotBindingKeys(slot: UiDesign["slots"][number]) {
 }
 
 export function validateUiDesign(design: UiDesign, options: UiTargetOption[], publishing: boolean, domain?: DomainPackId) {
+  if (design.experience) {
+    if (design.recordIntent || design.targets.length || design.slots.length) {
+      throw new ApiError(400, "interactive_layout_mixed", "Use a separate design for tool-driven chat actions and layout attachments.");
+    }
+    return;
+  }
   const declaration = design.recordIntent;
   if (declaration) {
     const option = recordIntentOption(declaration);

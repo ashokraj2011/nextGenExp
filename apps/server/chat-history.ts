@@ -104,10 +104,12 @@ export class PznChatHistory {
     });
     if (status !== "completed" || !experience) return;
     await thread.append({
-      id: messageId(id, "assistant"), role: "assistant", text: experience.question ?? experience.intro,
+      id: messageId(id, "assistant"), role: "assistant",
+      text: experience.question ?? (experience.intro || experience.blocks.map(displayTitle).find(Boolean) || ""),
       createdAt: new Date(turn.trace.markers.terminal ?? createdAt).toISOString(),
       data: {
         turnId: id, question: experience.question, intro: experience.intro,
+        ...(turn.public.interactiveExperience && { interactiveExperience: JSON.parse(JSON.stringify(turn.public.interactiveExperience)) }),
         contextId: turn.route?.contextId ?? null, intentId: turn.trace.intentId ?? null,
         displayedChoices: displayedRecordChoices(experience.blocks),
         displayedContent: experience.blocks.flatMap((block) => {
@@ -131,12 +133,18 @@ export class PznChatHistory {
 
   async turns(conversation: ConversationRecord): Promise<TurnView[]> {
     const { turns, messages } = await this.read(conversation);
-    return turns.map(({ public: turn }): TurnView => {
+    const watches = new Map(this.store.watches(conversation).map((watch) => [watch.id, watch]));
+    return turns.map(({ public: stored, interactiveWatchId }): TurnView => {
+      const watch = interactiveWatchId && watches.get(interactiveWatchId);
+      const state = stored.interactiveExperience;
+      const turn: TurnView = watch && state?.completion ? {
+        ...stored, interactiveExperience: { ...state, state: watch.state, completion: { label: state.completion.label, value: watch.value } },
+      } : stored;
       const request = transcriptMessage(messages, turn.id, "user");
       if (!turn.experience) return { ...turn, message: request.text };
       const { text, data } = transcriptMessage(messages, turn.id, "assistant");
       const question = typeof data.question === "string" ? text : null;
-      const intro = question && typeof data.intro === "string" ? data.intro : text;
+      const intro = typeof data.intro === "string" ? data.intro : text;
       const [surface] = turn.experience.messages;
       return {
         ...turn, message: request.text,

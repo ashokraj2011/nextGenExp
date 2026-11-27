@@ -1,3 +1,4 @@
+import { interactiveAction } from "./interactive-experiences";
 import { serverTenantId } from "./tenant";
 import { experienceAgentId } from "../../packages/contracts/agentic";
 import { ASK_USER } from "@sfield/core";
@@ -93,8 +94,7 @@ function registryPayload(inspection: Inspection, call: CallRecord): RegistryTool
   };
 }
 
-async function customerLookupPayload(sf: SField, inspection: Inspection, turn: TurnRecord) {
-  const read = turn.customerTask;
+async function scopedToolPayload(sf: SField, inspection: Inspection, turn: TurnRecord, read?: { sfieldRunId?: string; sfieldCallId?: string }) {
   if (!read?.sfieldRunId || !read.sfieldCallId) return;
   const run = await sf.persistence.getRun(read.sfieldRunId);
   if (run?.tenantId !== serverTenantId || run.subjectId !== turn.scope.principalId) return;
@@ -318,6 +318,7 @@ function callTimings(turn: TurnRecord, payload: TurnPayloads): NonNullable<TurnP
   if (compiler) calls.push({ label: "Compile chat UI", ...compiler });
   if (turn.trace.customerEvaluation) calls.push({ label: "Customer 360 recommendations", ...turn.trace.customerEvaluation });
   add("Customer record lookup", payload.customerLookup);
+  add("Interactive experience tool", payload.interactiveExperience?.call);
   attempts("Workflow model", payload.workflow?.agent?.model);
   payload.workflow?.calls.forEach((call) => add(call.label, call));
   attempts("Experience Agent", payload.agentic?.model);
@@ -328,7 +329,7 @@ function callTimings(turn: TurnRecord, payload: TurnPayloads): NonNullable<TurnP
 }
 
 export async function readTurnPayloads(sf: SField, store: Store, inspection: Inspection, turn: TurnRecord, conversation: ConversationRecord): Promise<TurnPayloads> {
-  const [discovery, router, glossary, treatment, portfolio, goal, composer, workflow, agentic, customerLookup, retirementAccounts] = await Promise.all([
+  const [discovery, router, glossary, treatment, portfolio, goal, composer, workflow, agentic, customerLookup, retirementAccounts, interactiveCall] = await Promise.all([
     discoveryPayloads(sf, inspection, turn),
     modelPayloads(sf, store, inspection, turn, "route"),
     glossaryPayloads(sf, inspection, turn),
@@ -338,8 +339,9 @@ export async function readTurnPayloads(sf: SField, store: Store, inspection: Ins
     modelPayloads(sf, store, inspection, turn, "compose"),
     workflowPayloads(sf, store, inspection, turn),
     experiencePayloads(sf, store, inspection, turn),
-    customerLookupPayload(sf, inspection, turn),
+    scopedToolPayload(sf, inspection, turn, turn.customerTask),
     routeReadPayloads(sf, inspection, turn, turn.retirementScopeId, "retirementAccounts"),
+    scopedToolPayload(sf, inspection, turn, { sfieldRunId: turn.public.interactiveExperience?.sfieldRunId, sfieldCallId: turn.interactiveCallId }),
   ]);
   const sourceId = turn.workflow?.sourceExperienceId ?? (turn.agentLaunch && "capability" in turn.agentLaunch ? turn.agentLaunch.sourceExperienceId : undefined);
   const source = sourceId && store.experience(sourceId, turn.scope.principalId).turn;
@@ -353,5 +355,15 @@ export async function readTurnPayloads(sf: SField, store: Store, inspection: Ins
     ...(source && sourceTreatment && { sourceDecision: { turnId: source.public.id, message: source.public.message, treatment: sourceTreatment } }),
     ...(turn.route && turn.trace.intentId && { verifiedIntent: { intentId: turn.trace.intentId, contextId: turn.route.contextId } }),
     ...(clicks.length && { workflowClicks: clicks }), turnId: turn.public.id, ...discovery, router, glossary, treatment, portfolio, goal, composer, workflow, ...(retirementAccounts && { retirementAccounts }), ...(agentic && { agentic }), ...(customerLookup && { customerLookup }) };
+  if (turn.interactive) {
+    const { publication, actionId, inputs, source, sourceTurnId } = turn.interactive;
+    const watch = turn.interactiveWatchId && store.watches(conversation).find(({ id }) => id === turn.interactiveWatchId);
+    payloads.interactiveExperience = {
+      invocation: inspection.payload({ publicationId: publication.id, revision: publication.revision, actionId,
+        toolRef: interactiveAction(turn.interactive).taskRef, inputs, source, ...(sourceTurnId && { sourceTurnId }) }),
+      state: inspection.payload({ ...turn.public.interactiveExperience, ...(watch && { state: watch.state, observedValue: watch.value, updatedAt: watch.updatedAt }) }),
+      call: interactiveCall,
+    };
+  }
   return { ...payloads, timing: callTimings(turn, payloads) };
 }

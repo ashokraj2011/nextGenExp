@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { interactiveExperienceSchema } from "./interactive-experience";
 import { domainPackIds, type DomainPackId } from "./domain-packs";
 import { capabilityIdSchema } from "./agentic";
 import { dataBindingKeySchema } from "./data-bindings";
@@ -151,6 +152,7 @@ export function recordIntentOption(intent: RecordIntent): UiTargetOption {
 }
 export const uiDesignSchema = z.object({
   recordIntent: recordIntentSchema.optional(),
+  experience: interactiveExperienceSchema.optional(),
   name: z.string().trim().min(1).max(72),
   description: z.string().trim().max(maxLayoutDescription),
   layout: z.enum(["stack", "dashboard"]),
@@ -169,7 +171,17 @@ export type UiLayoutRecord = {
   published?: UiPublication;
 };
 export type UiTargetOption = { target: UiTarget; label: string; description: string; components?: LayoutComponent[] };
-export type UiLayoutCatalog = { tenantId: string; domains: readonly DomainPackId[]; layouts: UiLayoutRecord[]; library: LibraryDesign[]; targets: UiTargetOption[] };
+export type UiExperienceTool = {
+  ref: string; description: string; customer: boolean;
+  inputs: { key: string; required: boolean; type: string }[];
+  customerInputs?: UiExperienceTool["inputs"];
+  customerFields?: string[];
+  outputSchema: Record<string, unknown>;
+};
+export type UiLayoutCatalog = {
+  tenantId: string; domains: readonly DomainPackId[]; layouts: UiLayoutRecord[]; library: LibraryDesign[];
+  targets: UiTargetOption[]; experienceTools?: UiExperienceTool[];
+};
 export type AppliedUiLayout = { id: string; revision: number; name: string; target: UiTarget };
 
 const recordId = z.string().regex(/^ui_[a-f0-9]{32}$/);

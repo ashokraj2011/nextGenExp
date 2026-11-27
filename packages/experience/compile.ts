@@ -13,10 +13,13 @@ import {
 } from "../contracts/surface";
 import type { VerifiedExperience } from "./verify";
 
+import type { InteractiveClickInvocation } from "../contracts/interactive-experience";
+
 export const makeId = (prefix: string) => prefix + "_" + randomUUID().replaceAll("-", "");
 export type IssuedAction = DisplayExperience["actions"][number] & {
   userMessage: string; followUpId: string; workflow?: WorkflowRecommendation; agentAction?: AgentAction;
   standaloneAction?: ActionRecommendation; offerSourceId?: string;
+  interactive?: InteractiveClickInvocation; inline?: boolean;
 };
 export type CompiledExperience = { display: DisplayExperience; issued: IssuedAction[] };
 type ExperienceInput = {
@@ -151,7 +154,7 @@ export function buildSurface(
 ): CompiledExperience {
   const { experienceId, messageId } = identity ?? { experienceId: makeId("exp"), messageId: makeId("msg") };
   const { intro, question, partial } = displayFields;
-  const actions = issued.filter((item) => !item.agentAction && !item.standaloneAction).map(({ actionId, componentId, label }) => ({ actionId, componentId, label }));
+  const actions = issued.filter((item) => !item.agentAction && !item.standaloneAction && !item.inline).map(({ actionId, componentId, label }) => ({ actionId, componentId, label }));
   const nodes = [
     ...blocks.map((block, index) => ({ id: "block_" + (index + 1), component: block.component, ...block.props })),
     ...actions.map(({ actionId, componentId, label }) => ({ id: componentId, component: "PznFollowUp", actionId, label })),

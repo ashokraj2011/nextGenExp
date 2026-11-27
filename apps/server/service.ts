@@ -1,3 +1,7 @@
+import { interactiveScalar, interactiveValue, type InteractiveTurnState } from "../../packages/contracts/interactive-experience";
+import {
+  compileInteractiveView, interactiveAction, interactiveWatchId, matchInteractiveExperience, type InteractiveInvocation,
+} from "./interactive-experiences";
 import { retirementAccountRequest, retirementBeneficiaryIntent, retirementListIntent, retirementViewSchema } from "../../packages/contracts/retirement-accounts";
 import { compileRetirementView } from "../../packages/experience/retirement-accounts";
 import { getDomainPack } from "../../packages/contracts/domain-packs";
@@ -30,7 +34,7 @@ import { compileChatReply, compileDynamicCanvas, compileExperience, compileFundi
 import { verifyContextProposal, verifyRoute, requireCheck, Rejected } from "../../packages/experience/verify";
 import { ApiError, presentConversation, Store, type ConversationRecord, type Stage, type TurnRecord } from "./store";
 import type { IntegrationTaskService } from "./integration-tasks";
-import type { StoredWatch } from "./store";
+import type { InteractiveCompletion, StoredWatch } from "./store";
 import { answerCustomerLookup, watchRequest } from "./customer-record-chat";
 import { normalizedIntentPhrase, recordIntentId } from "../../packages/contracts/ui-layout";
 import { isRecordTimeline } from "./dynamic-ui-generator";
@@ -112,6 +116,16 @@ export class ExperienceService {
         if (w.kind === "deal") {
           const deal = this.dynamicUi?.salesStore?.list().find((d) => d.id === w.recordId);
           value = deal && (["Commit", "Closed Won"].includes(deal.stage) ? "ready" : deal.stage);
+        } else if (w.kind === "experience") {
+          const service = this.dynamicUi?.integrationService;
+          const mid = findProfileById(w.personaId)?.syntheticMid;
+          const scope = w.operator ? { operator: true as const } : mid && { mid };
+          if (service && scope) {
+            const read = await service.interactiveRead(w.principalId, w.ref, w.invocation.inputs, w.invocation.source, scope);
+            const completion = interactiveAction(w.invocation).completion!;
+            const observed = interactiveScalar(interactiveValue(read?.output, completion.path));
+            if (observed !== undefined) value = String(observed);
+          }
         } else {
           const mid = findProfileById(w.personaId)?.syntheticMid;
           if (mid) value = (await this.dynamicUi?.integrationService?.customerRead(w.principalId, mid, w.ref, w.recordId))?.watchValue;
@@ -124,7 +138,7 @@ export class ExperienceService {
   }
 
   async recordUpdates(conversation: ConversationRecord, operator: boolean) {
-    const visible = () => this.store.watches(conversation).filter((w) => w.kind === "task" || operator);
+    const visible = () => this.store.watches(conversation).filter((w) => w.kind === "task" || (w.kind === "experience" && !w.operator) || operator);
     await Promise.all(visible().filter((w) => w.state === "watching" && this.store.watchDue(w.id)).map((w) => this.refreshWatch(w)));
     return visible().map(({ id, recordId, label, state, value, updatedAt }) => ({ id, recordId, label, state, value, updatedAt }));
   }
@@ -178,13 +192,13 @@ export class ExperienceService {
     return current;
   }
 
-  submit(conversation: ConversationRecord, message: string, requestId: string, origin = "message", retry?: TurnRecord, workflow?: WorkflowLaunch, agentLaunch?: AgentLaunch, operatorName?: string, requestSessionId?: string) {
+  submit(conversation: ConversationRecord, message: string, requestId: string, origin = "message", retry?: TurnRecord, workflow?: WorkflowLaunch, agentLaunch?: AgentLaunch, operatorName?: string, requestSessionId?: string, interactive?: InteractiveInvocation) {
     if (conversation.audience === "admin" && !this.canCreateRule) {
       throw new ApiError(404, "not_found", "This conversation is unavailable.");
     }
     const actor = conversation.domainId === "wealth" && conversation.audience !== "admin" ? undefined : operatorName;
     const { turn, created } = this.store.accept({
-      conversation, message, requestId, origin, retry, workflow, agentLaunch, operatorName: actor, requestSessionId,
+      conversation, message, requestId, origin, retry, workflow, agentLaunch, operatorName: actor, requestSessionId, interactive,
       tenantOperator: Boolean(actor && this.dynamicUi?.isTenantAdmin?.(actor)), selectionMode: this.selectionMode, now: this.now(),
     });
     if (created) this.schedule(turn);
@@ -218,6 +232,21 @@ export class ExperienceService {
     const conversation = this.store.conversation(turn.scope.conversationId, principalId);
     if (!operatorName && (conversation.audience === "admin" || this.store.hasOperatorContent(conversation.id))) {
       throw new ApiError(403, "operator_required", "Sign in with your operator account to continue this turn.");
+    }
+    if (signed.interactive && turn.interactive) {
+      if (Object.keys(action.context).some((key) => key !== "actionId")) {
+        throw new ApiError(400, "action_input_invalid", "This button uses values from the displayed record.");
+      }
+      const origin = "interactive_action:" + signed.actionId;
+      const prior = this.store.existingRequest(conversation.id, requestId, signed.userMessage, origin);
+      if (prior) return this.accepted(prior);
+      if (this.store.latestTurn(conversation.id)?.public.id !== turn.public.id || conversation.personaId !== turn.scope.personaId
+        || (turn.public.experience?.expiresAt ?? 0) <= this.now()) {
+        throw new ApiError(409, "action_stale", "Ask again to get an updated record.");
+      }
+      return this.submit(conversation, signed.userMessage, requestId, origin, undefined, undefined, undefined, operatorName, requestSessionId, {
+        ...signed.interactive, publication: turn.interactive.publication, source: "click", sourceTurnId: turn.public.id,
+      });
     }
     const origin = (signed.standaloneAction ? "standalone_action:" : signed.agentAction ? "experience_action:" : signed.workflow ? "workflow:" : "follow_up:") + signed.actionId;
     const submit = (launch?: AgentLaunch, actionOrigin = origin) => this.submit(conversation, signed.userMessage, requestId, actionOrigin, undefined,
@@ -308,6 +337,78 @@ export class ExperienceService {
     }).catch(() => undefined);
   }
 
+  private async runInteractiveExperience(turn: TurnRecord, current: () => TurnRecord) {
+    if (!turn.interactive && (turn.workflow || turn.agentLaunch)) return false;
+    const integration = this.dynamicUi?.integrationService;
+    if (!integration) return false;
+    const conversation = this.store.conversation(turn.scope.conversationId, turn.scope.principalId);
+    const prior = this.store.previousCompletedTurn(conversation.id, turn.ordinal);
+    const draftAudience = conversation.preview?.layout?.design.experience?.audience;
+    const audience = draftAudience ?? (turn.operatorName ? "operator" : "customer");
+    const invocation = turn.interactive ?? matchInteractiveExperience(turn.public.message, turn.uiLayouts ?? [], audience,
+      (ref) => integration.interactiveReadContract(ref),
+      prior?.public.interactiveExperience?.state !== "failed" ? prior?.interactive : undefined);
+    if (!invocation) return false;
+    const id = turn.public.id;
+    const reply = (text: string, interactive?: InteractiveCompletion) => this.store.finish(id, {
+      type: "completed", result: compileChatReply(text, "reply", this.now() + DECISION_TTL), interactive,
+    }, this.now());
+    if ("question" in invocation) {
+      reply(invocation.question);
+      return true;
+    }
+    const action = interactiveAction(invocation);
+    const task = integration.interactiveReadContract(action.taskRef);
+    const operator = invocation.publication.design.experience?.audience === "operator";
+    const mid = !operator && conversation.domainId === "wealth" && findProfileById(conversation.personaId)?.syntheticMid;
+    const scope = operator ? turn.operatorName && { operator: true as const } : mid && { mid };
+    const record = task?.resourceIdField && invocation.inputs[task.resourceIdField];
+    const recordId = typeof record === "string" || typeof record === "number" ? String(record).slice(0, 64) : undefined;
+    const { id: publicationId, revision, design } = invocation.publication;
+    const state: InteractiveTurnState = {
+      publication: { id: publicationId, revision, name: design.name },
+      actionId: invocation.actionId, source: invocation.source, sourceTurnId: invocation.sourceTurnId,
+      recordId, state: "running",
+    };
+    this.store.update(id, (row) => {
+      row.interactive = invocation;
+      row.public.interactiveExperience = state;
+      row.public.actionMode = "dynamic_ui";
+    });
+    this.store.progress(id, "planning", this.now());
+    const read = task && scope && await integration.interactiveRead(conversation.principalId, task.ref, invocation.inputs, invocation.source, scope);
+    current();
+    if (read) {
+      state.runId = read.run.runId;
+      state.sfieldRunId = read.run.sfieldRunId;
+    }
+    if (!read || !read.output) {
+      state.state = "failed";
+      reply(`I couldn’t verify the data for ${action.title}. Check the record and try again.`, { state, callId: read ? read.run.sfieldCallId : undefined });
+      return true;
+    }
+    const now = this.now();
+    const result = compileInteractiveView(action, read.output, recordId, now + 7 * 24 * 60 * 60 * 1000);
+    let watch: InteractiveCompletion["watch"];
+    state.state = "ready";
+    if (action.completion) {
+      const { path, equals, label } = action.completion;
+      const observed = interactiveScalar(interactiveValue(read.output, path));
+      const value = observed === undefined ? undefined : String(observed);
+      state.completion = { label, value };
+      state.state = observed === equals ? "reached" : "watching";
+      if (state.state === "watching" && !conversation.preview) {
+        watch = {
+          source: { kind: "experience", key: interactiveWatchId(invocation), invocation, operator,
+            ref: action.taskRef, recordId: recordId ?? action.title, target: String(equals), label },
+          value: value ?? "Unavailable",
+        };
+      }
+    }
+    this.store.finish(id, { type: "completed", result, interactive: { state, callId: read.run.sfieldCallId, watch } }, now);
+    return true;
+  }
+
   private async execute(id: string, recovering: boolean) {
     const initial = this.store.turn(id);
     if (this.closing || initial?.public.status !== "working") return;
@@ -382,6 +483,11 @@ export class ExperienceService {
       return true;
     };
     try {
+      if (!workspaceContext && (initial.interactive || initial.uiLayouts?.some(({ design }) => design.experience))) {
+        stage = "experience";
+        if (await this.runInteractiveExperience(initial, current)) return;
+        stage = "catalog";
+      }
       if (!capabilities.length && !initial.workflow && !workspaceContext && !initial.agentLaunch) {
         const reply = `There are no chat flows available in ${getDomainPack(domain).label} right now.`;
         this.store.finish(id, { type: "completed", result: compileChatReply(reply, "reply", this.now() + DECISION_TTL) }, this.now());

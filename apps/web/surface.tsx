@@ -408,7 +408,11 @@ function ContentBlock({ block, form }: { block: DisplayBlock; form?: { experienc
   if (block.component === layoutText.name) return <LayoutText {...block.props} />;
   if (block.component === customForm.name) return <CustomFormBlock {...block.props} />;
   if (block.component === boundWidget.name) return <BoundWidgetBlock {...block.props} />;
-  if (block.component === dynamicCanvas.name) return <DynamicCanvasBlock {...block.props} onFollowUp={controls.askPrompt} />;
+  if (block.component === dynamicCanvas.name) return <DynamicCanvasBlock {...block.props} onFollowUp={controls.askPrompt}
+    onAction={form?.enabled ? (actionId) => controls.followUp(form.experienceId, {
+      version: "1.0", action: { name: FOLLOW_UP_EVENT, surfaceId: form.experienceId, sourceComponentId: form.componentId,
+        timestamp: new Date().toISOString(), context: { actionId } },
+    }) : undefined} />;
   if (block.component === ruleCreation.name) return <RuleBlock {...block.props} />;
   if (block.component === portfolioSnapshot.name) return <ChatPortfolio {...block.props} />;
   if (block.component === fundingPreview.name) return <FundingPreviewBlock {...block.props} />;
@@ -474,7 +478,7 @@ function Introduction({ intro, question, partial }: { intro: string; question: s
   const { balanceComparison, completedFunding } = useContext(SurfaceActions);
   if (completedFunding) return null;
   const genericComparisonIntro = /^(?:(?:Hi [^,]+,|Thanks for asking, [^—]+ —)\s*)?here[’']s (?:how the terms compare|a comparison)\.$/i;
-  const showIntro = !balanceComparison || !genericComparisonIntro.test(intro.trim());
+  const showIntro = Boolean(intro.trim()) && (!balanceComparison || !genericComparisonIntro.test(intro.trim()));
   return <>
     {question ? <p className="clarification">{question}</p> : showIntro && <RichText text={intro} className="experience-intro" />}
     {partial && <p className="partial-result">Some matching content is unavailable.</p>}
@@ -526,9 +530,12 @@ const pznCatalog = new Catalog<ReactCatalogComponent>(PZN_CATALOG_ID, "1.0", [
   createComponentImplementation(layoutText, ({ props }) => <LayoutText {...props} />),
   createComponentImplementation(customForm, ({ props }) => <CustomFormBlock {...props} />),
   createComponentImplementation(boundWidget, ({ props }) => <BoundWidgetBlock {...props} />),
-  createComponentImplementation(dynamicCanvas, ({ props }) => {
+  createComponentImplementation(dynamicCanvas, ({ props, context }) => {
     const controls = useContext(ExperienceControls);
-    return <DynamicCanvasBlock {...props} onFollowUp={controls.askPrompt} />;
+    const { enabled } = useContext(SurfaceActions);
+    return <DynamicCanvasBlock {...props} onFollowUp={controls.askPrompt} onAction={enabled
+      ? (actionId) => void context.dispatchAction({ event: { name: FOLLOW_UP_EVENT, context: { actionId } } }).catch(() => undefined)
+      : undefined} />;
   }),
   createComponentImplementation(savingsChart, ({ props }) => <SavingsChart {...props} />),
   createComponentImplementation(savingsMetric, ({ props }) => <SavingsMetric {...props} />),

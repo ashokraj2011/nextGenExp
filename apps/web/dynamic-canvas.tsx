@@ -892,8 +892,9 @@ function canvasToWidgetDraft(props: DynamicCanvasProps): WidgetDraft {
   };
 }
 
-export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (prompt: string) => void }) {
+export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (prompt: string) => void; onAction?: (id: string) => void }) {
   const titleId = useId();
+  const authored = props.generatedBy === "authored";
   const [savedState, setSavedState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   async function saveWidget() {
     if (savedState === "saving" || savedState === "saved") return;
@@ -910,7 +911,7 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
     <section className="content-card dynamic-canvas" aria-labelledby={titleId}>
       <header className="dyn-canvas-header">
         <div>
-          <div className="dyn-canvas-kicker-row">
+          {!authored && <div className="dyn-canvas-kicker-row">
             <span className="dyn-canvas-kicker">
               <Sparkles size={13} aria-hidden="true" />
               {props.badge} · {props.generatedBy === "llm" ? "Dynamic LLM UI" : "Dynamic Canvas"}
@@ -921,12 +922,12 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
                 Live data · {props.dataSource}
               </span>
             )}
-          </div>
+          </div>}
           <h3 id={titleId}>{props.title}</h3>
           {props.subtitle && <p className="dyn-canvas-subtitle">{props.subtitle}</p>}
         </div>
         <div className="dyn-header-actions">
-          {!(props.recordId?.startsWith("wdg_") || props.dataSource?.startsWith("Widget Library")) && (
+          {!authored && !(props.recordId?.startsWith("wdg_") || props.dataSource?.startsWith("Widget Library")) && (
             <button
               type="button"
               className="dyn-save-btn"
@@ -1016,24 +1017,30 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
             );
           }
           if (node.type === "table") {
+            const rowActions = authored ? node.rowActionIds : undefined;
             return (
               <div key={idx} className="dyn-table-wrap">
                 {node.caption && <h4>{node.caption}</h4>}
                 <table className="dyn-table">
                   <thead>
-                    <tr>{node.columns.map((col) => <th key={col}>{col}</th>)}</tr>
+                    <tr>{node.columns.map((col, i) => <th scope="col" key={i}>{col}</th>)}
+                      {rowActions && <th scope="col">Action</th>}</tr>
                   </thead>
                   <tbody>
-                    {node.rows.map((row, rIdx) => (
-                      <tr
-                        key={rIdx}
-                        className={props.onFollowUp ? "dyn-table-row-clickable" : undefined}
-                        title={props.onFollowUp ? `Click to drill into ${row[0]}` : undefined}
-                        onClick={() => props.onFollowUp?.(`Show details and analysis for ${row[0]}`)}
-                      >
+                    {node.rows.map((row, rIdx) => {
+                      const id = rowActions?.[rIdx];
+                      const buttonLabel = node.rowActionLabel ?? "View details";
+                      const legacy = !authored && props.onFollowUp;
+                      return <tr key={rIdx} className={legacy ? "dyn-table-row-clickable" : undefined}
+                        title={legacy ? `Click to drill into ${row[0]}` : undefined}
+                        onClick={legacy ? () => legacy(`Show details and analysis for ${row[0]}`) : undefined}>
                         {row.map((cell, cIdx) => <td key={cIdx}>{cell}</td>)}
-                      </tr>
-                    ))}
+                        {rowActions && <td>{id && <button type="button" className="dyn-row-action"
+                          disabled={!props.onAction} aria-label={buttonLabel + " · " + row[0]} onClick={() => props.onAction?.(id)}>
+                          {buttonLabel} <ArrowUpRight size={14} aria-hidden="true" />
+                        </button>}</td>}
+                      </tr>;
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1111,7 +1118,7 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
         })}
       </div>
 
-      <footer className="dyn-canvas-footer">
+      {!authored && <footer className="dyn-canvas-footer">
         <p className="disclosure">{props.disclaimer}</p>
         {props.suggestedFollowUp && props.recommendationSource && props.onFollowUp && (
           <div className="dyn-provider-rec">
@@ -1124,7 +1131,7 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
             </button>
           </div>
         )}
-      </footer>
+      </footer>}
     </section>
   );
 }

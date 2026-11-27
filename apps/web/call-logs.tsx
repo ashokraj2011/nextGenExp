@@ -259,8 +259,15 @@ function TurnPayloadLog({ turn }: { turn: TurnView }) {
         <ol className="workflow-call-order" aria-label="sfield action calls in execution order">{payloads.agentic.calls.map((call, i) =>
           <li key={call.tool + ":" + i}><ReadToolStage title={call.tool} stage={call} expanded={Boolean(payloads.sourceDecision)} /></li>)}</ol>
       </details>}
+      {payloads.interactiveExperience && <section aria-label="Interactive experience">
+        <h3>Interactive experience</h3>
+        {turn.interactiveExperience?.sourceTurnId && <p><a href={diagnosticHref(adminPaths.logs, turn.conversationId, turn.interactiveExperience.sourceTurnId)}>Open the turn that displayed this action</a></p>}
+        <JsonBlock title="Resolved action and inputs" value={payloads.interactiveExperience.invocation} open />
+        {payloads.interactiveExperience.call && <ReadToolStage title="sfield integration task" stage={payloads.interactiveExperience.call} expanded />}
+        <JsonBlock title="Saved record and run state" value={payloads.interactiveExperience.state} />
+      </section>}
       {payloads.customerLookup && <ReadToolStage title="Customer record lookup" stage={payloads.customerLookup} />}
-      {((!payloads.workflow && !payloads.agentic && !payloads.customerLookup) || payloads.topicScores || payloads.router || payloads.treatment) && <>
+      {((!payloads.workflow && !payloads.agentic && !payloads.customerLookup && !payloads.interactiveExperience) || payloads.topicScores || payloads.router || payloads.treatment) && <>
         {!payloads.catalogLookup && !payloads.topicScores && !payloads.router && <ModelStage title="Context Router" stage={null} />}
         {payloads.glossary && <ReadToolStage title="CCRE glossary" payloadLabel="Glossary" stage={payloads.glossary} />}
         {payloads.retirementAccounts && <ReadToolStage title="Retirement account records" stage={payloads.retirementAccounts} />}

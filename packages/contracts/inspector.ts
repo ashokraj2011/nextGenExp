@@ -127,6 +127,7 @@ export type TurnPayloads = {
   verifiedIntent?: { intentId: string; contextId: string };
   catalogLookup?: RegistryToolPayloads;
   customerLookup?: RegistryToolPayloads;
+  interactiveExperience?: { invocation: InspectorPayload; state?: InspectorPayload; call?: RegistryToolPayloads };
   agentic?: AgenticPayloads;
   turnId: string;
   topicScores: TreatmentPayloads | null;

@@ -3804,3 +3804,20 @@
   font-weight: 660;
   white-space: nowrap;
 }
+
+.dyn-row-action {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .45rem .6rem;
+  border: 1px solid currentColor;
+  border-radius: .5rem;
+  color: var(--work-accent, #1d632e);
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dyn-row-action:disabled { opacity: .6; cursor: default; }
+.dyn-row-action:not(:disabled):hover { background: #edf5ef; }

@@ -12,7 +12,13 @@ import {
 import type { DisplayExperience } from "../../packages/contracts/surface";
 import type { SavedWidget } from "../../packages/contracts/widget";
 import { api, toolSetupErrorMessage } from "./api";
-import { ExperienceLayoutPreview } from "./surface";
+import { ExperienceCanvasView, ExperienceControls, ExperienceLayoutPreview } from "./surface";
+import type { ActionMessage } from "@a2ui/web_core/v1_0";
+import { adminPaths } from "../../packages/contracts/admin-paths";
+import type { TurnAccepted } from "../../packages/contracts/api";
+import { interactiveExperienceSchema } from "../../packages/contracts/interactive-experience";
+import { diagnosticHref } from "./admin-navigation";
+import { InteractiveExperienceEditor, orderExperienceTemplate, startInteractiveExperience } from "./interactive-experience-editor";
 import { DesignLibrary } from "./design-library";
 import { getDomainPack, type DomainPackId } from "../../packages/contracts/domain-packs";
 import { WidgetStudio } from "./widget-studio";
@@ -236,39 +242,58 @@ function slotMetaSummary(slot: LayoutSlot): string {
 
 function LayoutChatTest({ domainId, design, personaId }: { domainId: DomainPackId; design: UiDesign; personaId?: string }) {
   const [message, setMessage] = useState("");
-  const [test, setTest] = useState<{ key: string; pending?: boolean; error?: string; result?: DisplayExperience; matched?: boolean }>();
+  const [test, setTest] = useState<{ key: string; pending?: boolean; error?: string; result?: DisplayExperience; matched?: boolean; log?: string }>();
   const key = JSON.stringify([domainId, personaId, design, message.trim()]);
   const current = test?.key === key ? test : undefined;
   const runId = useRef(0);
   useEffect(() => () => { runId.current++; }, []);
 
-  async function run() {
+  async function run(start: () => Promise<TurnAccepted & { layoutId?: string }>, followingUp = false) {
+    if (current?.pending) return;
     const id = ++runId.current;
-    setTest({ key, pending: true });
+    setTest({ key, pending: true, ...(followingUp && { result: current?.result }) });
     try {
-      const accepted = await api.testUiLayout(domainId, design, message.trim(), personaId);
+      const accepted = await start();
       const events = await fetch(accepted.eventsUrl);
       if (!events.ok) throw new Error("The admin chat could not be opened.");
       await events.text();
-      const [turn, trace] = await Promise.all([api.turn(accepted.turnId), api.debug(accepted.turnId)]);
+      const turn = await api.turn(accepted.turnId);
       if (!turn.experience) throw new Error("The turn ended without a reply. Check the turn in Logs.");
-      if (runId.current === id) setTest({ key, result: turn.experience, matched: trace.uiLayout?.id === accepted.layoutId });
+      const matched = design.experience
+        ? Boolean(turn.interactiveExperience?.publication.id === accepted.layoutId || (followingUp && turn.interactiveExperience))
+        : (await api.debug(accepted.turnId)).uiLayout?.id === accepted.layoutId;
+      if (runId.current === id) setTest({ key, result: turn.experience, matched,
+        log: diagnosticHref(adminPaths.logs, accepted.conversation.id, accepted.turnId) });
     } catch (error) {
-      if (runId.current === id) setTest({ key, error: error instanceof Error ? error.message : "The chat test could not finish." });
+      if (runId.current === id) setTest({ key, error: error instanceof Error ? error.message : "The chat test could not finish.",
+        ...(followingUp && { result: current?.result }) });
     }
   }
 
-  return <details className="ui-layout-test">
+  return <details className="ui-layout-test" open={design.experience ? true : undefined}>
     <summary>Try a chat turn</summary>
-    <p>Run a message through the configured chat and published rules using this draft.</p>
-    <label>Customer message<input value={message} maxLength={1600} onChange={(e) => setMessage(e.target.value)} /></label>
-    <button className="ui-button" type="button" disabled={!message.trim() || current?.pending} onClick={() => void run()}>
+    <p>{design.experience ? "Enter a matching phrase, then try the actions on the result." : "Run a message through the configured chat and published rules using this draft."}</p>
+    <label>Customer message<input value={message} placeholder={design.experience ? "Enter a chat phrase" : undefined} maxLength={1600}
+      onChange={(e) => setMessage(e.target.value)} /></label>
+    <button className="ui-button" type="button" disabled={!message.trim() || current?.pending}
+      onClick={() => void run(() => api.testUiLayout(domainId, design, message.trim(), personaId))}>
       {current?.pending ? "Waiting for reply…" : "Send message"}
     </button>
     {current?.error && <p role="alert" className="ui-builder-error">{current.error}</p>}
     {current?.result && <>
-      <p role="status">{current.matched ? "Draft layout applied." : "Chat returned a different experience for this message."}</p>
-      <ExperienceLayoutPreview data={current.result} />
+      {!current.pending && current.matched !== undefined && <p role="status">{current.matched
+        ? (design.experience ? "Draft experience applied." : "Draft layout applied.")
+        : "Chat returned a different experience for this message."}</p>}
+      {design.experience ? <ExperienceControls.Provider value={{
+        activeExperienceId: current.pending ? undefined : current.result.experienceId,
+        rendered: () => undefined,
+        followUp: (id: string, envelope: ActionMessage) => {
+          void run(() => api.followUp(id, envelope, crypto.randomUUID()), true);
+        },
+      }}>
+        <ExperienceCanvasView data={current.result} />
+      </ExperienceControls.Provider> : <ExperienceLayoutPreview data={current.result} />}
+      {design.experience && current.log && <a className="ui-chat-link" href={current.log} target="_blank" rel="noreferrer">View this turn in Logs <ArrowRight size={14} /></a>}
     </>}
   </details>;
 }
@@ -799,6 +824,10 @@ function UiWorkspace({ initial, customers }: {
       || (slot.kind === "form" && Boolean(slot.title.trim()) && slot.fields.length > 0)
       || (slot.kind === "widget" && Boolean(slot.title.trim()))
     )));
+  const experience = activeDesign.experience;
+  const validExperience = Boolean(experience && interactiveExperienceSchema.safeParse(experience).success);
+  const tools = initial.experienceTools ?? [];
+  const publishAllowed = experience ? validExperience && experience.actions.some(({ phrases }) => phrases.length) : canPublish;
   const dirty = record ? normalized(activeDesign) !== normalized(record.draft) : true;
 
   function edit(next: UiDesign) {
@@ -845,6 +874,14 @@ function UiWorkspace({ initial, customers }: {
     setEdits((previous) => ({ ...previous, new: blank() }));
     select("new");
     setShowDetails(true);
+  }
+
+  function newInteractive() {
+    const experience = startInteractiveExperience(domainId, tools);
+    if (!experience) return;
+    setNewDomain(domainId);
+    setEdits((previous) => ({ ...previous, new: { ...blank(), name: "Interactive experience", experience } }));
+    select("new");
   }
 
   function buildSlot(kind: LayoutComponent | "text" | "form" | "widget"): LayoutSlot {
@@ -971,7 +1008,8 @@ function UiWorkspace({ initial, customers }: {
                   onChange={(event) => {
                     const next = event.target.value as DomainPackId;
                     setNewDomain(next);
-                    edit({ ...activeDesign, recordIntent: undefined, targets: activeDesign.targets.filter((target) => layoutTargetDomain(target) === next) });
+                    edit({ ...activeDesign, recordIntent: undefined, targets: activeDesign.targets.filter((target) => layoutTargetDomain(target) === next),
+                      ...(activeDesign.experience && next !== "wealth" && { experience: { ...activeDesign.experience, audience: "operator" } }) });
                   }}>
                   {initial.domains.map((id) => <option key={id} value={id}>{getDomainPack(id).label}</option>)}
                 </select>
@@ -1000,6 +1038,10 @@ function UiWorkspace({ initial, customers }: {
               >
                 <Plus size={14} aria-hidden="true" /> New
               </button>
+              <button type="button" className="ui-button ui-button-outline ui-compact-btn"
+                disabled={busy || records.length >= maxLayouts || !tools.length} onClick={newInteractive}>
+                <Plus size={14} aria-hidden="true" /> New experience
+              </button>
               <div className="ui-popover-wrap">
                 <button
                   type="button"
@@ -1011,6 +1053,12 @@ function UiWorkspace({ initial, customers }: {
                 </button>
                 {templatesOpen && (
                   <div className="ui-popover-menu" role="menu">
+                    <button type="button" disabled={!initial.domains.includes("wealth") || !tools.some(({ ref }) => ref === "int.commerce_sandbox.lookup_order@1.0.0")}
+                      onClick={() => {
+                        setEdits((p) => ({ ...p, new: { ...blank(), name: "Order tracking",
+                          description: "Check shipping progress and get an update when the delivery is confirmed.", experience: orderExperienceTemplate() } }));
+                        setNewDomain("wealth"); select("new"); setTemplatesOpen(false);
+                      }}>Wealth · Order tracking experience</button>
                     <button type="button" disabled={!initial.domains.includes("wealth")} onClick={() => { setEdits((p) => ({ ...p, new: starter() })); setNewDomain("wealth"); select("new"); setTemplatesOpen(false); }}>
                       Wealth · Balance Comparison
                     </button>
@@ -1052,7 +1100,7 @@ function UiWorkspace({ initial, customers }: {
               <button
                 type="button"
                 className="ui-button ui-button-outline ui-compact-btn"
-                disabled={busy || !activeDesign.name.trim() || !dirty}
+                disabled={busy || !activeDesign.name.trim() || !dirty || Boolean(experience && !validExperience)}
                 onClick={() => void save("draft")}
               >
                 Save draft
@@ -1060,7 +1108,7 @@ function UiWorkspace({ initial, customers }: {
               <button
                 type="button"
                 className="ui-button ui-button-primary ui-compact-btn"
-                disabled={busy || !canPublish || Boolean(record?.published && statusOf(record, activeDesign) === "Published")}
+                disabled={busy || !publishAllowed || !activeDesign.name.trim() || Boolean(record?.published && statusOf(record, activeDesign) === "Published")}
                 onClick={() => void save("publish")}
               >
                 Publish
@@ -1078,12 +1126,45 @@ function UiWorkspace({ initial, customers }: {
             setNewDomain(initial.domains.includes(item.domainId) ? item.domainId : initial.domains[0]);
             setEdits((prior) => ({ ...prior, new: { ...item.design, recordIntent: undefined, name: (item.design.name + " copy").slice(0, 72), targets: [] } }));
             select("new"); setShowDetails(true); setView("editor");
-            setNotice("Choose the domain and attach an intent or capability for your copy.");
+            setNotice(item.design.experience ? "Choose the domain and review your copy’s action phrases before publishing." : "Choose the domain and attach an intent or capability for your copy.");
           }} />
       ) : view === "widgets" ? (
         <WidgetStudio key={domainId} domainId={domainId} widgets={widgets} onWidgetsChange={setWidgets} onInsertIntoLayout={insertWidgetIntoLayout} />
       ) : view === "surfaces" ? (
         <SurfaceBinderLab />
+      ) : experience ? (
+        <>
+          {notice && <p className="ui-builder-notice" role="status">{notice}</p>}
+          {error && <p className="ui-builder-error" role="alert">{error}</p>}
+          <div className="ui-studio-two-col ui-interactive-studio">
+            <section className="ui-work-card ui-editor" aria-label="Interactive experience setup">
+              <fieldset className="ui-editor-content ui-simple-editor" disabled={busy}>
+                <div className="ui-identity-strip">
+                  <input className="ui-name-inline-input" aria-label="Experience name" value={activeDesign.name} maxLength={72}
+                    onChange={(e) => edit({ ...activeDesign, name: e.target.value })} />
+                  {record?.published && <button type="button" className="ui-button ui-button-plain ui-compact-btn"
+                    onClick={() => void save("unpublish")}>Unpublish</button>}
+                </div>
+                {record?.published && <p className="design-scope">Published revision {record.published.revision}</p>}
+                <label className="ui-experience-description">Description<textarea rows={2} maxLength={maxLayoutDescription}
+                  value={activeDesign.description} onChange={(e) => edit({ ...activeDesign, description: e.target.value })} /></label>
+                <InteractiveExperienceEditor key={selected} value={experience} tools={tools} domain={domainId}
+                  change={(next) => edit({ ...activeDesign, experience: next })} />
+              </fieldset>
+            </section>
+            <section className="ui-work-card ui-preview" aria-label="Experience preview">
+              <header className="ui-preview-head">
+                <h2>Experience preview</h2>
+                {record?.published && <a className="ui-chat-link" href={domainId === "wealth" && experience.audience === "operator" ? adminPaths.chat : getDomainPack(domainId).path}>Open chat <ArrowRight size={14} /></a>}
+              </header>
+              {domainId === "wealth" && experience.audience === "customer" && customers.length > 0 && <label className="ui-experience-persona">Preview as
+                <select aria-label="Preview as customer" value={previewPersonaId} onChange={(e) => setPreviewPersonaId(e.target.value)}>
+                  {customers.map(({ personaId, displayName }) => <option value={personaId} key={personaId}>{displayName}</option>)}
+                </select></label>}
+              <LayoutChatTest key={selected} domainId={domainId} design={activeDesign} personaId={domainId === "wealth" ? previewPersonaId || undefined : undefined} />
+            </section>
+          </div>
+        </>
       ) : (
         <>
           <section className="ui-copilot-bar" aria-label="Generate data-bound UI with Copilot">

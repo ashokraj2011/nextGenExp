@@ -109,7 +109,7 @@ export type DisplayExperience = {
 
 const payloadValidator = new PayloadValidator(new Catalog(PZN_CATALOG_ID, "1.0", catalogApis), { allowUnknownElements: false });
 const componentEnvelope = z.object({ id, component: z.enum(catalogApis.map((api) => api.name) as [string, ...string[]]) }).passthrough();
-const model = z.object({ intro: limitedText }).strict();
+const model = z.object({ intro: z.string().max(6000) }).strict();
 
 export function validatePznSurface(value: unknown, experienceId: string): CreateSurfaceMessage {
   if (new TextEncoder().encode(JSON.stringify(value)).length > MAX_SURFACE_BYTES) throw new Error("Surface payload exceeds limit");

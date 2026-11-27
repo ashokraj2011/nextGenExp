@@ -21,7 +21,7 @@ export function DesignLibrary({ tenantId, library, records, targets, canCopy, on
     <div className="widget-library-grid">{visible.map((item) => <article key={item.id} className="widget-library-tile">
       <small>{getDomainPack(item.domainId).label} · Revision {item.revision}</small>
       <h3>{item.design.name}</h3><p>{item.design.description}</p>
-      <p>{item.design.targets.map((target) => targets.find((option) => option.target.kind === target.kind && option.target.id === target.id)?.label ?? target.id).join(" · ")}</p>
+      {item.design.experience ? <p>{item.design.experience.audience === "customer" ? "Customer chat" : "Operator chat"} · {item.design.experience.actions.length} actions</p> : <p>{item.design.targets.map((target) => targets.find((option) => option.target.kind === target.kind && option.target.id === target.id)?.label ?? target.id).join(" · ")}</p>}
       <div className="design-library-actions">
         {records.some((record) => record.id === item.id) && <button className="ui-button ui-button-outline" type="button" onClick={() => onOpen(item.id)}>Edit my design</button>}
         {canCopy && <button className="ui-button ui-button-outline" type="button" onClick={() => onCopy(item)}>Use as template</button>}

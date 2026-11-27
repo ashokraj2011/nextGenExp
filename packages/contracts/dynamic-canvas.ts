@@ -17,6 +17,8 @@ export const dynamicTableNodeSchema = z.object({
   caption: z.string().trim().max(90).optional(),
   columns: z.array(z.string().trim().min(1).max(40)).min(2).max(5),
   rows: z.array(z.array(z.string().trim().max(80)).min(2).max(5)).min(1).max(10),
+  rowActionLabel: z.string().trim().min(1).max(40).optional(),
+  rowActionIds: z.array(z.string().regex(/^click_[a-f0-9]{32}$/).nullable()).max(10).optional(),
 }).strict();
 
 export const dynamicBarChartNodeSchema = z.object({
@@ -260,7 +262,7 @@ export const dynamicCanvasSchema = z.object({
   title: z.string().trim().min(1).max(96),
   badge: z.string().trim().min(1).max(44),
   subtitle: z.string().trim().max(260).optional(),
-  generatedBy: z.enum(["llm", "synthesizer"]),
+  generatedBy: z.enum(["llm", "synthesizer", "authored"]),
   dataSource: z.string().trim().max(120).optional(),
   recordId: z.string().trim().max(64).optional(),
   prompt: z.string().trim().max(600).optional(),

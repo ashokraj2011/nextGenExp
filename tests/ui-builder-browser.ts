@@ -144,8 +144,39 @@ try {
   if (screenshots) await page.screenshot({ path: resolve(screenshots, "widget-studio-desktop.png"), fullPage: true });
   await page.getByRole("button", { name: "Use in layout", exact: true }).first().click();
   await page.getByRole("region", { name: "Layout blocks and settings", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Templates", exact: true }).click();
+  await page.getByRole("button", { name: "Wealth · Order tracking experience", exact: true }).click();
+  const interactionEditor = page.getByRole("region", { name: "Interactive experience setup" });
+  await interactionEditor.getByLabel("Message shown in chat").fill("Open shipment details for me");
+  assert.equal(await interactionEditor.getByLabel("Bind orderId (required)").inputValue(), "orderId");
+  const experiencePreview = page.getByRole("region", { name: "Experience preview" });
+  await experiencePreview.getByLabel("Preview as customer").selectOption("demo-learner");
+  await experiencePreview.getByLabel("Customer message").fill("Track shipment ORD-1001");
+  await experiencePreview.getByRole("button", { name: "Send message", exact: true }).click();
+  await experiencePreview.getByRole("heading", { name: "Order summary" }).waitFor();
+  await experiencePreview.getByRole("button", { name: "Track delivery", exact: true }).click();
+  await experiencePreview.getByRole("heading", { name: "Delivery tracking" }).waitFor();
+  assert.equal(await experiencePreview.locator('[data-renderer="a2ui"]').count(), 1);
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await page.getByText("Published revision 1", { exact: true }).waitFor();
+
+  const shipping = await browser.newPage({ viewport: { width: 390, height: 850 }, reducedMotion: "reduce" });
+  await shipping.goto(app.url + "/login");
+  await shipping.getByRole("button", { name: "Sign in as Alice Morgan", exact: true }).click();
+  const shipmentQuestion = shipping.getByRole("textbox", { name: "Your question" });
+  await shipmentQuestion.fill("Track shipment ORD-1001");
+  await shipmentQuestion.press("Enter");
+  await shipping.getByRole("button", { name: "Track delivery", exact: true }).click();
+  await shipping.getByText("Open shipment details for me", { exact: true }).waitFor();
+  await shipping.getByRole("heading", { name: "Delivery tracking" }).waitFor();
+  await shipping.getByRole("region", { name: "Record updates" }).getByText("Watching", { exact: true }).waitFor();
+  await shipping.reload();
+  await shipping.getByRole("heading", { name: "Delivery tracking" }).waitFor();
+  await shipping.waitForFunction(() => document.documentElement.scrollWidth <= window.innerWidth);
+  await shipping.close();
+
   assert.deepEqual(pageErrors, []);
-  console.log("UI builder preview, publishing, intent routing, Inspector, Widget Studio and responsive layout passed.");
+  console.log("UI builder preview, publishing, intent routing, Inspector, Widget Studio, interactive actions, and responsive layout passed.");
 } finally {
   await browser.close();
   await app.close();

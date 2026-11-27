@@ -10,6 +10,18 @@ A layout controls how an existing result appears. Its attachment identifies the 
 4. **Save draft**. In **Layout preview → Try a chat turn**, ask **“Compare available and current balances.”** The expected result says **Draft layout applied** and includes your heading. Layout preview uses sample blocks and reads the selected profile for supported data bindings. The chat check runs the configured model and domain rules.
 5. **Publish**, then ask the same question in customer chat. In **Inspector → Published UI**, check the design name and revision. **Design library → Use as template** gives another owner an editable copy. Publishing an edit affects subsequent turns. Earlier turns retain their recorded UI.
 
+### Publish an interactive experience
+
+Use **New experience** in UI Builder when you want to connect a chat request directly to a registered sfield task and design the result. Choose the tenant’s workspace, the intended audience, and the version of each published read task. Add chat phrases with input placeholders such as `Track delivery {{orderId}}` and bind the card’s fields to that task’s result.
+
+To try the full path, open **Templates → Wealth · Order tracking experience** and select **Alice Morgan** in **Experience preview**. Send **“Track shipment ORD-1001”** and click **Track delivery**. The button sends the displayed order ID to the same action as **“Track delivery ORD-1001”**. Change **Message shown in chat** to see how the copy can change while the task still receives the same order ID. An operator experience can bind a table to an array and configure **On row click** the same way.
+
+Choose a **Field to watch** and a completion value when you want a record update in the original chat. The order template watches for `status = delivered`. A published thread restores its saved card, action inputs, and run state. The original card preserves the data shown at the time, and **Record updates** reports changes from the source. A new publication governs new typed requests. An existing clickable result keeps its original action and task versions while the result is current in the thread.
+
+In **Logs**, open **Interactive experience** to inspect the publication revision, source message or click, structured inputs, sfield request and response, and saved completion state.
+
+This authoring path supports synchronous read tasks and configured chat phrases. Customer experiences use member-scoped tasks and the public fields declared in their contracts. Operator experiences can also display and drill into tabular task results.
+
 ### Preview a design through the API
 
 From the browser console on a signed-in admin page, run this example. It previews a design without saving a revision. The response is a `DisplayExperience`. Its first two block names should be `PznLayoutText` and `PznComparison`.
