@@ -1943,6 +1943,11 @@ export class Runtime implements IntegrationTaskRuntime {
     );
   }
 
+  /** Creates a governed @sfield/core MCP Server (Streamable HTTP + stdio) backed by this runtime. */
+  createMcpServer(options: import("@sfield/core").SFieldMcpServerOptions = {}) {
+    return this.sf.createMcpServer(options);
+  }
+
   async close() {
     await this.sf.close();
   }

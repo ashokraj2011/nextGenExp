@@ -69,6 +69,24 @@ On wealth turns, the host invokes the registered `sfield` read tool `cep.empathy
 2. **Writes new life events back**: When the customer shares a new major life event in chat (job loss, medical emergency, bereavement, family crisis, new family, or career milestone), `apps/server/service.ts` persists a deduplicated note to Customer 360 (`CustomerProfileStore.appendNote`, capped to 400 characters) and stores a `fact` in `sfield.memory`.
 3. **Drives personalization & promotion suppression**: `Store.finish` passes `turn.public.emotionalState` to `applyPersonalization` so every response opens with the customer's name and situation-aware tone. Whenever `emotionalState.suppressPromotions` is `true` (from chat or from an advisor's Customer 360 note), the host forwards `excludePromotions: true` to both `Customer360Service.evaluate` and `cep.recommendations.arbitrate@1.0.0`, pausing promotional investment offers across Recommendation Providers.
 
+### Expose `sfield` as a governed MCP Server (`sf.createMcpServer`)
+
+`@sfield/core` ships a built-in, transport-agnostic MCP Server (`2025-03-26` JSON-RPC 2.0) in `vendor/sfield/packages/core/src/mcp/server.ts`. Any `sfield` app can expose an allowlisted subset of its registered tools over **Streamable HTTP** (`handleRequest`) or **stdio** (`serveStdio`):
+
+```ts
+const mcp = sf.createMcpServer({
+  serverInfo: { name: "my-sfield-mcp", version: "1.0.0" },
+  principal,
+  preset: "read_only", // safe default; use "supervised" for HITL-approved writes
+  allowTools: ["cep.empathy.assess@1.0.0"],
+});
+
+// Streamable HTTP: pass JSON-RPC payload to mcp.handleRequest(body, { principal })
+// Local CLI / Claude Desktop / Cursor: await mcp.serveStdio({ principal })
+```
+
+Every `tools/call` runs inside a real `sfield` `ExecutionScope` (`executions.open` / `executions.resume`), preserving `Authorizer` policy checks, Ajv closed schema validation, HITL approval suspension (`APPROVAL_REQUIRED` → `status: "pending_approval"` with `approvalId` + `callId`), and `sfield.sqlite` audit receipts (`sfieldRunId`). CEP wires `POST /api/mcp` onto `runtime.createMcpServer(...)` in `apps/server/cep-mcp-server.ts`, exposing `cep.empathy.assess@1.0.0`, published `int.*` Integration Tasks, and `cep.knowledge.search@1.0.0`.
+
 ### Connect an existing service
 
 For a configurable external read, author a task in the **Integrations** workspace at `/integrations`. Declare its effect, input/output fields and transport binding, then publish it. For customer record lookups, configure **Customer chat** with the record ID, member ID and visible fields. `Runtime.registerPublishedTask` attempts a dedicated registration and can fall back to the integration dispatcher. Check the published task's execution route there. `packages/contracts/integration-task.ts` defines the contract and `apps/server/integration-tasks.ts` runs the transport.

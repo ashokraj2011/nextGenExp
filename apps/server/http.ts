@@ -1260,6 +1260,7 @@ export async function startApp(options: Options) {
         knowledgeBase,
         principalId,
         operatorName: actor,
+        runtime,
       });
       res.writeHead(out.status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...out.headers });
       res.end(out.body === undefined ? "" : JSON.stringify(out.body));

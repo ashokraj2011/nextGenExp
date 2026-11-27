@@ -74,6 +74,13 @@ const executionLanes = [
     allowed: "cep.domain.execute_write@1.0.0 only (no agentId)",
     guarantee: "Explicit business resource binding (domain_record) + immutable Write Audit entry",
   },
+  {
+    lane: "External MCP Clients",
+    preset: "read_only / supervised",
+    caller: "sf.createMcpServer() (POST /api/mcp · stdio)",
+    allowed: "Allowlisted sfield tools (e.g. cep.empathy.assess@1.0.0), published int.* tasks, KB RAG",
+    guarantee: "Authorizer + Ajv schemas + HITL approval suspension (pending_approval) + sfieldRunId audit",
+  },
 ];
 
 const deploymentModes = [

@@ -42,6 +42,7 @@ import { Scheduler } from "./runtime/scheduler.js";
 import { EventBus } from "./runtime/events.js";
 import { RunService } from "./runtime/run-service.js";
 import { ExternalExecutionScope, type ExecutionScope, type ExecutionScopeOptions } from "./runtime/execution-scope.js";
+import { createSFieldMcpServer, type SFieldMcpServer, type SFieldMcpServerOptions } from "./mcp/server.js";
 import { approveLock, checkLockApproved, type ApproveLockInput } from "./governance/lock.js";
 import { buildContext, type ContextBuildOutput } from "./context/builder.js";
 import { computeEffectiveTools } from "./registry/effective.js";
@@ -419,6 +420,11 @@ export class SField {
   registerTool(input: DefineToolInput): ToolDefinition {
     const def = this.i.registry.registerCode(input, "registerTool");
     return def;
+  }
+
+  /** Creates a governed MCP (Model Context Protocol) server backed by this SField runtime (Streamable HTTP + stdio). */
+  createMcpServer(options: SFieldMcpServerOptions = {}): SFieldMcpServer {
+    return createSFieldMcpServer(this, options);
   }
 
   get persistence(): ExecutionPersistence {

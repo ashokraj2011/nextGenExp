@@ -86,6 +86,21 @@ export {
   type HarnessVerifyOutcome,
 } from "./runtime/agentic-harness.js";
 export { ExternalExecutionScope, type ExecutionScope, type ExecutionScopeOptions } from "./runtime/execution-scope.js";
+export {
+  SFieldMcpServer,
+  createSFieldMcpServer,
+  MCP_PROTOCOL_VERSION,
+  type McpCallContext,
+  type McpCallResult,
+  type McpExtraTool,
+  type McpHttpResponse,
+  type McpResourceContent,
+  type McpResourceDefinition,
+  type McpToolAnnotations,
+  type McpToolDescriptor,
+  type SFieldMcpHost,
+  type SFieldMcpServerOptions,
+} from "./mcp/server.js";
 export { PluginManager, CORE_API_VERSION, CORE_VERSION } from "./plugins/manager.js";
 export { EnvSecretResolver, CompositeSecretResolver } from "./secrets.js";
 export { checkLockApproved, approveLock, effectiveRequireApproved } from "./governance/lock.js";

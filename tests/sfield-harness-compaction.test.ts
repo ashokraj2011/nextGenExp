@@ -550,3 +550,193 @@ test("sfield cep.empathy.assess@1.0.0 reads & writes Customer 360 notes and supp
   assert.ok(card && card.component === "PznDynamicCanvas");
   assert.doesNotMatch(card.props.suggestedFollowUp ?? "", /invest.*cash|put.*cash to work/i, "promotional cash NBA must be suppressed");
 });
+
+test("@sfield/core SFieldMcpServer exposes allowlisted tools over HTTP and stdio with Authorizer, presets, and HITL resume", async () => {
+  const { PassThrough } = await import("node:stream");
+  const { SField, EphemeralPersistence, defineTool, createDevAuthorizer, LOCAL_DEV_PRINCIPAL } = await import("@sfield/core");
+
+  const readTool = defineTool({
+    id: "demo.quote.read",
+    version: "1.0.0",
+    description: "Returns a sample quote for a ticker symbol.",
+    inputs: {
+      type: "object",
+      additionalProperties: false,
+      required: ["symbol"],
+      properties: { symbol: { type: "string", minLength: 1, maxLength: 10 } },
+    },
+    outputs: {
+      type: "object",
+      additionalProperties: false,
+      required: ["symbol", "priceUsd"],
+      properties: { symbol: { type: "string" }, priceUsd: { type: "number" } },
+    },
+    policy: { action: "demo.quote.read", effect: "read", requiresApproval: false, timeoutMs: 2_000, maxAttempts: 1, classification: "public", maxOutputBytes: 4096 },
+    handler: async (raw) => ({ symbol: String((raw as { symbol: string }).symbol).toUpperCase(), priceUsd: 215.5 }),
+  });
+
+  const secretTool = defineTool({
+    id: "demo.internal.secret",
+    version: "1.0.0",
+    description: "Internal-only tool not exposed over MCP.",
+    inputs: { type: "object", additionalProperties: false, properties: {} },
+    outputs: { type: "object", additionalProperties: false, required: ["ok"], properties: { ok: { type: "boolean" } } },
+    policy: { action: "demo.internal.secret", effect: "read", requiresApproval: false, timeoutMs: 2_000, maxAttempts: 1, classification: "public", maxOutputBytes: 4096 },
+    handler: async () => ({ ok: true }),
+  });
+
+  const writeTool = defineTool({
+    id: "demo.note.write",
+    version: "1.0.0",
+    description: "Writes an audited note (requires HITL approval under supervised preset).",
+    resource: { type: "note", id: { ref: "inputs.noteId" } },
+    inputs: {
+      type: "object",
+      additionalProperties: false,
+      required: ["noteId", "text"],
+      properties: { noteId: { type: "string", minLength: 1, maxLength: 32 }, text: { type: "string", minLength: 1, maxLength: 120 } },
+    },
+    outputs: {
+      type: "object",
+      additionalProperties: false,
+      required: ["saved", "noteId"],
+      properties: { saved: { type: "boolean" }, noteId: { type: "string" } },
+    },
+    policy: { action: "demo.note.write", effect: "write", requiresApproval: true, timeoutMs: 2_000, maxAttempts: 1, classification: "public", maxOutputBytes: 4096 },
+    handler: async (raw) => ({ saved: true, noteId: String((raw as { noteId: string }).noteId) }),
+  });
+
+  const sf = await SField.create({
+    deployment: "ephemeral",
+    config: { version: 1, models: {}, agents: {} },
+    persistence: new EphemeralPersistence(),
+    authorizer: createDevAuthorizer(),
+    tools: [readTool, secretTool, writeTool],
+  });
+
+  try {
+    const mcp = sf.createMcpServer({
+      serverInfo: { name: "generic-sfield-mcp", version: "2.0.0" },
+      principal: LOCAL_DEV_PRINCIPAL,
+      preset: "read_only",
+      allowTools: ["demo.quote.read@1.0.0", "demo.note.write@1.0.0"],
+    });
+
+    // 1. tools/list exposes ONLY allowlisted tools with accurate MCP annotations
+    const listRes = await mcp.handleRequest({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    const tools = (listRes.body as { result: { tools: Array<{ name: string; annotations?: { readOnlyHint?: boolean } }> } }).result.tools;
+    assert.deepEqual(tools.map((t) => t.name).sort(), ["demo.note.write@1.0.0", "demo.quote.read@1.0.0"]);
+    assert.equal(tools.find((t) => t.name === "demo.quote.read@1.0.0")?.annotations?.readOnlyHint, true);
+    assert.equal(tools.find((t) => t.name === "demo.note.write@1.0.0")?.annotations?.readOnlyHint, false);
+
+    // 2. Hidden tool cannot be called
+    const hiddenCall = await mcp.handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "demo.internal.secret@1.0.0", arguments: {} } });
+    assert.ok((hiddenCall.body as { error?: { code: number } }).error, "hidden tool must be rejected");
+
+    // 3. Allowed read tool executes through sfield ExecutionScope with sfieldRunId
+    const readCall = await mcp.handleRequest({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "demo.quote.read@1.0.0", arguments: { symbol: "aapl" } } });
+    const readContent = (readCall.body as { result: { structuredContent: { status: string; sfieldRunId: string; output: { symbol: string; priceUsd: number } } } }).result.structuredContent;
+    assert.equal(readContent.status, "succeeded");
+    assert.ok(readContent.sfieldRunId.startsWith("run_"));
+    assert.deepEqual(readContent.output, { symbol: "AAPL", priceUsd: 215.5 });
+
+    // 4. Write tool denied under default read_only preset
+    const deniedWrite = await mcp.handleRequest({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "demo.note.write@1.0.0", arguments: { noteId: "n1", text: "hi" } } });
+    assert.equal((deniedWrite.body as { result: { isError?: boolean; structuredContent: { status: string } } }).result.isError, true);
+    assert.equal((deniedWrite.body as { result: { structuredContent: { status: string } } }).result.structuredContent.status, "denied");
+
+    // 5. Write tool under supervised preset pauses for HITL approval, then resumes cleanly after approval!
+    const pausedWrite = await mcp.handleRequest(
+      { jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "demo.note.write@1.0.0", arguments: { noteId: "n2", text: "approved note" } } },
+      { preset: "supervised" },
+    );
+    const pausedBody = (pausedWrite.body as { result: { structuredContent: { status: string; approvalId: string; callId: string; sfieldRunId: string } } }).result.structuredContent;
+    assert.equal(pausedBody.status, "pending_approval");
+    assert.ok(pausedBody.approvalId);
+    assert.ok(pausedBody.callId);
+
+    // Approve via sfield ApprovalService and resume over MCP!
+    await sf.approvals.decide({
+      approvalId: pausedBody.approvalId,
+      decision: "approve",
+      actor: { tenantId: LOCAL_DEV_PRINCIPAL.tenantId, subjectId: "reviewer-1", roles: ["approver"] },
+    });
+    const resumedWrite = await mcp.handleRequest(
+      {
+        jsonrpc: "2.0",
+        id: 6,
+        method: "tools/call",
+        params: {
+          name: "demo.note.write@1.0.0",
+          arguments: {
+            noteId: "n2",
+            text: "approved note",
+            _sfieldResume: { runId: pausedBody.sfieldRunId, callId: pausedBody.callId },
+          },
+        },
+      },
+      { preset: "supervised" },
+    );
+    const resumedBody = (resumedWrite.body as { result: { structuredContent: { status: string; output: { saved: boolean; noteId: string } } } }).result.structuredContent;
+    assert.equal(resumedBody.status, "succeeded");
+    assert.deepEqual(resumedBody.output, { saved: true, noteId: "n2" });
+
+    // 6. Stdio transport works over newline-delimited JSON-RPC streams
+    const inStream = new PassThrough();
+    const outStream = new PassThrough();
+    let stdoutText = "";
+    outStream.on("data", (chunk) => { stdoutText += chunk.toString("utf8"); });
+    const stdioDone = mcp.serveStdio({ input: inStream, output: outStream });
+    inStream.write(JSON.stringify({ jsonrpc: "2.0", id: 10, method: "initialize" }) + "\n");
+    inStream.write(JSON.stringify({ jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: "demo.quote.read@1.0.0", arguments: { symbol: "msft" } } }) + "\n");
+    inStream.end();
+    await stdioDone;
+    const lines = stdoutText.trim().split("\n").map((l) => JSON.parse(l) as { id: number; result: Record<string, any> });
+    assert.equal(lines.length, 2);
+    assert.equal(lines[0].result.serverInfo.name, "generic-sfield-mcp");
+    assert.equal(lines[1].result.structuredContent.output.symbol, "MSFT");
+  } finally {
+    await sf.close();
+  }
+});
+
+test("CEP POST /api/mcp exposes native sfield tool cep.empathy.assess@1.0.0 via @sfield/core SFieldMcpServer", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "cep-sfield-mcp-endpoint-"));
+  const gateway = await startFixtureGateway();
+  const app = await startApp({
+    projectRoot: fileURLToPath(testProject),
+    dataDir: dir,
+    gateway: gateway.settings,
+    operatorAuth: "off",
+  });
+  t.after(async () => { await app.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
+  const client = await testClient(app.url);
+
+  const mcpCall = async (method: string, params?: Record<string, unknown>) =>
+    client.request<{ jsonrpc: string; id: number; result?: Record<string, any>; error?: { code: number; message: string } }>(
+      "/api/mcp",
+      { jsonrpc: "2.0", id: 1, method, ...(params ? { params } : {}) },
+    );
+
+  const listed = await mcpCall("tools/list");
+  const names = (listed.result?.tools as Array<{ name: string }>).map((x) => x.name);
+  assert.ok(names.includes("cep.empathy.assess@1.0.0"), "expected native sfield empathy tool in MCP tools/list");
+  assert.ok(names.includes("cep.knowledge.search@1.0.0"), "expected knowledge search tool in MCP tools/list");
+
+  const sfieldRes = await mcpCall("resources/read", { uri: "cep://sfield/tools" });
+  assert.ok(sfieldRes.result?.contents?.[0]?.text?.includes("cep.empathy.assess@1.0.0"));
+
+  const empathyCall = await mcpCall("tools/call", {
+    name: "cep.empathy.assess@1.0.0",
+    arguments: {
+      personaId: "demo-learner",
+      userMessage: "I just lost my job today",
+      ordinal: 1,
+    },
+  });
+  const sc = empathyCall.result?.structuredContent;
+  assert.equal(sc?.status, "succeeded");
+  assert.ok(String(sc?.sfieldRunId ?? "").startsWith("run_"));
+  assert.equal(sc?.output?.lifeEvent, "job_loss");
+  assert.equal(sc?.output?.suppressPromotions, true);
+});
