@@ -11,6 +11,7 @@
 import {
   createSFieldMcpServer,
   MCP_PROTOCOL_VERSION,
+  McpExtensionStore,
   SFieldError,
   type McpExtraTool,
   type McpHttpResponse,
@@ -32,6 +33,8 @@ export interface CepMcpDeps {
   runtime?: Runtime | null;
   exposureConfig?: McpExposureConfig;
 }
+
+const cepMcpExtensionStore = new McpExtensionStore();
 
 const OFFLINE_MCP_HOST: SFieldMcpHost = {
   registry: {
@@ -172,6 +175,7 @@ export async function handleCepMcpRequest(raw: unknown, deps: CepMcpDeps): Promi
     allowTools: exposure.enabledToolRefs,
     extraTools,
     resources,
+    extensionStore: cepMcpExtensionStore,
   };
 
   const mcpServer = deps.runtime

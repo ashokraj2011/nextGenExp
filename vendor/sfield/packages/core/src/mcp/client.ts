@@ -11,7 +11,14 @@ import type { ToolDefinition } from "../types/tool.js";
 import { defineTool } from "../registry/define-tool.js";
 import { ToolError } from "../registry/tool-error.js";
 import type { ToolResilienceGuard } from "../policy/resilience.js";
-import { MCP_PROTOCOL_VERSION, type McpHttpResponse, type McpToolDescriptor } from "./server.js";
+import { MCP_PROTOCOL_VERSION, type McpCallResult, type McpHttpResponse, type McpToolDescriptor } from "./server.js";
+import {
+  MCP_PROTOCOL_VERSION_2026,
+  type McpElicitationAction,
+  type McpElicitationRequest,
+  type McpTaskStatus,
+  type McpTaskSummary,
+} from "./extensions.js";
 
 export interface McpClientOptions {
   /** Streamable HTTP MCP endpoint URL (e.g. `https://api.example.com/api/mcp`). */
@@ -138,18 +145,40 @@ export class McpClient {
     }
   }
 
-  async initialize(signal?: AbortSignal): Promise<{ protocolVersion: string; serverInfo?: { name: string; version: string } }> {
-    const res = await this.rpc<{ protocolVersion: string; serverInfo?: { name: string; version: string } }>(
+  async initialize(signal?: AbortSignal, protocolVersion = MCP_PROTOCOL_VERSION_2026): Promise<{
+    protocolVersion: string;
+    capabilities?: Record<string, unknown>;
+    serverInfo?: { name: string; version: string };
+  }> {
+    const res = await this.rpc<{
+      protocolVersion: string;
+      capabilities?: Record<string, unknown>;
+      serverInfo?: { name: string; version: string };
+    }>(
       "initialize",
       {
-        protocolVersion: MCP_PROTOCOL_VERSION,
-        capabilities: {},
+        protocolVersion,
+        capabilities: {
+          extensions: {
+            "io.modelcontextprotocol/elicitation": { modes: ["form"], multiRoundTrip: true },
+            "io.modelcontextprotocol/tasks": { list: true, get: true, result: true, cancel: true },
+          },
+        },
         clientInfo: { name: "sfield-mcp-client", version: "1.0.0" },
       },
       signal,
     );
     this.initialized = true;
     return res;
+  }
+
+  /** MCP 2026 stateless server capability discovery. */
+  async discover(signal?: AbortSignal): Promise<{
+    protocolVersions: string[];
+    capabilities: Record<string, unknown>;
+    serverInfo?: { name: string; version: string };
+  }> {
+    return this.rpc("server/discover", undefined, signal);
   }
 
   async listTools(signal?: AbortSignal): Promise<McpToolDescriptor[]> {
@@ -165,6 +194,99 @@ export class McpClient {
   ): Promise<{ content?: Array<{ type: string; text?: string }>; structuredContent?: unknown; isError?: boolean }> {
     if (!this.initialized) await this.initialize(signal);
     return this.rpc("tools/call", { name, arguments: args }, signal);
+  }
+
+  /** MCP 2026 Async Tasks Extension: launch a tool asynchronously and return its task handle. */
+  async callToolAsync(
+    name: string,
+    args: Record<string, unknown>,
+    opts: { ttlMs?: number; signal?: AbortSignal } = {},
+  ): Promise<McpTaskSummary> {
+    if (!this.initialized) await this.initialize(opts.signal);
+    const res = await this.rpc<{ task: McpTaskSummary }>(
+      "tools/call",
+      { name, arguments: args, task: opts.ttlMs ? { ttlMs: opts.ttlMs } : {} },
+      opts.signal,
+    );
+    return res.task;
+  }
+
+  async getTask(taskId: string, signal?: AbortSignal): Promise<McpTaskSummary> {
+    const res = await this.rpc<{ task: McpTaskSummary }>("tasks/get", { taskId }, signal);
+    return res.task;
+  }
+
+  async getTaskResult(taskId: string, signal?: AbortSignal): Promise<{
+    task: McpTaskSummary;
+    result?: McpCallResult;
+    error?: { code: number; message: string };
+  }> {
+    return this.rpc("tasks/result", { taskId }, signal);
+  }
+
+  async listTasks(opts: { status?: McpTaskStatus } = {}, signal?: AbortSignal): Promise<McpTaskSummary[]> {
+    const res = await this.rpc<{ tasks: McpTaskSummary[] }>("tasks/list", opts.status ? { status: opts.status } : undefined, signal);
+    return Array.isArray(res?.tasks) ? res.tasks : [];
+  }
+
+  async cancelTask(taskId: string, signal?: AbortSignal): Promise<McpTaskSummary> {
+    const res = await this.rpc<{ task: McpTaskSummary }>("tasks/cancel", { taskId }, signal);
+    return res.task;
+  }
+
+  /** MCP 2026 Elicitation Extension: submit user response to a pending `input_required` elicitation. */
+  async respondElicitation(
+    input: { elicitationId: string; action: McpElicitationAction; content?: Record<string, unknown> },
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>> {
+    return this.rpc("elicitation/respond", input, signal);
+  }
+
+  async listElicitations(signal?: AbortSignal): Promise<McpElicitationRequest[]> {
+    const res = await this.rpc<{ elicitations: McpElicitationRequest[] }>("elicitation/list", undefined, signal);
+    return Array.isArray(res?.elicitations) ? res.elicitations : [];
+  }
+
+  /**
+   * Polls an async MCP task until it reaches a terminal state (`completed`, `failed`, or `cancelled`).
+   * If the task enters `input_required` and `onElicitation` is provided, automatically resolves the
+   * elicitation and continues polling until completion.
+   */
+  async waitForTask(
+    taskId: string,
+    opts: {
+      pollIntervalMs?: number;
+      timeoutMs?: number;
+      onElicitation?: (req: McpElicitationRequest) => Promise<{ action: McpElicitationAction; content?: Record<string, unknown> }>;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<{ task: McpTaskSummary; result?: McpCallResult; error?: { code: number; message: string } }> {
+    const deadline = Date.now() + (opts.timeoutMs ?? 30_000);
+    const handledElicitations = new Set<string>();
+    while (Date.now() < deadline) {
+      if (opts.signal?.aborted) throw new Error("waitForTask aborted");
+      const task = await this.getTask(taskId, opts.signal);
+      if (task.status === "completed" || task.status === "failed" || task.status === "cancelled") {
+        return this.getTaskResult(taskId, opts.signal);
+      }
+      if (task.status === "input_required" && task.elicitation) {
+        if (!opts.onElicitation) {
+          return { task };
+        }
+        if (!handledElicitations.has(task.elicitation.elicitationId)) {
+          handledElicitations.add(task.elicitation.elicitationId);
+          const reply = await opts.onElicitation(task.elicitation);
+          await this.respondElicitation({
+            elicitationId: task.elicitation.elicitationId,
+            action: reply.action,
+            ...(reply.content ? { content: reply.content } : {}),
+          }, opts.signal);
+        }
+      }
+      const waitMs = Math.max(15, opts.pollIntervalMs ?? task.pollIntervalMs ?? 100);
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+    throw new Error(`MCP task "${taskId}" timed out after ${opts.timeoutMs ?? 30_000}ms`);
   }
 }
 

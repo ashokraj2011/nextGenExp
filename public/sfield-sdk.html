@@ -396,8 +396,8 @@
           <p><code>TokenBucketRateLimiter</code>, 3-state <code>CircuitBreaker</code> (<code>closed → open → half_open</code>), and <code>ToolResilienceGuard</code> protect upstream connectors and MCP tools from cascading failures.</p>
         </article>
         <article class="card">
-          <h3>Federated MCP (Server + Client) <span class="pill">2025-03-26</span></h3>
-          <p>Expose principal-scoped RBAC tools via <code>sf.createMcpServer()</code> (Streamable HTTP + stdio) and mount remote MCP servers as closed-schema <code>sfield</code> tools via <code>createMcpClient</code> + <code>createMcpProxyTools</code>.</p>
+          <h3>Federated MCP (Server + Client) <span class="pill">2026-07-28</span></h3>
+          <p>Expose principal-scoped RBAC tools via <code>sf.createMcpServer()</code> (Streamable HTTP + stdio) with MCP 2026 <strong>Elicitation</strong> (<code>input_required</code> / <code>elicitation/respond</code>) and <strong>Async Tasks</strong> (<code>tasks/get</code>, <code>tasks/result</code>, <code>tasks/cancel</code>), and mount remote MCP servers via <code>createMcpClient</code> + <code>createMcpProxyTools</code>.</p>
         </article>
         <article class="card">
           <h3>Domain-Agnostic &amp; Agent OBO Identity <span class="pill">Any ID · A2A</span></h3>

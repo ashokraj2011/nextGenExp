@@ -130,6 +130,7 @@ export {
   SFieldMcpServer,
   createSFieldMcpServer,
   MCP_PROTOCOL_VERSION,
+  MCP_SUPPORTED_VERSIONS,
   type McpCallContext,
   type McpCallResult,
   type McpExtraTool,
@@ -141,6 +142,22 @@ export {
   type SFieldMcpHost,
   type SFieldMcpServerOptions,
 } from "./mcp/server.js";
+export {
+  MCP_PROTOCOL_VERSION_2026,
+  MCP_EXTENSION_ELICITATION,
+  MCP_EXTENSION_TASKS,
+  ElicitationRequiredError,
+  McpExtensionStore,
+  requestElicitation,
+  parseElicitationToolError,
+  type McpElicitationAction,
+  type McpElicitationRecord,
+  type McpElicitationRequest,
+  type McpElicitationStatus,
+  type McpTaskRecord,
+  type McpTaskStatus,
+  type McpTaskSummary,
+} from "./mcp/extensions.js";
 export {
   McpClient,
   createMcpClient,
