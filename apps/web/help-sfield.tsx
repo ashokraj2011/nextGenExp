@@ -115,7 +115,7 @@ const sdkPackages = [
   {
     pkg: "@sfield/core",
     role: "Governed Agent Kernel",
-    highlights: "SField runtime, closed Ajv tool contracts, SurfaceBinderService (sf.surfaces deterministic Data-to-UI stitch & HMAC-sealed actions), HITL approvals, Anthropic / Gemini / OpenAI-compatible providers, MCP 2026 SFieldMcpServer (Elicitation + Async Tasks) + McpClient, PiiFirewall, ToolResilienceGuard, DelegationService, streamRun, FilesystemArtifactStore & VectorMemoryIndex.",
+    highlights: "SField runtime, closed Ajv tool contracts, defineGraph / sf.graphs (parallel fan-out, interrupts, Time-Travel), SurfaceBinderService (sf.surfaces deterministic Data-to-UI stitch & HMAC-sealed actions), HITL approvals, Anthropic / Gemini / OpenAI-compatible providers, MCP 2026 SFieldMcpServer (Elicitation + Async Tasks) + McpClient, PiiFirewall, ToolResilienceGuard, DelegationService, streamRun, FilesystemArtifactStore & VectorMemoryIndex.",
   },
   {
     pkg: "@sfield/preset-memory",
@@ -182,11 +182,11 @@ const frameworkComparison = [
     othersCons: "Read/write effect isolation and per-turn tool narrowing are usually convention-based rather than kernel-enforced.",
   },
   {
-    dimension: "HITL Approvals & Crash Resume",
-    sfieldPros: "Built-in SHA-256 argument-digest-bound approvals, single-use resume, and durable SQLite/Postgres+JSON checkpoints out of the box.",
-    sfieldCons: "Structured around governed tool calls/digests rather than arbitrary free-form graph-node interrupts.",
-    othersPros: "LangGraph interrupt() and Mastra/ADK workflows support arbitrary mid-graph pauses and complex branching state machines.",
-    othersCons: "Cryptographic argument binding, tamper detection, and role/dual-control approval queues are typically DIY.",
+    dimension: "Graphs, HITL & Time-Travel",
+    sfieldPros: "Built-in defineGraph() (parallel fan-out, conditional edges, mid-graph interrupts, forkAndReplay() Time-Travel) plus SHA-256 argument-digest-bound HITL approvals & durable checkpoints.",
+    sfieldCons: "Graph engine is newer than LangGraph’s multi-year ecosystem of pre-built subgraphs.",
+    othersPros: "LangGraph StateGraph / interrupt() and Mastra/ADK workflows offer mature, complex branching state machines.",
+    othersCons: "Cryptographic argument binding, per-node effect presets, and tenant-isolated dual-control approval queues are typically DIY.",
   },
   {
     dimension: "Data-to-UI & Sealed Actions",
@@ -210,11 +210,11 @@ const frameworkComparison = [
     othersCons: "Requires deploying and operating separate sidecars, gateways, or custom middleware for PII redaction and circuit breaking.",
   },
   {
-    dimension: "Workbench & Release Gates",
-    sfieldPros: "Zero-framework embeddable & standalone @sfield/studio + sfield eval + sfield lock approve with zero SaaS dependency.",
-    sfieldCons: "Lighter visual graph-debugging and dataset-annotation UX than mature commercial SaaS platforms like LangSmith.",
-    othersPros: "Rich hosted observability, prompt playgrounds, and visual trace UIs (LangSmith, LangGraph Studio, Vertex Eval, OpenAI Traces).",
-    othersCons: "Often requires paid SaaS accounts, external trace data egress, or vendor-specific cloud lock-in.",
+    dimension: "Workbench, Waterfall & Red-Team",
+    sfieldPros: "Zero-framework embeddable & standalone @sfield/studio with visual execution waterfalls, interactive Graph Time-Travel, MCP 2026 Elicitation/Tasks, 1-Click 5-Attack Red-Team Proofs, and sfield lock approve.",
+    sfieldCons: "Lighter dataset-annotation & prompt-hub collaboration UX than mature commercial SaaS platforms like LangSmith.",
+    othersPros: "Rich hosted observability, prompt playgrounds, and dataset annotation UIs (LangSmith, LangGraph Studio, Vertex Eval, OpenAI Traces).",
+    othersCons: "Often requires paid SaaS accounts, external trace data egress, or vendor-specific cloud lock-in; no built-in 1-click red-team proof suite.",
   },
 ];
 

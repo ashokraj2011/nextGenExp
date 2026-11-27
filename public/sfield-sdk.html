@@ -257,7 +257,7 @@
         <div class="metric"><strong>9 Packages</strong><span>Publishable <code>@sfield/*</code> workspaces</span></div>
         <div class="metric"><strong>4 Model Backends</strong><span>Gemini, Anthropic, OpenAI-compat, Copilot ACP</span></div>
         <div class="metric"><strong>3 Storage Modes</strong><span>Memory, SQLite, Postgres + JSON fallback</span></div>
-        <div class="metric"><strong>154 Tests</strong><span>Unit, Studio, MCP 2026, SurfaceBinder &amp; Providers</span></div>
+        <div class="metric"><strong>156 Tests</strong><span>Graphs, Time-Travel, Red-Team, MCP 2026 &amp; Surfaces</span></div>
       </div>
     </section>
 
@@ -344,7 +344,7 @@
             <tr>
               <td><code>@sfield/core</code></td>
               <td>Core runtime kernel</td>
-              <td><code>SField</code>, <code>defineTool</code>, <code>SurfaceBinderService</code> (<code>sf.surfaces</code>), <code>GeminiProvider</code>, <code>AnthropicProvider</code>, <code>OpenAICompatibleProvider</code>, <code>SFieldMcpServer</code> (MCP 2026), <code>McpClient</code>, <code>createMcpProxyTools</code>, <code>createPiiFirewallHook</code>, <code>createToolResilienceGuard</code>, <code>DelegationService</code>, <code>streamRun</code>, <code>FilesystemArtifactStore</code>, <code>VectorMemoryIndex</code></td>
+              <td><code>SField</code>, <code>defineTool</code>, <code>defineGraph</code> (<code>sf.graphs</code>), <code>SurfaceBinderService</code> (<code>sf.surfaces</code>), <code>GeminiProvider</code>, <code>AnthropicProvider</code>, <code>OpenAICompatibleProvider</code>, <code>SFieldMcpServer</code> (MCP 2026), <code>McpClient</code>, <code>createMcpProxyTools</code>, <code>createPiiFirewallHook</code>, <code>createToolResilienceGuard</code>, <code>DelegationService</code>, <code>streamRun</code>, <code>FilesystemArtifactStore</code>, <code>VectorMemoryIndex</code></td>
             </tr>
             <tr>
               <td><code>@sfield/preset-memory</code></td>
@@ -427,6 +427,10 @@
           <h3>Deterministic SurfaceBinder <span class="pill">sf.surfaces</span></h3>
           <p>Stitches live tool outputs into declarative <code>$ref</code> / <code>$repeat</code> / <code>$input</code> UI templates with strict JSON Schema validation and <strong>HMAC-SHA256 sealed actions</strong> so host servers blindly render &amp; dispatch without custom glue.</p>
         </article>
+        <article class="card">
+          <h3>Governed State Graphs &amp; Time-Travel <span class="pill">sf.graphs</span></h3>
+          <p><code>defineGraph()</code> adds LangGraph-style typed state machines (<code>parallel</code> fan-out, conditional edges, mid-graph <code>ctx.interrupt()</code>, and <code>forkAndReplay()</code> checkpoint Time-Travel) with per-node policy presets and <code>Principal</code> isolation.</p>
+        </article>
       </div>
     </section>
 
@@ -464,7 +468,7 @@
           <tbody>
             <tr>
               <td><strong>Runtime &amp; Ecosystem</strong></td>
-              <td><strong>Pros:</strong> Zero-trust TypeScript/Node 22+ kernel with zero cloud lock-in and minimal runtime dependencies.<br /><br /><strong>Cons:</strong> Node.js/TS only (no native Python SDK yet); smaller third-party community plugin catalog than LangChain/LangGraph.</td>
+              <td><strong>Pros:</strong> Zero-trust TypeScript/Node 22+ kernel with zero cloud lock-in, minimal dependencies, and polyglot Python tool support via MCP 2026 (<code>examples/python-mcp-tool</code>).<br /><br /><strong>Cons:</strong> Core SDK is Node.js/TS (Python tools run over MCP rather than in-process); smaller third-party plugin catalog than LangChain/LangGraph.</td>
               <td><strong>Pros:</strong> Massive Python &amp; JS ecosystems (LangGraph, Google ADK, CrewAI), hundreds of pre-built connectors, and deep vendor hooks (Vertex AI, OpenAI).<br /><br /><strong>Cons:</strong> Heavier dependency trees, faster API churn, or tighter coupling to a single cloud/model vendor.</td>
             </tr>
             <tr>
@@ -478,9 +482,9 @@
               <td><strong>Pros:</strong> Flexible Zod/Pydantic tool definitions make rapid prototyping and open-ended JSON tools effortless.<br /><br /><strong>Cons:</strong> Read/write effect isolation and per-turn tool narrowing are usually convention-based rather than kernel-enforced.</td>
             </tr>
             <tr>
-              <td><strong>HITL Approvals &amp; Crash Resume</strong></td>
-              <td><strong>Pros:</strong> Built-in SHA-256 argument-digest-bound approvals, single-use resume, and durable SQLite/Postgres+JSON checkpoints out of the box.<br /><br /><strong>Cons:</strong> Structured around governed tool calls/digests rather than arbitrary free-form graph-node interrupts.</td>
-              <td><strong>Pros:</strong> LangGraph <code>interrupt()</code> and Mastra/ADK workflows support arbitrary mid-graph pauses and complex branching state machines.<br /><br /><strong>Cons:</strong> Cryptographic argument binding, tamper detection, and role/dual-control approval queues are typically DIY.</td>
+              <td><strong>Graphs, HITL &amp; Time-Travel</strong></td>
+              <td><strong>Pros:</strong> Built-in <code>defineGraph()</code> (parallel fan-out, conditional edges, mid-graph <code>ctx.interrupt()</code>, <code>forkAndReplay()</code> Time-Travel) plus SHA-256 argument-digest-bound HITL approvals &amp; durable checkpoints.<br /><br /><strong>Cons:</strong> Graph engine is newer than LangGraph’s multi-year ecosystem of pre-built subgraphs.</td>
+              <td><strong>Pros:</strong> LangGraph <code>StateGraph</code> / <code>interrupt()</code> and Mastra/ADK workflows offer mature, complex branching state machines.<br /><br /><strong>Cons:</strong> Cryptographic argument binding, per-node effect presets, and tenant-isolated dual-control approval queues are typically DIY.</td>
             </tr>
             <tr>
               <td><strong>Data-to-UI &amp; Sealed Actions</strong></td>
@@ -498,9 +502,9 @@
               <td><strong>Pros:</strong> Easy to pair with enterprise cloud DLP and API gateways (GCP Model Armor, Azure Content Safety, Cloudflare AI Gateway).<br /><br /><strong>Cons:</strong> Requires deploying and operating separate sidecars, gateways, or custom middleware for PII redaction and circuit breaking.</td>
             </tr>
             <tr>
-              <td><strong>Workbench &amp; Release Gates</strong></td>
-              <td><strong>Pros:</strong> Zero-framework embeddable &amp; standalone <code>@sfield/studio</code> + <code>sfield eval</code> + <code>sfield lock approve</code> with zero SaaS dependency.<br /><br /><strong>Cons:</strong> Lighter visual graph-debugging and dataset-annotation UX than mature commercial SaaS platforms like LangSmith.</td>
-              <td><strong>Pros:</strong> Rich hosted observability, prompt playgrounds, and visual trace UIs (LangSmith, LangGraph Studio, Vertex Eval, OpenAI Traces).<br /><br /><strong>Cons:</strong> Often requires paid SaaS accounts, external trace data egress, or vendor-specific cloud lock-in.</td>
+              <td><strong>Workbench, Waterfall &amp; Red-Team</strong></td>
+              <td><strong>Pros:</strong> Zero-framework embeddable &amp; standalone <code>@sfield/studio</code> with visual execution waterfalls, interactive Graph Time-Travel, MCP 2026 Elicitation/Tasks, 1-Click 5-Attack Red-Team Proofs, and <code>sfield lock approve</code>—zero SaaS required.<br /><br /><strong>Cons:</strong> Lighter dataset-annotation &amp; prompt-hub collaboration UX than mature commercial SaaS platforms like LangSmith.</td>
+              <td><strong>Pros:</strong> Rich hosted observability, prompt playgrounds, and dataset annotation UIs (LangSmith, LangGraph Studio, Vertex Eval, OpenAI Traces).<br /><br /><strong>Cons:</strong> Often requires paid SaaS accounts, external trace data egress, or vendor-specific cloud lock-in; no built-in 1-click red-team proof suite.</td>
             </tr>
           </tbody>
         </table>
