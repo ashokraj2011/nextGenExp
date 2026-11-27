@@ -115,7 +115,7 @@ export const helpContracts = [
       {
         id: "discovery",
         title: "Supported topics and relevance scores",
-        description: "The mock Treatment Selector loads active topics from contexts.json. It uses the member ID and test case to return scores from propensity.json for the requested topics.",
+        description: "The mock Treatment Selector loads active topics from contexts.json. It uses the MID and test case to return scores from propensity.json for the requested topics.",
         files: [
           jsonFile("context-discovery.tools.json", {
             "contexts.list": { input: turnInputSchema, output: contextResultSchema },
@@ -163,7 +163,7 @@ export const helpContracts = [
       {
         id: "treatment",
         title: "Treatment Selector",
-        description: "The sfield tool takes turnRef and routeDecisionId. The server uses them to send TS the member ID and verified topic, plus accountId for a selected retirement account. V1 returns ordered content IDs. V2.0 adds workflows linked to eligible cards. Chat requests v2.1, which also allows independently eligible actions with an ID and version. The multi-step planner uses a separate v3 format that can also carry ranked capabilities.",
+        description: "The sfield tool takes turnRef and routeDecisionId. The server uses them to send TS the MID and verified topic, plus accountId for a selected retirement account. V1 returns ordered content IDs. V2.0 adds workflows linked to eligible cards. Chat requests v2.1, which also allows independently eligible actions with an ID and version. The multi-step planner uses a separate v3 format that can also carry ranked capabilities.",
         files: [
           jsonFile("treatment-selector.tool.json", { input: treatmentInputSchema, output: treatmentResultSchema }),
           jsonFile("treatment-recommendations.tool.json", { input: treatmentInputSchema, output: treatmentRecommendationsResultSchema }),
@@ -186,7 +186,7 @@ export const helpContracts = [
       {
         id: "retirement-accounts",
         title: "Retirement account records",
-        description: "Alice asks for her retirement accounts and then asks about the second one. The account service reads her Rollover IRA ending in 6105. Treatment Selector receives her member ID, the learning context and the selected account ID. Its beneficiary rule determines whether the reminder appears.",
+        description: "Alice asks for her retirement accounts and then asks about the second one. The account service reads her Rollover IRA ending in 6105. Treatment Selector receives her MID, the learning context and the selected account ID. Its beneficiary rule determines whether the reminder appears.",
         files: [jsonFile("retirement-accounts.tool.json", { input: portfolioInputSchema, output: retirementAccountsResultSchema })],
       },
       {

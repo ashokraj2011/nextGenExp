@@ -2,7 +2,7 @@
 
 ## Expanding Treatment Selector from Content Recommendations to Actions and Workflows
 
-Treatment Selector (TS) already uses a member ID, a topic, and CCRE rules to return ranked content IDs. This proof of concept lets domain teams use those rules to recommend a standalone action or a versioned workflow. In chat, `sfield` uses the conversation and a language model to identify intent, then asks TS what the customer is eligible for. The app presents the choices using A2UI. When the customer selects a workflow, `sfield` runs its tools.
+Treatment Selector (TS) already uses a MID, a topic, and CCRE rules to return ranked content IDs. This proof of concept lets domain teams use those rules to recommend a standalone action or a versioned workflow. In chat, `sfield` uses the conversation and a language model to identify intent, then asks TS what the customer is eligible for. The app presents the choices using A2UI. When the customer selects a workflow, `sfield` runs its tools.
 
 When Marcus Reed asks **“What’s next?”**, TS recommends **Preview funding** because his account is unfunded. Once the mock account portal confirms his first deposit, the same rule excludes the funding reminder at his next sign-in. Logs show the rule, the account status it evaluated, and the portal confirmation. [Follow the customer interaction map](http://127.0.0.1:4174/admin/help#interactions) or [inspect the TS rule examples](http://127.0.0.1:4174/admin/help#proposal).
 
@@ -146,7 +146,7 @@ Customer chat opens at `/`. With operator sign-in enabled, the admin, integratio
 
 For local demos you can skip the prompt with `PZN_OPERATOR_AUTH=off`. Admin pages then open without a password and actions are attributed to `local-operator`; signing in still works and takes precedence (useful for testing dual control). The server refuses this setting under `NODE_ENV=production`, and it only listens on `127.0.0.1`/`localhost`.
 
-In `/integrations`, the **Customer chat** settings on a read task map the record ID, member ID and fields customers may see. Publish the task to make it available in chat. For example, Alice can ask “Where is my order ORD-1001?” and then “Tell me when it is delivered.” The server checks the registered source and posts the status change to that thread.
+In `/integrations`, the **Customer chat** settings on a read task map the record ID, MID and fields customers may see. Publish the task to make it available in chat. For example, Alice can ask “Where is my order ORD-1001?” and then “Tell me when it is delivered.” The server checks the registered source and posts the status change to that thread.
 
 ## Navigation & Admin Control Plane Map
 

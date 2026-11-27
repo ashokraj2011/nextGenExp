@@ -1,6 +1,6 @@
 ## Attach a workflow to a Treatment Selector rule
 
-Marcus’s address update is an end-to-end example of two independent decisions. The intent model identifies an address update. Treatment Selector (TS) checks Marcus’s member ID and that topic to determine which content, action and workflow apply. sfield executes the recommended workflow when Marcus clicks its button.
+Marcus’s address update is an end-to-end example of two independent decisions. The intent model identifies an address update. Treatment Selector (TS) checks Marcus’s MID and that topic to determine which content, action and workflow apply. sfield executes the recommended workflow when Marcus clicks its button.
 
 ### Map an intent to a TS topic
 

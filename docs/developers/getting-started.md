@@ -23,7 +23,7 @@ For **Google Gemini**, **OpenAI**, or an **office LLM gateway**, configure **Mod
 
 1. Sign in as **Jordan Lee** and ask **“Compare available and current balances.”** The expected chat card is **Compare balance definitions**.
 2. In **Administration → Logs**, select the conversation and that message. The app chooses a flow from the enabled tenant and domain flows. Inside account help, sfield retrieves the TS topic catalog and member relevance scores, then sends the message and recent history to the intent model.
-3. Inspect **Treatment Selector** for the member ID (MID), the topic `balance` and the eligible content. Open the composer exchange to see which eligible items the model proposed for display.
+3. Inspect **Treatment Selector** for the MID, the topic `balance` and the eligible content. Open the composer exchange to see which eligible items the model proposed for display.
 4. In **Inspector**, look for `compare_balances` and `PznComparison`. In the same chat ask **“show me the summary.”** On this turn look for `show_balance`, the balance read and `PznMetricSummary`. The read supplies the amounts.
 
 ### Find the part to change

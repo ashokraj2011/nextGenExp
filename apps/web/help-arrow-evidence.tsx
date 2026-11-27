@@ -26,7 +26,7 @@ function RoutingExplanation({ record }: { record: RecordData }) {
     <h3>How intent is derived</h3>
     {record.turn.semanticRoute && <p>The app first chose <strong>{record.turn.semanticRoute.capabilityLabel}</strong> for this message
       using {record.turn.semanticRoute.method === "deterministic" ? "a routing rule" : "its capability-routing model"}.</p>}
-    <p>sfield loads the active topics from TS. It then sends the member ID and those topic IDs to TS for relevance scores.
+    <p>sfield loads the active topics from TS. It then sends the MID and those topic IDs to TS for relevance scores.
       The app supplies the allowed intent-to-topic mappings, recent messages and selected profile fields to the Context Router.
       The router proposes an intent or a clarifying question. The app checks the proposal before requesting eligible recommendations.</p>
     {input.success && <>
@@ -49,7 +49,7 @@ function RoutingExplanation({ record }: { record: RecordData }) {
       <SavedJson title="Recent chat in the router request" value={input.data.recent} />
       {input.data.summaryFollowUpIntentId && <p>For this follow-up the app also supplied <code>summaryFollowUpIntentId = {input.data.summaryFollowUpIntentId}</code>.</p>}
       {log.treatment?.comparison?.reasons?.length ? <details className="trace-details"><summary>How customer data affected eligibility</summary>
-        <JsonBlock title="Member ID and verified topic sent to TS" value={log.treatment.mockInput} open />
+        <JsonBlock title="MID and verified topic sent to TS" value={log.treatment.mockInput} open />
         <SavedJson title="Rules matched by TS" value={log.treatment.comparison.reasons} open />
       </details> : null}
     </>}
@@ -90,7 +90,7 @@ function ArrowPayload({ kind, record }: { kind: ArrowEvidence; record: RecordDat
     case "flowRequest": case "flowResponse": return <FlowSelectionCall turn={turn} log={log}
       focus={kind === "flowRequest" ? "request" : "response"} />;
     case "registry": case "discovery": return <>
-      <p>TS returns the domain’s active topics. The scoring request then sends Marcus’s member ID and those topic IDs to TS.</p>
+      <p>TS returns the domain’s active topics. The scoring request then sends Marcus’s MID and those topic IDs to TS.</p>
       <ToolCalls calls={[log.catalogLookup, log.topicScores].filter((call): call is RegistryToolPayloads => Boolean(call))} />
       {log.topicScores?.mockInput && <JsonBlock title="Member and topics sent to TS for scoring" value={log.topicScores.mockInput} />}
     </>;

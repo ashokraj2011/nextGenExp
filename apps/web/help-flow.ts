@@ -246,7 +246,7 @@ const addressSteps = {
   },
   treatment: treatment(
     addressContext, addressTreatments,
-    "Treatment Selector receives Marcus’s member ID and TS rule group (address-update). CCRE recommends a standalone address action for this topic. Marcus’s unfunded status also qualifies him for the funding card and Preview funding workflow.",
+    "Treatment Selector receives Marcus’s MID and TS rule group (address-update). CCRE recommends a standalone address action for this topic. Marcus’s unfunded status also qualifies him for the funding card and Preview funding workflow.",
     newAccount.syntheticMid,
   ),
   composer: {
@@ -283,7 +283,7 @@ export const addressUpdateExample = {
     treatment: {
       calls: [{
         title: "Treatment Selector",
-        description: "The app sends the turn ID and verified route ID. sfield calls Treatment Selector with Marcus’s member ID and the address-update rule group, running CCRE rules to return eligible content, the address action and the funding workflow.",
+        description: "The app sends the turn ID and verified route ID. sfield calls Treatment Selector with Marcus’s MID and the address-update rule group, running CCRE rules to return eligible content, the address action and the funding workflow.",
         exchange: marcusCalls.treatment,
       }],
     },

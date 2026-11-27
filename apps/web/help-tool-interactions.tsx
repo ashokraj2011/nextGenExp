@@ -155,7 +155,7 @@ const MODES: Record<ModeId, ModeSpec> = {
         from: "gate",
         to: "executor",
         whatHappens: "CEP requests the exact read tools needed for the verified intent (e.g. TS eligibility + portfolio/goal read). Authorizer verifies Principal and read effect.",
-        llmSees: "Not involved — parameters like member ID (MID) and turnRef are injected host-side.",
+        llmSees: "Not involved — parameters like MID and turnRef are injected host-side.",
         enforcement: "apps/server/runtime.ts · authorizer checks tenantId, pzn-demo role, and readAllowed.",
       },
       {
@@ -291,7 +291,7 @@ const MODES: Record<ModeId, ModeSpec> = {
         from: "gate",
         to: "executor",
         whatHappens: "AgenticExecution resolves each planned capability to its registered sfield tool ref and checks Authorizer + Treatment Selector eligibility.",
-        llmSees: "Underlying business tool refs and member IDs stay completely inside the server.",
+        llmSees: "Underlying business tool refs and MIDs stay completely inside the server.",
         enforcement: "Every underlying business tool still passes sfield Authorizer + Ajv schema validation.",
       },
       {

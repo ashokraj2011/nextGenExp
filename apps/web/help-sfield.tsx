@@ -285,7 +285,7 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
           <div>
             <h4>Portfolio Snapshot tool</h4>
             <code>{portfolioTool}</code>
-            <p>The app identifies the chat request and its approved route. The tool uses that to find the right member ID.</p>
+            <p>The app identifies the chat request and its approved route. The tool uses that to find the right MID.</p>
           </div>
           <ArrowRight className="help-provider-arrow" size={20} aria-hidden="true" />
           <div>

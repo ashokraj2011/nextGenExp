@@ -20,7 +20,7 @@ const stages: Stage[] = [
     exchanges: [
       {
         from: "App server", to: "Portfolio and goal services",
-        request: "Marcus’s member ID (MID).",
+        request: "Marcus’s MID.",
         response: "His portfolio figures and savings goal for the welcome screen.",
       },
       {
@@ -136,7 +136,7 @@ const stages: Stage[] = [
       {
         from: "Mock account portal", to: "Account store",
         request: "Record the first deposit for Marcus’s MID.",
-        response: "A saved confirmation with the member ID, source, event ID and time. It carries across sign-ins.",
+        response: "A saved confirmation with the MID, source, event ID and time. It carries across sign-ins.",
       },
       {
         from: "App server", to: "Treatment Selector",

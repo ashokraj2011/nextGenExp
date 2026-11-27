@@ -107,7 +107,7 @@ Beyond CEP-specific tools, the `sfield` SDK (`vendor/sfield/packages/*`) ships s
 
 ### Connect an existing service
 
-For a configurable external read, author a task in the **Integrations** workspace at `/integrations`. Declare its effect, input/output fields and transport binding, then publish it. For customer record lookups, configure **Customer chat** with the record ID, member ID and visible fields. `Runtime.registerPublishedTask` attempts a dedicated registration and can fall back to the integration dispatcher. Check the published task's execution route there. `packages/contracts/integration-task.ts` defines the contract and `apps/server/integration-tasks.ts` runs the transport.
+For a configurable external read, author a task in the **Integrations** workspace at `/integrations`. Declare its effect, input/output fields and transport binding, then publish it. For customer record lookups, configure **Customer chat** with the record ID, MID and visible fields. `Runtime.registerPublishedTask` attempts a dedicated registration and can fall back to the integration dispatcher. Check the published task's execution route there. `packages/contracts/integration-task.ts` defines the contract and `apps/server/integration-tasks.ts` runs the transport.
 
 ### Reopen a thread and inspect what persists
 

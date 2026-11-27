@@ -18,7 +18,7 @@ const chat: Step[] = [
   { wire: "selector-runtime", kind: "discovery", title: "Return topics and Marcus’s scores" },
   { wire: "runtime-model", kind: "router", title: "Ask the Context Router" },
   { wire: "model-runtime", kind: "router", title: "Return the proposed intent" },
-  { wire: "runtime-selector", kind: "treatment", title: "Check eligibility for Marcus’s member ID and topic" },
+  { wire: "runtime-selector", kind: "treatment", title: "Check eligibility for Marcus’s MID and topic" },
   { wire: "selector-runtime", kind: "treatment", title: "Return eligible recommendations" },
   { wire: "runtime-tools", kind: "domain", title: "Request domain data when needed" },
   { wire: "tools-runtime", kind: "domain", title: "Return domain data when requested" },

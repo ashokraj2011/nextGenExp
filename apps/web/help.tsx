@@ -53,7 +53,7 @@ function TreatmentEvolution({ selectContract, run }: { selectContract: (id: stri
     <div className="help-section-heading">
       <div>
         <h2 id="proposal-title">Expanding Treatment Selector from Content Recommendations to Actions and Workflows</h2>
-        <p className="help-exchange-description">Today, Treatment Selector (TS) takes a member ID (<code>mid</code>) and a topic (<code>context</code>) and returns ranked content IDs. In this proof of concept, the same CCRE rules can recommend a standalone action or a workflow by ID and version. sfield sends TS the topic it inferred from chat and runs the workflow the customer picks.</p>
+        <p className="help-exchange-description">Today, Treatment Selector (TS) takes a MID (<code>mid</code>) and a topic (<code>context</code>) and returns ranked content IDs. In this proof of concept, the same CCRE rules can recommend a standalone action or a workflow by ID and version. sfield sends TS the topic it inferred from chat and runs the workflow the customer picks.</p>
         <p className="help-exchange-description">
           When Marcus Reed asks “What’s next?”, the <strong>Account is unfunded</strong> rule makes <strong>Preview funding</strong> eligible.
           Once the mock account portal confirms his first deposit, TS reads his updated status at the next sign-in and drops the reminder.{" "}
@@ -385,7 +385,7 @@ export function Help() {
         </div>
         <ol className="help-goal-flow">
           <li><strong>Understand the goal</strong><p>sfield gives the Experience Agent the request and recent chat. The agent looks up relevant capabilities and proposes which steps can run together.</p></li>
-          <li><strong>Check eligibility</strong><p>The app sends the member ID and each relevant topic to Treatment Selector. CCRE rules determine which capabilities and content are eligible.</p></li>
+          <li><strong>Check eligibility</strong><p>The app sends the MID and each relevant topic to Treatment Selector. CCRE rules determine which capabilities and content are eligible.</p></li>
           <li><strong>Read and calculate</strong><p>sfield reads the savings goal and portfolio independently. Once goal progress is verified, the calculator projects savings using the selected amount and timeframe.</p></li>
           <li><strong>Build the response</strong><p>The app turns verified results into approved A2UI components. Changing the contribution runs the calculation again and updates the chart.</p></li>
         </ol>
