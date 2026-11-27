@@ -74,6 +74,27 @@ CEP exposes these directly as zero-glue blind pass-through endpoints in `apps/se
 
 ---
 
+### How `sfield` compares to other agent frameworks
+
+Most agent frameworks optimize for prompt chaining, graph prototyping, or frontend streaming. **`sfield`** is designed specifically as a **zero-trust backend governance kernel** for regulated Node.js/TypeScript systems—and pairs cleanly behind frontend streaming libraries like `assistant-ui` or Vercel AI SDK.
+
+| Capability | `sfield` (`@sfield/*`) | LangGraph / LangChain | Vercel AI SDK | OpenAI Agents SDK | Google ADK | Mastra / CrewAI |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Primary focus** | Zero-trust enterprise governance runtime (Node 22+ / TS) | Graph/state-machine orchestration (Python / JS) | Streaming UI hooks & multi-model SDK (TS) | Lightweight multi-agent handoffs & guardrails | Hierarchical multi-agent & Vertex AI / Gemini orchestration | Rapid workflow / role-based prototyping |
+| **Identity, multi-tenant & OBO** | **Built-in** `Principal` (`human\|agent\|service`, custom `identifiers`, RFC 8693 `actingFor`, declarative `principal.*` bindings) | App-layer / custom middleware | App-layer / custom middleware | Context object (no built-in OBO / tenant isolation) | Session state / Vertex IAM | App-layer / custom middleware |
+| **Policy presets & tool contracts** | **Built-in** (`read_only`, `supervised`, `bounded_auto`) + closed Ajv schemas + `beforeModelDispatch` tool narrowing | Custom graph guards; Pydantic/Zod schemas | Zod tool schemas; effect isolation built by host | Guardrail functions; no effect presets | Tool callbacks / plugins | Zod/Pydantic schemas; custom policy layer |
+| **Digest-bound HITL & crash resume** | **Built-in** SHA-256 argument-bound approvals, single-use resume & SQLite/Postgres checkpoints | Checkpointed `interrupt()` (digest binding & RBAC DIY) | Confirmation hooks (host persists state) | Approval callbacks (host persists state) | Long-running tool pause / resume | Workflow suspend / resume |
+| **Deterministic Data-to-UI & sealed actions** | **Built-in** `sf.surfaces` (`$ref`/`$repeat`/`$input` + **HMAC-SHA256 principal-bound sealed actions**) | Separate (AG-UI / CopilotKit) | Generative UI (`streamUI`) — no cryptographic action sealing | None built-in | None built-in | None built-in |
+| **MCP 2026 (Elicitation + Async Tasks)** | **Built-in** RBAC `SFieldMcpServer` (HTTP + stdio), Elicitation, Async Tasks, `McpClient` + proxy tools | MCP client adapters | Experimental MCP client | Hosted/local MCP client | MCP toolset client | MCP client / server adapters |
+| **PII egress firewall & resilience** | **Built-in** `PiiFirewall` (scrub + local rehydration) & `TokenBucket` + 3-state `CircuitBreaker` | External gateway / custom middleware | External gateway / custom middleware | Custom guardrail functions | Model Armor (GCP) / custom callbacks | Custom middleware / gateway |
+| **Governance workbench & release gates** | **Embeddable & standalone** `@sfield/studio` (zero UI deps) + `sfield eval` + `sfield lock approve` | LangSmith / LangGraph Studio | External (OTel / Langfuse / Braintrust) | OpenAI Traces dashboard | ADK Web Dev UI + Vertex Eval | Mastra Playground / CrewAI Enterprise |
+
+**When to choose `sfield`**: Regulated or enterprise Node.js/TypeScript apps (Finance, Healthcare, IT Ops, RevOps) where LLMs must never fabricate figures, run writes without SHA-256 digest-bound HITL, or leak PII—and you want zero-cloud-lock-in persistence (SQLite or Postgres + JSON fallback) with an embeddable workbench (`@sfield/studio`).
+
+**When to pair or choose others**: Pair `sfield` behind **Vercel AI SDK / `assistant-ui`** for rich frontend chat streaming; choose **LangGraph** or **Google ADK** for Python-first teams or research-heavy graph pipelines tied to LangSmith or Vertex AI.
+
+---
+
 ### Service deployment with Postgres + automatic JSON fallback
 
 In `deployment: "service"`, `sfield` requires lock-manifest approval before booting. `@sfield/store-postgres` provides `createPostgresOrJsonPersistence()`, which connects to PostgreSQL when available and seamlessly falls back to conformance-verified, atomic durable JSON-file storage (`JsonFilePersistence` + `FilesystemArtifactStore`) when Postgres is unconfigured or unreachable:

@@ -229,6 +229,7 @@
         <a href="#packages">9 Packages</a>
         <a href="#primitives">Enterprise Primitives</a>
         <a href="#surfaces">SurfaceBinder</a>
+        <a href="#comparison">Comparison</a>
         <a href="#persistence">Postgres + JSON Fallback</a>
         <a href="#quickstart">Code &amp; CLI</a>
         <a href="/admin/sfield-studio">sfield Studio</a>
@@ -444,6 +445,110 @@
         <article class="card">
           <h3>3. Sealed Action Dispatch <span class="pill">HMAC-SHA256</span></h3>
           <p>Every action carries an HMAC seal bound to <code>{ tenantId, subjectId, toolRef, resolvedInputs, inputSlots }</code>. <code>sf.surfaces.dispatchAction()</code> blocks argument tampering and cross-principal replay, merges only declared <code>$input</code> slots, and supports HITL &amp; MCP Elicitation.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="comparison">
+      <h2>How <code>sfield</code> Compares to Other Agent Frameworks</h2>
+      <p class="section-desc">Most agent SDKs optimize for rapid model orchestration, prompt chaining, or frontend streaming. <strong>sfield</strong> is purpose-built as a <strong>zero-trust backend governance kernel</strong> for regulated Node.js/TypeScript applications—and pairs cleanly behind frontend libraries like Vercel AI SDK or assistant-ui.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Capability</th>
+              <th><code>sfield</code> (@sfield/*)</th>
+              <th>LangGraph / LangChain</th>
+              <th>Vercel AI SDK</th>
+              <th>OpenAI Agents SDK</th>
+              <th>Google ADK</th>
+              <th>Mastra / CrewAI</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Primary Focus</strong></td>
+              <td>Zero-trust enterprise governance runtime (Node 22+ / TS)</td>
+              <td>Graph/state-machine orchestration (Python / JS)</td>
+              <td>Frontend streaming UI hooks &amp; multi-model SDK (TS)</td>
+              <td>Lightweight multi-agent handoffs &amp; guardrails</td>
+              <td>Hierarchical multi-agent &amp; Vertex AI / Gemini orchestration</td>
+              <td>Rapid workflow / role-based agent prototyping</td>
+            </tr>
+            <tr>
+              <td><strong>Identity, Multi-Tenant &amp; Agent OBO</strong></td>
+              <td><strong>Built-in</strong> <code>Principal</code> (<code>human|agent|service</code>, custom <code>identifiers</code>, RFC 8693 <code>actingFor</code>, declarative <code>principal.*</code> bindings)</td>
+              <td>App-layer / custom middleware</td>
+              <td>App-layer / custom middleware</td>
+              <td>Context object (no built-in OBO / tenant isolation)</td>
+              <td>Session state / Vertex IAM</td>
+              <td>App-layer / custom middleware</td>
+            </tr>
+            <tr>
+              <td><strong>Policy Presets &amp; Effect Isolation</strong></td>
+              <td><strong>Built-in</strong> (<code>read_only</code>, <code>supervised</code>, <code>bounded_auto</code>) + closed Ajv schemas + <code>beforeModelDispatch</code> tool narrowing</td>
+              <td>Custom graph guards / Pydantic or Zod schemas</td>
+              <td>Zod tool schemas; effect isolation built by host</td>
+              <td>Input/output guardrails; no effect presets</td>
+              <td>Tool callbacks / plugins</td>
+              <td>Zod/Pydantic schemas; custom policy layer</td>
+            </tr>
+            <tr>
+              <td><strong>Digest-Bound HITL &amp; Crash Resume</strong></td>
+              <td><strong>Built-in</strong> SHA-256 argument-bound approvals, single-use resume &amp; SQLite/Postgres checkpoints</td>
+              <td>Checkpointed <code>interrupt()</code> (digest binding &amp; RBAC DIY)</td>
+              <td>Tool confirmation hooks (host persists state)</td>
+              <td>Approval callbacks (host persists state)</td>
+              <td>Long-running tool pause / resume</td>
+              <td>Workflow suspend / resume</td>
+            </tr>
+            <tr>
+              <td><strong>Deterministic Data-to-UI &amp; Sealed Actions</strong></td>
+              <td><strong>Built-in</strong> <code>sf.surfaces</code> (<code>$ref</code> / <code>$repeat</code> / <code>$input</code> + <strong>HMAC-SHA256 principal-bound sealed actions</strong>)</td>
+              <td>No built-in UI binder (separate AG-UI / CopilotKit)</td>
+              <td>Generative UI (<code>streamUI</code>) — no cryptographic action sealing</td>
+              <td>None built-in</td>
+              <td>None built-in</td>
+              <td>None built-in</td>
+            </tr>
+            <tr>
+              <td><strong>MCP 2026 (Elicitation + Async Tasks)</strong></td>
+              <td><strong>Built-in</strong> RBAC <code>SFieldMcpServer</code> (HTTP + stdio), Elicitation, Async Tasks, <code>McpClient</code> + proxy tools</td>
+              <td>MCP client adapters (server RBAC &amp; 2026 extensions DIY)</td>
+              <td>Experimental MCP client</td>
+              <td>Hosted/local MCP client</td>
+              <td>MCP toolset client</td>
+              <td>MCP client / server adapters</td>
+            </tr>
+            <tr>
+              <td><strong>PII Egress Firewall &amp; Resilience</strong></td>
+              <td><strong>Built-in</strong> <code>PiiFirewall</code> (egress scrub + local rehydration) &amp; <code>TokenBucket</code> + 3-state <code>CircuitBreaker</code></td>
+              <td>External gateway or custom middleware</td>
+              <td>External gateway or custom middleware</td>
+              <td>Custom guardrail functions</td>
+              <td>Model Armor (GCP) / custom callbacks</td>
+              <td>Custom middleware / gateway</td>
+            </tr>
+            <tr>
+              <td><strong>Governance Workbench &amp; Release Gates</strong></td>
+              <td><strong>Embeddable &amp; standalone</strong> <code>@sfield/studio</code> (zero UI deps) + <code>sfield eval</code> + <code>sfield lock approve</code></td>
+              <td>LangSmith / LangGraph Studio (SaaS or self-hosted)</td>
+              <td>External observability (OTel / Langfuse / Braintrust)</td>
+              <td>OpenAI Traces dashboard</td>
+              <td>ADK Web Dev UI + Vertex Eval</td>
+              <td>Mastra Playground / CrewAI Enterprise</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="grid" style="margin-top:14px">
+        <article class="card">
+          <h3>When to choose <code>sfield</code> <span class="pill">Regulated Enterprise</span></h3>
+          <p>Choose <strong>sfield</strong> for Finance, Healthcare, IT Ops, or RevOps apps in Node.js/TypeScript where LLMs must never fabricate figures, execute writes without SHA-256 digest-bound HITL, or leak PII—and you want zero-cloud-lock-in persistence (SQLite or Postgres + JSON fallback) and an embeddable governance Studio.</p>
+        </article>
+        <article class="card">
+          <h3>When to pair or choose others <span class="pill">Complementary</span></h3>
+          <p>Use <strong>Vercel AI SDK / assistant-ui</strong> on the frontend for rich chat streaming (CEP pairs <code>assistant-ui</code> on top of <code>sfield</code>!). Choose <strong>LangGraph</strong> or <strong>Google ADK</strong> for Python-first teams or research-heavy graph pipelines tightly integrated with LangSmith or Vertex AI.</p>
         </article>
       </div>
     </section>

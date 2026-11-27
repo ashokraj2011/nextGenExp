@@ -159,6 +159,58 @@ const sdkPackages = [
   },
 ];
 
+const frameworkComparison = [
+  {
+    dimension: "Primary Focus",
+    sfield: "Zero-trust governed runtime (Node 22+ / TS) for regulated enterprise apps",
+    langgraph: "Graph/state-machine orchestration (Python / JS)",
+    vercel: "Frontend streaming UI hooks & multi-model SDK (TS)",
+    openaiAdk: "Multi-agent handoffs & Gemini/OpenAI-native orchestration",
+  },
+  {
+    dimension: "Identity & Agent OBO",
+    sfield: "Built-in Principal (human|agent|service, custom identifiers, RFC 8693 actingFor)",
+    langgraph: "App-layer / custom middleware",
+    vercel: "App-layer / custom middleware",
+    openaiAdk: "Session context / cloud IAM",
+  },
+  {
+    dimension: "Tool Policy & HITL",
+    sfield: "read_only / supervised / bounded_auto + closed Ajv schemas + SHA-256 digest-bound approvals",
+    langgraph: "Checkpointed interrupt() (digest binding & RBAC DIY)",
+    vercel: "Zod tool schemas & confirmation callbacks",
+    openaiAdk: "Guardrails & approval callbacks (host persists state)",
+  },
+  {
+    dimension: "Data-to-UI & Sealed Actions",
+    sfield: "Built-in sf.surfaces ($ref/$repeat/$input + HMAC-SHA256 sealed action dispatch)",
+    langgraph: "Separate (AG-UI / CopilotKit)",
+    vercel: "Generative UI (streamUI) — no cryptographic action sealing",
+    openaiAdk: "None built-in",
+  },
+  {
+    dimension: "MCP 2026 & Federation",
+    sfield: "Built-in RBAC SFieldMcpServer (Elicitation + Async Tasks) + McpClient proxy tools",
+    langgraph: "MCP client adapters",
+    vercel: "Experimental MCP client",
+    openaiAdk: "MCP client / toolsets",
+  },
+  {
+    dimension: "PII Firewall & Resilience",
+    sfield: "Built-in egress PiiFirewall + local rehydration + TokenBucket & 3-state CircuitBreaker",
+    langgraph: "External gateway / custom middleware",
+    vercel: "External gateway / custom middleware",
+    openaiAdk: "External (Model Armor / custom guardrails)",
+  },
+  {
+    dimension: "Workbench & Release Gates",
+    sfield: "Embeddable & standalone @sfield/studio + sfield eval + sfield lock approve",
+    langgraph: "LangSmith / LangGraph Studio",
+    vercel: "External (OTel / Braintrust / Langfuse)",
+    openaiAdk: "OpenAI Traces / ADK Web UI + Vertex Eval",
+  },
+];
+
 export function SfieldHelp({ selectContract }: { selectContract: (id: string) => void }) {
   const portfolioTool = sfieldTools.portfolio.id + "@" + toolVersion;
   return <section id="sfield" className="help-section" aria-labelledby="sfield-title">
@@ -290,6 +342,35 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
               <p>{item.use}</p>
             </div>
           ))}
+        </div>
+      </div>
+
+      <div className="help-sfield-subsection">
+        <h3>How <code>sfield</code> compares to other agent frameworks</h3>
+        <p>Most agent SDKs focus on prompt chaining or frontend streaming. <strong>sfield</strong> focuses on <em>zero-trust backend governance</em>—and pairs cleanly behind frontend chat libraries like <code>assistant-ui</code> or Vercel AI SDK:</p>
+        <div className="help-sfield-table-wrap">
+          <table className="help-sfield-table">
+            <thead>
+              <tr>
+                <th>Capability</th>
+                <th><code>sfield</code> (@sfield/*)</th>
+                <th>LangGraph / LangChain</th>
+                <th>Vercel AI SDK</th>
+                <th>OpenAI Agents / Google ADK</th>
+              </tr>
+            </thead>
+            <tbody>
+              {frameworkComparison.map((row) => (
+                <tr key={row.dimension}>
+                  <td><strong>{row.dimension}</strong></td>
+                  <td>{row.sfield}</td>
+                  <td>{row.langgraph}</td>
+                  <td>{row.vercel}</td>
+                  <td>{row.openaiAdk}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 

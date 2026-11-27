@@ -68,6 +68,23 @@ await sf.close();
 
 ---
 
+## How `sfield` Compares to Other Agent Frameworks
+
+| Capability | `sfield` (`@sfield/*`) | LangGraph / LangChain | Vercel AI SDK | OpenAI Agents SDK | Google ADK | Mastra / CrewAI |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Primary focus** | Zero-trust enterprise governance runtime (Node 22+ / TS) | Graph/state-machine orchestration (Python / JS) | Streaming UI hooks & multi-model SDK (TS) | Lightweight multi-agent handoffs & guardrails | Hierarchical multi-agent & Vertex AI / Gemini | Rapid workflow / role-based prototyping |
+| **Identity, multi-tenant & OBO** | **Built-in** `Principal` (`human\|agent\|service`, custom `identifiers`, RFC 8693 `actingFor`) | App-layer / custom middleware | App-layer / custom middleware | Context object (no built-in OBO) | Session state / Vertex IAM | App-layer / custom middleware |
+| **Policy presets & closed schemas** | **Built-in** (`read_only`, `supervised`, `bounded_auto`) + closed Ajv schemas + tool narrowing | Custom guards; Pydantic/Zod | Zod schemas; host enforces effects | Guardrail functions | Tool callbacks / plugins | Zod/Pydantic; custom policy |
+| **Digest-bound HITL & resume** | **Built-in** SHA-256 argument-bound approvals + SQLite/Postgres checkpoints | Checkpointed `interrupt()` (digest & RBAC DIY) | Confirmation hooks (host persists) | Approval callbacks | Long-running pause / resume | Workflow suspend / resume |
+| **Data-to-UI stitch & sealed actions** | **Built-in** `sf.surfaces` (`$ref`/`$repeat`/`$input` + HMAC-SHA256 sealed actions) | Separate (AG-UI / CopilotKit) | Generative UI (`streamUI`), no action sealing | None built-in | None built-in | None built-in |
+| **MCP 2026 (Elicitation & Async Tasks)** | **Built-in** RBAC `SFieldMcpServer` (HTTP + stdio), Elicitation, Async Tasks & `McpClient` | MCP client adapters | Experimental MCP client | MCP client | MCP toolset client | MCP adapters |
+| **PII firewall & resilience** | **Built-in** `PiiFirewall` + `TokenBucket` + 3-state `CircuitBreaker` | External gateway / DIY | External gateway / DIY | Custom guardrails | Model Armor (GCP) / DIY | Custom middleware |
+| **Workbench & release gates** | **Embeddable & standalone** `@sfield/studio` + `sfield eval` + `sfield lock approve` | LangSmith / LangGraph Studio | External (OTel / Braintrust) | OpenAI Traces | ADK Web UI + Vertex Eval | Mastra Playground / CrewAI Enterprise |
+
+> **Complementary by design**: `sfield` is a backend governance kernel — pair it behind **Vercel AI SDK** or **`assistant-ui`** for frontend streaming chat, or adopt **LangGraph / Google ADK** when your team is Python-first or anchored to LangSmith / Vertex AI.
+
+---
+
 ## Production Deployment (`deployment: "service"`) with Postgres + JSON Fallback
 
 `@sfield/store-postgres` supports PostgreSQL (`pg.Pool` via `createPgPoolAdapter`) with automatic durable atomic JSON-file fallback when Postgres is unavailable or unconfigured:
