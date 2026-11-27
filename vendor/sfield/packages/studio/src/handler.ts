@@ -12,6 +12,9 @@ import {
   createPiiFirewall,
   createPrincipal,
   createSFieldMcpServer,
+  defineGraph,
+  GRAPH_END,
+  GraphService,
   isoAfter,
   MCP_PROTOCOL_VERSION_2026,
   McpExtensionStore,
@@ -30,6 +33,7 @@ import {
 } from "@sfield/core";
 import type { StudioOptions, StudioServerHandle, StudioServerOptions } from "./types.js";
 import { renderStudioHtml } from "./ui.js";
+import { runRedTeamProofSuite } from "./redteam.js";
 
 function normalizeBasePath(raw?: string): string {
   if (!raw || raw === "/") return "";
@@ -201,6 +205,79 @@ export function createStudioHandler(options: StudioOptions): (req: IncomingMessa
 
   const studioMcpPrincipal = (): Principal => options.runtime?.devPrincipal
     ?? createPrincipal({ tenantId: "studio", subjectId: "studio-operator" });
+
+  const graphService = options.runtime?.graphs ?? new GraphService({
+    executions: {
+      open: async () => { throw new SFieldError("STATE_UNAVAILABLE", "Runtime offline"); },
+    },
+  });
+
+  type RebalanceState = {
+    accountId: string;
+    amountUsd: number;
+    riskTier?: "low" | "elevated";
+    complianceOk?: boolean;
+    liquidityOk?: boolean;
+    humanApproved?: boolean;
+    decision?: string;
+  };
+
+  const studioDemoGraph = defineGraph<RebalanceState>({
+    id: "studio.rebalance.graph",
+    version: "1.0.0",
+    description: "Governed multi-step rebalance graph with parallel checks, conditional HITL interrupt, and checkpoint Time-Travel.",
+    entry: "assess_risk",
+    nodes: {
+      assess_risk: {
+        preset: "read_only",
+        handler: async (state) => ({
+          riskTier: state.amountUsd >= 10_000 ? "elevated" : "low",
+        }),
+      },
+      parallel_checks: {
+        kind: "parallel",
+        branches: ["check_compliance", "check_liquidity"],
+      },
+      check_compliance: {
+        preset: "read_only",
+        handler: async () => ({ complianceOk: true }),
+      },
+      check_liquidity: {
+        preset: "read_only",
+        handler: async () => ({ liquidityOk: true }),
+      },
+      hitl_review: {
+        preset: "supervised",
+        handler: async (state, ctx) => {
+          if (ctx.resumeValue && typeof ctx.resumeValue === "object" && (ctx.resumeValue as { approved?: boolean }).approved) {
+            return { humanApproved: true };
+          }
+          return ctx.interrupt(`Elevated rebalance ($${state.amountUsd.toLocaleString()}) requires human sign-off.`, {
+            accountId: state.accountId,
+            amountUsd: state.amountUsd,
+            riskTier: state.riskTier,
+          });
+        },
+      },
+      finalize: {
+        preset: "read_only",
+        handler: async (state) => ({
+          decision: state.riskTier === "elevated"
+            ? `Approved high-value rebalance of $${state.amountUsd.toLocaleString()} for ${state.accountId} (HITL verified)`
+            : `Auto-cleared low-risk rebalance of $${state.amountUsd.toLocaleString()} for ${state.accountId}`,
+        }),
+      },
+    },
+    edges: {
+      assess_risk: "parallel_checks",
+      hitl_review: "finalize",
+      finalize: GRAPH_END,
+    },
+    conditionalEdges: {
+      parallel_checks: (state) => (state.riskTier === "elevated" ? "hitl_review" : "finalize"),
+    },
+  });
+  graphService.register(studioDemoGraph);
 
   const assertWritable = () => {
     if (readOnly) {
@@ -677,6 +754,89 @@ export function createStudioHandler(options: StudioOptions): (req: IncomingMessa
           params: { taskId },
         }, { principal });
         sendJson(res, { response: rpc.body }, rpc.status);
+        return true;
+      }
+
+      // GET /api/graphs/runs — list registered governed graphs and persisted graph runs
+      if (rel === "/api/graphs/runs" && method === "GET") {
+        sendJson(res, {
+          graphs: graphService.list(),
+          runs: graphService.listRuns(),
+        });
+        return true;
+      }
+
+      // POST /api/graphs/demo — execute the built-in governed rebalance graph (supports custom amountUsd)
+      if (rel === "/api/graphs/demo" && method === "POST") {
+        assertWritable();
+        const body = await readJsonBody(req);
+        const amountUsd = typeof body["amountUsd"] === "number" && Number.isFinite(body["amountUsd"])
+          ? body["amountUsd"]
+          : 25_000;
+        const accountId = typeof body["accountId"] === "string" && body["accountId"].trim()
+          ? body["accountId"].trim()
+          : "acct-wealth-001";
+        const principal = body["principal"] ? buildPrincipalFromBody(body["principal"]) : studioMcpPrincipal();
+        const run = await graphService.run({
+          graph: studioDemoGraph,
+          principal,
+          initialState: { accountId, amountUsd },
+        });
+        sendJson(res, { run, runs: graphService.listRuns() }, 201);
+        return true;
+      }
+
+      // POST /api/graphs/runs/:id/resume — resume an interrupted graph run
+      if (rel.startsWith("/api/graphs/runs/") && rel.endsWith("/resume") && method === "POST") {
+        assertWritable();
+        const runId = decodeURIComponent(rel.slice("/api/graphs/runs/".length, -"/resume".length));
+        const body = await readJsonBody(req);
+        const existing = graphService.getRun(runId);
+        const principal = existing
+          ? createPrincipal({ tenantId: existing.tenantId, subjectId: existing.subjectId })
+          : studioMcpPrincipal();
+        const run = await graphService.resume({
+          runId,
+          principal,
+          resumeValue: body["resumeValue"] ?? { approved: true },
+          ...(body["statePatch"] && typeof body["statePatch"] === "object"
+            ? { statePatch: body["statePatch"] as Record<string, unknown> }
+            : {}),
+        });
+        sendJson(res, { run, runs: graphService.listRuns() });
+        return true;
+      }
+
+      // POST /api/graphs/runs/:id/fork — Time-Travel fork & replay from any historical checkpoint
+      if (rel.startsWith("/api/graphs/runs/") && rel.endsWith("/fork") && method === "POST") {
+        assertWritable();
+        const runId = decodeURIComponent(rel.slice("/api/graphs/runs/".length, -"/fork".length));
+        const body = await readJsonBody(req);
+        const checkpointId = typeof body["checkpointId"] === "string" ? body["checkpointId"].trim() : "";
+        if (!checkpointId) {
+          sendJson(res, { error: "invalid_checkpoint", message: "checkpointId is required." }, 400);
+          return true;
+        }
+        const existing = graphService.getRun(runId);
+        const principal = existing
+          ? createPrincipal({ tenantId: existing.tenantId, subjectId: existing.subjectId })
+          : studioMcpPrincipal();
+        const forked = await graphService.forkAndReplay({
+          runId,
+          checkpointId,
+          principal,
+          ...(body["stateOverride"] && typeof body["stateOverride"] === "object"
+            ? { stateOverride: body["stateOverride"] as Record<string, unknown> }
+            : {}),
+        });
+        sendJson(res, { run: forked, runs: graphService.listRuns() }, 201);
+        return true;
+      }
+
+      // POST /api/redteam/run — execute 5 live zero-trust governance & red-team proofs
+      if (rel === "/api/redteam/run" && method === "POST") {
+        const result = await runRedTeamProofSuite();
+        sendJson(res, result);
         return true;
       }
 

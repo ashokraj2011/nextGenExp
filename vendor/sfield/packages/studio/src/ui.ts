@@ -118,6 +118,13 @@ export function renderStudioHtml(opts: {
     .notice.err { background: var(--err-soft); border-color: rgba(255, 92, 114, 0.35); color: #ffd3da; }
     .notice.ok { background: var(--ok-soft); border-color: rgba(46, 204, 113, 0.35); color: #ccf6dd; }
     .plugin-frame { width: 100%; height: calc(100vh - 130px); border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+    .wf-list { display: flex; flex-direction: column; gap: 8px; }
+    .wf-row { display: grid; grid-template-columns: 180px 1fr 90px; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: #0d121b; }
+    .wf-bar-track { height: 10px; border-radius: 999px; background: var(--surface-2); overflow: hidden; position: relative; }
+    .wf-bar { height: 100%; border-radius: 999px; background: var(--accent); min-width: 6px; }
+    .wf-bar.ok { background: var(--ok); }
+    .wf-bar.warn { background: var(--warn); }
+    .wf-bar.err { background: var(--err); }
     @media (max-width: 820px) {
       .shell { grid-template-columns: 1fr; }
       .rail { border-right: none; border-bottom: 1px solid var(--border); }
@@ -160,7 +167,9 @@ export function renderStudioHtml(opts: {
     const API = (BOOT.basePath || "") + "/api";
     const CORE_TABS = [
       { id: "overview", label: "Overview & Locks" },
-      { id: "runs", label: "Runs & Traces" },
+      { id: "runs", label: "Runs & Waterfall" },
+      { id: "graphs", label: "Graphs & Time-Travel" },
+      { id: "redteam", label: "Red-Team Proofs" },
       { id: "tools", label: "Tools & Playground" },
       { id: "mcp2026", label: "MCP 2026 Elicitation & Tasks" },
       { id: "approvals", label: "HITL Approvals" },
@@ -170,7 +179,7 @@ export function renderStudioHtml(opts: {
       { id: "telemetry", label: "OTel Telemetry" },
     ];
     let activeTab = "overview";
-    let state = { overview: null, runs: [], selectedRun: null, tools: [], approvals: [], evals: [], memory: [], telemetry: null, mcp2026: null, mcpLastOut: null };
+    let state = { overview: null, runs: [], selectedRun: null, tools: [], approvals: [], evals: [], memory: [], telemetry: null, mcp2026: null, mcpLastOut: null, graphs: null, selectedGraphRunId: null, redteam: null };
 
     async function api(path, opts) {
       const res = await fetch(API + path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
@@ -237,10 +246,17 @@ export function renderStudioHtml(opts: {
           heading.textContent = "Overview & Governance Locks";
           renderOverview(root);
         } else if (activeTab === "runs") {
-          heading.textContent = "Runs, Identities & Traces";
+          heading.textContent = "Runs, Visual Waterfall & Traces";
           const data = await api("/runs?limit=50");
           state.runs = data.runs || [];
           renderRuns(root);
+        } else if (activeTab === "graphs") {
+          heading.textContent = "Governed State Graphs & Checkpoint Time-Travel";
+          state.graphs = await api("/graphs/runs");
+          renderGraphs(root);
+        } else if (activeTab === "redteam") {
+          heading.textContent = "1-Click Zero-Trust Governance & Red-Team Proofs";
+          renderRedTeam(root);
         } else if (activeTab === "tools") {
           heading.textContent = "Tool Registry & Principal Playground";
           const data = await api("/tools");
@@ -357,9 +373,29 @@ export function renderStudioHtml(opts: {
           detail.innerHTML = '<div class="card">Loading run trace…</div>';
           try {
             const d = await api("/runs/" + encodeURIComponent(tr.dataset.run));
+            const wfItems = []
+              .concat((d.modelAttempts || []).map((m, idx) => ({
+                label: "Model #" + (idx + 1) + " · " + (m.model || "llm"),
+                tone: m.status === "succeeded" ? "ok" : "warn",
+                ms: Math.max(1, Number(m.durationMs || 15)),
+                meta: (m.usage && m.usage.totalTokens ? m.usage.totalTokens + " tok" : m.status || "done"),
+              })))
+              .concat((d.calls || []).map((c) => ({
+                label: "Tool · " + (c.toolRef || c.toolId || "call"),
+                tone: c.status === "succeeded" ? "ok" : (c.status === "suspended" ? "warn" : "err"),
+                ms: Math.max(1, Number(c.durationMs || 5)),
+                meta: c.status || "done",
+              })));
+            const maxMs = wfItems.reduce((acc, it) => Math.max(acc, it.ms), 1);
+            const wfHtml = wfItems.length
+              ? '<div class="wf-list">' + wfItems.map((it) =>
+                  '<div class="wf-row"><div><code>' + esc(it.label) + '</code></div><div class="wf-bar-track"><div class="wf-bar ' + it.tone + '" style="width:' + Math.max(6, Math.round((it.ms / maxMs) * 100)) + '%"></div></div><div class="muted" style="text-align:right">' + esc(it.meta) + '</div></div>'
+                ).join("") + '</div>'
+              : '<div class="empty">No model or tool steps recorded on this run.</div>';
             detail.innerHTML =
               '<div class="card stack">' +
                 '<div class="row" style="justify-content:space-between"><h2>Run Trace · <code>' + esc(d.run.runId) + '</code></h2>' + pill(d.run.state, d.run.state === "completed" ? "ok" : "warn") + '</div>' +
+                '<div><h3>Execution Waterfall (' + wfItems.length + ' steps)</h3>' + wfHtml + '</div>' +
                 '<div class="grid-2">' +
                   '<div><h3>Principal & Identity</h3><pre>' + esc(JSON.stringify(d.run.principal, null, 2)) + '</pre></div>' +
                   '<div><h3>Tool Calls (' + d.calls.length + ')</h3><pre>' + esc(JSON.stringify(d.calls, null, 2)) + '</pre></div>' +
@@ -671,6 +707,151 @@ export function renderStudioHtml(opts: {
           renderMcp2026(root);
         };
       });
+    }
+
+    function renderGraphs(root) {
+      const g = state.graphs || { graphs: [], runs: [] };
+      const runs = g.runs || [];
+      if (!state.selectedGraphRunId && runs.length) state.selectedGraphRunId = runs[0].runId;
+      const active = runs.find((r) => r.runId === state.selectedGraphRunId) || runs[0] || null;
+
+      const runRows = runs.map((r) => {
+        const tone = r.status === "completed" ? "ok" : (r.status === "interrupted" ? "warn" : "err");
+        const forkBadge = r.parentRunId ? " " + pill("forked", "accent") : "";
+        return '<tr class="clickable" data-grun="' + esc(r.runId) + '">' +
+          '<td><code>' + esc(r.runId.slice(0, 16)) + '</code>' + forkBadge + '</td>' +
+          '<td><code>' + esc(r.graphId) + '</code></td>' +
+          '<td>' + pill(r.status, tone) + '</td>' +
+          '<td>' + esc(r.checkpoints.length) + ' nodes · ' + esc(r.totalDurationMs) + 'ms</td>' +
+        '</tr>';
+      }).join("");
+
+      let activeHtml = '<div class="empty">Run the demo graph on the left to inspect its checkpoint waterfall and try Time-Travel Fork &amp; Replay.</div>';
+      if (active) {
+        const maxDur = active.checkpoints.reduce((m, c) => Math.max(m, Math.max(1, c.durationMs)), 1);
+        const cpHtml = active.checkpoints.map((cp) => {
+          const tone = cp.status === "completed" ? "ok" : (cp.status === "interrupted" ? "warn" : "err");
+          const pct = Math.max(8, Math.round((Math.max(1, cp.durationMs) / maxDur) * 100));
+          return '<div class="wf-row" style="grid-template-columns:190px 1fr 220px">' +
+            '<div><strong>#' + cp.stepIndex + ' ' + esc(cp.nodeId) + '</strong><div class="muted" style="font-size:11px">' + pill(cp.preset, "accent") + ' ' + pill(cp.status, tone) + '</div></div>' +
+            '<div class="stack" style="gap:4px"><div class="wf-bar-track"><div class="wf-bar ' + tone + '" style="width:' + pct + '%"></div></div><div class="muted" style="font-size:11px">stateAfter: <code>' + esc(JSON.stringify(cp.stateAfter)) + '</code></div></div>' +
+            '<div class="row" style="justify-content:flex-end">' +
+              '<span class="muted" style="font-size:11px">' + cp.durationMs + 'ms</span>' +
+              (!BOOT.readOnly ? '<button class="btn" type="button" data-fork-cp="' + esc(cp.checkpointId) + '">Fork &amp; Replay</button>' : '') +
+            '</div>' +
+          '</div>';
+        }).join("");
+
+        activeHtml =
+          '<div class="stack">' +
+            '<div class="row" style="justify-content:space-between">' +
+              '<div><strong>Run <code>' + esc(active.runId) + '</code></strong>' + (active.parentRunId ? ' ' + pill("Forked from " + active.parentRunId.slice(0, 12), "accent") : '') + '</div>' +
+              pill(active.status, active.status === "completed" ? "ok" : (active.status === "interrupted" ? "warn" : "err")) +
+            '</div>' +
+            (active.interrupt
+              ? '<div class="notice"><strong>Paused at <code>' + esc(active.interrupt.nodeId) + '</code>:</strong> ' + esc(active.interrupt.reason) +
+                (!BOOT.readOnly ? ' <button class="btn ok" id="graph-resume-btn" type="button" style="margin-left:10px">Approve &amp; Resume</button>' : '') +
+                '</div>'
+              : '') +
+            '<div class="wf-list">' + cpHtml + '</div>' +
+            (!BOOT.readOnly
+              ? '<label class="field">Time-Travel State Override JSON (applied when clicking Fork &amp; Replay on any checkpoint)<input id="graph-fork-override" value="{&quot;amountUsd&quot;: 5000}" /></label>'
+              : '') +
+            '<div><h3>Final State</h3><pre>' + esc(JSON.stringify(active.state, null, 2)) + '</pre></div>' +
+          '</div>';
+      }
+
+      root.innerHTML =
+        '<div class="grid-2">' +
+          '<div class="card stack">' +
+            '<h2>Governed Graph Launcher (<code>sf.graphs</code>)</h2>' +
+            '<div class="muted">Runs <code>studio.rebalance.graph</code> with parallel compliance/liquidity fan-out and conditional HITL interrupt (&ge; $10,000). Try running with $25,000, then click <strong>Fork &amp; Replay</strong> on checkpoint #0 with <code>{"amountUsd": 5000}</code> to Time-Travel onto the auto-clear branch!</div>' +
+            '<div class="row">' +
+              '<label class="field" style="flex:1">Rebalance Amount (USD)<input id="graph-amount" type="number" value="25000" /></label>' +
+              '<button class="btn primary" id="graph-run-btn" type="button" style="margin-top:18px"' + (BOOT.readOnly ? " disabled" : "") + '>Run Governed Graph</button>' +
+            '</div>' +
+            '<h3>Graph Runs (' + runs.length + ')</h3>' +
+            (runs.length
+              ? '<table><thead><tr><th>Run</th><th>Graph</th><th>Status</th><th>Steps</th></tr></thead><tbody>' + runRows + '</tbody></table>'
+              : '<div class="empty">No graph runs yet.</div>') +
+          '</div>' +
+          '<div class="card stack">' +
+            '<h2>Checkpoint Waterfall &amp; Time-Travel</h2>' +
+            activeHtml +
+          '</div>' +
+        '</div>';
+
+      const runBtn = document.getElementById("graph-run-btn");
+      if (runBtn) {
+        runBtn.onclick = async () => {
+          const amountUsd = Number(document.getElementById("graph-amount").value || 25000);
+          const out = await api("/graphs/demo", { method: "POST", body: JSON.stringify({ amountUsd }) });
+          state.selectedGraphRunId = out.run.runId;
+          await loadActiveTab();
+        };
+      }
+      root.querySelectorAll("tr[data-grun]").forEach((tr) => {
+        tr.onclick = () => { state.selectedGraphRunId = tr.dataset.grun; renderGraphs(root); };
+      });
+      const resumeBtn = document.getElementById("graph-resume-btn");
+      if (resumeBtn && active) {
+        resumeBtn.onclick = async () => {
+          await api("/graphs/runs/" + encodeURIComponent(active.runId) + "/resume", {
+            method: "POST",
+            body: JSON.stringify({ resumeValue: { approved: true } }),
+          });
+          await loadActiveTab();
+        };
+      }
+      root.querySelectorAll("button[data-fork-cp]").forEach((btn) => {
+        btn.onclick = async () => {
+          if (!active) return;
+          const rawOverride = (document.getElementById("graph-fork-override") || {}).value || "{}";
+          const stateOverride = JSON.parse(rawOverride);
+          const out = await api("/graphs/runs/" + encodeURIComponent(active.runId) + "/fork", {
+            method: "POST",
+            body: JSON.stringify({ checkpointId: btn.dataset.forkCp, stateOverride }),
+          });
+          state.selectedGraphRunId = out.run.runId;
+          await loadActiveTab();
+        };
+      });
+    }
+
+    function renderRedTeam(root) {
+      const r = state.redteam;
+      const cards = r
+        ? r.proofs.map((p) =>
+            '<div class="card stack" style="border-color:' + (p.passed ? "rgba(46,204,113,0.45)" : "rgba(255,92,114,0.5)") + '">' +
+              '<div class="row" style="justify-content:space-between"><strong>' + esc(p.title) + '</strong>' + pill(p.passed ? "BLOCKED / VERIFIED (" + p.durationMs + "ms)" : "FAILED", p.passed ? "ok" : "err") + '</div>' +
+              '<div style="font-size:13px"><strong>Simulated Attack:</strong> ' + esc(p.attack) + '</div>' +
+              '<div class="muted" style="font-size:13px"><strong>sfield Defense:</strong> ' + esc(p.defense) + '</div>' +
+              '<pre>' + esc(JSON.stringify(p.evidence, null, 2)) + '</pre>' +
+            '</div>'
+          ).join("")
+        : '<div class="empty">Click <strong>Run 5 Live Security Proofs</strong> above to execute real adversarial tests against <code>@sfield/core</code>.</div>';
+
+      root.innerHTML =
+        '<div class="card stack">' +
+          '<div class="row" style="justify-content:space-between">' +
+            '<div><h2>1-Click Zero-Trust Governance &amp; Red-Team Proof Suite</h2><div class="muted">Executes 5 live adversarial attacks against an isolated <code>@sfield/core</code> kernel: prompt-injected write, tampered HMAC UI action, cross-tenant replay, PII egress leak, and unapproved write HITL gating.</div></div>' +
+            '<button class="btn primary" id="redteam-run-btn" type="button">Run 5 Live Security Proofs</button>' +
+          '</div>' +
+          (r ? '<div class="notice ' + (r.allPassed ? "ok" : "err") + '"><strong>Result: ' + r.passed + ' / ' + r.total + ' proofs passed</strong> · Executed at ' + esc(r.ranAt) + '</div>' : '') +
+        '</div>' +
+        '<div class="stack">' + cards + '</div>';
+
+      document.getElementById("redteam-run-btn").onclick = async () => {
+        const btn = document.getElementById("redteam-run-btn");
+        btn.disabled = true;
+        btn.textContent = "Running attacks…";
+        try {
+          state.redteam = await api("/redteam/run", { method: "POST", body: "{}" });
+          renderRedTeam(root);
+        } catch (e) {
+          root.innerHTML = '<div class="notice err">' + esc(e.message) + '</div>';
+        }
+      };
     }
 
     function renderPlugin(root, plugin) {

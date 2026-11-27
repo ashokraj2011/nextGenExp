@@ -47,6 +47,7 @@ import { createSFieldMcpServer, type SFieldMcpServer, type SFieldMcpServerOption
 import { DelegationService } from "./runtime/delegation.js";
 import { streamRun, type RunStreamChunk } from "./runtime/stream.js";
 import { SurfaceBinderService } from "./ui/surface-binder.js";
+import { GraphService } from "./graph/state-graph.js";
 import { approveLock, checkLockApproved, type ApproveLockInput } from "./governance/lock.js";
 import { buildContext, type ContextBuildOutput } from "./context/builder.js";
 import { computeEffectiveTools } from "./registry/effective.js";
@@ -113,6 +114,7 @@ export class SField {
   readonly harness: AgenticHarness;
   readonly delegation: DelegationService;
   readonly surfaces: SurfaceBinderService;
+  readonly graphs: GraphService;
   private constructor(readonly i: Internals) {
     this.chat = new ChatHarness(i.persistence);
     this.compactor = new ConversationCompactor(i.memory);
@@ -130,6 +132,7 @@ export class SField {
       { registry: this.registry, executions: this.executions },
       (p) => i.runs.resolvePrincipal(p),
     );
+    this.graphs = new GraphService({ executions: this.executions });
   }
 
   // ------------------------------------------------------------ construction

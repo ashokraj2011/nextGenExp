@@ -199,6 +199,23 @@ export {
   type SurfaceSourceSpec,
   type SurfaceTemplate,
 } from "./ui/surface-binder.js";
+export {
+  defineGraph,
+  graphInterrupt,
+  GraphService,
+  GRAPH_END,
+  type GraphEnd,
+  type GraphInterruptSignal,
+  type GraphNodeContext,
+  type GraphNodeResult,
+  type GraphFunctionNode,
+  type GraphParallelNode,
+  type GraphNode,
+  type GraphDefinition,
+  type GraphCheckpoint,
+  type GraphRunRecord,
+  type GraphExecutionHost,
+} from "./graph/state-graph.js";
 export { PluginManager, CORE_API_VERSION, CORE_VERSION } from "./plugins/manager.js";
 export { EnvSecretResolver, CompositeSecretResolver } from "./secrets.js";
 export { checkLockApproved, approveLock, effectiveRequireApproved } from "./governance/lock.js";
