@@ -14,6 +14,7 @@ import { withTimeout } from "../util/async.js";
 import type { Scrubber } from "../util/scrub.js";
 import type { ToolRegistry } from "../registry/registry.js";
 import { approvalRequired, effectAllowed, type PolicyPreset } from "../policy/presets.js";
+import { principalKindOf, principalToBindingRoot } from "../security/identity.js";
 import type { ApprovalService } from "../policy/approvals.js";
 import { jsonBytes, shortenForModel } from "./views.js";
 
@@ -135,9 +136,9 @@ export class ToolPipeline {
       if (!resolver) throw new SFieldError("UNKNOWN_BINDING", `connection ${def.connection} is not bound`, { runId, callId });
       connection = await resolver.resolve(principal, def);
     }
-    const roots = { inputs };
+    const roots = { inputs, principal: principalToBindingRoot(principal) };
     const resolve = (binding: ValueBinding, field: string): JsonValue | undefined => {
-      const v = resolveBinding(binding, roots, { field, allowOmit: true, allowedRoots: ["inputs"] });
+      const v = resolveBinding(binding, roots, { field, allowOmit: true, allowedRoots: ["inputs", "principal"] });
       return v === OMIT ? undefined : v;
     };
     let operation: PreparedOperation;
@@ -171,7 +172,12 @@ export class ToolPipeline {
     const base = {
       callId,
       runId,
-      principalIdentity: { tenantId: principal.tenantId, subjectId: principal.subjectId },
+      principalIdentity: {
+        tenantId: principal.tenantId,
+        subjectId: principal.subjectId,
+        ...(principal.kind ? { kind: principalKindOf(principal) } : {}),
+        ...(principal.actingFor ? { actingForSubjectId: principal.actingFor.subjectId } : {}),
+      },
       toolRef: def.ref,
       toolDigest: def.digest,
       bindingIdentity,

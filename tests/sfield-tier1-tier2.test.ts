@@ -5,9 +5,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   SField,
+  EphemeralPersistence,
   FilesystemArtifactStore,
   VectorMemoryIndex,
   HashEmbeddingProvider,
+  createPrincipal,
+  createAgentPrincipal,
+  effectiveSubjectId,
+  isAgentPrincipal,
+  resolveIdentifier,
   defineTool,
   scopeKey,
   type MemoryItem,
@@ -434,5 +440,116 @@ test("@sfield/cli doctor diagnoses runtime, packages, config, and SQLite persist
     assert.equal(settings.model, "gemini-2.5-flash");
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("@sfield/core generalizes domain IDs (MRN/orderId/MID) via Principal.identifiers, Agent OBO actingFor, and principal.* bindings", async () => {
+  // 1. Arbitrary domain identifiers + Agent On-Behalf-Of principal helpers
+  const humanMrn = createPrincipal({
+    tenantId: "clinic-1",
+    subjectId: "patient:42",
+    roles: ["patient"],
+    identifiers: { mrn: "MRN-4200" },
+  });
+  assert.equal(isAgentPrincipal(humanMrn), false);
+  assert.equal(resolveIdentifier(humanMrn, "mrn"), "MRN-4200");
+  assert.equal(effectiveSubjectId(humanMrn), "patient:42");
+
+  const agentObo = createAgentPrincipal({
+    tenantId: "clinic-1",
+    agentId: "triage-bot",
+    roles: ["agent", "ehr.read"],
+    actingFor: {
+      subjectId: "patient:42",
+      kind: "human",
+      identifiers: { mrn: "MRN-4200", insuranceMemberId: "INS-99" },
+    },
+  });
+  assert.equal(isAgentPrincipal(agentObo), true);
+  assert.equal(agentObo.subjectId, "agent:triage-bot");
+  assert.equal(effectiveSubjectId(agentObo), "patient:42");
+  assert.equal(resolveIdentifier(agentObo, "agentId"), "triage-bot");
+  assert.equal(resolveIdentifier(agentObo, "mrn"), "MRN-4200");
+  assert.equal(resolveIdentifier(agentObo, "mrn", { includeActingFor: false }), undefined);
+
+  // 2. Declarative { ref: "principal.identifiers.mrn" } binds resource.id from host-verified Principal (never LLM inputs)
+  const observedResources: Array<{ type: string; id: string; callerKind?: string; actingFor?: string }> = [];
+  const ehrTool = defineTool({
+    id: "ehr.records.read",
+    version: "1.0.0",
+    description: "Read patient record using declarative principal.identifiers.mrn binding",
+    inputs: { type: "object", properties: { view: { type: "string" } }, required: ["view"], additionalProperties: false },
+    outputs: {
+      type: "object",
+      properties: { mrn: { type: "string" }, subject: { type: "string" } },
+      required: ["mrn", "subject"],
+      additionalProperties: false,
+    },
+    resource: { type: "patient", id: { ref: "principal.identifiers.mrn" } },
+    policy: { effect: "read", classification: "confidential" },
+    handler: async (_inputs, ctx) => ({
+      mrn: resolveIdentifier(ctx.principal, "mrn") ?? "",
+      subject: effectiveSubjectId(ctx.principal),
+    }),
+  });
+
+  const sf = await SField.create({
+    config: { version: 1, models: {}, agents: {} },
+    deployment: "ephemeral",
+    persistence: new EphemeralPersistence(),
+    tools: [ehrTool],
+    authorizer: {
+      async authorize(req) {
+        observedResources.push({
+          type: req.resource.type,
+          id: req.resource.id,
+          callerKind: req.principal.kind,
+          actingFor: req.principal.actingFor?.subjectId,
+        });
+        if (req.resource.type === "patient" && req.resource.id === "MRN-4200") {
+          return { decision: "allow", evidenceId: "ev-obo-ok", expiresAt: new Date(Date.now() + 60_000).toISOString() };
+        }
+        return { decision: "deny", code: "DENIED", reason: "Resource mismatch" };
+      },
+    },
+    quiet: true,
+  });
+
+  try {
+    // Agent acting on behalf of patient:42 executes the tool and Authorizer receives resolved resource.id = "MRN-4200"
+    const res = await sf.registry.execute({
+      toolRef: "ehr.records.read@1.0.0",
+      inputs: { view: "summary" },
+      principal: agentObo,
+      preset: "read_only",
+    });
+    assert.equal(res.status, "succeeded");
+    assert.deepEqual(res.output, { mrn: "MRN-4200", subject: "patient:42" });
+    assert.equal(observedResources.length, 1);
+    assert.deepEqual(observedResources[0], {
+      type: "patient",
+      id: "MRN-4200",
+      callerKind: "agent",
+      actingFor: "patient:42",
+    });
+
+    // Different agent acting on behalf of an unauthorized MRN is denied by Authorizer
+    const otherAgent = createAgentPrincipal({
+      tenantId: "clinic-1",
+      agentId: "rogue-bot",
+      actingFor: { subjectId: "patient:99", identifiers: { mrn: "MRN-9999" } },
+    });
+    await assert.rejects(
+      () =>
+        sf.registry.execute({
+          toolRef: "ehr.records.read@1.0.0",
+          inputs: { view: "summary" },
+          principal: otherAgent,
+          preset: "read_only",
+        }),
+      /ACCESS_DENIED|Resource mismatch/i,
+    );
+  } finally {
+    await sf.close();
   }
 });

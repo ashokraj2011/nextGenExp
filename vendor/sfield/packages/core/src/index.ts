@@ -49,6 +49,17 @@ export {
   type ResilienceStatus,
 } from "./policy/resilience.js";
 export {
+  createPrincipal,
+  createAgentPrincipal,
+  principalKindOf,
+  isAgentPrincipal,
+  effectiveSubjectId,
+  resolveIdentifier,
+  principalToBindingRoot,
+  type CreatePrincipalInput,
+  type CreateAgentPrincipalInput,
+} from "./security/identity.js";
+export {
   PiiFirewall,
   createPiiFirewall,
   createPiiFirewallHook,

@@ -33,12 +33,28 @@ export function classificationAllowed(data: DataClassification, accepts: DataCla
   return CLASSIFICATION_ORDER[data] <= CLASSIFICATION_ORDER[accepts];
 }
 
+export type PrincipalKind = "human" | "agent" | "service";
+
+/** On-Behalf-Of (Act-As) identity when an AI agent or backend service acts for a human or service subject. */
+export interface ActingForIdentity {
+  subjectId: string;
+  kind?: "human" | "service";
+  /** Domain-specific identifiers for the represented subject (e.g., `{ mid }`, `{ mrn }`, `{ customerId }`). */
+  identifiers?: Readonly<Record<string, string>>;
+}
+
 /** Host-authenticated identity. Nothing in a request body can set it (§2 principle 5). */
 export interface Principal {
   tenantId: string;
   subjectId: string;
+  /** Caller actor class: human user, AI agent, or backend service. Defaults to `"human"`. */
+  kind?: PrincipalKind;
   roles: readonly string[];
   attributes: Readonly<Record<string, string>>;
+  /** Domain-specific caller identifiers (e.g., `{ mid: "MID-1" }`, `{ mrn: "MRN-2" }`, `{ agentId: "rebalancer" }`). */
+  identifiers?: Readonly<Record<string, string>>;
+  /** Optional On-Behalf-Of subject when an agent or service acts for another principal. */
+  actingFor?: ActingForIdentity;
 }
 
 /** An authenticated actor making an approval or input decision. */

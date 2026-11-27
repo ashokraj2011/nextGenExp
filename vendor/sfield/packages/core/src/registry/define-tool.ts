@@ -141,7 +141,7 @@ export function normalizeTool(input: ToolSpec, opts: NormalizeOptions): ToolDefi
     if (typeof resource.type !== "string" || !/^[A-Za-z_][A-Za-z0-9_-]*$/.test(resource.type)) {
       throw new SFieldError("INVALID_CONFIG", `${path}.resource.type: invalid`, { path: `${path}.resource.type` });
     }
-    const err = checkBinding(resource.id, ["inputs", "environment"], `${path}.resource.id`);
+    const err = checkBinding(resource.id, ["inputs", "environment", "principal"], `${path}.resource.id`);
     if (err) throw new SFieldError("INVALID_REFERENCE", err, { path: `${path}.resource.id` });
   } else if (effect === "read") {
     resource = { type: "tool", id: { literal: input.id } };

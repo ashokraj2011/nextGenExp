@@ -110,6 +110,8 @@ export class DelegationService {
           childRunId: handle.id,
           agent: input.agent,
           depth: depth + 1,
+          principalKind: input.principal.kind ?? "human",
+          ...(input.principal.actingFor ? { actingForSubjectId: input.principal.actingFor.subjectId } : {}),
         },
       }]);
 

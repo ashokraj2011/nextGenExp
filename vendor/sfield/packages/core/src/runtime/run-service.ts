@@ -33,7 +33,23 @@ export class RunService {
   resolvePrincipal(principal: Principal | undefined): Principal {
     if (principal) {
       if (!principal.tenantId || !principal.subjectId) throw new SFieldError("ACCESS_DENIED", "principal needs tenantId and subjectId");
-      return { tenantId: principal.tenantId, subjectId: principal.subjectId, roles: [...(principal.roles ?? [])], attributes: { ...(principal.attributes ?? {}) } };
+      return {
+        tenantId: principal.tenantId,
+        subjectId: principal.subjectId,
+        ...(principal.kind ? { kind: principal.kind } : {}),
+        roles: [...(principal.roles ?? [])],
+        attributes: { ...(principal.attributes ?? {}) },
+        ...(principal.identifiers ? { identifiers: { ...principal.identifiers } } : {}),
+        ...(principal.actingFor
+          ? {
+              actingFor: {
+                subjectId: principal.actingFor.subjectId,
+                ...(principal.actingFor.kind ? { kind: principal.actingFor.kind } : {}),
+                ...(principal.actingFor.identifiers ? { identifiers: { ...principal.actingFor.identifiers } } : {}),
+              },
+            }
+          : {}),
+      };
     }
     if (this.deps.devPrincipal) return this.deps.devPrincipal;
     throw new SFieldError("ACCESS_DENIED", "principal is required outside a development preset", { suggestion: "Map the authenticated request to a Principal at the host boundary (§4.7)" });

@@ -101,6 +101,7 @@ node vendor/sfield/examples/hello-agent.mjs
 node vendor/sfield/examples/hitl-approval.mjs
 node vendor/sfield/examples/mcp-federation.mjs
 node vendor/sfield/examples/postgres-or-json-service.mjs
+node vendor/sfield/examples/agent-to-agent-identity.mjs
 ```
 
 Licensed under [Apache-2.0](./LICENSE).

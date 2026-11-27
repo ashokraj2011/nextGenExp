@@ -393,6 +393,10 @@
           <p>Expose principal-scoped RBAC tools via <code>sf.createMcpServer()</code> (Streamable HTTP + stdio) and mount remote MCP servers as closed-schema <code>sfield</code> tools via <code>createMcpClient</code> + <code>createMcpProxyTools</code>.</p>
         </article>
         <article class="card">
+          <h3>Domain-Agnostic &amp; Agent OBO Identity <span class="pill">Any ID · A2A</span></h3>
+          <p><code>Principal</code> supports <code>kind: "human" | "agent" | "service"</code>, arbitrary domain <code>identifiers</code> (<code>mid</code>, <code>mrn</code>, <code>orderId</code>), and RFC 8693 <code>actingFor</code> chains via <code>createAgentPrincipal()</code>, <code>resolveIdentifier()</code>, and declarative <code>{ ref: "principal.identifiers.&lt;key&gt;" }</code> resource bindings.</p>
+        </article>
+        <article class="card">
           <h3>Sub-Agent Delegation <span class="pill">Zero Escalation</span></h3>
           <p><code>sf.delegation.delegate()</code> spawns child agent sessions pinned to the parent’s exact <code>Principal</code>, enforcing bounded recursion depth and immutable parent→child audit trees.</p>
         </article>
