@@ -235,13 +235,14 @@ export function Help() {
           <a href="#walkthroughs">Walkthroughs</a>
           <a href="#contracts">Contracts</a>
           <a href={developerGuideHref()}>Developer docs</a>
+          <a href="/sfield-sdk.html" target="_blank" rel="noreferrer">sfield SDK HTML ↗</a>
         </nav>
       </div>
     </header>
     <main className="help-width help-main">
       <div className="help-intro">
-        <h1>How CEP works</h1>
-        <p>The app chooses a chat flow. Inside the app server, sfield asks the language model what the customer means and Treatment Selector which recommendations apply. The app builds the reply, and the browser displays it.</p>
+        <h1>How CEP &amp; sfield work</h1>
+        <p><strong>sfield</strong> (<code>@sfield/*</code>) is the standalone Governed Agent SDK powering CEP — enforcing zero-trust identity, closed tool schemas, HITL approvals, MCP federation, PII firewalling, OTel tracing, and durable storage (SQLite or Postgres with automatic JSON fallback). CEP is its multi-domain reference platform connecting language models, Treatment Selector, and A2UI surfaces.</p>
       </div>
       <InteractionMap run={run} />
       <div id="cep-blueprint">

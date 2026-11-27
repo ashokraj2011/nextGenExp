@@ -87,20 +87,63 @@ const deploymentModes = [
   {
     mode: "ephemeral",
     label: "Ephemeral (In-Memory)",
-    use: "Unit tests and stateless CI verification via @sfield/testing.",
+    use: "Zero-boilerplate unit tests & scripts via @sfield/preset-memory (EphemeralPersistence + InMemoryArtifactStore) and @sfield/testing.",
     active: false,
   },
   {
     mode: "durable_single",
     label: "Durable Single-Node (SQLite)",
-    use: "Active in CEP today via @sfield/store-sqlite — full crash recovery, checkpoints, and local audit trails.",
+    use: "Active in CEP today via @sfield/store-sqlite & @sfield/preset-local — node:sqlite checkpoints, SqliteMemoryRepository, and FilesystemArtifactStore.",
     active: true,
   },
   {
     mode: "service",
-    label: "Distributed Service (Postgres / HA)",
-    use: "Production scale-out path: swap ExecutionPersistence + ArtifactStore to Postgres without changing agents or tools.",
+    label: "Distributed Service (Postgres + JSON Fallback)",
+    use: "Production HA via @sfield/store-postgres (PostgresPersistence + PostgresMemoryRepository + lock-manifest gating) with automatic durable JsonFilePersistence fallback (createPostgresOrJsonPersistence) when Postgres is unavailable.",
     active: false,
+  },
+];
+
+const sdkPackages = [
+  {
+    pkg: "@sfield/core",
+    role: "Governed Agent Kernel",
+    highlights: "SField runtime, closed Ajv tool contracts, HITL approvals, Anthropic / Gemini / OpenAI-compatible providers, SFieldMcpServer + McpClient, PiiFirewall, ToolResilienceGuard, DelegationService, streamRun, FilesystemArtifactStore & VectorMemoryIndex.",
+  },
+  {
+    pkg: "@sfield/preset-memory",
+    role: "Zero-Boilerplate Ephemeral Preset",
+    highlights: 'Enables SField.create({ config, preset: "memory" }) for tests and scripts; refuses NODE_ENV=production and deployment: "service".',
+  },
+  {
+    pkg: "@sfield/preset-local",
+    role: "Zero-Boilerplate Durable Local Preset",
+    highlights: 'Enables SField.create({ config, preset: "local" }) backed by SQLite + FilesystemArtifactStore under .sfield/ (or SFIELD_LOCAL_DIR).',
+  },
+  {
+    pkg: "@sfield/store-sqlite",
+    role: "Durable Single-Node Store",
+    highlights: "Atomic BEGIN IMMEDIATE transactions, durable epoch fencing, SqliteMemoryRepository, and bounded event retention over built-in node:sqlite.",
+  },
+  {
+    pkg: "@sfield/store-postgres",
+    role: "Service Postgres + JSON Fallback",
+    highlights: "Production POSTGRES_SCHEMA_SQL DDL, PostgresMemoryRepository, createPgPoolAdapter(pgPool), and createPostgresOrJsonPersistence() falling back automatically to conformance-verified JsonFilePersistence.",
+  },
+  {
+    pkg: "@sfield/telemetry-otel",
+    role: "OpenTelemetry GenAI Sink",
+    highlights: "Zero-dependency TelemetrySink recording gen_ai.* spans & token/cost/duration metrics with OTLP/HTTP JSON (v1/traces) export.",
+  },
+  {
+    pkg: "@sfield/testing",
+    role: "Conformance & Release-Gate Eval Runner",
+    highlights: "persistenceConformance() suite, deterministic FakeModelProvider, plus runEvalSuite() & evaluateReleaseGate() wired into sf.lock.evalReports().",
+  },
+  {
+    pkg: "@sfield/cli",
+    role: "Standalone CLI (sfield)",
+    highlights: "init, validate, eval, lock status, lock approve, inspect <runId>, doctor, and mcp serve (stdio).",
   },
 ];
 
@@ -108,15 +151,19 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
   const portfolioTool = sfieldTools.portfolio.id + "@" + toolVersion;
   return <section id="sfield" className="help-section" aria-labelledby="sfield-title">
     <div className="help-section-heading">
-      <h2 id="sfield-title">sfield and plug-in tools</h2>
-      <a className="help-section-link" href="#contracts" onClick={() => selectContract("rules")}>
-        Tool setup contract <ArrowUpRight size={14} aria-hidden="true" />
-      </a>
+      <h2 id="sfield-title">sfield Agent SDK &amp; plug-in tools</h2>
+      <div style={{ display: "flex", gap: "14px", alignItems: "center", flexWrap: "wrap" }}>
+        <a className="help-section-link" href="/sfield-sdk.html" target="_blank" rel="noreferrer">
+          Standalone HTML SDK Guide <ArrowUpRight size={14} aria-hidden="true" />
+        </a>
+        <a className="help-section-link" href="#contracts" onClick={() => selectContract("rules")}>
+          Tool setup contract <ArrowUpRight size={14} aria-hidden="true" />
+        </a>
+      </div>
     </div>
     <div className="help-sfield">
       <p className="help-sfield-lead">
-        <strong>sfield is CEP’s embedded zero-trust agent &amp; tool execution kernel</strong> (<code>@sfield/core</code>,{" "}
-        <code>@sfield/store-sqlite</code>, <code>@sfield/testing</code>). It sits between the CEP server, language models, and business systems — enforcing identity, closed schemas, policy presets, budgets, durability, and verification on every call.
+        <strong>sfield is the standalone zero-trust Governed Agent SDK</strong> (8 publishable packages under <code>@sfield/*</code>), and <strong>CEP is its flagship reference application</strong>. sfield sits between any host application, language models, and business systems — enforcing identity, closed schemas, policy presets, PII egress redaction, rate limits/circuit breakers, MCP federation, budgets, durability, and verification on every call.
       </p>
 
       <ol className="help-sfield-flow" aria-label="How sfield handles a chat message" role="list">
@@ -135,7 +182,7 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
         <li className="help-sfield-targets">
           <div className="help-proposal-choice">
             <span className="help-entity-icon"><Sparkles size={16} aria-hidden="true" /></span>
-            <div><h3>Language model gateway</h3><p>Copilot ACP or OpenAI-compatible gateway — always sandboxed in <code>read_only</code> sessions with strict token &amp; attempt budgets.</p></div>
+            <div><h3>Language model gateway</h3><p>Native <code>GeminiProvider</code>, <code>AnthropicProvider</code>, <code>OpenAICompatibleProvider</code>, and Copilot ACP — always sandboxed with PII egress scrubbing, OTel tracing, and strict token &amp; attempt budgets.</p></div>
           </div>
           <div className="help-proposal-choice">
             <span className="help-entity-icon"><Database size={16} aria-hidden="true" /></span>
@@ -182,6 +229,31 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
                   <td>{row.caller}</td>
                   <td>{row.allowed}</td>
                   <td>{row.guarantee}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="help-sfield-subsection">
+        <h3>Standalone <code>@sfield/*</code> SDK packages (8 publishable workspaces)</h3>
+        <p>Every enterprise capability built for CEP lives as a reusable, domain-agnostic package under <code>vendor/sfield/packages/</code>, verified by CI (<code>.github/workflows/ci.yml</code>) and publishable via <code>.github/workflows/release.yml</code>:</p>
+        <div className="help-sfield-table-wrap">
+          <table className="help-sfield-table">
+            <thead>
+              <tr>
+                <th>Package</th>
+                <th>Role</th>
+                <th>Capabilities</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sdkPackages.map((row) => (
+                <tr key={row.pkg}>
+                  <td><code>{row.pkg}</code></td>
+                  <td><strong>{row.role}</strong></td>
+                  <td>{row.highlights}</td>
                 </tr>
               ))}
             </tbody>

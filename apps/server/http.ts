@@ -202,10 +202,11 @@ async function body<S extends z.ZodTypeAny>(req: IncomingMessage, schema: S, lim
 }
 
 async function serveAsset(pathname: string, root: string, res: ServerResponse) {
-  if (!pagePaths.has(pathname) && !pathname.startsWith("/assets/")) {
+  const isStandaloneDoc = pathname === "/sfield-sdk.html";
+  if (!pagePaths.has(pathname) && !pathname.startsWith("/assets/") && !isStandaloneDoc) {
     throw new ApiError(404, "not_found", "This page is unavailable.");
   }
-  const path = resolve(root, "." + (pathname.startsWith("/assets/") ? decodeURIComponent(pathname) : "/index.html"));
+  const path = resolve(root, "." + (pathname.startsWith("/assets/") || isStandaloneDoc ? decodeURIComponent(pathname) : "/index.html"));
   if (!path.startsWith(root + sep)) throw new ApiError(404, "not_found", "This file is unavailable.");
   if (!await stat(path).then((entry) => entry.isFile(), () => false)) {
     throw new ApiError(503, "build_unavailable", "Build the web app before starting this server.");
@@ -213,10 +214,11 @@ async function serveAsset(pathname: string, root: string, res: ServerResponse) {
   const framePolicy = pathname === "/embed"
     ? "frame-ancestors 'self' http://127.0.0.1:* http://localhost:* https:"
     : "frame-ancestors 'none'";
+  const scriptPolicy = isStandaloneDoc ? " script-src 'self' 'unsafe-inline';" : "";
   res.writeHead(200, {
     "Content-Type": MIME[extname(path)] ?? "application/octet-stream",
     "Cache-Control": pathname.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-store",
-    "Content-Security-Policy": `default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; ${framePolicy}`,
+    "Content-Security-Policy": `default-src 'self';${scriptPolicy} style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; ${framePolicy}`,
   });
   res.end(await readFile(path));
 }

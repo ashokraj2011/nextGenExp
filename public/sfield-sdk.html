@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>sfield — Governed Enterprise Agent SDK</title>
+  <meta name="description" content="sfield (@sfield/*) — Standalone zero-trust Governed Agent SDK for Node.js 22+ with CEP as its flagship reference platform." />
+  <style>
+    :root {
+      --bg: #f7faf8;
+      --surface: #ffffff;
+      --surface-alt: #eef5f0;
+      --text: #14261d;
+      --muted: #4b6156;
+      --border: #d4e2da;
+      --accent: #1d6f42;
+      --accent-strong: #155331;
+      --accent-soft: #e4f3ea;
+      --code-bg: #102018;
+      --code-text: #e6f4ec;
+      --badge-bg: #e7f4ec;
+      --badge-text: #155331;
+      --shadow: 0 8px 28px rgba(16, 40, 28, 0.06);
+    }
+    [data-theme="dark"] {
+      --bg: #0c1411;
+      --surface: #131f1a;
+      --surface-alt: #182821;
+      --text: #eaf3ee;
+      --muted: #9eb5a8;
+      --border: #253b31;
+      --accent: #44c47d;
+      --accent-strong: #5ed491;
+      --accent-soft: #173325;
+      --code-bg: #09100d;
+      --code-text: #dff2e7;
+      --badge-bg: #163224;
+      --badge-text: #6de09f;
+      --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.88em;
+      background: var(--surface-alt);
+      padding: 0.14em 0.42em;
+      border-radius: 5px;
+      border: 1px solid var(--border);
+    }
+    pre {
+      margin: 0;
+      background: var(--code-bg);
+      color: var(--code-text);
+      padding: 16px 18px;
+      border-radius: 10px;
+      overflow-x: auto;
+      font-size: 0.85rem;
+      line-height: 1.55;
+      border: 1px solid var(--border);
+    }
+    pre code { background: none; border: none; padding: 0; color: inherit; font-size: inherit; }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      backdrop-filter: blur(10px);
+      background: color-mix(in srgb, var(--surface) 88%, transparent);
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar-inner {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.05rem; color: var(--text); }
+    .brand-dot { width: 12px; height: 12px; border-radius: 4px; background: var(--accent); display: inline-block; }
+    .nav { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; font-size: 0.9rem; }
+    .nav a { color: var(--muted); font-weight: 500; }
+    .nav a:hover { color: var(--accent); text-decoration: none; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 13px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+    .btn-primary:hover { background: var(--accent-strong); color: #ffffff; }
+    .container { max-width: 1120px; margin: 0 auto; padding: 36px 20px 64px; }
+    .hero {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 36px 32px;
+      box-shadow: var(--shadow);
+      margin-bottom: 32px;
+    }
+    .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 11px;
+      border-radius: 999px;
+      background: var(--badge-bg);
+      color: var(--badge-text);
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+    h1 { margin: 0 0 12px; font-size: clamp(1.85rem, 3.5vw, 2.55rem); line-height: 1.18; letter-spacing: -0.02em; }
+    .lead { font-size: 1.06rem; color: var(--muted); max-width: 78ch; margin: 0 0 22px; }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 12px;
+      margin-top: 24px;
+      padding-top: 22px;
+      border-top: 1px solid var(--border);
+    }
+    .metric { background: var(--surface-alt); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+    .metric strong { display: block; font-size: 1.35rem; color: var(--accent); line-height: 1.2; }
+    .metric span { font-size: 0.82rem; color: var(--muted); }
+    section { margin-top: 36px; }
+    h2 { font-size: 1.4rem; margin: 0 0 8px; letter-spacing: -0.01em; }
+    .section-desc { color: var(--muted); margin: 0 0 18px; max-width: 78ch; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+    }
+    .card h3 { margin: 0 0 6px; font-size: 1rem; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .card p { margin: 0; font-size: 0.9rem; color: var(--muted); }
+    .pill {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--badge-bg);
+      color: var(--badge-text);
+    }
+    .table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { background: var(--surface-alt); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+    tr:last-child td { border-bottom: none; }
+    .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .tab-btn {
+      padding: 7px 13px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    .tab-btn[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .tab-panel { display: none; position: relative; }
+    .tab-panel.active { display: block; }
+    .copy-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      padding: 4px 10px;
+      font-size: 0.75rem;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.08);
+      color: #e6f4ec;
+      cursor: pointer;
+    }
+    .copy-btn:hover { background: rgba(255,255,255,0.18); }
+    .diagram-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      box-shadow: var(--shadow);
+      overflow-x: auto;
+    }
+    footer {
+      margin-top: 48px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand"><span class="brand-dot"></span><span>sfield Agent SDK</span></div>
+      <nav class="nav" aria-label="Page sections">
+        <a href="#architecture">Architecture</a>
+        <a href="#packages">8 Packages</a>
+        <a href="#primitives">Enterprise Primitives</a>
+        <a href="#persistence">Postgres + JSON Fallback</a>
+        <a href="#quickstart">Code &amp; CLI</a>
+        <a href="/admin/help">CEP Admin Docs</a>
+        <a href="/admin/gateway">Model Gateway</a>
+        <button id="themeToggle" class="btn" type="button" aria-label="Toggle color theme">Dark mode</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero" style="margin-top:0">
+      <span class="kicker">Standalone Enterprise Agent SDK · Node.js 22+ · Apache-2.0</span>
+      <h1><code>sfield</code> — Zero-Trust Governed Agent Runtime</h1>
+      <p class="lead">
+        <strong>sfield</strong> is the standalone TypeScript SDK for building auditable, policy-governed AI agent platforms — separating model reasoning from identity, authorization, closed JSON Schema validation, HITL approvals, MCP federation, resilience, and durable persistence. <strong>CEP</strong> (Wealth Advisory, IT Ops, Sales RevOps) is its flagship reference application.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#quickstart">5-Line Quick Start</a>
+        <a class="btn" href="/admin/help?guide=sdk">Open Admin SDK Reference</a>
+        <a class="btn" href="/admin/help#sfield">View CEP + sfield Blueprint</a>
+        <a class="btn" href="/">Launch CEP Reference App</a>
+      </div>
+      <div class="metrics">
+        <div class="metric"><strong>8 Packages</strong><span>Publishable <code>@sfield/*</code> workspaces</span></div>
+        <div class="metric"><strong>4 Model Backends</strong><span>Gemini, Anthropic, OpenAI-compat, Copilot ACP</span></div>
+        <div class="metric"><strong>3 Storage Modes</strong><span>Memory, SQLite, Postgres + JSON fallback</span></div>
+        <div class="metric"><strong>145+ Tests</strong><span>Unit, SDK, MCP &amp; Conformance verified</span></div>
+      </div>
+    </section>
+
+    <section id="architecture">
+      <h2>Runtime Architecture</h2>
+      <p class="section-desc">Every model call, tool invocation, memory write, MCP request, and sub-agent delegation flows through the same deterministic governance boundary.</p>
+      <div class="diagram-box">
+        <svg viewBox="0 0 980 260" width="100%" style="min-width:700px;height:auto;display:block" role="img" aria-label="sfield SDK architecture diagram">
+          <defs>
+            <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="#1d6f42" />
+            </marker>
+          </defs>
+          <!-- Host / Apps -->
+          <rect x="14" y="24" width="190" height="210" rx="12" fill="#e4f3ea" stroke="#1d6f42" stroke-width="1.5" />
+          <text x="109" y="54" text-anchor="middle" font-size="14" font-weight="700" fill="#14261d">Host Applications</text>
+          <text x="109" y="84" text-anchor="middle" font-size="12" fill="#355244">CEP (Wealth / Ops / Sales)</text>
+          <text x="109" y="108" text-anchor="middle" font-size="12" fill="#355244">External MCP Clients</text>
+          <text x="109" y="132" text-anchor="middle" font-size="12" fill="#355244">@sfield/cli (init · eval · doctor)</text>
+          <text x="109" y="164" text-anchor="middle" font-size="11" fill="#1d6f42" font-weight="600">Principal · Tenant · Preset</text>
+          <text x="109" y="186" text-anchor="middle" font-size="11" fill="#1d6f42" font-weight="600">streamRun() · SSE / AG-UI</text>
+
+          <!-- sfield core -->
+          <rect x="256" y="16" width="430" height="226" rx="14" fill="#155331" stroke="#0f3c23" stroke-width="1.5" />
+          <text x="471" y="44" text-anchor="middle" font-size="15" font-weight="700" fill="#ffffff">@sfield/core Runtime Kernel</text>
+
+          <rect x="276" y="60" width="185" height="44" rx="8" fill="#1d6f42" />
+          <text x="368" y="80" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">Authorizer &amp; Policy Presets</text>
+          <text x="368" y="96" text-anchor="middle" font-size="10.5" fill="#d8f2e2">read_only · supervised · bounded_auto</text>
+
+          <rect x="480" y="60" width="185" height="44" rx="8" fill="#1d6f42" />
+          <text x="572" y="80" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">PII Firewall &amp; Resilience</text>
+          <text x="572" y="96" text-anchor="middle" font-size="10.5" fill="#d8f2e2">Egress Scrub · TokenBucket · Breaker</text>
+
+          <rect x="276" y="116" width="185" height="44" rx="8" fill="#1d6f42" />
+          <text x="368" y="136" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">Closed Ajv Tools &amp; HITL</text>
+          <text x="368" y="152" text-anchor="middle" font-size="10.5" fill="#d8f2e2">Digest-bound Approvals · Resume</text>
+
+          <rect x="480" y="116" width="185" height="44" rx="8" fill="#1d6f42" />
+          <text x="572" y="136" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">MCP Server + Federation</text>
+          <text x="572" y="152" text-anchor="middle" font-size="10.5" fill="#d8f2e2">RBAC Server · McpClient · Delegation</text>
+
+          <rect x="276" y="172" width="389" height="52" rx="8" fill="#0f3c23" />
+          <text x="471" y="194" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">ModelGateway · AgenticHarness · Compactor · VectorMemoryIndex</text>
+          <text x="471" y="212" text-anchor="middle" font-size="10.5" fill="#b7e4c8">Lock-Manifest Governance · Budgets · Eval Reports · OTel gen_ai.* Sink</text>
+
+          <!-- Backends -->
+          <rect x="740" y="16" width="224" height="104" rx="12" fill="#eef5f0" stroke="#1d6f42" stroke-width="1.5" />
+          <text x="852" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="#14261d">Native Model Providers</text>
+          <text x="852" y="64" text-anchor="middle" font-size="11.5" fill="#355244">GeminiProvider (v1beta SSE)</text>
+          <text x="852" y="84" text-anchor="middle" font-size="11.5" fill="#355244">AnthropicProvider · OpenAI-Compat</text>
+          <text x="852" y="104" text-anchor="middle" font-size="11.5" fill="#355244">GitHub Copilot ACP</text>
+
+          <rect x="740" y="134" width="224" height="108" rx="12" fill="#eef5f0" stroke="#1d6f42" stroke-width="1.5" />
+          <text x="852" y="160" text-anchor="middle" font-size="13" font-weight="700" fill="#14261d">Persistence &amp; Telemetry</text>
+          <text x="852" y="182" text-anchor="middle" font-size="11.5" fill="#355244">Postgres + Auto JSON Fallback</text>
+          <text x="852" y="202" text-anchor="middle" font-size="11.5" fill="#355244">SQLite · FilesystemArtifactStore</text>
+          <text x="852" y="222" text-anchor="middle" font-size="11.5" fill="#355244">@sfield/telemetry-otel (OTLP)</text>
+
+          <!-- Arrows -->
+          <line x1="204" y1="128" x2="252" y2="128" stroke="#1d6f42" stroke-width="2.2" marker-end="url(#arr)" />
+          <line x1="686" y1="68" x2="736" y2="68" stroke="#1d6f42" stroke-width="2.2" marker-end="url(#arr)" />
+          <line x1="686" y1="188" x2="736" y2="188" stroke="#1d6f42" stroke-width="2.2" marker-end="url(#arr)" />
+        </svg>
+      </div>
+    </section>
+
+    <section id="packages">
+      <h2>Publishable <code>@sfield/*</code> Workspace Suite</h2>
+      <p class="section-desc">All 8 packages carry public npm / GitHub Packages manifests and release cleanly in topological order via <code>.github/workflows/release.yml</code>.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Package</th><th>Deployment / Role</th><th>Primary Exports</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>@sfield/core</code></td>
+              <td>Core runtime kernel</td>
+              <td><code>SField</code>, <code>defineTool</code>, <code>GeminiProvider</code>, <code>AnthropicProvider</code>, <code>OpenAICompatibleProvider</code>, <code>SFieldMcpServer</code>, <code>McpClient</code>, <code>createMcpProxyTools</code>, <code>createPiiFirewallHook</code>, <code>createToolResilienceGuard</code>, <code>DelegationService</code>, <code>streamRun</code>, <code>FilesystemArtifactStore</code>, <code>VectorMemoryIndex</code></td>
+            </tr>
+            <tr>
+              <td><code>@sfield/preset-memory</code></td>
+              <td>Ephemeral dev/test preset</td>
+              <td><code>preset: "memory"</code> — zero-boilerplate in-memory persistence, artifact store &amp; dev authorizer (refuses production)</td>
+            </tr>
+            <tr>
+              <td><code>@sfield/preset-local</code></td>
+              <td>Durable local dev preset</td>
+              <td><code>preset: "local"</code> — SQLite + <code>FilesystemArtifactStore</code> under <code>.sfield/</code> or <code>SFIELD_LOCAL_DIR</code></td>
+            </tr>
+            <tr>
+              <td><code>@sfield/store-sqlite</code></td>
+              <td><code>durable_single</code></td>
+              <td><code>sqlitePersistence</code>, <code>SqlitePersistence</code>, <code>SqliteMemoryRepository</code> over built-in <code>node:sqlite</code></td>
+            </tr>
+            <tr>
+              <td><code>@sfield/store-postgres</code></td>
+              <td><code>service</code> + JSON fallback</td>
+              <td><code>PostgresPersistence</code>, <code>PostgresMemoryRepository</code>, <code>POSTGRES_SCHEMA_SQL</code>, <code>createPgPoolAdapter</code>, <code>JsonFilePersistence</code>, <code>createPostgresOrJsonPersistence</code></td>
+            </tr>
+            <tr>
+              <td><code>@sfield/telemetry-otel</code></td>
+              <td>Observability</td>
+              <td><code>createOtelTelemetrySink</code>, <code>OtelTelemetrySink</code> (<code>gen_ai.*</code> spans/metrics + OTLP/HTTP JSON <code>v1/traces</code>)</td>
+            </tr>
+            <tr>
+              <td><code>@sfield/testing</code></td>
+              <td>Conformance &amp; Evals</td>
+              <td><code>persistenceConformance</code>, <code>runEvalSuite</code>, <code>evaluateReleaseGate</code>, <code>FakeModelProvider</code></td>
+            </tr>
+            <tr>
+              <td><code>@sfield/cli</code></td>
+              <td>Developer &amp; Ops CLI</td>
+              <td><code>sfield init | validate | eval | lock status | lock approve | inspect | doctor | mcp serve</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="primitives">
+      <h2>Enterprise Governance Primitives</h2>
+      <p class="section-desc">Built once into <code>@sfield/core</code> so every domain team inherits security, resilience, and observability by default.</p>
+      <div class="grid">
+        <article class="card">
+          <h3>PII Egress Firewall <span class="pill">beforeModelDispatch</span></h3>
+          <p><code>createPiiFirewallHook</code> tokenizes SSNs, emails, phones, cards, account IDs, and known customer names before any external LLM request and rehydrates responses locally via <code>rehydrateRunOutput</code>.</p>
+        </article>
+        <article class="card">
+          <h3>Rate Limits &amp; Circuit Breakers <span class="pill">Resilience</span></h3>
+          <p><code>TokenBucketRateLimiter</code>, 3-state <code>CircuitBreaker</code> (<code>closed → open → half_open</code>), and <code>ToolResilienceGuard</code> protect upstream connectors and MCP tools from cascading failures.</p>
+        </article>
+        <article class="card">
+          <h3>Federated MCP (Server + Client) <span class="pill">2025-03-26</span></h3>
+          <p>Expose principal-scoped RBAC tools via <code>sf.createMcpServer()</code> (Streamable HTTP + stdio) and mount remote MCP servers as closed-schema <code>sfield</code> tools via <code>createMcpClient</code> + <code>createMcpProxyTools</code>.</p>
+        </article>
+        <article class="card">
+          <h3>Sub-Agent Delegation <span class="pill">Zero Escalation</span></h3>
+          <p><code>sf.delegation.delegate()</code> spawns child agent sessions pinned to the parent’s exact <code>Principal</code>, enforcing bounded recursion depth and immutable parent→child audit trees.</p>
+        </article>
+        <article class="card">
+          <h3>Semantic Vector Memory <span class="pill">Hybrid RAG</span></h3>
+          <p><code>VectorMemoryIndex</code> pairs any pluggable <code>EmbeddingProvider</code> (or deterministic local <code>HashEmbeddingProvider</code>) with lexical boosting while honoring deletion generations.</p>
+        </article>
+        <article class="card">
+          <h3>Eval Gates &amp; Lock Manifests <span class="pill">CI / CD</span></h3>
+          <p><code>runEvalSuite</code> persists signed <code>EvalReportRecord</code> evidence into <code>sf.lock.evalReports()</code>; <code>evaluateReleaseGate</code> and <code>sfield lock approve</code> gate <code>deployment: "service"</code> rollouts.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="persistence">
+      <h2>PostgreSQL Service Store with Automatic JSON Fallback</h2>
+      <p class="section-desc">Run multi-replica <code>deployment: "service"</code> against PostgreSQL in production, and seamlessly fall back to conformance-verified atomic durable JSON-file storage whenever Postgres is unconfigured or unreachable.</p>
+      <div class="grid">
+        <article class="card">
+          <h3>1. Primary: PostgreSQL <span class="pill">pg.Pool / Neon / Supabase</span></h3>
+          <p>Driver-agnostic <code>PostgresSqlClient</code> (<code>createPgPoolAdapter</code>) runs auto-migrated <code>POSTGRES_SCHEMA_SQL</code> DDL with <code>JSONB</code> documents, atomic lease ownership, and <code>PostgresMemoryRepository</code>.</p>
+        </article>
+        <article class="card">
+          <h3>2. Fallback: Durable JSON Store <span class="pill">Conformance Verified</span></h3>
+          <p><code>JsonFilePersistence</code> passes 100% of <code>@sfield/testing</code>’s <code>persistenceConformance</code> suite using atomic temp-file swaps (<code>.tmp → rename</code>) paired with <code>FilesystemArtifactStore</code>.</p>
+        </article>
+        <article class="card">
+          <h3>3. Unified Factory <span class="pill">createPostgresOrJsonPersistence</span></h3>
+          <p>Attempts Postgres <code>init()</code> + <code>health()</code> first; on failure or missing client, invokes <code>onFallback(reason)</code>, activates <code>JsonFilePersistence</code>, and reports <code>activeBackend()</code> in health checks.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="quickstart">
+      <h2>Quick Start &amp; CLI</h2>
+      <p class="section-desc">Copy-pasteable recipes verified against the live workspace.</p>
+      <div class="tabs" role="tablist" aria-label="Code examples">
+        <button class="tab-btn" role="tab" aria-selected="true" data-tab="hello">5-Line Quick Start</button>
+        <button class="tab-btn" role="tab" aria-selected="false" data-tab="service">Postgres + JSON Fallback</button>
+        <button class="tab-btn" role="tab" aria-selected="false" data-tab="mcp">MCP Federation</button>
+        <button class="tab-btn" role="tab" aria-selected="false" data-tab="cli">sfield CLI</button>
+      </div>
+
+      <div id="tab-hello" class="tab-panel active">
+        <button class="copy-btn" type="button">Copy</button>
+        <pre><code>import { SField, defineTool } from "@sfield/core";
+
+const greet = defineTool({
+  id: "demo.greet",
+  version: "1.0.0",
+  description: "Greet a user by name.",
+  inputs: { type: "object", properties: { name: { type: "string" } }, required: ["name"], additionalProperties: false },
+  outputs: { type: "object", properties: { greeting: { type: "string" } }, required: ["greeting"], additionalProperties: false },
+  policy: { effect: "read", classification: "public" },
+  handler: async ({ name }) => ({ greeting: `Hello from sfield, ${name}!` }),
+});
+
+const sf = await SField.create({
+  config: { version: 1, models: {}, agents: {} },
+  preset: "memory", // or "local" for SQLite + FilesystemArtifactStore
+  tools: [greet],
+});
+
+const res = await sf.registry.execute({ toolRef: "demo.greet@1.0.0", inputs: { name: "Ada" } });
+console.log(res.output); // { greeting: "Hello from sfield, Ada!" }
+await sf.close();</code></pre>
+      </div>
+
+      <div id="tab-service" class="tab-panel">
+        <button class="copy-btn" type="button">Copy</button>
+        <pre><code>import { SField, approveLock, createDevAuthorizer } from "@sfield/core";
+import { createPostgresOrJsonPersistence, createPgPoolAdapter } from "@sfield/store-postgres";
+
+const persistence = createPostgresOrJsonPersistence({
+  // client: createPgPoolAdapter(pgPool), // optional — falls back to durable JSON when omitted/down
+  jsonPath: "./.sfield/service-state.json",
+  onFallback: (reason) => console.warn("Using durable JSON fallback:", reason),
+});
+
+await persistence.init({ namespace: "prod", ownerId: "pod-1" });
+console.log("Active backend:", persistence.activeBackend()); // "postgres" | "json"</code></pre>
+      </div>
+
+      <div id="tab-mcp" class="tab-panel">
+        <button class="copy-btn" type="button">Copy</button>
+        <pre><code>import { createMcpClient, createMcpProxyTools } from "@sfield/core";
+
+// 1. Expose allowlisted &amp; RBAC-filtered sfield tools over Streamable HTTP or stdio
+const mcpServer = sf.createMcpServer({
+  serverInfo: { name: "my-sfield-mcp", version: "1.0.0" },
+  preset: "read_only",
+  authenticate: async (headers) => verifyBearer(headers.authorization),
+  allowTools: (tool, principal) => tool.policy.effect === "read" || principal?.roles.includes("admin"),
+});
+
+// 2. Consume remote MCP servers as closed-schema sfield tools
+const client = createMcpClient({ endpoint: "https://tools.example.com/mcp" });
+const proxyTools = await createMcpProxyTools(client, { namespace: "partner" });</code></pre>
+      </div>
+
+      <div id="tab-cli" class="tab-panel">
+        <button class="copy-btn" type="button">Copy</button>
+        <pre><code># Diagnose Node runtime, 8 @sfield/* packages, config, persistence &amp; OTel
+npm run sfield -- doctor --config ./sfield.config.yaml --db ./state.sqlite
+
+# Scaffold a standalone project &amp; validate deterministically (offline-safe)
+npm run sfield -- init ./my-agent
+npm run sfield -- validate ./my-agent/sfield.config.yaml
+
+# Run guardrail evals, enforce release gate &amp; approve lock manifest
+npm run sfield -- eval ./suite.mjs --db ./state.sqlite --config ./my-agent/sfield.config.yaml --gate-min-pass 0.95
+npm run sfield -- lock approve --db ./state.sqlite --config ./my-agent/sfield.config.yaml --approver release-bot
+
+# Inspect a persisted run or serve governed tools over MCP stdio
+npm run sfield -- inspect &lt;runId&gt; --db ./state.sqlite
+npm run sfield -- mcp serve --db ./state.sqlite --config ./my-agent/sfield.config.yaml</code></pre>
+      </div>
+    </section>
+
+    <footer>
+      <span><strong>sfield Agent SDK</strong> · Apache-2.0 · Node.js 22+</span>
+      <span>
+        <a href="/admin/help">CEP Admin Help</a> ·
+        <a href="/admin/help?guide=sdk">Developer Guides</a> ·
+        <a href="/admin/gateway">Model Gateway</a> ·
+        <a href="/admin/logs">Logs &amp; Approvals</a>
+      </span>
+    </footer>
+  </main>
+
+  <script>
+    (function () {
+      const root = document.documentElement;
+      const toggle = document.getElementById("themeToggle");
+      const saved = localStorage.getItem("sfield-doc-theme");
+      if (saved === "dark" || (!saved && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+        root.setAttribute("data-theme", "dark");
+        toggle.textContent = "Light mode";
+      }
+      toggle.addEventListener("click", () => {
+        const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+        root.setAttribute("data-theme", next);
+        localStorage.setItem("sfield-doc-theme", next);
+        toggle.textContent = next === "dark" ? "Light mode" : "Dark mode";
+      });
+
+      const tabButtons = document.querySelectorAll(".tab-btn");
+      tabButtons.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const target = btn.getAttribute("data-tab");
+          tabButtons.forEach((b) => b.setAttribute("aria-selected", String(b === btn)));
+          document.querySelectorAll(".tab-panel").forEach((panel) => {
+            panel.classList.toggle("active", panel.id === "tab-" + target);
+          });
+        });
+      });
+
+      document.querySelectorAll(".copy-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const code = btn.parentElement.querySelector("code")?.textContent ?? "";
+          try {
+            await navigator.clipboard.writeText(code);
+            const prev = btn.textContent;
+            btn.textContent = "Copied!";
+            setTimeout(() => { btn.textContent = prev; }, 1400);
+          } catch {}
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

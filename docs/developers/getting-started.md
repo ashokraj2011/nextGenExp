@@ -4,19 +4,20 @@ Use a balance comparison to see how a customer message becomes a screen. You can
 
 ### Start a local checkout
 
-Use Node.js 22.13 or later and npm 10 or later. The repository includes sfield as an npm workspace. Run these commands from the repository root after signing in with the Copilot CLI, the default model provider.
+Use Node.js 22.13 or later and npm 10 or later. The repository includes the standalone **`sfield` Agent SDK** (all 8 `@sfield/*` packages) as npm workspaces. Run these commands from the repository root after signing in with the Copilot CLI, the default model provider.
 
 ```sh
 npm ci
 npm run build
+npm run sfield -- doctor
 npm run preview
 ```
 
-Open `http://127.0.0.1:4174/` for customer chat and `/admin/help?guide=start` on the same server for these guides. For live editing, run `PZN_PORT=4180 npm run dev` and use port 4180 for both. Admin pages use the operator account for your installation. Local setup and gateway options are in the root `README.md` and `.env.example`.
+Open `http://127.0.0.1:4174/` for customer chat, `/admin/help?guide=start` for these guides, and `/sfield-sdk.html` for the standalone SDK overview page. For live editing, run `PZN_PORT=4180 npm run dev` and use port 4180. Admin pages use the operator account for your installation. Local setup and gateway options are in the root `README.md` and `.env.example`.
 
 For an internal npm registry, supply your organization's registry URL to the install, for example `npm ci --registry=https://packages.example.org/artifactory/api/npm/npm-virtual/`. The lockfile omits registry download URLs. npm can use credentials already configured in your user npm settings.
 
-For an office LLM gateway, configure **Model gateway** in Administration or set `LLM_PROVIDER=gateway`, `LLM_BASE_URL`, `LLM_MODEL` and the credentials your gateway expects in `.env`. `LLM_GATEWAY_HEADERS_JSON` and `LLM_GATEWAY_BODY_JSON` carry extra headers and body fields. A configuration activated in the admin panel takes precedence for the app. The command-line chat harness reads its environment separately.
+For **Google Gemini**, **OpenAI**, or an **office LLM gateway**, configure **Model gateway** in Administration (`/admin/gateway`) or set `LLM_PROVIDER=gemini` (`GEMINI_API_KEY`, `GEMINI_MODEL`), `LLM_PROVIDER=openai` (`OPENAI_API_KEY`), or `LLM_PROVIDER=gateway` (`LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`) in `.env`. `LLM_GATEWAY_HEADERS_JSON` and `LLM_GATEWAY_BODY_JSON` carry extra headers and body fields. A configuration activated in the admin panel takes precedence for the app. The command-line chat harness reads its environment separately.
 
 ### Follow the first turn
 

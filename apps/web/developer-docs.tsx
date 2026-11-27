@@ -4,14 +4,16 @@ import { developerGuideHref } from "./admin-navigation";
 import gettingStarted from "../../docs/developers/getting-started.md";
 import chatUi from "../../docs/developers/chat-ui.md";
 import runtime from "../../docs/developers/sfield-and-tools.md";
+import sfieldSdk from "../../docs/developers/sfield-sdk.md";
 import workflows from "../../docs/developers/rules-and-workflows.md";
 import readToolUrl from "../../docs/developers/examples/read-tool.mjs?url&no-inline";
 import "./developer-docs.css";
 
 const guides = [
   { id: "start", label: "Getting started", html: gettingStarted, related: "Interaction map", href: adminPaths.help + "#interactions" },
-  { id: "ui", label: "Create a chat UI", html: chatUi, related: "UI Builder", href: adminPaths.builder },
+  { id: "sdk", label: "sfield SDK reference", html: sfieldSdk, related: "Standalone HTML Guide", href: "/sfield-sdk.html" },
   { id: "sfield", label: "sfield and tools", html: runtime, related: "Tool setup", href: adminPaths.tools },
+  { id: "ui", label: "Create a chat UI", html: chatUi, related: "UI Builder", href: adminPaths.builder },
   { id: "workflows", label: "Rules and workflows", html: workflows, related: "Logs", href: adminPaths.logs },
 ];
 
