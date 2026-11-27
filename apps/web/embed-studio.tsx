@@ -32,6 +32,7 @@ export function EmbedStudio() {
   const [omniBusy, setOmniBusy] = useState(false);
   const [omniNotice, setOmniNotice] = useState("");
   const [previewChannel, setPreviewChannel] = useState<"slack" | "teams">("slack");
+  const [previewLoaded, setPreviewLoaded] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -300,15 +301,34 @@ export function EmbeddedAdvisor() {
               <h2>2. Live Embedded Surface Preview</h2>
               <p className="embed-card-sub">Real chromeless <code>/embed</code> frame rendered with your brand &amp; accent overrides.</p>
             </div>
-            <span className="embed-live-pill"><Sparkles size={12} aria-hidden="true" />Live iframe</span>
+            <button
+              type="button"
+              className="embed-live-pill"
+              style={{ cursor: "pointer", border: "1px solid currentColor" }}
+              onClick={() => setPreviewLoaded((v) => !v)}
+            >
+              <Sparkles size={12} aria-hidden="true" />
+              {previewLoaded ? "Unload preview" : "Load live preview"}
+            </button>
           </div>
           <div className="embed-preview-frame-shell">
-            <iframe
-              key={previewIframeSrc}
-              title="CEP Live Embed Preview"
-              src={previewIframeSrc}
-              className="embed-preview-iframe"
-            />
+            {previewLoaded ? (
+              <iframe
+                key={previewIframeSrc}
+                title="CEP Live Embed Preview"
+                src={previewIframeSrc}
+                className="embed-preview-iframe"
+              />
+            ) : (
+              <div style={{ display: "grid", placeItems: "center", height: "100%", padding: "24px", textAlign: "center", gap: "10px" }}>
+                <p className="embed-card-sub" style={{ margin: 0 }}>
+                  Live iframe preview is paused by default so it doesn’t consume extra HTTP/1.1 SSE connections.
+                </p>
+                <button type="button" className="btn-primary" onClick={() => setPreviewLoaded(true)}>
+                  Load Live Embed Preview
+                </button>
+              </div>
+            )}
           </div>
         </section>
       </div>
