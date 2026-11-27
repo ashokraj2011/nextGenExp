@@ -11,15 +11,22 @@ import {
   approveLock,
   createPiiFirewall,
   createPrincipal,
+  createSFieldMcpServer,
   isoAfter,
+  MCP_PROTOCOL_VERSION_2026,
+  McpExtensionStore,
   newId,
   nowIso,
+  requestElicitation,
+  SFieldError,
   type ActingForIdentity,
   type ExecutionPersistence,
   type JsonObject,
+  type McpExtraTool,
   type MemoryItem,
   type Principal,
   type RunState,
+  type SFieldMcpHost,
 } from "@sfield/core";
 import type { StudioOptions, StudioServerHandle, StudioServerOptions } from "./types.js";
 import { renderStudioHtml } from "./ui.js";
@@ -122,7 +129,78 @@ export function createStudioHandler(options: StudioOptions): (req: IncomingMessa
   const readOnly = Boolean(options.readOnly);
   const plugins = options.plugins ?? [];
   const pii = options.piiFirewall ?? createPiiFirewall();
+  const mcpStore = options.mcpExtensionStore ?? new McpExtensionStore();
   const html = renderStudioHtml({ title, basePath, readOnly, plugins });
+
+  const studioDemoTool: McpExtraTool = {
+    descriptor: {
+      name: "studio.mcp2026.demo@1.0.0",
+      description: "Interactive MCP 2026 demo tool supporting Async Tasks and mid-flight JSON Schema Elicitation.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          action: { type: "string", description: "Action to request (e.g. rebalance_portfolio)" },
+          justification: { type: "string", description: "Operator justification (elicited if omitted)" },
+          maxBudgetUsd: { type: "number", description: "Approved budget cap in USD (elicited if omitted)" },
+          confirmed: { type: "boolean", description: "Explicit confirmation flag" },
+        },
+      },
+    },
+    handler: async (args) => {
+      const action = typeof args["action"] === "string" && args["action"].trim()
+        ? args["action"].trim()
+        : "rebalance_portfolio";
+      if (!args["justification"] || typeof args["maxBudgetUsd"] !== "number") {
+        requestElicitation({
+          message: `Provide structured approval details to continue "${action}".`,
+          requestedSchema: {
+            type: "object",
+            additionalProperties: false,
+            required: ["justification", "maxBudgetUsd", "confirmed"],
+            properties: {
+              justification: { type: "string", minLength: 3, maxLength: 200, description: "Business justification" },
+              maxBudgetUsd: { type: "number", minimum: 1, maximum: 1000000, description: "Budget cap (USD)" },
+              confirmed: { type: "boolean", description: "Confirm execution" },
+            },
+          },
+        });
+      }
+      const payload = {
+        status: "completed",
+        action,
+        justification: args["justification"],
+        maxBudgetUsd: args["maxBudgetUsd"],
+        confirmed: Boolean(args["confirmed"]),
+        completedAt: nowIso(),
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(payload) }],
+        structuredContent: payload,
+      };
+    },
+  };
+
+  const offlineMcpHost: SFieldMcpHost = {
+    registry: {
+      list: () => [],
+      describe: (ref) => { throw new SFieldError("UNKNOWN_TOOL", `Runtime offline; tool ${ref} unavailable`); },
+    },
+    executions: {
+      open: async () => { throw new SFieldError("STATE_UNAVAILABLE", "Runtime offline"); },
+      resume: async () => { throw new SFieldError("STATE_UNAVAILABLE", "Runtime offline"); },
+    },
+  };
+
+  const studioMcpServer = createSFieldMcpServer(options.runtime ?? offlineMcpHost, {
+    serverInfo: { name: "sfield-studio-mcp", version: "1.0.0" },
+    preset: "read_only",
+    extensionStore: mcpStore,
+    extraTools: [studioDemoTool],
+  });
+
+  const studioMcpPrincipal = (): Principal => options.runtime?.devPrincipal
+    ?? createPrincipal({ tenantId: "studio", subjectId: "studio-operator" });
 
   const assertWritable = () => {
     if (readOnly) {
@@ -477,6 +555,128 @@ export function createStudioHandler(options: StudioOptions): (req: IncomingMessa
       // GET /api/telemetry/otlp
       if (rel === "/api/telemetry/otlp" && method === "GET") {
         sendJson(res, options.telemetry ? options.telemetry.buildOtlpTracePayload() : { resourceSpans: [] });
+        return true;
+      }
+
+      // GET /api/mcp2026/state — list active MCP 2026 async tasks, pending elicitations, and callable tools
+      if (rel === "/api/mcp2026/state" && method === "GET") {
+        const principal = studioMcpPrincipal();
+        const listed = await studioMcpServer.handleRequest(
+          { jsonrpc: "2.0", id: "tools-list", method: "tools/list" },
+          { principal },
+        );
+        const resultObj = (listed.body && typeof listed.body === "object" && "result" in listed.body)
+          ? (listed.body as { result?: Record<string, unknown> }).result
+          : undefined;
+        const tools = Array.isArray(resultObj?.["tools"]) ? resultObj!["tools"] : [];
+        sendJson(res, {
+          protocolVersion: MCP_PROTOCOL_VERSION_2026,
+          tasks: mcpStore.listTasks(),
+          elicitations: mcpStore.listElicitations({ status: "pending" }),
+          tools,
+        });
+        return true;
+      }
+
+      // POST /api/mcp2026/call — invoke a tool over MCP 2026 (optionally as an Async Task)
+      if (rel === "/api/mcp2026/call" && method === "POST") {
+        assertWritable();
+        const body = await readJsonBody(req);
+        const name = typeof body["name"] === "string" ? body["name"].trim() : "";
+        if (!name) {
+          sendJson(res, { error: "invalid_tool", message: "name is required." }, 400);
+          return true;
+        }
+        const args = (body["arguments"] && typeof body["arguments"] === "object" && !Array.isArray(body["arguments"]))
+          ? body["arguments"] as Record<string, unknown>
+          : {};
+        const asyncTask = Boolean(body["asyncTask"]);
+        const principal = body["principal"] ? buildPrincipalFromBody(body["principal"]) : studioMcpPrincipal();
+        const rpc = await studioMcpServer.handleRequest({
+          jsonrpc: "2.0",
+          id: newId("mcp"),
+          method: "tools/call",
+          params: {
+            name,
+            arguments: args,
+            ...(asyncTask ? { task: { ttl: 60_000 } } : {}),
+          },
+        }, { principal });
+        sendJson(res, {
+          response: rpc.body,
+          tasks: mcpStore.listTasks(),
+          elicitations: mcpStore.listElicitations({ status: "pending" }),
+        }, rpc.status);
+        return true;
+      }
+
+      // POST /api/mcp2026/elicitations/:id/respond — respond (accept / decline / cancel) to a pending elicitation
+      if (rel.startsWith("/api/mcp2026/elicitations/") && rel.endsWith("/respond") && method === "POST") {
+        assertWritable();
+        const elicitationId = decodeURIComponent(
+          rel.slice("/api/mcp2026/elicitations/".length, -"/respond".length),
+        );
+        const body = await readJsonBody(req);
+        const action = body["action"] === "decline" || body["action"] === "cancel" ? body["action"] : "accept";
+        const content = (body["content"] && typeof body["content"] === "object" && !Array.isArray(body["content"]))
+          ? body["content"] as Record<string, unknown>
+          : undefined;
+        const existing = mcpStore.getElicitation(elicitationId);
+        const principal = existing?.principal ?? studioMcpPrincipal();
+        const rpc = await studioMcpServer.handleRequest({
+          jsonrpc: "2.0",
+          id: newId("mcp"),
+          method: "elicitation/respond",
+          params: {
+            elicitationId,
+            action,
+            ...(content ? { content } : {}),
+          },
+        }, { principal });
+        sendJson(res, {
+          response: rpc.body,
+          tasks: mcpStore.listTasks(),
+          elicitations: mcpStore.listElicitations({ status: "pending" }),
+        }, rpc.status);
+        return true;
+      }
+
+      // POST /api/mcp2026/tasks/:id/cancel — cancel an active MCP 2026 async task
+      if (rel.startsWith("/api/mcp2026/tasks/") && rel.endsWith("/cancel") && method === "POST") {
+        assertWritable();
+        const taskId = decodeURIComponent(rel.slice("/api/mcp2026/tasks/".length, -"/cancel".length));
+        const taskRec = mcpStore.getTask(taskId);
+        const principal = taskRec
+          ? createPrincipal({ tenantId: taskRec.tenantId, subjectId: taskRec.subjectId })
+          : studioMcpPrincipal();
+        const rpc = await studioMcpServer.handleRequest({
+          jsonrpc: "2.0",
+          id: newId("mcp"),
+          method: "tasks/cancel",
+          params: { taskId },
+        }, { principal });
+        sendJson(res, {
+          response: rpc.body,
+          tasks: mcpStore.listTasks(),
+          elicitations: mcpStore.listElicitations({ status: "pending" }),
+        }, rpc.status);
+        return true;
+      }
+
+      // GET /api/mcp2026/tasks/:id/result — fetch result of an MCP 2026 async task
+      if (rel.startsWith("/api/mcp2026/tasks/") && rel.endsWith("/result") && method === "GET") {
+        const taskId = decodeURIComponent(rel.slice("/api/mcp2026/tasks/".length, -"/result".length));
+        const taskRec = mcpStore.getTask(taskId);
+        const principal = taskRec
+          ? createPrincipal({ tenantId: taskRec.tenantId, subjectId: taskRec.subjectId })
+          : studioMcpPrincipal();
+        const rpc = await studioMcpServer.handleRequest({
+          jsonrpc: "2.0",
+          id: newId("mcp"),
+          method: "tasks/result",
+          params: { taskId },
+        }, { principal });
+        sendJson(res, { response: rpc.body }, rpc.status);
         return true;
       }
 

@@ -162,6 +162,7 @@ export function renderStudioHtml(opts: {
       { id: "overview", label: "Overview & Locks" },
       { id: "runs", label: "Runs & Traces" },
       { id: "tools", label: "Tools & Playground" },
+      { id: "mcp2026", label: "MCP 2026 Elicitation & Tasks" },
       { id: "approvals", label: "HITL Approvals" },
       { id: "evals", label: "Evals & Gate" },
       { id: "memory", label: "Memory Explorer" },
@@ -169,7 +170,7 @@ export function renderStudioHtml(opts: {
       { id: "telemetry", label: "OTel Telemetry" },
     ];
     let activeTab = "overview";
-    let state = { overview: null, runs: [], selectedRun: null, tools: [], approvals: [], evals: [], memory: [], telemetry: null };
+    let state = { overview: null, runs: [], selectedRun: null, tools: [], approvals: [], evals: [], memory: [], telemetry: null, mcp2026: null, mcpLastOut: null };
 
     async function api(path, opts) {
       const res = await fetch(API + path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
@@ -245,6 +246,10 @@ export function renderStudioHtml(opts: {
           const data = await api("/tools");
           state.tools = data.tools || [];
           renderTools(root);
+        } else if (activeTab === "mcp2026") {
+          heading.textContent = "MCP 2026 · Elicitation & Async Tasks";
+          state.mcp2026 = await api("/mcp2026/state");
+          renderMcp2026(root);
         } else if (activeTab === "approvals") {
           heading.textContent = "Human-in-the-Loop Approvals";
           const data = await api("/approvals");
@@ -543,6 +548,129 @@ export function renderStudioHtml(opts: {
             ? '<table><thead><tr><th>Span</th><th>Status</th><th>Trace</th><th>Attributes</th></tr></thead><tbody>' + rows + '</tbody></table>'
             : '<div class="empty">No telemetry spans recorded yet. Attach an <code>OtelTelemetrySink</code> to capture live spans.</div>') +
         '</div>';
+    }
+
+    function renderMcp2026(root) {
+      const m = state.mcp2026 || { protocolVersion: "2026-07-28", tasks: [], elicitations: [], tools: [] };
+      const toolOpts = (m.tools || []).map((t) => '<option value="' + esc(t.name) + '">' + esc(t.name) + '</option>').join("");
+      const elicitCards = (m.elicitations || []).map((el) => {
+        const props = (el.requestedSchema && el.requestedSchema.properties) ? el.requestedSchema.properties : {};
+        const reqList = Array.isArray(el.requestedSchema && el.requestedSchema.required) ? el.requestedSchema.required : [];
+        const fieldsHtml = Object.entries(props).map(([key, def]) => {
+          const isReq = reqList.includes(key);
+          const label = key + (isReq ? " *" : "") + (def && def.description ? " — " + def.description : "");
+          if (def && def.type === "boolean") {
+            return '<label class="row" style="font-size:13px"><input type="checkbox" style="width:auto" data-elicit-field="' + esc(el.elicitationId) + ':' + esc(key) + '" data-field-type="boolean" checked /> <span>' + esc(label) + '</span></label>';
+          }
+          if (def && Array.isArray(def.enum)) {
+            const opts = def.enum.map((v) => '<option value="' + esc(v) + '">' + esc(v) + '</option>').join("");
+            return '<label class="field">' + esc(label) + '<select data-elicit-field="' + esc(el.elicitationId) + ':' + esc(key) + '" data-field-type="string">' + opts + '</select></label>';
+          }
+          const inputType = (def && (def.type === "number" || def.type === "integer")) ? "number" : "text";
+          const defVal = inputType === "number" ? "5000" : "";
+          return '<label class="field">' + esc(label) + '<input type="' + inputType + '" value="' + defVal + '" placeholder="' + esc(key) + '" data-elicit-field="' + esc(el.elicitationId) + ':' + esc(key) + '" data-field-type="' + esc((def && def.type) || "string") + '" /></label>';
+        }).join("");
+        return '<div class="card stack" style="border-color:rgba(245,166,35,0.45)">' +
+          '<div class="row" style="justify-content:space-between"><strong>' + esc(el.message) + '</strong>' + pill("input_required", "warn") + '</div>' +
+          '<div class="muted" style="font-size:12px">ID: <code>' + esc(el.elicitationId) + '</code></div>' +
+          fieldsHtml +
+          '<div class="row">' +
+            '<button class="btn ok" type="button" data-elicit-act="accept" data-elicit-id="' + esc(el.elicitationId) + '">Accept &amp; Resume</button>' +
+            '<button class="btn err" type="button" data-elicit-act="decline" data-elicit-id="' + esc(el.elicitationId) + '">Decline</button>' +
+            '<button class="btn" type="button" data-elicit-act="cancel" data-elicit-id="' + esc(el.elicitationId) + '">Cancel</button>' +
+          '</div>' +
+        '</div>';
+      }).join("");
+
+      const taskRows = (m.tasks || []).map((t) => {
+        const tone = t.status === "completed" ? "ok" : t.status === "input_required" || t.status === "working" ? "warn" : "err";
+        const acts =
+          '<button class="btn" type="button" data-task-res="' + esc(t.taskId) + '">Result</button> ' +
+          ((t.status === "working" || t.status === "input_required") && !BOOT.readOnly
+            ? '<button class="btn err" type="button" data-task-cancel="' + esc(t.taskId) + '">Cancel</button>'
+            : '');
+        return '<tr><td><code>' + esc(t.taskId) + '</code></td><td><code>' + esc(t.toolName) + '</code></td><td>' + pill(t.status, tone) + '</td><td>' + esc(t.statusMessage || "") + '</td><td>' + acts + '</td></tr>';
+      }).join("");
+
+      root.innerHTML =
+        '<div class="grid-2">' +
+          '<div class="card stack">' +
+            '<div class="row" style="justify-content:space-between"><h2>MCP 2026 Tool &amp; Async Task Launcher</h2>' + pill("Protocol " + (m.protocolVersion || "2026-07-28"), "accent") + '</div>' +
+            '<div class="muted">Invoke any MCP tool synchronously or as an Async Task (<code>task.ttl</code>). Choose <code>studio.mcp2026.demo@1.0.0</code> to trigger a live mid-flight JSON Schema Elicitation form.</div>' +
+            '<label class="field">Tool<select id="mcp-tool-select">' + toolOpts + '</select></label>' +
+            '<label class="field">Arguments JSON<textarea id="mcp-args-json" class="mono">{\n  "action": "rebalance_portfolio"\n}</textarea></label>' +
+            '<label class="row" style="font-size:13px"><input type="checkbox" id="mcp-async-chk" style="width:auto" checked /> <span>Run as MCP 2026 Async Task (<code>task: { ttl: 60000 }</code>)</span></label>' +
+            '<div class="row"><button class="btn primary" id="mcp-invoke-btn" type="button"' + (BOOT.readOnly ? " disabled" : "") + '>Invoke via MCP 2026</button></div>' +
+            (state.mcpLastOut ? '<div><h3>Last JSON-RPC Response</h3><pre>' + esc(JSON.stringify(state.mcpLastOut, null, 2)) + '</pre></div>' : '') +
+          '</div>' +
+          '<div class="stack">' +
+            '<div class="card stack">' +
+              '<h2>Pending Elicitations (' + (m.elicitations ? m.elicitations.length : 0) + ')</h2>' +
+              (elicitCards || '<div class="empty">No pending elicitations. Invoke <code>studio.mcp2026.demo@1.0.0</code> to trigger one.</div>') +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="card stack">' +
+          '<h2>Async Tasks Tray (' + (m.tasks ? m.tasks.length : 0) + ')</h2>' +
+          (m.tasks && m.tasks.length
+            ? '<table><thead><tr><th>Task ID</th><th>Tool</th><th>Status</th><th>Message</th><th>Actions</th></tr></thead><tbody>' + taskRows + '</tbody></table>'
+            : '<div class="empty">No MCP 2026 async tasks yet.</div>') +
+        '</div>';
+
+      const invokeBtn = document.getElementById("mcp-invoke-btn");
+      if (invokeBtn) {
+        invokeBtn.onclick = async () => {
+          const name = document.getElementById("mcp-tool-select").value;
+          const asyncTask = document.getElementById("mcp-async-chk").checked;
+          const parsedArgs = JSON.parse(document.getElementById("mcp-args-json").value || "{}");
+          const out = await api("/mcp2026/call", {
+            method: "POST",
+            body: JSON.stringify({ name, arguments: parsedArgs, asyncTask }),
+          });
+          state.mcpLastOut = out.response;
+          await new Promise((r) => setTimeout(r, 80));
+          await loadActiveTab();
+        };
+      }
+
+      root.querySelectorAll("button[data-elicit-act]").forEach((btn) => {
+        btn.onclick = async () => {
+          const id = btn.dataset.elicitId;
+          const action = btn.dataset.elicitAct;
+          const content = {};
+          if (action === "accept") {
+            root.querySelectorAll('[data-elicit-field^="' + id + ':"]').forEach((el) => {
+              const fieldKey = el.dataset.elicitField.slice(id.length + 1);
+              const t = el.dataset.fieldType;
+              if (t === "boolean") content[fieldKey] = Boolean(el.checked);
+              else if (t === "number" || t === "integer") content[fieldKey] = Number(el.value);
+              else content[fieldKey] = el.value;
+            });
+          }
+          const out = await api("/mcp2026/elicitations/" + encodeURIComponent(id) + "/respond", {
+            method: "POST",
+            body: JSON.stringify({ action, ...(action === "accept" ? { content } : {}) }),
+          });
+          state.mcpLastOut = out.response;
+          await loadActiveTab();
+        };
+      });
+
+      root.querySelectorAll("button[data-task-cancel]").forEach((btn) => {
+        btn.onclick = async () => {
+          const out = await api("/mcp2026/tasks/" + encodeURIComponent(btn.dataset.taskCancel) + "/cancel", { method: "POST" });
+          state.mcpLastOut = out.response;
+          await loadActiveTab();
+        };
+      });
+
+      root.querySelectorAll("button[data-task-res]").forEach((btn) => {
+        btn.onclick = async () => {
+          const out = await api("/mcp2026/tasks/" + encodeURIComponent(btn.dataset.taskRes) + "/result");
+          state.mcpLastOut = out.response;
+          renderMcp2026(root);
+        };
+      });
     }
 
     function renderPlugin(root, plugin) {

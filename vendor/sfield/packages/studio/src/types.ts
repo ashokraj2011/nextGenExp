@@ -1,6 +1,6 @@
 /** Public contracts for @sfield/studio. */
 import type { IncomingMessage } from "node:http";
-import type { ExecutionPersistence, PiiFirewall, SField } from "@sfield/core";
+import type { ExecutionPersistence, McpExtensionStore, PiiFirewall, SField } from "@sfield/core";
 import type { OtelMetricPoint, OtelSpanRecord, OtelTelemetrySink } from "@sfield/telemetry-otel";
 
 export interface StudioPluginTab {
@@ -38,6 +38,8 @@ export interface StudioOptions {
   telemetry?: OtelTelemetrySink | StudioTelemetrySource;
   /** Optional PII firewall instance for the interactive redaction lab. */
   piiFirewall?: PiiFirewall;
+  /** Optional shared MCP 2026 Elicitation & Async Tasks store (defaults to an isolated in-memory store). */
+  mcpExtensionStore?: McpExtensionStore;
   /** Display title in the Studio header. Defaults to "sfield Studio". */
   title?: string;
   /** Optional mount prefix (e.g. "/admin/sfield-studio"). Defaults to "". */

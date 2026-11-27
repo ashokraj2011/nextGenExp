@@ -34,7 +34,7 @@ export interface CepMcpDeps {
   exposureConfig?: McpExposureConfig;
 }
 
-const cepMcpExtensionStore = new McpExtensionStore();
+export const cepMcpExtensionStore = new McpExtensionStore();
 
 const OFFLINE_MCP_HOST: SFieldMcpHost = {
   registry: {

@@ -64,7 +64,7 @@ import { CepTelemetry } from "./telemetry";
 import { migrateLegacyConnectors } from "./connector-migration";
 import { HandoffStore } from "./handoff-store";
 import { coBrowseSlidersSchema, createHandoffInputSchema } from "../../packages/contracts/handoff";
-import { buildA2aAgentCard, handleCepMcpRequest } from "./cep-mcp-server";
+import { buildA2aAgentCard, cepMcpExtensionStore, handleCepMcpRequest } from "./cep-mcp-server";
 import { McpExposureStore, mcpExposureConfigSchema, STANDALONE_SFIELD_MCP_TOOLS } from "./mcp-exposure-store";
 import { agUiRunInputSchema, streamAgUiRun } from "./ag-ui";
 import { WatchcardStore } from "./watchcard-store";
@@ -692,6 +692,7 @@ export async function startApp(options: Options) {
   const sfieldStudioHandler = createStudioHandler({
     runtime: runtime?.sfieldInstance,
     telemetry: telemetry.otelSink,
+    mcpExtensionStore: cepMcpExtensionStore,
     title: "sfield Studio · CEP",
     basePath: "/admin/sfield-studio",
     plugins: [

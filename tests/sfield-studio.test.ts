@@ -194,6 +194,65 @@ test("@sfield/studio serves standalone workbench UI, Principal/Tool playground, 
     assert.ok(Array.isArray(tel.spans));
     const otlp = await (await fetch(`${studio.url}/api/telemetry/otlp`)).json() as { resourceSpans: unknown[] };
     assert.ok(Array.isArray(otlp.resourceSpans));
+
+    // 8b. MCP 2026 Elicitation & Async Task lifecycle in Studio
+    const mcpState = await (await fetch(`${studio.url}/api/mcp2026/state`)).json() as {
+      protocolVersion: string;
+      tools: Array<{ name: string }>;
+      tasks: unknown[];
+      elicitations: unknown[];
+    };
+    assert.equal(mcpState.protocolVersion, "2026-07-28");
+    assert.ok(mcpState.tools.some((t) => t.name === "studio.mcp2026.demo@1.0.0"));
+
+    const callRes = await fetch(`${studio.url}/api/mcp2026/call`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "studio.mcp2026.demo@1.0.0",
+        arguments: { action: "rebalance_portfolio" },
+        asyncTask: true,
+      }),
+    });
+    assert.equal(callRes.status, 200);
+    const callBody = await callRes.json() as { response: { result?: { task?: { taskId: string } } } };
+    const taskId = callBody.response.result?.task?.taskId;
+    assert.ok(taskId);
+
+    // Wait briefly for the async task to pause on mid-flight elicitation
+    await new Promise((r) => setTimeout(r, 40));
+    const pausedState = await (await fetch(`${studio.url}/api/mcp2026/state`)).json() as {
+      tasks: Array<{ taskId: string; status: string }>;
+      elicitations: Array<{ elicitationId: string }>;
+    };
+    const pausedTask = pausedState.tasks.find((t) => t.taskId === taskId);
+    assert.equal(pausedTask?.status, "input_required");
+    assert.equal(pausedState.elicitations.length, 1);
+    const elicitationId = pausedState.elicitations[0].elicitationId;
+
+    // Submit structured elicitation response and confirm async task completes
+    const respRes = await fetch(`${studio.url}/api/mcp2026/elicitations/${encodeURIComponent(elicitationId)}/respond`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "accept",
+        content: { justification: "Quarterly client rebalance", maxBudgetUsd: 5000, confirmed: true },
+      }),
+    });
+    assert.equal(respRes.status, 200);
+    const taskResultRes = await fetch(`${studio.url}/api/mcp2026/tasks/${encodeURIComponent(taskId)}/result`);
+    assert.equal(taskResultRes.status, 200);
+    const taskResult = await taskResultRes.json() as {
+      response: {
+        result?: {
+          task?: { status: string };
+          result?: { structuredContent?: { status: string; maxBudgetUsd: number } };
+        };
+      };
+    };
+    assert.equal(taskResult.response.result?.task?.status, "completed");
+    assert.equal(taskResult.response.result?.result?.structuredContent?.status, "completed");
+    assert.equal(taskResult.response.result?.result?.structuredContent?.maxBudgetUsd, 5000);
   } finally {
     await studio.close();
   }
