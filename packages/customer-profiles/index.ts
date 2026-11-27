@@ -252,6 +252,29 @@ export class CustomerProfileStore {
     return { updatedFields, profile: next };
   }
 
+  /**
+   * Appends a concise life-event or relationship note into Customer 360 `notes` (deduplicated, capped at 560 chars).
+   */
+  appendNote(personaId: string, note: string): { added: boolean; notes: string } {
+    const clean = note.trim().replace(/\s+/g, " ").slice(0, 220);
+    const current = this.findByPersonaId(personaId);
+    if (!current || !clean) return { added: false, notes: current?.notes ?? "" };
+    const existing = (current.notes ?? "").trim();
+    const lowerExisting = existing.toLowerCase();
+    const lowerClean = clean.toLowerCase();
+    // Deduplicate exact match or matching core phrase (first 36 chars)
+    if (lowerExisting.includes(lowerClean) || (lowerClean.length >= 24 && lowerExisting.includes(lowerClean.slice(0, 36)))) {
+      return { added: false, notes: existing };
+    }
+    const combined = existing ? `${existing} | ${clean}` : clean;
+    const bounded = combined.length <= 400 ? combined : `${combined.slice(0, 397)}...`;
+    const next: StoredCustomerProfile = { ...current, notes: bounded };
+    const map = new Map(this.loadOverrides());
+    map.set(personaId, next);
+    this.persist(map);
+    return { added: true, notes: bounded };
+  }
+
   portfolioSnapshot(mid: string): PortfolioSnapshot | null {
     const profile = this.findByMid(mid);
     if (!profile) return null;

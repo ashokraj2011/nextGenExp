@@ -165,7 +165,7 @@ const pagePaths = new Set(["/", "/chat", "/wealth", "/advisor", "/it-ops", "/rev
 
 function visibleTurn(turn: TurnView, operator?: string): TurnView {
   if (operator) return turn;
-  const { semanticRoute, customerLookup, providerArbitration, piiRedaction, ...customerTurn } = turn;
+  const { semanticRoute, customerLookup, emotionalState, providerArbitration, piiRedaction, ...customerTurn } = turn;
   return customerTurn;
 }
 
@@ -424,7 +424,7 @@ export async function startApp(options: Options) {
     chat: new ChatHarness(offline), close: () => offline.close(),
   }, {
     isTenantAdmin: membership.isTenantAdmin,
-    gateway: options.gateway, dataDir: options.dataDir, customer360, portfolioSnapshots, goalProgressProvider,
+    gateway: options.gateway, dataDir: options.dataDir, customer360, profileStore, portfolioSnapshots, goalProgressProvider,
     opsStore, salesStore, connectorStore, approvalStore, tradeStore, actionFlowStore, workflowEngine, knowledgeBase, widgetLibraries, piiFirewall,
     goalStore, integrationService, onTradeSettle: makeTradeSettler,
   });

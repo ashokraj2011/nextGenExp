@@ -48,6 +48,18 @@ import {
   type RecommendationProviderDescriptor,
 } from "../../packages/contracts/recommendation-provider";
 import {
+  emotionalAssessmentJsonSchema,
+  emotionalAssessmentSchema,
+  empathyAssessInputJsonSchema,
+  empathyAssessInputSchema,
+  empathyAssessToolId,
+  empathyAssessToolRef,
+  empathyAssessToolVersion,
+  type EmotionalAssessment,
+  type EmpathyAssessInput,
+} from "../../packages/contracts/empathy";
+import { assessEmotionalState, firstNameOf } from "./response-personalizer";
+import {
   createCustomer360NbaProvider,
   createOpsRunbookProvider,
   createSalesDealDeskProvider,
@@ -175,6 +187,7 @@ const toolRefs = {
   fundingStatus: fundingToolRef("fundingStatus"),
   fundingPreview: fundingToolRef("fundingPreview"),
   arbitrateRecommendations: recommendationArbitrateToolRef,
+  empathyAssess: empathyAssessToolRef,
 } as const;
 const registryPurposes = {
   catalogScopeId: "pzn-context-discovery",
@@ -195,6 +208,7 @@ export function principalFor(id: string, scope?: Pick<Scope, "userId" | "persona
 const actions = new Set<string>([
   ...toolKeys.map((key) => sfieldTools[key].id),
   recommendationArbitrateToolId,
+  empathyAssessToolId,
   pznTreatmentSelectorToolId,
 ]);
 export const sfieldNamespace = "pzn-experience-runtime";
@@ -296,6 +310,8 @@ export class Runtime implements IntegrationTaskRuntime {
     private readonly piiFirewall?: PiiFirewallStore,
     private readonly telemetry?: CepTelemetry,
     private readonly modelMeta?: { provider: string; model: string },
+    private readonly gatewaySettings?: GatewaySettings,
+    private readonly dataDir?: string,
   ) {
     this.integrationExecutor = new TaskCallExecutor(integrationTasks?.orders, connectorStore);
     this.funding = new FundingAgent(store, () => this.sf, now);
@@ -334,6 +350,8 @@ export class Runtime implements IntegrationTaskRuntime {
       extraProviders?.piiFirewall,
       extraProviders?.telemetry,
       { provider: settings.profile === "copilot_acp" ? "copilot_acp" : settings.profile === "openai" ? "openai" : "openai_compatible", model: settings.model },
+      settings,
+      dirname(path),
     );
     const agentTools = [...runtime.experiences.tools(), ...runtime.experiences.execution.tools()];
     const agentActions = new Set(agentTools.map(({ ref }) => axeToolAction(ref)));
@@ -623,16 +641,55 @@ export class Runtime implements IntegrationTaskRuntime {
 
   async arbitrateRecommendations(
     turn: TurnRecord,
-    input: { contextId: string; domain?: RecommendationDomain; existingBlockTitles?: string[] },
+    input: { contextId: string; domain?: RecommendationDomain; excludePromotions?: boolean; existingBlockTitles?: string[] },
     signal: AbortSignal,
   ): Promise<RecommendationArbitrateResult> {
     const result = await this.registry(turn, "tsScopeId", 1, signal, (execute) => execute("arbitrateRecommendations", {
       turnRef: turn.public.id,
       contextId: input.contextId,
       domain: input.domain ?? "wealth",
+      ...(input.excludePromotions !== undefined ? { excludePromotions: input.excludePromotions } : {}),
       ...(input.existingBlockTitles ? { existingBlockTitles: input.existingBlockTitles } : {}),
     }));
     return recommendationArbitrateResultSchema.parse(result.output);
+  }
+
+  /**
+   * Executes the native sfield `cep.empathy.assess@1.0.0` read tool inside a scoped `read_only`
+   * execution to classify customer emotional state & life events from chat + Customer 360 notes.
+   */
+  async assessEmotionalState(
+    principalId: string,
+    scope: Pick<Scope, "userId" | "personaId" | "domainId">,
+    input: EmpathyAssessInput,
+    signal: AbortSignal,
+  ): Promise<EmotionalAssessment> {
+    const execScope = await this.sf.executions.open({
+      principal: principalFor(principalId, scope),
+      purpose: "cep-empathy-assess",
+      preset: "read_only",
+      budget: { maxToolCalls: 1 },
+    });
+    try {
+      const result = await execScope.registry.execute(
+        empathyAssessToolRef,
+        {
+          personaId: input.personaId,
+          userMessage: input.userMessage,
+          ordinal: input.ordinal,
+          ...(input.recentSummary ? { recentSummary: input.recentSummary.slice(0, 2400) } : {}),
+          ...(input.customerNotes ? { customerNotes: input.customerNotes.slice(0, 800) } : {}),
+          ...(input.hasRetirementHistory !== undefined ? { hasRetirementHistory: input.hasRetirementHistory } : {}),
+        },
+        { signal },
+      );
+      if (result.status !== "succeeded" || !result.output) {
+        throw new Error(result.error?.message ?? "Empathy assessment tool failed.");
+      }
+      return emotionalAssessmentSchema.parse(result.output);
+    } finally {
+      await execScope.close();
+    }
   }
 
   async executeGovernedWrite(
@@ -1324,9 +1381,55 @@ export class Runtime implements IntegrationTaskRuntime {
             contextId: parsed.contextId,
             domain: parsed.domain,
             fundingStatus: funding,
-            excludePromotions: false,
+            excludePromotions: parsed.excludePromotions ?? false,
             existingBlockTitles: parsed.existingBlockTitles,
           }, ctx.signal);
+        },
+      }),
+      defineTool({
+        id: empathyAssessToolId,
+        version: empathyAssessToolVersion,
+        description: "Assesses customer emotional state, life events, promotion suppression, and tailored empathy framing from the current message, recent context, and Customer 360 notes.",
+        inputs: empathyAssessInputJsonSchema,
+        outputs: emotionalAssessmentJsonSchema,
+        policy: {
+          action: empathyAssessToolId,
+          effect: "read",
+          requiresApproval: false,
+          maxAttempts: 1,
+          timeoutMs: 6_000,
+          classification: "public",
+          maxOutputBytes: 8_000,
+        },
+        handler: async (raw, ctx) => {
+          const parsed = empathyAssessInputSchema.parse(raw);
+          const profile = this.profileStore?.findByPersonaId(parsed.personaId) ?? findProfileById(parsed.personaId);
+          const customerNotes = parsed.customerNotes ?? profile?.notes;
+          const gw = this.gatewaySettings;
+          const isLiveExternalGateway = Boolean(
+            gw && (
+              gw.profile === "copilot_acp"
+              || gw.profile === "openai"
+              || ("baseUrl" in gw && !/127\.0\.0\.1|localhost/.test(gw.baseUrl))
+            ),
+          );
+          const dataDir = this.dataDir;
+          const llmJson = isLiveExternalGateway && gw && dataDir
+            ? async (sys: string, usr: string, sig: AbortSignal) => {
+                const { callConfiguredLlmJson } = await import("./dynamic-ui-generator");
+                return callConfiguredLlmJson(gw, dataDir, sys, usr, sig, undefined, { operation: "sfield:empathy_assess" });
+              }
+            : undefined;
+          return assessEmotionalState({
+            firstName: firstNameOf(profile?.displayName),
+            userMessage: parsed.userMessage,
+            ordinal: parsed.ordinal,
+            recentSummary: parsed.recentSummary,
+            customerNotes,
+            hasRetirementHistory: parsed.hasRetirementHistory,
+            llmJson,
+            signal: ctx.signal,
+          });
         },
       }),
       defineTool({

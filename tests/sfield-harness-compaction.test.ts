@@ -481,3 +481,72 @@ test("Contextual personalization, empathetic job-loss support, and industry sect
   assert.equal(supportCard.props.badge, "Life Event Support");
   assert.ok(supportCard.props.nodes.some((n) => n.type === "checklist"), "expected First-30-Days checklist");
 });
+
+test("sfield cep.empathy.assess@1.0.0 reads & writes Customer 360 notes and suppresses promotions during hardship", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "cep-sfield-empathy-c360-"));
+  const gateway = await startFixtureGateway();
+  const app = await startApp({
+    projectRoot: fileURLToPath(testProject),
+    dataDir: dir,
+    gateway: gateway.settings,
+    operatorAuth: "off",
+  });
+  t.after(async () => { await app.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
+  const client = await testClient(app.url);
+
+  // 1. Disclosing job loss invokes native sfield tool cep.empathy.assess@1.0.0 AND writes back to Customer 360 notes
+  const chat1 = await client.conversation("normal", "demo-learner");
+  const jobLossTurn = (await client.ask(chat1.id, "I just lost my job, what should I do?")).turn;
+  assert.equal(jobLossTurn.status, "completed");
+  assert.equal(jobLossTurn.emotionalState?.toolRef, "cep.empathy.assess@1.0.0");
+  assert.equal(jobLossTurn.emotionalState?.lifeEvent, "job_loss");
+  assert.equal(jobLossTurn.emotionalState?.suppressPromotions, true);
+  assert.equal(jobLossTurn.emotionalState?.fromCurrentMessage, true);
+
+  // Verify Customer 360 notes now contains the life-event note
+  const adminRes1 = await fetch(`${app.url}/api/admin/customers`, { headers: { cookie: client.cookie } });
+  assert.equal(adminRes1.status, 200);
+  const adminData1 = await adminRes1.json() as { customers: Array<{ personaId: string; displayName: string; notes?: string; [k: string]: unknown }> };
+  const alice = adminData1.customers.find((c) => c.personaId === "demo-learner");
+  assert.ok(alice, "expected Alice Morgan in Customer 360");
+  assert.match(alice.notes ?? "", /job loss/i, "expected job-loss note persisted into Customer 360 notes");
+
+  // 2. Advisor sets a hardship note on Jordan Lee directly in Customer 360 -> next neutral query reads it & suppresses promos!
+  const jordan = adminData1.customers.find((c) => /jordan/i.test(c.displayName));
+  assert.ok(jordan, "expected Jordan Lee in Customer 360");
+  const updateRes = await fetch(`${app.url}/api/admin/customers`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: client.cookie },
+    body: JSON.stringify({
+      personaId: jordan.personaId,
+      displayName: jordan.displayName,
+      segment: jordan.segment,
+      notes: "Navigating company restructuring / layoff — prioritize liquidity",
+      accountFundingStatus: jordan.accountFundingStatus,
+      beneficiaryStatus: jordan.beneficiaryStatus,
+      availableBalanceCents: Number(jordan.availableBalanceCents),
+      currentBalanceCents: Number(jordan.currentBalanceCents),
+      cashCents: 2_500_000, // $25,000 high cash would normally trigger promotional "Put idle cash to work" NBA
+      equityCents: Number(jordan.equityCents),
+      fixedIncomeCents: Number(jordan.fixedIncomeCents),
+      homeGoalTargetCents: Number(jordan.homeGoalTargetCents),
+      homeGoalSavedCents: Number(jordan.homeGoalSavedCents),
+    }),
+  });
+  assert.equal(updateRes.status, 200, "expected Customer 360 note update to succeed");
+
+  // Switch conversation to Jordan and send a neutral query ("Show all my stocks")
+  const chat2 = await client.conversation("normal", jordan.personaId);
+  const neutralTurn = (await client.ask(chat2.id, "Show all my stocks")).turn;
+  assert.equal(neutralTurn.status, "completed");
+  assert.equal(neutralTurn.emotionalState?.toolRef, "cep.empathy.assess@1.0.0");
+  assert.equal(neutralTurn.emotionalState?.source, "customer360_notes");
+  assert.equal(neutralTurn.emotionalState?.lifeEvent, "job_loss");
+  assert.equal(neutralTurn.emotionalState?.suppressPromotions, true);
+  assert.equal(neutralTurn.emotionalState?.fromCurrentMessage, false);
+  assert.match(neutralTurn.experience?.intro ?? "", /Jordan.*transition/i, "expected empathetic opener informed by Customer 360 notes");
+  // Promotional cash-investing NBA must be suppressed!
+  const card = neutralTurn.experience?.blocks.find((b) => b.component === "PznDynamicCanvas");
+  assert.ok(card && card.component === "PznDynamicCanvas");
+  assert.doesNotMatch(card.props.suggestedFollowUp ?? "", /invest.*cash|put.*cash to work/i, "promotional cash NBA must be suppressed");
+});

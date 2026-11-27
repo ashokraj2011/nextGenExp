@@ -115,6 +115,7 @@ export type SemanticRouteTrace = {
   confidence: number;
   reasoning: string;
 };
+import type { EmotionalAssessment } from "./empathy";
 export type LiveHarnessStage = {
   stage: string;
   status: string;
@@ -133,6 +134,7 @@ export type TurnView = {
   actionMode?: ActionMode;
   semanticRoute?: SemanticRouteTrace;
   customerLookup?: CustomerLookupSummary;
+  emotionalState?: EmotionalAssessment;
   providerArbitration?: ProviderArbitrationTrace;
   piiRedaction?: PiiRedactionTrace;
   nextBestAction?: NextBestActionCard;

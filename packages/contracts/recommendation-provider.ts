@@ -39,6 +39,7 @@ export const recommendationArbitrateInputSchema = z.object({
   turnRef: z.string().trim().min(1).max(128),
   contextId: z.string().trim().min(1).max(80),
   domain: recommendationDomainSchema.default("wealth"),
+  excludePromotions: z.boolean().optional(),
   existingBlockTitles: z.array(z.string().trim().max(120)).max(12).optional(),
 }).strict();
 
@@ -59,6 +60,7 @@ export const recommendationArbitrateInputJsonSchema = {
     turnRef: { type: "string", minLength: 1, maxLength: 128 },
     contextId: { type: "string", minLength: 1, maxLength: 80 },
     domain: { type: "string", enum: ["wealth", "operations", "sales", "general"] },
+    excludePromotions: { type: "boolean" },
     existingBlockTitles: {
       type: "array",
       maxItems: 12,

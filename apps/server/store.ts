@@ -1047,6 +1047,7 @@ export class Store {
               firstName: firstNameOf(profile.displayName),
               userMessage: turn.public.message,
               ordinal: turn.ordinal,
+              emotionalState: turn.public.emotionalState,
             })
           : laidOut;
         if (turn.agentLaunch && "capability" in turn.agentLaunch) delete turn.agentLaunch.values;

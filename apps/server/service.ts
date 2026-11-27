@@ -7,7 +7,8 @@ import { fieldValueValid } from "./agentic-inputs";
 import { digestJson, formatRollingSummary, type ChatHarness, type HarnessStageRecord, type RunResult } from "@sfield/core";
 import demo from "../../fixtures/host.json";
 import { type Conversation, type FailureCode, type TurnAccepted } from "../../packages/contracts/api";
-import { findProfileById } from "../../packages/customer-profiles";
+import { findProfileById, type CustomerProfileStore } from "../../packages/customer-profiles";
+import type { EmotionalAssessment } from "../../packages/contracts/empathy";
 import { DECISION_TTL, TURN_DEADLINE, contextCatalogSchema, propensitySchema, type SelectionMode, type PropensityResult } from "../../packages/contracts/domain";
 import {
   fundingOptionsSchema, fundingPreviewSchema, fundingPreviewWorkflow, fundingStatusSchema, fundingToolKey,
@@ -62,7 +63,7 @@ import { principalFor, type Runtime } from "./runtime";
 import { PznChatHistory, resolveClarificationReply } from "./chat-history";
 import { collectCrossThreadStatus, isThreadStatusPrompt, runThreadStatusHarness } from "./thread-status";
 import { CustomerGoalStore, inferSuggestedGoalFromPrompt, isGoalSetupPrompt } from "./goal-store";
-import { buildHardshipSupportCanvas, isStandaloneHardshipPrompt } from "./response-personalizer";
+import { buildHardshipSupportCanvas, isHardshipLifeEvent, isStandaloneHardshipPrompt } from "./response-personalizer";
 
 class TurnFailure extends Error {
   constructor(readonly code: FailureCode) { super(code); }
@@ -130,6 +131,7 @@ export class ExperienceService {
       dataDir: string;
       integrationService?: IntegrationTaskService;
       customer360?: Customer360Service;
+      profileStore?: CustomerProfileStore;
       portfolioSnapshots?: PortfolioSnapshotProvider;
       goalProgressProvider?: GoalProgressProvider;
       opsStore?: OpsIncidentStore;
@@ -1069,11 +1071,53 @@ export class ExperienceService {
           || entry.intentId === "retirement_learning"
           || /\bretir|62|leaving your job/i.test(`${entry.request} ${entry.clarificationQuestion ?? ""} ${entry.assistantReply ?? ""}`),
         );
-        if (conversation.domainId === "wealth" && isStandaloneHardshipPrompt(scopedPrompt, hasRetirementHistory)) {
+        let emotionalState: EmotionalAssessment | undefined;
+        if (conversation.domainId === "wealth") {
+          try {
+            const liveProfile = domainTools.profileStore?.findByPersonaId(conversation.personaId) ?? findProfileById(conversation.personaId);
+            const shortRecent = recentForRoute.slice(-2).map((entry) => `${entry.request} -> ${entry.assistantReply ?? entry.clarificationQuestion ?? ""}`).join(" | ");
+            emotionalState = await runtime.assessEmotionalState(
+              initial.scope.principalId,
+              initial.scope,
+              {
+                personaId: conversation.personaId,
+                userMessage: scopedPrompt,
+                ordinal: initial.ordinal,
+                ...(shortRecent ? { recentSummary: shortRecent } : {}),
+                ...(liveProfile?.notes ? { customerNotes: liveProfile.notes } : {}),
+                hasRetirementHistory,
+              },
+              signal,
+            );
+            this.store.update(id, (row) => {
+              row.public.emotionalState = emotionalState;
+            });
+            // Persist newly disclosed major life events back into Customer 360 notes + sfield Memory
+            if (emotionalState.fromCurrentMessage && emotionalState.customerNoteToSave) {
+              const savedNote = domainTools.profileStore?.appendNote(conversation.personaId, emotionalState.customerNoteToSave);
+              if (savedNote?.added) {
+                void runtime.rememberMemory(initial.scope.principalId, {
+                  kind: "fact",
+                  content: emotionalState.customerNoteToSave,
+                  key: `life_event:${emotionalState.lifeEvent}`,
+                  origin: "trusted_source",
+                }).catch(() => undefined);
+              }
+            }
+          } catch {
+            // Emotional assessment is best-effort and must never fail a turn.
+          }
+        }
+        const suppressPromotionsForEmpathy = Boolean(emotionalState?.suppressPromotions);
+        const isFreshHardship = !hasRetirementHistory && (
+          isStandaloneHardshipPrompt(scopedPrompt, hasRetirementHistory)
+          || Boolean(emotionalState?.fromCurrentMessage && isHardshipLifeEvent(emotionalState.lifeEvent))
+        );
+        if (conversation.domainId === "wealth" && isFreshHardship) {
           stage = "compose";
           this.store.progress(id, "planning", this.now());
-          const profile = findProfileById(conversation.personaId);
-          const support = buildHardshipSupportCanvas(scopedPrompt, profile);
+          const profile = domainTools.profileStore?.findByPersonaId(conversation.personaId) ?? findProfileById(conversation.personaId);
+          const support = buildHardshipSupportCanvas(scopedPrompt, profile, emotionalState);
           const now = this.now();
           const dynamicResult = compileDynamicCanvas(support.intro, support.canvas, now + DECISION_TTL);
           this.store.update(id, (row) => {
@@ -1083,7 +1127,7 @@ export class ExperienceService {
               capabilityLabel: "Life Event Support",
               method: "deterministic",
               confidence: 0.96,
-              reasoning: "Matched urgent life-event / hardship inquiry with empathetic liquidity guidance.",
+              reasoning: emotionalState?.reason ?? "Matched urgent life-event / hardship inquiry with empathetic liquidity guidance.",
             };
             row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
           });
@@ -1155,7 +1199,7 @@ export class ExperienceService {
               principalId: initial.scope.principalId,
               personaId: conversation.personaId,
               fundingStatus: (this.store.axe.fundingStatus(initial.scope) ?? persona.accountFundingStatus) === "funded" ? "funded" : "unfunded",
-              excludePromotions: runtime.experiences.execution.world.exclusions(initial),
+              excludePromotions: suppressPromotionsForEmpathy || runtime.experiences.execution.world.exclusions(initial),
             })
           : undefined;
         const profileSummary = scrubbedProfileSummaryOverride ?? (lookupInfo
@@ -1292,6 +1336,7 @@ export class ExperienceService {
             const wealthArb = await runtime.arbitrateRecommendations(current(), {
               contextId: wealthContext,
               domain: "wealth",
+              excludePromotions: suppressPromotionsForEmpathy || runtime.experiences.execution.world.exclusions(initial),
               existingBlockTitles: [generated.canvas.title],
             }, signal);
             governedWinner = pickEligibleRecommendation(wealthArb.recommendations);
@@ -1379,7 +1424,7 @@ export class ExperienceService {
               principalId: turn.scope.principalId,
               personaId: conversation.personaId,
               fundingStatus: effectiveFundingForRoute,
-              excludePromotions: runtime.experiences.execution.world.exclusions(turn),
+              excludePromotions: Boolean(turn.public.emotionalState?.suppressPromotions) || runtime.experiences.execution.world.exclusions(turn),
             }).lookup
           : undefined;
         const result = await runtime.model("route", turn, conversation, catalog.snapshotId, {
@@ -1703,7 +1748,7 @@ export class ExperienceService {
             principalId: latest.scope.principalId,
             personaId: conversation.personaId,
             fundingStatus: (this.store.axe.fundingStatus(latest.scope) ?? persona.accountFundingStatus) === "funded" ? "funded" : "unfunded",
-            excludePromotions: runtime.experiences.execution.world.exclusions(latest),
+            excludePromotions: Boolean(latest.public.emotionalState?.suppressPromotions) || runtime.experiences.execution.world.exclusions(latest),
             existingBlockTitles,
           });
           lookupSummary = evaluated.lookup;
