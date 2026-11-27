@@ -772,17 +772,21 @@ function UiWorkspace({ initial, customers }: {
   initial: UiLayoutCatalog;
   customers: Customer360AdminRecord[];
 }) {
+  const params = new URLSearchParams(location.search);
+  const scopedDomain = initial.domains.find((domain) => domain === params.get("domain"));
+  const initialRecord = scopedDomain ? initial.layouts.find(({ domainId }) => domainId === scopedDomain) : initial.layouts[0];
   const [view, setView] = useState<"editor" | "widgets" | "designs" | "surfaces">(() => {
-    const param = new URLSearchParams(location.search).get("view");
+    const param = params.get("view");
     if (param === "surfaces") return "surfaces";
-    return !initial.domains.length || param === "library" ? "designs" : "editor";
+    if (!initial.domains.length || param === "library") return "designs";
+    return param === "widgets" ? "widgets" : "editor";
   });
   const [library, setLibrary] = useState(initial.library);
-  const [newDomain, setNewDomain] = useState<DomainPackId>(initial.domains[0] ?? "wealth");
+  const [newDomain, setNewDomain] = useState<DomainPackId>(scopedDomain ?? initial.domains[0] ?? "wealth");
   const [widgets, setWidgets] = useState<SavedWidget[]>([]);
   const [records, setRecords] = useState(initial.layouts);
-  const [selected, setSelected] = useState(initial.layouts[0]?.id ?? "new");
-  const [edits, setEdits] = useState<Partial<Record<string, UiDesign>>>(() => initial.layouts.length ? {} : { new: domainStarters[newDomain]() });
+  const [selected, setSelected] = useState(initialRecord?.id ?? "new");
+  const [edits, setEdits] = useState<Partial<Record<string, UiDesign>>>(() => initialRecord ? {} : { new: domainStarters[newDomain]() });
   const [expandedSlotId, setExpandedSlotId] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -1152,7 +1156,8 @@ function UiWorkspace({ initial, customers }: {
 
       {view !== "editor" && error && <p className="ui-builder-error" role="alert">{error}</p>}
       {view === "designs" ? (
-        <DesignLibrary tenantId={initial.tenantId} library={library} records={records} targets={initial.targets} canCopy={initial.domains.length > 0}
+        <DesignLibrary tenantId={initial.tenantId} library={library} records={records} targets={initial.targets}
+          initialDomain={scopedDomain} canCopy={initial.domains.length > 0}
           onOpen={(id) => { select(id); setView("editor"); }}
           onCopy={(item) => {
             setNewDomain(initial.domains.includes(item.domainId) ? item.domainId : initial.domains[0]);

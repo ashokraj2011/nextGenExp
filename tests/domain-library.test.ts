@@ -9,6 +9,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { generateWidgetFromText } from "../apps/server/widget-library";
 import { Store } from "../apps/server/store";
+import type { ExperienceRegistryScopes, ExperienceRegistryView, RecordWorkspaceRegistry } from "../packages/contracts/experience-registry";
 import type { Bootstrap, ConversationView } from "../packages/contracts/api";
 import type { UiDesign, UiLayoutCatalog, UiLayoutRecord } from "../packages/contracts/ui-layout";
 import { author, operatorHeader, reviewer, testOperators } from "./operator-fixture";
@@ -137,6 +138,43 @@ test("a published domain design reaches independent members with their own data 
   await reader.request("/api/admin/routing-flows?scope=tenant", {}, 403, readerHeaders);
   assert.deepEqual((await southOwner.request<{ overrides: object }>(flowSettings)).overrides, {});
   assert.deepEqual((await owner.request<{ overrides: object }>(flowSettings)).overrides, { stock_trade: { enabled: false } });
+  const registry = "/api/admin/experience-registry";
+  assert.deepEqual(await owner.request<ExperienceRegistryScopes>(registry + "?view=scopes"), {
+    tenantId: "north", domains: ["wealth", "it_ops"], tenantTools: false,
+  });
+  assert.deepEqual(await reader.request<ExperienceRegistryScopes>(registry + "?view=scopes", undefined, 200, readerHeaders), {
+    tenantId: "north", domains: ["sales_revops"], tenantTools: false,
+  });
+  const named = { id: "it_ops_intent_shift_notes", label: "Shift notes", view: "timeline", phrases: ["Show shift notes"] };
+  const namedLayout = await owner.request<UiLayoutRecord>(path, { operation: "publish", domainId: "it_ops", design: {
+    ...design, name: "Shift notes layout", targets: [{ kind: "intent", id: named.id }], recordIntent: named,
+    slots: [{ kind: "block", id: "timeline", component: "PznDynamicCanvas" }],
+  } });
+  const opsRegistry = await owner.request<RecordWorkspaceRegistry>(registry + "?domain=it_ops");
+  assert.deepEqual([opsRegistry.tenantId, opsRegistry.domainId], ["north", "it_ops"]);
+  assert.ok(opsRegistry.intents.some(({ id, phrases, layoutName }) => id === named.id && phrases?.[0] === "Show shift notes" && layoutName === "Shift notes layout"));
+  assert.ok(opsRegistry.catalog.some(({ id }) => id === namedLayout.id));
+  assert.ok(opsRegistry.catalog.some(({ id, kind }) => id === saved.widget.id && kind === "widget"));
+  assert.ok(opsRegistry.providers.some(({ id }) => id === "ops_runbook"));
+  assert.ok(!opsRegistry.providers.some(({ id }) => id === "sales_deal_desk"));
+  assert.deepEqual(opsHome.intentPrompts, []);
+  assert.deepEqual((await southOwner.request<RecordWorkspaceRegistry>(registry + "?domain=it_ops")).catalog, []);
+  const salesRegistry = await reader.request<RecordWorkspaceRegistry>(registry + "?domain=sales_revops", undefined, 200, readerHeaders);
+  assert.ok(salesRegistry.intents.some(({ id }) => id === "sales_revops_detail"));
+  assert.ok(salesRegistry.providers.some(({ id }) => id === "sales_deal_desk"));
+  assert.deepEqual(salesRegistry.catalog, []);
+  await reader.request(registry + "?domain=it_ops", undefined, 403, readerHeaders);
+  await reader.request(registry + "?domain=wealth", undefined, 403, readerHeaders);
+  const intent = { intentId: "review_year_start", label: "Review the start of the year", contextId: "balance",
+    task: "explain", description: "Review the start of the year with the customer.", samplePhrases: ["Help me review the start of the year"], enabled: true };
+  await reader.request("/api/admin/registry-intent?domain=sales_revops", intent, 400, readerHeaders);
+  await reader.request("/api/admin/registry-intent", intent, 403, readerHeaders);
+  const wealth = await owner.request<ExperienceRegistryView>("/api/admin/registry-intent?domain=wealth", intent);
+  assert.equal(wealth.domainId, "wealth");
+  assert.ok(wealth.intents.some(({ intentId }) => intentId === intent.intentId));
+  const separateWealth = await southOwner.request<ExperienceRegistryView>(registry + "?domain=wealth");
+  assert.ok(!separateWealth.intents.some(({ intentId }) => intentId === intent.intentId));
+
   const southChat = await southOwner.conversation();
   assert.equal(southChat.tenantId, "south");
 });

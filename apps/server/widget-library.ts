@@ -449,28 +449,24 @@ export class WidgetLibraryStore {
     return widget && { widget, ...compileSavedWidgetToCanvas(widget, prompt, personaName) };
   }
 
+  publishedWidgets(preferredOwner?: string) {
+    const data = this.load();
+    const groups = Object.entries(data).filter(([owner]) => owner !== preferredOwner).map(([, widgets]) => widgets);
+    if (preferredOwner) groups.unshift(data[preferredOwner] ?? []);
+    const widgets = new Map<string, SavedWidget>();
+    for (const group of groups) {
+      for (const widget of group) {
+        if (widget.availableForConsumption && !widgets.has(widget.id)) widgets.set(widget.id, widget);
+      }
+    }
+    return [...widgets.values()];
+  }
+
   matchCustomWidget(principalId: string, prompt: string, exactOnly = false): SavedWidget | undefined {
     const trimmed = prompt.trim();
     if (trimmed.length < 3 || /\bcreate\s+(?:a\s+)?rule\b/i.test(trimmed)) return undefined;
     const tokens = extractWidgetTokens(trimmed);
-
-    const data = this.load();
-    const seen = new Set<string>();
-    const candidates: SavedWidget[] = [];
-    for (const w of data[principalId] ?? []) {
-      if (!w.availableForConsumption || seen.has(w.id)) continue;
-      seen.add(w.id);
-      candidates.push(w);
-    }
-    for (const [owner, list] of Object.entries(data)) {
-      if (owner === principalId) continue;
-      for (const w of list) {
-        if (!w.availableForConsumption || seen.has(w.id)) continue;
-        seen.add(w.id);
-        candidates.push(w);
-      }
-    }
-
+    const candidates = this.publishedWidgets(principalId);
     const query = trimmed.toLowerCase();
     const exact = candidates.find((w) => w.prompt.trim().toLowerCase() === query || w.name.toLowerCase() === query);
     if (exact || exactOnly) return exact;

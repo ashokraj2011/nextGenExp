@@ -9,6 +9,7 @@ import { setTimeout as wait } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import type { ConversationView, RecordUpdate, TurnAccepted, TurnView } from "../packages/contracts/api";
+import type { RecordWorkspaceRegistry } from "../packages/contracts/experience-registry";
 import type { TaskContractInput } from "../packages/contracts/integration-task";
 import type { TurnPayloads } from "../packages/contracts/inspector";
 import type { UiDesign, UiLayoutRecord } from "../packages/contracts/ui-layout";
@@ -168,6 +169,8 @@ test("a separate domain binds a row’s stable ID into the same versioned task u
   broken.experience!.actions[0].table!.onClick!.inputs.reference = "amount";
   await client.request("/api/admin/ui-layouts", { operation: "publish", domainId: "it_ops", design: broken }, 400);
   await client.request("/api/admin/ui-layouts", { operation: "publish", domainId: "it_ops", design });
+  const catalog = await client.request<RecordWorkspaceRegistry>("/api/admin/experience-registry?domain=it_ops");
+  assert.ok(catalog.intents.some(({ label, phrases }) => label === "Expense review queue" && phrases?.[0] === "Show the expense queue"));
   const chat = await client.request<ConversationView>("/api/conversations", { domainId: "it_ops" }, 201);
   const listed = (await client.ask(chat.id, "Show the expense queue")).turn;
   const table = canvas(listed).nodes.find((node) => node.type === "table");

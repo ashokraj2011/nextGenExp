@@ -103,7 +103,7 @@ export function createOpsRunbookProvider(
   return {
     id: "ops_runbook",
     label: "IT Ops Runbook Recommender",
-    description: "Inspects live operational incident telemetry (incidents.json) to recommend P1 rollback approvals and remediation runbooks.",
+    description: "Recommends next steps for open and escalated incidents. P1 incidents get higher priority, and a pending rollback brings up the triage and rollback review.",
     domains: ["operations"],
     async evaluate() {
       const active = listIncidents().filter((inc) => inc.status === "open" || inc.status === "escalated");
@@ -132,7 +132,7 @@ export function createSalesDealDeskProvider(
   return {
     id: "sales_deal_desk",
     label: "Sales Deal Desk Recommender",
-    description: "Inspects live CRM deal pipeline (deals.json) to surface pending enterprise discount approvals and close-plan actions.",
+    description: "Recommends next steps for deals in negotiation or with a pending discount. Pending discounts get higher priority.",
     domains: ["sales"],
     async evaluate() {
       const deals = listDeals();

@@ -230,8 +230,35 @@ try {
   await wizard.waitFor();
   assert.deepEqual(submissions, []);
 
+  await openAdmin(page, "intents");
+  const registryScope = page.getByLabel("Workspace", { exact: true });
+  await page.getByText("pzn-local", { exact: true }).waitFor();
+  await page.getByRole("tab", { name: /Intents & TS Mapping/ }).waitFor();
+  assert.equal(await registryScope.inputValue(), "wealth");
+  await registryScope.selectOption("it_ops");
+  await page.getByRole("heading", { name: "Incident details", exact: true }).waitFor();
+  await page.getByRole("tab", { name: /Content Catalog/ }).click();
+  await page.getByRole("heading", { name: "IT Ops · Live P1 Incident Command", exact: true }).waitFor();
+  assert.equal(await page.getByRole("heading", { name: "Compare balances layout", exact: true }).count(), 0);
+  await page.getByRole("tab", { name: "Next Best Actions", exact: true }).click();
+  await page.getByRole("heading", { name: "IT Ops Runbook Recommender", exact: true }).waitFor();
+  await registryScope.selectOption("sales_revops");
+  await page.getByRole("heading", { name: "Deal details", exact: true }).waitFor();
+  await page.getByRole("tab", { name: "Next Best Actions", exact: true }).click();
+  await page.getByRole("heading", { name: "Sales Deal Desk Recommender", exact: true }).waitFor();
+  assert.equal(await page.getByRole("heading", { name: "IT Ops Runbook Recommender", exact: true }).count(), 0);
+  await registryScope.selectOption("tenant");
+  await page.getByRole("tab", { name: "Action flows", exact: true }).waitFor();
+  assert.equal(await page.getByRole("tab", { name: "Knowledge base", exact: true }).count(), 1);
+  await registryScope.selectOption("it_ops");
+  await page.getByRole("tab", { name: /Content Catalog/ }).click();
+  await page.getByRole("region", { name: "Published content", exact: true }).getByRole("link", { name: "Design library", exact: true }).click();
+  const opsLibrary = page.getByRole("region", { name: "Shared design library", exact: true });
+  await opsLibrary.getByRole("heading", { name: "IT Ops · Live P1 Incident Command", exact: true }).waitFor();
+  assert.equal(await opsLibrary.getByRole("heading", { name: "Compare balances layout", exact: true }).count(), 0);
+
   assert.deepEqual(pageErrors, []);
-  console.log("UI builder preview, publishing, intent routing, Inspector, Widget Studio, interactive actions, linked widgets, and responsive layout passed.");
+  console.log("UI builder preview, publishing, intent routing, Inspector, Widget Studio, interactive actions, linked widgets, workspace catalogs, and responsive layout passed.");
 } finally {
   await browser.close();
   await app.close();

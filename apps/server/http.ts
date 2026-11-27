@@ -1,6 +1,6 @@
 import { domainPackIds } from "../../packages/contracts/domain-packs";
 import { createStudioHandler } from "@sfield/studio";
-import { handleAdminStudioRoutes } from "./routes/admin-studio";
+import { handleAdminStudioRoutes, isExperienceRegistryEndpoint } from "./routes/admin-studio";
 import { handleCollaborationAndProtocolRoutes } from "./routes/collaboration";
 import { handleDomainsOpsSalesRoutes } from "./routes/domains-ops-sales";
 import { handleIntegrationsAndPznRoutes } from "./routes/integrations-pzn";
@@ -347,9 +347,7 @@ export async function startApp(options: Options) {
       rawEntry,
     }));
     return {
-      contexts,
-      intents,
-      content,
+      tenantId: serverTenantId, domainId: "wealth", contexts, intents, content,
       nbaRules: experienceRegistry.listNbaRules(),
     };
   }
@@ -862,8 +860,8 @@ export async function startApp(options: Options) {
       || (resource === "proactive" && id === "trigger");
     if (internalApi) {
       const actor = requireOperator();
-      const domainAdmin = resource === "admin" && ["routing-flows", "ui-layouts", "ui-layout-preview", "ui-layout-test", "ui-layout-generate", "widgets", "widget-generate",
-        "customers", "bootstrap", "conversations", "logs", "inspector", "tools", "ccre-rules", "treatment-preview", "treatment-runs"].includes(id);
+      const domainAdmin = resource === "admin" && (isExperienceRegistryEndpoint(id) || ["routing-flows", "ui-layouts", "ui-layout-preview", "ui-layout-test", "ui-layout-generate", "widgets", "widget-generate",
+        "customers", "bootstrap", "conversations", "logs", "inspector", "tools", "ccre-rules", "treatment-preview", "treatment-runs"].includes(id));
       const domainApi = domainAdmin || ["debug", "ops", "ops-incidents", "sales", "sales-deals"].includes(resource);
       if (!domainApi && !membership.isTenantAdmin(actor)) throw new ApiError(403, "tenant_admin_required", "This setting requires a tenant administrator.");
     }
@@ -871,18 +869,18 @@ export async function startApp(options: Options) {
     if (["sales", "sales-deals"].includes(resource)) requireChatDomain("sales_revops", "");
     const adminBootstrap = resource === "admin" && id === "bootstrap" && !operation && inspectorEnabled;
     if (method === "GET" && ((resource === "bootstrap" && !id) || adminBootstrap)) {
-      const intentPrompts = experienceRegistry.listIntents()
-        .filter((item) => item.enabled && item.samplePhrases.length > 0)
-        .map((item) => ({
-          intentId: item.intentId,
-          label: item.label,
-          prompt: item.samplePhrases[0],
-          isCustom: !item.isBuiltIn || item.isCustomized,
-        }));
       const domain = url.searchParams.get("domain");
       const parsedDomain = z.enum(domainPackIds).safeParse(domain ?? "wealth");
       if (!parsedDomain.success) throw new ApiError(400, "domain_invalid", "Choose an available domain.");
       const activeDomain = parsedDomain.data;
+      const intentPrompts = activeDomain === "wealth" && (!operator || membership.library(operator).includes("wealth"))
+        ? experienceRegistry.listIntents().filter((item) => item.enabled && item.samplePhrases.length > 0).map((item) => ({
+          intentId: item.intentId,
+          label: item.label,
+          prompt: item.samplePhrases[0],
+          isCustom: !item.isBuiltIn || item.isCustomized,
+        }))
+        : [];
       const personas: Bootstrap["personas"] = activeDomain === "wealth"
         ? await loadBootstrapPersonas(principalId, (personaId) => (!customerSession || personaId === selectedProfile) && membership.chat("wealth", personaId, operator), selectedProfile)
         : operator && membership.chat(activeDomain, "", operator) ? [{

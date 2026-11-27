@@ -36,7 +36,9 @@ import type { PiiFirewallConfig, PiiFirewallView, PiiRedactionTrace } from "../.
 import type { UxEvolutionView, UxProposal } from "../../packages/contracts/ux-evolution";
 import type { Customer360AdminRecord, Customer360ProfileInput } from "../../packages/contracts/customer-360";
 import type {
+  ExperienceRegistryScopes,
   ExperienceRegistryView,
+  RecordWorkspaceRegistry,
   ManagedContentInput,
   ManagedIntentInput,
   ManagedNbaRuleInput,
@@ -181,7 +183,10 @@ export const api = {
   saveCustomer: (input: Customer360ProfileInput) => request<{ customer?: Customer360AdminRecord; customers: Customer360AdminRecord[] }>("/api/admin/customers", input),
   deleteOrResetCustomer: (personaId: string) => request<{ deleted: boolean; reset: boolean; customers: Customer360AdminRecord[] }>("/api/admin/customer-delete", { personaId }),
   resetCustomerNba: (personaId: string) => request<{ customers: Customer360AdminRecord[] }>("/api/admin/customer-reset-nba", { personaId }),
-  experienceRegistry: () => request<ExperienceRegistryView>("/api/admin/experience-registry"),
+  experienceRegistryScopes: () => request<ExperienceRegistryScopes>("/api/admin/experience-registry?view=scopes"),
+  experienceRegistry: () => request<ExperienceRegistryView>("/api/admin/experience-registry?domain=wealth"),
+  recordWorkspaceRegistry: (domain: RecordWorkspaceRegistry["domainId"]) =>
+    request<RecordWorkspaceRegistry>("/api/admin/experience-registry?domain=" + domain),
   saveRegistryIntent: (input: ManagedIntentInput) => request<ExperienceRegistryView>("/api/admin/registry-intent", input),
   deleteOrResetRegistryIntent: (intentId: string) => request<ExperienceRegistryView>("/api/admin/registry-intent-delete", { intentId }),
   saveRegistryContent: (input: ManagedContentInput) => request<ExperienceRegistryView>("/api/admin/registry-content", input),

@@ -17,7 +17,9 @@ import {
   managedContentInputSchema,
   managedIntentInputSchema,
   managedNbaRuleInputSchema,
+  type ExperienceRegistryScopes,
   type ExperienceRegistryView,
+  type RecordWorkspaceRegistry,
 } from "../../../packages/contracts/experience-registry";
 import { knowledgeDocumentUpsertSchema } from "../../../packages/contracts/knowledge-base";
 import { mcpDiscoverRequestSchema, mcpImportRequestSchema } from "../../../packages/contracts/mcp-discovery";
@@ -59,7 +61,7 @@ import { serverTenantId } from "../tenant";
 import { addCcreRule, previewTreatmentSelector, toolSetupTag, toolSetupView, validateToolSetup } from "../tool-setup";
 import type { TradeStore } from "../trade-store";
 import { generateBoundUiLayoutWithLlm } from "../ui-layout-generator";
-import { previewUiLayout, uiTargetOptions, validateUiDesign } from "../ui-layouts";
+import { previewUiLayout, recordViewOptions, uiTargetOptions, validateUiDesign } from "../ui-layouts";
 import type { UxEvolutionStore } from "../ux-evolution";
 import type { VerticalPackStore } from "../vertical-factory";
 import type { WidgetLibraryStore } from "../widget-library";
@@ -67,6 +69,50 @@ import type { WorkflowEngine } from "../workflow-engine";
 import type { WriteAuditStore } from "../write-audit";
 
 const idPattern = /^[A-Za-z0-9._-]{1,80}$/;
+
+const wealthRegistryWrites = new Set([
+  "registry-intent", "registry-intent-delete", "registry-content", "registry-content-delete",
+  "registry-nba", "registry-nba-reorder", "registry-nba-delete",
+]);
+
+export function isExperienceRegistryEndpoint(id: string) {
+  return id === "experience-registry" || wealthRegistryWrites.has(id);
+}
+
+function recordWorkspaceRegistry(
+  domainId: RecordWorkspaceRegistry["domainId"], store: Store, widgets: WidgetLibraryStore, runtime: Runtime | null,
+): RecordWorkspaceRegistry {
+  const layouts = store.publishedUiLayouts(domainId);
+  const layoutByIntent = new Map(layouts.flatMap(({ design }) => design.targets.flatMap(({ kind, id }) =>
+    kind === "intent" ? [[id, design.name] as const] : [])));
+  const intents: RecordWorkspaceRegistry["intents"] = recordViewOptions(domainId).map(({ target, label, description }) => ({
+    id: target.id, label, description, layoutName: layoutByIntent.get(target.id),
+  }));
+  for (const { id, design } of layouts) {
+    if (design.recordIntent) {
+      const intent = design.recordIntent;
+      intents.push({ id: intent.id, label: intent.label, description: design.description, phrases: intent.phrases, layoutName: design.name });
+    }
+    if (design.experience?.audience === "operator") {
+      for (const action of design.experience.actions) {
+        if (action.phrases.length) intents.push({
+          id: id + ":" + action.id, label: action.title, description: action.description || design.description,
+          phrases: action.phrases, layoutName: design.name,
+        });
+      }
+    }
+  }
+  const providerDomain = domainId === "it_ops" ? "operations" : "sales";
+  return {
+    tenantId: serverTenantId, domainId, intents,
+    catalog: [
+      ...layouts.map(({ id, design, revision }) => ({ id, kind: "layout" as const, title: design.name, description: design.description, revision })),
+      ...widgets.publishedWidgets().map(({ id, name, body }) => ({ id, kind: "widget" as const, title: name, description: body })),
+    ],
+    providers: (runtime?.recommendationProviderDescriptors() ?? []).filter(({ domains }) => domains.includes(providerDomain))
+      .map(({ id, label, description }) => ({ id, label, description })),
+  };
+}
 
 export interface AdminStudioRouteDeps {
   req: IncomingMessage;
@@ -294,11 +340,23 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
     return true;
   }
   if (id === "experience-registry" && method === "GET") {
-    json(res, buildExperienceRegistryView());
+    if (url.searchParams.get("view") === "scopes") {
+      const actor = requireOperator();
+      json(res, { tenantId: serverTenantId, domains: membership.authoring(actor), tenantTools: membership.isTenantAdmin(actor) } satisfies ExperienceRegistryScopes);
+      return true;
+    }
+    const domain = authoringDomain();
+    json(res, domain === "wealth" ? buildExperienceRegistryView() : recordWorkspaceRegistry(domain, store, widgetLibraries[domain], runtime));
     return true;
+  }
+  if (method === "POST" && id && wealthRegistryWrites.has(id) && authoringDomain() !== "wealth") {
+    throw new ApiError(400, "registry_domain_invalid", "Choose Wealth to edit customer intents, content, and Next Best Action rules.");
   }
   if (id === "registry-intent" && method === "POST") {
     const input = await body(req, managedIntentInputSchema, 16 * 1024);
+    if (layoutTargetDomain({ kind: "intent", id: input.intentId }) !== "wealth") {
+      throw new ApiError(400, "registry_domain_invalid", "Use a Wealth intent ID here. Publish IT Ops and Sales intents in UI Builder.");
+    }
     if (!activeContexts.some((c) => c.contextId === input.contextId)) {
       throw new ApiError(400, "invalid_context", "Choose an active Treatment Selector context.");
     }

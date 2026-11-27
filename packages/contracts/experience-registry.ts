@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { componentNames, contextEntrySchema, type ContentEntry } from "./domain";
+import type { DomainPackId } from "./domain-packs";
+import type { RecommendationProviderDescriptor } from "./recommendation-provider";
 
 export const managedIntentInputSchema = z.object({
   intentId: z.string().regex(/^[a-z][a-z0-9_]{1,63}$/, "Use lowercase snake_case (e.g. tax_planning)"),
@@ -77,7 +79,29 @@ export type ManagedNbaRuleRecord = ManagedNbaRuleInput & {
   isCustomized: boolean;
 };
 
+export type ExperienceRegistryScopes = {
+  tenantId: string;
+  domains: DomainPackId[];
+  tenantTools: boolean;
+};
+
+export type RecordWorkspaceRegistry = {
+  tenantId: string;
+  domainId: Exclude<DomainPackId, "wealth">;
+  intents: {
+    id: string;
+    label: string;
+    description: string;
+    phrases?: string[];
+    layoutName?: string;
+  }[];
+  catalog: { id: string; kind: "layout" | "widget"; title: string; description: string; revision?: number }[];
+  providers: Pick<RecommendationProviderDescriptor, "id" | "label" | "description">[];
+};
+
 export type ExperienceRegistryView = {
+  tenantId: string;
+  domainId: "wealth";
   contexts: { contextId: string; displayName: string; description: string; active: boolean; baseContentIds: string[] }[];
   intents: ManagedIntentRecord[];
   content: ManagedContentRecord[];

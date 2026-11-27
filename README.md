@@ -160,7 +160,7 @@ In `/integrations`, the **Customer chat** settings on a read task map the record
 | `/login` | Demo profile selector (**Alice Morgan**, **Jordan Lee**, **Marcus Reed**). |
 | `/admin` | **Tool Setup**, Treatment Selector overrides, CCRE rule builder, **Recommendation Providers (`sfield`)**, **External REST & MCP Connector Registry** (`Invoke via sfield`), and Capability Studio. |
 | `/admin/customers` | **Customer 360** CRUD + **IT Ops Incidents** CRUD + **Sales RevOps Deals** CRUD. |
-| `/admin/intents` | **Intents & TS Mapping**, **Content Catalog**, **NBA Priority Rules**, and **Action Flows (No-Code)**. |
+| `/admin/intents` | Choose a workspace to see its intents, published content, and recommendation sources. Wealth also has editors for customer intents, content, and NBA rules. Choose **Tenant tools** for Action Flows, Workflows, and Knowledge Base. |
 | `/admin/ui` | **UI Builder** (drag-and-drop multi-namespace `customer.*` / `incident.*` / `deal.*` / `custom.*` bindings + starter templates), **Widget Studio**, and live **`sf.surfaces` SurfaceBinder Lab** (`/admin/ui?view=surfaces`). |
 | `/admin/logs` | **Chat calls**, **Pending actions**, **Approvals (HITL)** (`?source=approvals`), **Write audit (sfield)** (`?source=write_audit`), and **Engagement analytics** (`?source=analytics`). |
 | `/admin/inspector` | Deep turn decision trace, verified Experience IR, and `sfield` run inspection. |

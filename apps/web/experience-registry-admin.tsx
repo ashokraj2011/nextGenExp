@@ -7,8 +7,12 @@ import { WorkflowStudioPanel } from "./workflow-studio-panel";
 import { KnowledgeBasePanel } from "./knowledge-base-panel";
 import { adminPaths } from "../../packages/contracts/admin-paths";
 import { componentNames, type ComponentName } from "../../packages/contracts/domain";
+import { getDomainPack } from "../../packages/contracts/domain-packs";
+import type { FlowScope } from "../../packages/contracts/routing-flows";
 import type {
+  ExperienceRegistryScopes,
   ExperienceRegistryView,
+  RecordWorkspaceRegistry,
   ManagedContentInput,
   ManagedContentRecord,
   ManagedIntentInput,
@@ -20,7 +24,131 @@ import type {
 import { api } from "./api";
 import "./experience-registry-admin.css";
 
-type Tab = "intents" | "content" | "nba" | "flows" | "workflows" | "kb";
+type RegistryTab = "intents" | "content" | "nba";
+type TenantTab = "flows" | "workflows" | "kb";
+const workspaceName = (scope: FlowScope) => scope === "tenant" ? "Tenant tools" : getDomainPack(scope).label;
+
+export function ExperienceRegistryAdmin() {
+  const [scopes, setScopes] = useState<ExperienceRegistryScopes>();
+  const [scope, setScope] = useState<FlowScope>();
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    void api.experienceRegistryScopes().then((data) => {
+      if (!active) return;
+      const allowed: FlowScope[] = [...data.domains, ...(data.tenantTools ? ["tenant" as const] : [])];
+      const requested = new URLSearchParams(location.search).get("domain");
+      setScope(allowed.find((item) => item === requested) ?? allowed[0]);
+      setScopes(data);
+    }, (reason: Error) => { if (active) setError(reason.message); });
+    return () => { active = false; };
+  }, []);
+
+  function switchWorkspace(next: FlowScope) {
+    setScope(next);
+    const url = new URL(location.href);
+    url.searchParams.set("domain", next);
+    history.replaceState(history.state, "", url);
+  }
+
+  return <main className="admin-page reg-page">
+    <header className="reg-header">
+      <h1>Intents, Catalog &amp; NBA Rules</h1>
+      <p className="reg-subtitle">See what chat can recognize, show, and recommend in each workspace.</p>
+    </header>
+    {scopes && <div className="reg-scope-row">
+      <p>Tenant <strong>{scopes.tenantId}</strong></p>
+      {scope && <div className="reg-workspace-picker">
+        <label htmlFor="registry-workspace">Workspace</label>
+        <select id="registry-workspace" value={scope} onChange={(event) => switchWorkspace(event.target.value as FlowScope)}>
+          {scopes.domains.map((id) => <option value={id} key={id}>{workspaceName(id)}</option>)}
+          {scopes.tenantTools && <option value="tenant">{workspaceName("tenant")}</option>}
+        </select>
+      </div>}
+    </div>}
+    {error && <p className="reg-notice is-error" role="alert">{error}</p>}
+    {!scopes && !error && <p className="workspace-loading" role="status">Loading workspaces…</p>}
+    {scopes && !scope && <p>No workspaces are available to manage for this account.</p>}
+    {scope === "wealth" && <WealthRegistry />}
+    {scope === "tenant" && <TenantRegistryTools />}
+    {(scope === "it_ops" || scope === "sales_revops") && <RecordRegistry key={scope} domain={scope} />}
+  </main>;
+}
+
+function TenantRegistryTools() {
+  const [tab, setTab] = useState<TenantTab>("flows");
+  return <>
+    <div className="reg-tabs" role="tablist" aria-label="Tenant tool sections">
+      <button type="button" role="tab" aria-selected={tab === "flows"} className={"reg-tab" + (tab === "flows" ? " is-active" : "")}
+        onClick={() => setTab("flows")}><Zap size={15} aria-hidden="true" />Action flows</button>
+      <button type="button" role="tab" aria-selected={tab === "workflows"} className={"reg-tab" + (tab === "workflows" ? " is-active" : "")}
+        onClick={() => setTab("workflows")}><Layers size={15} aria-hidden="true" />Workflows</button>
+      <button type="button" role="tab" aria-selected={tab === "kb"} className={"reg-tab" + (tab === "kb" ? " is-active" : "")}
+        onClick={() => setTab("kb")}><BookOpen size={15} aria-hidden="true" />Knowledge base</button>
+    </div>
+    {tab === "flows" && <ActionFlowsPanel />}
+    {tab === "workflows" && <WorkflowStudioPanel />}
+    {tab === "kb" && <KnowledgeBasePanel />}
+  </>;
+}
+
+function RecordRegistry({ domain }: { domain: RecordWorkspaceRegistry["domainId"] }) {
+  const [tab, setTab] = useState<RegistryTab>("intents");
+  const [view, setView] = useState<RecordWorkspaceRegistry>();
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    void api.recordWorkspaceRegistry(domain).then((data) => { if (active) setView(data); },
+      (reason: Error) => { if (active) setError(reason.message); });
+    return () => { active = false; };
+  }, [domain]);
+  const builder = adminPaths.builder + "?domain=" + domain;
+
+  return <>
+    <div className="reg-tabs" role="tablist" aria-label="Workspace registry sections">
+      <button type="button" role="tab" aria-selected={tab === "intents"} className={"reg-tab" + (tab === "intents" ? " is-active" : "")}
+        onClick={() => setTab("intents")}><GitBranch size={15} aria-hidden="true" />Intents {view && `(${view.intents.length})`}</button>
+      <button type="button" role="tab" aria-selected={tab === "content"} className={"reg-tab" + (tab === "content" ? " is-active" : "")}
+        onClick={() => setTab("content")}><BookOpen size={15} aria-hidden="true" />Content Catalog {view && `(${view.catalog.length})`}</button>
+      <button type="button" role="tab" aria-selected={tab === "nba"} className={"reg-tab" + (tab === "nba" ? " is-active" : "")}
+        onClick={() => setTab("nba")}><Sparkles size={15} aria-hidden="true" />Next Best Actions</button>
+    </div>
+    {error && <p className="reg-notice is-error" role="alert">{error}</p>}
+    {!view && !error && <p className="workspace-loading" role="status">Loading workspace catalog…</p>}
+    {view && tab === "intents" && <section className="reg-card" aria-labelledby="workspace-intents-title">
+      <div className="reg-card-head">
+        <h2 id="workspace-intents-title">Chat intents</h2>
+        <a href={builder}>Manage in UI Builder <ArrowRight size={14} aria-hidden="true" /></a>
+      </div>
+      <ul className="reg-scope-items">{view.intents.map(({ id, label, description, phrases, layoutName }) => <li key={id}>
+        <h3>{label}</h3>
+        {description && <p>{description}</p>}
+        {phrases?.length ? <p>Example phrases <strong>{phrases.join(" · ")}</strong></p> : null}
+        {layoutName && <p>Published design <strong>{layoutName}</strong></p>}
+      </li>)}</ul>
+    </section>}
+    {view && tab === "content" && <section className="reg-card" aria-labelledby="workspace-catalog-title">
+      <div className="reg-card-head">
+        <h2 id="workspace-catalog-title">Published content</h2>
+        <div className="reg-scope-links">
+          <a href={builder + "&view=library"}>Design library <ArrowRight size={14} aria-hidden="true" /></a>
+          <a href={builder + "&view=widgets"}>Widget library <ArrowRight size={14} aria-hidden="true" /></a>
+        </div>
+      </div>
+      {view.catalog.length ? <ul className="reg-scope-items">{view.catalog.map(({ id, kind, title, description, revision }) => <li key={id}>
+        <h3>{title}</h3>
+        <p>{kind === "layout" ? `UI design · Revision ${revision}` : "Published widget"}</p>
+        {description && <p>{description}</p>}
+      </li>)}</ul> : <p>No published designs or widgets in this workspace.</p>}
+    </section>}
+    {view && tab === "nba" && <section className="reg-card" aria-labelledby="workspace-providers-title">
+      <div className="reg-card-head"><h2 id="workspace-providers-title">Recommendation providers</h2></div>
+      {view.providers.length ? <ul className="reg-scope-items">{view.providers.map(({ id, label, description }) => <li key={id}>
+        <h3>{label}</h3><p>{description}</p>
+      </li>)}</ul> : <p>No recommendation providers are connected for this workspace.</p>}
+    </section>}
+  </>;
+}
 
 const conditionLabels: Record<NbaConditionKind, string> = {
   unfunded_account: "Account is unfunded",
@@ -75,8 +203,8 @@ function newNbaForm(): ManagedNbaRuleInput {
   };
 }
 
-export function ExperienceRegistryAdmin() {
-  const [tab, setTab] = useState<Tab>("intents");
+function WealthRegistry() {
+  const [tab, setTab] = useState<RegistryTab>("intents");
   const [view, setView] = useState<ExperienceRegistryView | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -389,18 +517,7 @@ export function ExperienceRegistryAdmin() {
   const contextForForm = view?.contexts.find((c) => c.contextId === intentForm.contextId);
 
   return (
-    <main className="admin-page reg-page">
-      <header className="reg-header">
-        <div>
-          <p className="reg-eyebrow"><GitBranch size={15} aria-hidden="true" />Master Data &amp; Experience Mapping</p>
-          <h1>Intents, Catalog &amp; NBA Rules</h1>
-          <p className="reg-subtitle">
-            Manage the straightened CEP flow: <strong>1. Customer 360 → 2. High-Level Customer Intents → 3. Treatment Selector (TS + CCRE Rules) → 4. Content Catalog &amp; #1 NBA</strong>.
-            All edits apply live across Intent Routing, TS Eligibility, UI Builder, and Customer 360 arbitration.
-          </p>
-        </div>
-      </header>
-
+    <>
       <div className="reg-tabs" role="tablist" aria-label="Master data sections">
         <button type="button" role="tab" aria-selected={tab === "intents"} className={"reg-tab" + (tab === "intents" ? " is-active" : "")} onClick={() => { setTab("intents"); setNotice(null); }}>
           <GitBranch size={15} aria-hidden="true" />Intents &amp; TS Mapping {view ? `(${view.intents.length})` : ""}
@@ -411,30 +528,15 @@ export function ExperienceRegistryAdmin() {
         <button type="button" role="tab" aria-selected={tab === "nba"} className={"reg-tab" + (tab === "nba" ? " is-active" : "")} onClick={() => { setTab("nba"); setNotice(null); }}>
           <Sparkles size={15} aria-hidden="true" />NBA Priority Rules {view ? `(${view.nbaRules.length})` : ""}
         </button>
-        <button type="button" role="tab" aria-selected={tab === "flows"} className={"reg-tab" + (tab === "flows" ? " is-active" : "")} onClick={() => { setTab("flows"); setNotice(null); }}>
-          <Zap size={15} aria-hidden="true" />Action Flows (No-Code)
-        </button>
-        <button type="button" role="tab" aria-selected={tab === "workflows"} className={"reg-tab" + (tab === "workflows" ? " is-active" : "")} onClick={() => { setTab("workflows"); setNotice(null); }}>
-          <Layers size={15} aria-hidden="true" />Workflows (Multi-Step)
-        </button>
-        <button type="button" role="tab" aria-selected={tab === "kb"} className={"reg-tab" + (tab === "kb" ? " is-active" : "")} onClick={() => { setTab("kb"); setNotice(null); }}>
-          <BookOpen size={15} aria-hidden="true" />Knowledge Base (RAG)
-        </button>
       </div>
 
       {notice && (
         <p className={"reg-notice " + (notice.tone === "error" ? "is-error" : "is-ok")} role="status">{notice.text}</p>
       )}
 
-      {tab === "kb" ? (
-        <KnowledgeBasePanel />
-      ) : tab === "workflows" ? (
-        <WorkflowStudioPanel />
-      ) : tab === "flows" ? (
-        <ActionFlowsPanel />
-      ) : loading || !view ? (
-        <p className="workspace-loading" role="status">Loading Experience Registry…</p>
-      ) : tab === "intents" ? (
+      {loading ? (
+        <p className="workspace-loading" role="status">Loading Wealth catalog…</p>
+      ) : !view ? null : tab === "intents" ? (
         <div className="reg-grid">
           <section className="reg-rail" aria-label="Routing intents">
             <div className="reg-rail-head">
@@ -555,7 +657,7 @@ export function ExperienceRegistryAdmin() {
                 </div>
                 <div className="reg-hop-links">
                   <a href={adminPaths.tools}>Edit TS ranking &amp; CCRE rules in Tool setup →</a>
-                  <a href={adminPaths.builder}>Customize page layout in UI Builder →</a>
+                  <a href={adminPaths.builder + "?domain=wealth"}>Customize layout in UI Builder →</a>
                 </div>
               </div>
 
@@ -885,6 +987,6 @@ export function ExperienceRegistryAdmin() {
           </section>
         </div>
       )}
-    </main>
+    </>
   );
 }

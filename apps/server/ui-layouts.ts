@@ -16,7 +16,7 @@ import type { SalesDealStore } from "./sales-store";
 import { allRoutingIntents, type IntentDefinition } from "../../packages/contracts/routing-intents";
 import type { DisplayBlock } from "../../packages/contracts/surface";
 import { CEP_CAPABILITIES } from "../../packages/contracts/capabilities-catalog";
-import { bindingDomain, layoutTargetDomain, layoutWidgets, widgetSequence, normalizedIntentPhrase, recordIntentOption, recordCapabilities, recordIntentId, recordLayoutCapabilities, recordViews, targetKey, type LayoutComponent, type UiDesign, type UiTargetOption } from "../../packages/contracts/ui-layout";
+import { bindingDomain, layoutTargetDomain, layoutWidgets, widgetSequence, normalizedIntentPhrase, recordIntentOption, recordCapabilities, recordIntentId, recordLayoutCapabilities, recordViews, targetKey, type RecordDomain, type LayoutComponent, type UiDesign, type UiTargetOption } from "../../packages/contracts/ui-layout";
 import { conversationalTextAllowed } from "../../packages/experience/chat-policy";
 import { contentCatalog, readDemoBalance } from "../../packages/experience/content";
 import { findEffectiveContentById } from "../../packages/experience-registry/registry";
@@ -45,18 +45,26 @@ function intentBlocks({ intentId, contextId, task }: IntentDefinition): LayoutCo
   return components;
 }
 
+export function recordViewOptions(domain: RecordDomain): UiTargetOption[] {
+  const subject = domain === "it_ops" ? "Incident" : "Deal";
+  return recordViews.map((view) => ({
+    target: { kind: "intent", id: recordIntentId(domain, view) },
+    label: subject + " " + (view === "detail" ? "details" : view),
+    description: view === "list" ? "Choose a record from the displayed results." : "Show the selected record’s " + (view === "timeline" ? "timeline." : "details."),
+    components: ["PznDynamicCanvas"],
+  }));
+}
+
 export function uiTargetOptions(registry: CapabilityRegistry, principalId: string): UiTargetOption[] {
   const latest = new Map(registry.list(principalId).map((manifest) => [manifest.id, manifest]));
   return [
-    ...allRoutingIntents().map((intent): UiTargetOption => ({
-      target: { kind: "intent", id: intent.intentId }, label: intent.label, description: intent.description, components: intentBlocks(intent),
-    })),
-    ...(["it_ops", "sales_revops"] as const).flatMap((domain) => recordViews.map((view): UiTargetOption => {
-      const subject = domain === "it_ops" ? "Incident" : "Deal";
-      const label = subject + " " + (view === "detail" ? "details" : view);
-      return { target: { kind: "intent", id: recordIntentId(domain, view) }, label,
-        description: view === "list" ? "Choose a record from the displayed results." : "Show the selected record’s " + (view === "timeline" ? "timeline." : "details."), components: ["PznDynamicCanvas"] };
-    })),
+    ...allRoutingIntents().flatMap((intent): UiTargetOption[] => {
+      const target = { kind: "intent" as const, id: intent.intentId };
+      return layoutTargetDomain(target) === "wealth" ? [{
+        target, label: intent.label, description: intent.description, components: intentBlocks(intent),
+      }] : [];
+    }),
+    ...(["it_ops", "sales_revops"] as const).flatMap(recordViewOptions),
     ...recordLayoutCapabilities.map((id): UiTargetOption => {
       const { label, description } = CEP_CAPABILITIES.find((c) => c.id === id)!;
       return { target: { kind: "capability", id }, label, description, components: ["PznDynamicCanvas"] };

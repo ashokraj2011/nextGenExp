@@ -1,13 +1,13 @@
 import { useState } from "react";
-import { getDomainPack } from "../../packages/contracts/domain-packs";
+import { getDomainPack, type DomainPackId } from "../../packages/contracts/domain-packs";
 import type { LibraryDesign, UiLayoutCatalog, UiLayoutRecord } from "../../packages/contracts/ui-layout";
 
-export function DesignLibrary({ tenantId, library, records, targets, canCopy, onOpen, onCopy }: {
-  tenantId: string; library: LibraryDesign[]; records: UiLayoutRecord[]; targets: UiLayoutCatalog["targets"]; canCopy: boolean;
+export function DesignLibrary({ tenantId, library, records, targets, initialDomain, canCopy, onOpen, onCopy }: {
+  tenantId: string; library: LibraryDesign[]; records: UiLayoutRecord[]; targets: UiLayoutCatalog["targets"]; initialDomain?: DomainPackId; canCopy: boolean;
   onOpen(id: string): void; onCopy(item: LibraryDesign): void;
 }) {
-  const [domain, setDomain] = useState("");
-  const domains = [...new Set(library.map((item) => item.domainId))];
+  const [domain, setDomain] = useState<string>(initialDomain ?? "");
+  const domains = [...new Set([...(initialDomain ? [initialDomain] : []), ...library.map((item) => item.domainId)])];
   const visible = domain ? library.filter((item) => item.domainId === domain) : library;
   return <section className="ui-work-card shared-design-library" aria-label="Shared design library">
     <div className="widget-library-header">

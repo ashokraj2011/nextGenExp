@@ -6,18 +6,6 @@
   gap: 18px;
 }
 
-.reg-eyebrow {
-  margin: 0 0 6px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: .76rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  color: var(--teal-dark);
-}
-
 .reg-header h1 {
   margin: 0 0 6px;
   font-family: var(--font-serif);
@@ -1080,3 +1068,27 @@
   font-size: 0.78rem;
   color: var(--ink);
 }
+
+.reg-scope-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .75rem 1.5rem;
+}
+.reg-scope-row p { margin: 0; color: var(--muted); }
+.reg-workspace-picker { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; font-weight: 600; }
+.reg-scope-row select {
+  max-width: 100%;
+  min-height: 36px;
+  padding: .35rem .65rem;
+  color: var(--ink);
+  background: var(--surface, #fff);
+  border: 1px solid var(--line-strong);
+  border-radius: .55rem;
+}
+.reg-scope-items { list-style: none; padding: 0; margin: 0; }
+.reg-scope-items li { padding: .75rem 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.reg-scope-items h3 { font-size: 1rem; margin: 0 0 .25rem; }
+.reg-scope-items p { margin: .2rem 0 0; color: var(--muted); }
+.reg-scope-links { display: flex; flex-wrap: wrap; gap: .75rem; }
+.reg-card-head a { display: inline-flex; align-items: center; gap: .3rem; }

@@ -264,7 +264,7 @@ export function Help() {
               <span className="help-entity-icon"><GitBranch size={17} aria-hidden="true" /></span>
               <div>
                 <strong>Intents, Catalog &amp; NBA Rules</strong>
-                <p>Manage high-level intents, governed content treatments, and NBA priority order.</p>
+                <p>Choose a workspace to see its chat intents, published content, and recommendation sources.</p>
               </div>
               <ArrowUpRight size={15} aria-hidden="true" />
             </a>
