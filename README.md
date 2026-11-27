@@ -161,7 +161,7 @@ In `/integrations`, the **Customer chat** settings on a read task map the record
 | `/admin` | **Tool Setup**, Treatment Selector overrides, CCRE rule builder, **Recommendation Providers (`sfield`)**, **External REST & MCP Connector Registry** (`Invoke via sfield`), and Capability Studio. |
 | `/admin/customers` | **Customer 360** CRUD + **IT Ops Incidents** CRUD + **Sales RevOps Deals** CRUD. |
 | `/admin/intents` | **Intents & TS Mapping**, **Content Catalog**, **NBA Priority Rules**, and **Action Flows (No-Code)**. |
-| `/admin/ui` | **UI Builder** (drag-and-drop multi-namespace `customer.*` / `incident.*` / `deal.*` / `custom.*` bindings + starter templates) and **Widget Studio**. |
+| `/admin/ui` | **UI Builder** (drag-and-drop multi-namespace `customer.*` / `incident.*` / `deal.*` / `custom.*` bindings + starter templates), **Widget Studio**, and live **`sf.surfaces` SurfaceBinder Lab** (`/admin/ui?view=surfaces`). |
 | `/admin/logs` | **Chat calls**, **Pending actions**, **Approvals (HITL)** (`?source=approvals`), **Write audit (sfield)** (`?source=write_audit`), and **Engagement analytics** (`?source=analytics`). |
 | `/admin/inspector` | Deep turn decision trace, verified Experience IR, and `sfield` run inspection. |
 | `/admin/sfield-studio` | Embedded **`@sfield/studio`** governance workbench (Runs, Principal/Tool Playground, HITL Approvals, Locks, Evals, Memory, PII Lab, OTel & Host Plugins). |
@@ -175,7 +175,7 @@ In `/integrations`, the **Customer chat** settings on a read task map the record
 # Full TypeScript check (including vendor/sfield) + Vite production build
 npm run build
 
-# Full unit & integration test suite (151 tests covering sfield, SurfaceBinder, MCP 2026 Elicitation/Tasks, Studio, verifiers, empathy & C360 notes, recommendation providers, compaction, folders, SSE, CCRE, recovery)
+# Full unit & integration test suite (154 tests covering sfield, SurfaceBinder, MCP 2026 Elicitation/Tasks, Studio, optional RecommendationProviderRegistry, verifiers, empathy & C360 notes, compaction, folders, SSE, CCRE, recovery)
 npm test
 
 # Targeted host test suite

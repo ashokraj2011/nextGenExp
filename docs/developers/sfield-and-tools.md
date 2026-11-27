@@ -113,7 +113,8 @@ Beyond CEP-specific tools, the `sfield` SDK (`vendor/sfield/packages/*`) ships s
 - **Eval Runner & Release Gate (`@sfield/testing`)** — `runEvalSuite` executes guardrail cases, writes `EvalReportRecord` into `sf.lock.evalReports()`, and `evaluateReleaseGate` enforces pass-rate, latency, and cost budgets.
 - **Standalone CLI (`@sfield/cli`)** — run `npm run sfield -- init | validate | eval | lock status | lock approve | inspect <runId> | doctor | studio | mcp serve` to scaffold, diagnose, validate configs, run eval gates, manage lock approvals, inspect persisted runs, launch `@sfield/studio`, or run a stdio MCP server.
 - **Governance Workbench (`@sfield/studio`)** — standalone or embeddable zero-framework workbench (`createStudioHandler`, `startStudioServer`), mounted in CEP at `/admin/sfield-studio` with Host Plugins.
-- **CI & Publishing Pipelines** — `.github/workflows/ci.yml` verifies build, 151 tests, and Playwright suites; `.github/workflows/release.yml` publishes all 9 `@sfield/*` packages to npm or GitHub Packages.
+- **Pluggable `RecommendationProviderRegistry`** — Treatment Selector (`treatments.eligible@1.0.0`, categorized as `recommendation_provider`) is registered as one optional `RecommendationProvider` alongside `customer360_nba`, `ops_runbook`, `sales_deal_desk`, and external REST/MCP connectors. `startApp({ recommendationProviders })` supports custom providers or `[]` (zero-TS mode).
+- **CI & Publishing Pipelines** — `.github/workflows/ci.yml` verifies build, 154 tests, and Playwright suites; `.github/workflows/release.yml` publishes all 9 `@sfield/*` packages to npm or GitHub Packages.
 
 ### Connect an existing service
 

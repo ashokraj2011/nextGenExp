@@ -16,6 +16,7 @@ import { ExperienceLayoutPreview } from "./surface";
 import { DesignLibrary } from "./design-library";
 import { getDomainPack, type DomainPackId } from "../../packages/contracts/domain-packs";
 import { WidgetStudio } from "./widget-studio";
+import { SurfaceBinderLab } from "./surface-binder-lab";
 import "./ui-builder.css";
 
 const blank = (): UiDesign => ({
@@ -722,8 +723,11 @@ function UiWorkspace({ initial, customers }: {
   initial: UiLayoutCatalog;
   customers: Customer360AdminRecord[];
 }) {
-  const [view, setView] = useState<"editor" | "widgets" | "designs">(() =>
-    !initial.domains.length || new URLSearchParams(location.search).get("view") === "library" ? "designs" : "editor");
+  const [view, setView] = useState<"editor" | "widgets" | "designs" | "surfaces">(() => {
+    const param = new URLSearchParams(location.search).get("view");
+    if (param === "surfaces") return "surfaces";
+    return !initial.domains.length || param === "library" ? "designs" : "editor";
+  });
   const [library, setLibrary] = useState(initial.library);
   const [newDomain, setNewDomain] = useState<DomainPackId>(initial.domains[0] ?? "wealth");
   const [widgets, setWidgets] = useState<SavedWidget[]>([]);
@@ -1024,6 +1028,11 @@ function UiWorkspace({ initial, customers }: {
         </div>
 
         <div className="ui-studio-topbar-right">
+          <button type="button" className="ui-button ui-button-plain ui-compact-btn" aria-pressed={view === "surfaces"}
+            onClick={() => setView(view === "surfaces" && initial.domains.length ? "editor" : "surfaces")}>
+            <Sparkles size={14} aria-hidden="true" />
+            {view === "surfaces" ? "Back to Studio" : "SurfaceBinder Lab"}
+          </button>
           <button type="button" className="ui-button ui-button-plain ui-compact-btn" aria-pressed={view === "designs"}
             onClick={() => setView(view === "designs" && initial.domains.length ? "editor" : "designs")}>Design library</button>
           {initial.domains.length > 0 && <button
@@ -1073,6 +1082,8 @@ function UiWorkspace({ initial, customers }: {
           }} />
       ) : view === "widgets" ? (
         <WidgetStudio key={domainId} domainId={domainId} widgets={widgets} onWidgetsChange={setWidgets} onInsertIntoLayout={insertWidgetIntoLayout} />
+      ) : view === "surfaces" ? (
+        <SurfaceBinderLab />
       ) : (
         <>
           <section className="ui-copilot-bar" aria-label="Generate data-bound UI with Copilot">

@@ -60,6 +60,7 @@ For screens or widgets that bind directly to registered `sfield` tools without c
 - `GET /api/surfaces/schemas` — returns auto-discovered bindable output/input paths from every registered `sfield` tool's closed JSON Schema.
 - `POST /api/surfaces/stitch` — executes the declared read `sources` via `sfield`, resolves `$ref` (including `principal.identifiers.*`), `$repeat` (`$item` / `$index`), and deterministic formatters (`usd_cents`, `percent`, `date`), and returns a stitched surface with **HMAC-SHA256 sealed actions**.
 - `POST /api/surfaces/action` — blindly forwards a clicked sealed action plus user `formInputs` back to `sf.surfaces.dispatchAction(...)`, which verifies the principal-bound seal, merges only declared `$input` slots, and handles `succeeded`, `pending_approval` (HITL), or `input_required` (MCP Elicitation).
+- Try it interactively in **Administration → UI Builder → SurfaceBinder Lab** (`/admin/ui?view=surfaces`).
 
 ### Add a new component type in code
 
