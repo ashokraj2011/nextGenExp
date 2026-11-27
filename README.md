@@ -43,7 +43,14 @@ Edit the Markdown under `docs/developers/` to update both versions. Vite renders
 
 ## Quick Start
 
-Requires **Node 22.13+** and **npm 10+**. The `sfield` core, SQLite persistence store, and testing harness are vendored in `vendor/sfield` as local npm workspaces.
+Requires **Node 22.13+** and **npm 10+**. The standalone **`sfield` Agent SDK** monorepo is vendored under `vendor/sfield/packages/` as local npm workspaces:
+
+- `@sfield/core` — Governed runtime, closed Ajv tool contracts, HITL approvals, `GeminiProvider` / `AnthropicProvider` / `OpenAICompatibleProvider`, `SFieldMcpServer` + `McpClient`, `PiiFirewall`, `ToolResilienceGuard`, `DelegationService`, `streamRun`
+- `@sfield/store-sqlite` — `durable_single` persistence over built-in `node:sqlite`
+- `@sfield/store-postgres` — `deployment: "service"` PostgreSQL persistence (`POSTGRES_SCHEMA_SQL`, `createPgPoolAdapter`, `createServiceMemoryPersistence`)
+- `@sfield/telemetry-otel` — OpenTelemetry `gen_ai.*` `TelemetrySink` with OTLP/HTTP JSON trace export
+- `@sfield/testing` — Deterministic fake providers, conformance helpers, and generic `runEvalSuite` / `evaluateReleaseGate`
+- `@sfield/cli` — Standalone CLI (`npm run sfield -- init | validate | lock status | lock approve | inspect | mcp serve`)
 
 ```sh
 npm ci

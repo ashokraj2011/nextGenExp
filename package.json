@@ -19,9 +19,10 @@
     "preview": "node --env-file-if-exists=.env --import tsx apps/server/main.ts --preview",
     "chat:harness": "npm run build:sfield && node --import tsx apps/harness/chat.ts",
     "mcp:stdio": "npm run build:sfield && node --env-file-if-exists=.env --import tsx apps/server/mcp-stdio.ts",
+    "sfield": "npm run build:sfield && node vendor/sfield/packages/cli/dist/bin.js",
     "eval:live": "node --env-file-if-exists=.env --import tsx tests/evaluate-live.ts",
     "eval:openai": "node --env-file-if-exists=.env.openai --import tsx tests/evaluate-live.ts --openai --smoke",
-    "build:sfield": "tsc -b vendor/sfield/packages/store-sqlite",
+    "build:sfield": "tsc -b vendor/sfield/packages/store-sqlite vendor/sfield/packages/telemetry-otel vendor/sfield/packages/store-postgres vendor/sfield/packages/cli",
     "pretest": "npm run build:sfield",
     "eval:agentic": "node --env-file-if-exists=.env --import tsx tests/evaluate-agentic.ts"
   },

@@ -1,0 +1,22 @@
+{
+  "name": "@sfield/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "bin": {
+    "sfield": "./dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@sfield/core": "0.1.0",
+    "@sfield/store-sqlite": "0.1.0",
+    "@sfield/testing": "0.1.0"
+  }
+}

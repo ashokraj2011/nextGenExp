@@ -26,6 +26,7 @@ import { normalizeTool, type ToolSpec } from "./registry/define-tool.js";
 import type { PolicyPreset } from "./policy/presets.js";
 import { PluginManager } from "./plugins/manager.js";
 import { AnthropicProvider } from "./gateway/providers/anthropic.js";
+import { GeminiProvider } from "./gateway/providers/gemini.js";
 import { OpenAICompatibleProvider } from "./gateway/providers/openai-compatible.js";
 import { ModelGateway } from "./gateway/gateway.js";
 import { EnvSecretResolver, CompositeSecretResolver } from "./secrets.js";
@@ -53,11 +54,14 @@ import type { ExposedTool } from "./types/tool.js";
 
 export const PROVIDER_DEFAULT_LIMITS: Readonly<Record<string, { contextWindow: number; maxOutputTokens: number }>> = Object.freeze({
   anthropic: { contextWindow: 200000, maxOutputTokens: 8192 },
+  gemini: { contextWindow: 1000000, maxOutputTokens: 8192 },
   openai_compatible: { contextWindow: 128000, maxOutputTokens: 4096 },
 });
 
 export interface ValidateOptions extends Omit<SFieldOptions, "config"> {
   config: string | JsonObject;
+  /** Whether to verify that referenced env credentials exist in `env`. Defaults to `true`. */
+  checkCredentials?: boolean;
   /** Loader override for tests. */
   presetLoader?: (name: string) => Promise<PresetModule>;
 }
@@ -506,6 +510,7 @@ async function prepareCompile(options: SFieldCreateOptions, mode: { validateOnly
   let preset: PresetComponents | undefined;
   if (!reusing) {
     plugins.registerProvider(new AnthropicProvider());
+    plugins.registerProvider(new GeminiProvider());
     plugins.registerProvider(new OpenAICompatibleProvider());
     let presetModule: PresetModule | undefined;
     if (options.preset) {
@@ -541,7 +546,7 @@ async function prepareCompile(options: SFieldCreateOptions, mode: { validateOnly
     limits,
     env,
     overrides: options.overrides as JsonObject[] | undefined,
-    checkCredentials: true,
+    checkCredentials: mode.validateOnly ? ((options as ValidateOptions).checkCredentials ?? true) : true,
     knownSecretNames: options.secrets ? () => true : undefined,
   };
   return { loaded, ctx, registry, plugins, preset, secrets, limits, deployment, configDir };

@@ -92,10 +92,18 @@ integration-task version) must restart.
 - Added `ConversationCompactor` (`sf.compactor`) to fold older turns outside the verbatim window into a structured `RollingThreadSummary` persisted in `sfield.memory` (`kind: "summary"`, `origin: "derived"`, automatic key supersession).
 - Added optional `onStage` observer on `AgenticHarnessSpec` so hosts can stream live stage transitions and thinking progress as each stage finishes.
 
-## 6. First-class SDK primitives (MCP Server + Client, PII Firewall, Resilience, Delegation & Streaming)
+## 7. First-class SDK primitives (MCP Server + Client, PII Firewall, Resilience, Delegation & Streaming)
 
 - **MCP Server + Client Federation** ([mcp/server.ts](mcp/server.ts), [mcp/client.ts](mcp/client.ts)): `sf.createMcpServer()` exposes allowlisted & principal-scoped (`authenticate` + `allowTools(tool, principal)`) `sfield` tools over Streamable HTTP or `stdio` with HITL suspension/resume; `createMcpClient` + `createMcpProxyTools` mount remote MCP tools as native closed-schema `sfield` tools.
 - **PII Egress Firewall** ([security/pii-firewall.ts](security/pii-firewall.ts)): `createPiiFirewall` + `createPiiFirewallHook` tokenize sensitive identifiers in `beforeModelDispatch` and rehydrate locally via `rehydrateRunOutput`.
 - **Tool Resilience** ([policy/resilience.ts](policy/resilience.ts)): `TokenBucketRateLimiter`, 3-state `CircuitBreaker`, and `ToolResilienceGuard` (`RATE_LIMITED` / `CIRCUIT_OPEN` error codes).
 - **Governed Sub-Agent Delegation** ([runtime/delegation.ts](runtime/delegation.ts)): `sf.delegation.delegate()` + `sf.delegation.tree()` enforce zero identity escalation, bounded recursion depth (`maxDepth`), and parent→child audit linkage.
 - **Typed Run Streaming** ([runtime/stream.ts](runtime/stream.ts)): `sf.streamRun(handle)` and `formatRunStreamSse(chunk)` yield normalized lifecycle/delta stream chunks from `RunHandle.events()`.
+- **Native Gemini Provider** ([gateway/providers/gemini.ts](gateway/providers/gemini.ts)): `GeminiProvider` (`provider: "gemini"`) supports Google Gemini v1beta SSE streaming, function calls, structured JSON `responseSchema`, `top_k`, and exact `usageMetadata` reporting.
+
+## 8. Companion SDK Workspace Packages
+
+- **`@sfield/telemetry-otel`** (`vendor/sfield/packages/telemetry-otel/`): OpenTelemetry `gen_ai.*` `TelemetrySink` with OTLP/HTTP JSON trace export (`v1/traces`).
+- **`@sfield/store-postgres`** (`vendor/sfield/packages/store-postgres/`): `deployment: "service"` PostgreSQL `ExecutionPersistence` with `POSTGRES_SCHEMA_SQL` DDL, `createPgPoolAdapter`, and `createServiceMemoryPersistence()`.
+- **`@sfield/testing`** (`vendor/sfield/packages/testing/src/eval-runner.ts`): `runEvalSuite` + `evaluateReleaseGate` persisting `EvalReportRecord` into `sf.lock.evalReports()`.
+- **`@sfield/cli`** (`vendor/sfield/packages/cli/`): Standalone `sfield` CLI (`init`, `validate`, `lock status`, `lock approve`, `inspect`, `mcp serve`).

@@ -37,6 +37,7 @@ export const GENERIC_PARAMS: readonly string[] = Object.freeze(["max_output_toke
 
 export const PROVIDER_PARAMS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   anthropic: ["max_output_tokens", "temperature", "top_p", "top_k", "stop_sequences"],
+  gemini: ["max_output_tokens", "temperature", "top_p", "top_k", "stop_sequences"],
   openai_compatible: ["max_output_tokens", "temperature", "top_p", "stop_sequences", "seed", "presence_penalty", "frequency_penalty"],
 });
 

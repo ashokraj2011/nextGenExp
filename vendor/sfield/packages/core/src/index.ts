@@ -79,6 +79,7 @@ export {
 } from "./context/compactor.js";
 export { ModelGateway, type DispatchResult } from "./gateway/gateway.js";
 export { AnthropicProvider, ANTHROPIC_API_VERSION, ANTHROPIC_DEFAULT_BASE_URL } from "./gateway/providers/anthropic.js";
+export { GeminiProvider, GEMINI_DEFAULT_BASE_URL } from "./gateway/providers/gemini.js";
 export { OpenAICompatibleProvider } from "./gateway/providers/openai-compatible.js";
 export { toolOverheadTokens, stableBody, schemaIsStrictCompatible } from "./gateway/providers/shared.js";
 export { costMicroUsd, estimateMaxCost } from "./gateway/pricing.js";

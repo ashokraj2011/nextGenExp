@@ -87,15 +87,20 @@ const mcp = sf.createMcpServer({
 
 Every `tools/call` runs inside a real `sfield` `ExecutionScope` (`executions.open` / `executions.resume`), preserving `Authorizer` policy checks, Ajv closed schema validation, HITL approval suspension (`APPROVAL_REQUIRED` → `status: "pending_approval"` with `approvalId` + `callId`), and `sfield.sqlite` audit receipts (`sfieldRunId`). CEP wires `POST /api/mcp` onto `runtime.createMcpServer(...)` in `apps/server/cep-mcp-server.ts`, exposing `cep.empathy.assess@1.0.0`, published `int.*` Integration Tasks, and `cep.knowledge.search@1.0.0`.
 
-### Core `@sfield/core` SDK primitives
+### Core `@sfield/*` SDK workspace packages & primitives
 
-Beyond CEP-specific tools, `@sfield/core` ships standalone enterprise primitives usable in any TypeScript host:
+Beyond CEP-specific tools, the `sfield` SDK (`vendor/sfield/packages/*`) ships standalone enterprise packages and primitives usable in any TypeScript/Node 22 host:
 
+- **Native Model Providers (`@sfield/core`)** — `AnthropicProvider`, `GeminiProvider` (Google Gemini v1beta SSE streaming, function calls, and `responseSchema`), and `OpenAICompatibleProvider`.
 - **PII Egress Firewall (`createPiiFirewall` / `createPiiFirewallHook`)** — tokenizes SSN, email, phone, card, account IDs, known names, and custom rules in `beforeModelDispatch` and rehydrates locally via `firewall.rehydrateRunOutput(runId, output)`.
 - **Tool Resilience (`createToolResilienceGuard`)** — per-key `TokenBucketRateLimiter` (`RATE_LIMITED`) and 3-state `CircuitBreaker` (`CIRCUIT_OPEN` → `half_open` → `closed`).
 - **Federated MCP Client & RBAC Server (`createMcpClient`, `createMcpProxyTools`, `sf.createMcpServer`)** — discover tools from any remote Streamable HTTP MCP server (or another `sfield` instance) and mount them as closed-schema `sfield` tools with `Authorizer` + resilience enforcement; enforce per-caller RBAC on `SFieldMcpServer` via `authenticate(headers)` + `allowTools(tool, principal)`.
 - **Governed Sub-Agent Delegation (`sf.delegation.delegate` / `sf.delegation.tree`)** — delegates to child agents under the parent's exact `Principal` (blocking identity escalation and recursive depth loops) with immutable `delegation_started` / `delegation_finished` parent→child audit links.
 - **Typed Run Streaming (`sf.streamRun` / `formatRunStreamSse`)** — streams normalized `RunStreamChunk` lifecycle & delta events from any `RunHandle` ready for SSE or AG-UI transports.
+- **OpenTelemetry GenAI Sink (`@sfield/telemetry-otel`)** — `createOtelTelemetrySink` records `gen_ai.*` spans & metrics and exports OTLP/HTTP JSON (`v1/traces`) to any collector.
+- **PostgreSQL Service Store (`@sfield/store-postgres`)** — `PostgresPersistence` (`deployment: "service"`), `POSTGRES_SCHEMA_SQL` production DDL, `createPgPoolAdapter(pool)` for `pg`, and `createServiceMemoryPersistence()` for multi-replica lock-gated tests.
+- **Eval Runner & Release Gate (`@sfield/testing`)** — `runEvalSuite` executes guardrail cases, writes `EvalReportRecord` into `sf.lock.evalReports()`, and `evaluateReleaseGate` enforces pass-rate, latency, and cost budgets.
+- **Standalone CLI (`@sfield/cli`)** — run `npm run sfield -- init | validate | lock status | lock approve | inspect <runId> | mcp serve` to scaffold, validate configs, manage lock approvals, inspect persisted runs, or launch a stdio MCP server.
 
 ### Connect an existing service
 
