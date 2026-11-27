@@ -351,8 +351,38 @@ function ChatPortfolio(props: z.infer<typeof portfolioSnapshot.schema>) {
   return <PortfolioSnapshotBlock {...props} onExploreAllocation={askPrompt} allowSimulation={pendingPortfolio || Boolean(askPrompt)} />;
 }
 
+type ComparisonProps = z.infer<typeof comparison.schema>;
+
+function CardSources({ sources, disclosures }: Pick<ComparisonProps, "sources" | "disclosures">) {
+  return <div className="content-footer">
+    {disclosures.map((disclosure) => <p className="disclosure" key={disclosure}>{disclosure}</p>)}
+    <details className="source-details">
+      <summary><FileText size={14} aria-hidden="true" />{sources.length === 1 ? "View source" : "View sources"} <ChevronDown size={14} aria-hidden="true" /></summary>
+      <ul>{sources.map(({ title, label, version, ref }) => (
+        <li key={ref}><strong>{title}</strong><span>{label} · {version}</span></li>
+      ))}</ul>
+    </details>
+  </div>;
+}
+
+function BalanceComparisonCard({ columns, sources, disclosures }: ComparisonProps) {
+  return <section className="content-card balance-comparison">
+    <h3>Available vs. current balance</h3>
+    <p className="content-body">Check your available balance to see how much you can use now.</p>
+    <dl className="compare-grid" aria-label="Balance definitions">
+      {columns.map(({ title, fields }) => <div className="compare-column" key={title}>
+        <dt>{title}</dt>
+        <dd>{fields.find(({ fieldId }) => fieldId === "meaning")?.value ?? fields[0].value}</dd>
+      </div>)}
+    </dl>
+    <CardSources sources={sources} disclosures={disclosures} />
+  </section>;
+}
+
 function ContentBlock({ block, form }: { block: DisplayBlock; form?: { experienceId: string; componentId: string; enabled: boolean } }) {
   const controls = useContext(ExperienceControls);
+  const { balanceComparison } = useContext(SurfaceActions);
+  if (balanceComparison && block.component === comparison.name) return <BalanceComparisonCard {...block.props} />;
   if (block.component === retirementAccounts.name) return <RetirementAccountsCard {...block.props} />;
   if (block.component === savingsChart.name) return <SavingsChart {...block.props} />;
   if (block.component === savingsMetric.name) return <SavingsMetric {...block.props} />;
@@ -419,41 +449,49 @@ function ContentBlock({ block, form }: { block: DisplayBlock; form?: { experienc
         </>
       )}
       {block.component === goalProgressCard.name && <GoalProgressDetails goal={block.props.goal} />}
-      <div className="content-footer">
-        {props.disclosures.map((disclosure) => <p className="disclosure" key={disclosure}>{disclosure}</p>)}
-        <details className="source-details">
-          <summary><FileText size={14} />{props.sources.length === 1 ? "View source" : "View sources"} <ChevronDown size={14} /></summary>
-          <ul>{props.sources.map(({ title, label, version, ref }) => (
-            <li key={ref}><strong>{title}</strong><span>{label} · {version}</span></li>
-          ))}</ul>
-        </details>
-      </div>
+      <CardSources sources={props.sources} disclosures={props.disclosures} />
     </section>
   );
 }
 
 function Introduction({ intro, question, partial }: { intro: string; question: string | null; partial: boolean }) {
+  const { balanceComparison } = useContext(SurfaceActions);
+  const genericComparisonIntro = /^(?:(?:Hi [^,]+,|Thanks for asking, [^—]+ —)\s*)?here[’']s (?:how the terms compare|a comparison)\.$/i;
+  const showIntro = !balanceComparison || !genericComparisonIntro.test(intro.trim());
   return <>
-    {question ? <p className="clarification">{question}</p> : <RichText text={intro} className="experience-intro" />}
+    {question ? <p className="clarification">{question}</p> : showIntro && <RichText text={intro} className="experience-intro" />}
     {partial && <p className="partial-result">Some matching content is unavailable.</p>}
   </>;
 }
 
-const SurfaceActions = createContext({ enabled: false, preview: false, pendingPortfolio: false });
+function SurfaceFollowUps({ children }: { children: ReactNode[] }) {
+  const { balanceComparison } = useContext(SurfaceActions);
+  const actions = children.length > 0 && <div className="follow-up-list">{children}</div>;
+  return balanceComparison ? <details className="balance-comparison-help">
+    <summary>Why do they differ? <ChevronDown size={15} aria-hidden="true" /></summary>
+    <p>Activity can change what’s available to use before it’s reflected in the recorded total.</p>
+    {actions}
+  </details> : actions;
+}
+
+const SurfaceActions = createContext({
+  enabled: false, preview: false, pendingPortfolio: false,
+  balanceComparison: false, hiddenActionComponents: [] as string[],
+});
 const pznCatalog = new Catalog<ReactCatalogComponent>(PZN_CATALOG_ID, "1.0", [
   createComponentImplementation(experienceRoot, ({ props, buildChild }) => {
-    const { preview } = useContext(SurfaceActions);
+    const { preview, hiddenActionComponents } = useContext(SurfaceActions);
     const children = Array.isArray(props.children) ? props.children.map((child) => (
       typeof child === "string" ? { id: child, basePath: undefined } : child
     )) : [];
     const count = children.length - props.actionCount;
     const content = children.slice(0, count);
-    const followUps = children.slice(count);
+    const followUps = children.slice(count).filter(({ id }) => !hiddenActionComponents.includes(id));
     return (
       <div className={surfaceClass({ ...props, preview })} data-renderer="a2ui">
         <Introduction intro={props.intro} question={props.question} partial={props.partial} />
         {content.map(({ id, basePath }) => <div className="surface-child" key={id}>{buildChild(id, basePath)}</div>)}
-        {followUps.length > 0 && <div className="follow-up-list">{followUps.map(({ id, basePath }) => <div key={id}>{buildChild(id, basePath)}</div>)}</div>}
+        <SurfaceFollowUps>{followUps.map(({ id, basePath }) => <div key={id}>{buildChild(id, basePath)}</div>)}</SurfaceFollowUps>
       </div>
     );
   }),
@@ -567,6 +605,7 @@ type SurfaceControls = {
   accountPortalAvailable?: boolean;
   activeExperienceId?: string;
   allowRuleCreation?: boolean;
+  simplifyBalanceComparison?: boolean;
   askPrompt?: (prompt: string) => void;
   onWriteBack?: (updates: Record<string, string>) => Promise<string[]>;
   followUp: (id: string, envelope: ActionMessage) => void;
@@ -580,7 +619,7 @@ type ChatSurface = DisplayExperience & { previewTurnId?: string };
 function CanonicalFallback({ experience, enabled }: { experience: ChatSurface; enabled: boolean }) {
   const controls = useContext(ExperienceControls);
   const { experienceId } = experience;
-  const { preview } = useContext(SurfaceActions);
+  const { preview, hiddenActionComponents } = useContext(SurfaceActions);
   const rendered = useRef(controls.rendered);
   rendered.current = controls.rendered;
   useEffect(() => rendered.current(experienceId, true, experience.previewTurnId), [experienceId, experience.previewTurnId]);
@@ -589,8 +628,8 @@ function CanonicalFallback({ experience, enabled }: { experience: ChatSurface; e
     {experience.blocks.map((block, index) => <div className="surface-child" key={index}>
       <ContentBlock block={block} form={{ experienceId, componentId: "block_" + (index + 1), enabled }} />
     </div>)}
-    {experience.actions.length > 0 && <div className="follow-up-list">
-      {experience.actions.map(({ actionId, componentId, label }) => (
+    <SurfaceFollowUps>
+      {experience.actions.filter(({ componentId }) => !hiddenActionComponents.includes(componentId)).map(({ actionId, componentId, label }) => (
         <button key={actionId} type="button" className="follow-up" disabled={!enabled} onClick={() => (
           controls.followUp(experienceId, {
             version: "1.0", action: {
@@ -600,7 +639,7 @@ function CanonicalFallback({ experience, enabled }: { experience: ChatSurface; e
           })
         )}>{label}</button>
       ))}
-    </div>}
+    </SurfaceFollowUps>
   </div>;
 }
 
@@ -615,7 +654,15 @@ function ExperiencePart({ data, preview = false }: { data: ChatSurface; preview?
     return () => clearTimeout(timer);
   }, [expiresAt]);
   const enabled = !preview && controls.activeExperienceId === experienceId && !expired;
-  return <SurfaceActions.Provider value={{ enabled, preview, pendingPortfolio: Boolean(data.previewTurnId) }}>
+  const [block] = data.blocks;
+  const balanceComparison = Boolean(controls.simplifyBalanceComparison && !preview && !data.layout && !data.theme
+    && data.blocks.length === 1 && block?.component === comparison.name
+    && ["fixture:balance_available_definition", "fixture:balance_current_definition"]
+      .every((ref) => block.props.sources.some((source) => source.ref === ref)));
+  const hiddenActionComponents = balanceComparison
+    ? data.actions.filter(({ label }) => label === "Compare balance terms").map(({ componentId }) => componentId)
+    : [];
+  return <SurfaceActions.Provider value={{ enabled, preview, pendingPortfolio: Boolean(data.previewTurnId), balanceComparison, hiddenActionComponents }}>
     <LiveSimulationProvider>
       <SurfaceBoundary key={experienceId} fallback={<CanonicalFallback experience={data} enabled={enabled} />}>
         <MountedSurface id={experienceId} input={messages[0]}

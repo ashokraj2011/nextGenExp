@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { progressLabels, type NextBestActionCard, type TurnView } from "../../../packages/contracts/api";
 import { api } from "../api";
-import { PolicyCitations, TurnRichActions } from "../chat-rich-ux";
+import { TurnRichActions } from "../chat-rich-ux";
 import { SpeakButton } from "../composer-extras";
 import { ProfileAvatar } from "../demo-profiles";
 import { LabMark } from "../lab-mark";
@@ -146,6 +146,13 @@ function ReplyLoading() {
   </div>;
 }
 
+function ReplyText() {
+  const text = useAuiState(({ part }) => part.type === "text" ? part.text : "");
+  return text ? <p className="assistant-reply-text">{text}</p> : null;
+}
+
+const replyParts = { Text: ReplyText };
+
 export function AssistantMessage() {
   const turn = useAuiState((state) => state.message.metadata.custom?.turn as TurnView | undefined);
   const {
@@ -160,6 +167,16 @@ export function AssistantMessage() {
   if (!turn) return null;
   const experience = turn.experience;
   const steps = progressHistory[turn.id] ?? [turn.progress];
+  const recommendation = experience?.blocks.some((block) => block.component === "PznContentCard" && block.props.recommendation);
+  const companion = !adminChat && turn.status === "completed" && turn.nextBestAction && (
+    <NbaCompanionCard
+      nba={turn.nextBestAction}
+      personaId={activeProfile?.personaId}
+      disabled={pending}
+      onRunPrompt={runPrompt}
+      onPreviewFunding={previewFunding}
+    />
+  );
 
   return (
     <MessagePrimitive.Root ref={element} className="assistant-message"
@@ -195,17 +212,9 @@ export function AssistantMessage() {
           {!adminChat && turn.status === "completed" && (
             <ExpertiseTurnBanner mode={expertiseMode} turn={turn} />
           )}
-          {(turn.status !== "working" || turn.previewExperience) && <MessagePrimitive.Parts />}
+          {(turn.status !== "working" || turn.previewExperience) && <MessagePrimitive.Parts components={replyParts} />}
           {!adminChat && turn.status === "working" && turn.previewExperience && <ReplyIndicator label="Checking for recommendations." />}
-          {!adminChat && turn.status === "completed" && turn.nextBestAction && (
-            <NbaCompanionCard
-              nba={turn.nextBestAction}
-              personaId={activeProfile?.personaId}
-              disabled={pending}
-              onRunPrompt={runPrompt}
-              onPreviewFunding={previewFunding}
-            />
-          )}
+          {!recommendation && companion}
 
           {turn.status === "completed" && latest?.id === turn.id && <span className="sr-only" role="status">Response ready.</span>}
           {(turn.status === "failed" || turn.status === "cancelled") && latest?.id === turn.id && (
@@ -214,8 +223,7 @@ export function AssistantMessage() {
             </button>
           )}
           {experience?.status === "ready" && experience.outcome !== "create_rule" && (
-            <>
-              <PolicyCitations userMessage={turn.message} />
+            <footer className="reply-footer">
               <TurnRichActions
                 turn={turn}
                 pending={pending}
@@ -223,16 +231,16 @@ export function AssistantMessage() {
                 onPinCanvas={pinCanvas}
                 onReframe={runPrompt}
                 onBranch={branchTurn}
-              />
-              <footer className="feedback-controls" aria-label="Response feedback">
+              >{recommendation && companion}</TurnRichActions>
+              <div className="feedback-controls" role="group" aria-label="Response feedback">
                 <SpeakButton text={experience.question ?? experience.intro} />
-                <span>Was this helpful?</span>
+                <span className="feedback-label">Was this helpful?</span>
                 <button className="icon-button" type="button" aria-label="Helpful" aria-pressed={turn.feedback === "helpful"}
                   onClick={() => feedback(turn.id, experience.experienceId, "helpful")}><ThumbsUp size={15} /></button>
                 <button className="icon-button" type="button" aria-label="Unhelpful" aria-pressed={turn.feedback === "unhelpful"}
                   onClick={() => feedback(turn.id, experience.experienceId, "unhelpful")}><ThumbsDown size={15} /></button>
-              </footer>
-            </>
+              </div>
+            </footer>
           )}
         </div>
       </div>

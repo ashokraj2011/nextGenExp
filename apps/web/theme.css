@@ -352,9 +352,6 @@
 :root[data-theme="dark"] .editorial-thread .content-card,
 :root[data-theme="dark"] .editorial-thread .content-card.suggested-next-step,
 :root[data-theme="dark"] .editorial-thread .experience-intro,
-:root[data-theme="dark"] .editorial-hero-stage .portfolio-snapshot,
-:root[data-theme="dark"] .editorial-hero-stage .welcome-no-portfolio,
-:root[data-theme="dark"] .editorial-hero-stage .pending-actions,
 :root[data-theme="dark"] .content-card,
 :root[data-theme="dark"] .clarification,
 :root[data-theme="dark"] .reasoning-panel,
@@ -601,8 +598,7 @@
   background: #253328;
 }
 
-:root[data-theme="dark"] .workspace-overview .overview-banner,
-:root[data-theme="dark"] .workspace-home .portfolio-snapshot {
+:root[data-theme="dark"] .workspace-overview:not(.workspace-home) .overview-banner {
   background: linear-gradient(120deg, #16271a, #161c18 68%);
   border-color: var(--teal-border);
 }

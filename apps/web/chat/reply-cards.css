@@ -7,6 +7,7 @@
 
 /* Match the geometry of the first card while the reply is being prepared. */
 .reply-loading { display: grid; gap: 12px; }
+.assistant-reply-text { white-space: pre-line; }
 .reply-indicator { display: flex; align-items: center; min-block-size: 1.52rem; }
 .reply-dots {
   display: inline-flex;
@@ -47,6 +48,52 @@
 .skeleton-value { width: 43%; height: 23px; }
 .skeleton-detail { display: flex; gap: 12px; width: 60%; }
 .skeleton-detail span { width: 40%; height: 9px; }
+
+.balance-comparison .compare-grid { gap: 0; border-block: 1px solid var(--line); }
+.editorial-thread .balance-comparison .compare-column {
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.editorial-thread .balance-comparison .compare-column + .compare-column { border-inline-start: 1px solid var(--line); }
+.balance-comparison .compare-column dt { color: var(--ink); font-size: .9rem; font-weight: 650; }
+.balance-comparison .content-footer {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 10px;
+  padding-top: 0;
+  border: 0;
+}
+.balance-comparison-help > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 4px 12px;
+  border: 1px solid var(--teal-border);
+  border-radius: 11px;
+  background: var(--teal-pale);
+  color: var(--teal-dark);
+  font-size: .86rem;
+  font-weight: 650;
+  list-style: none;
+  cursor: pointer;
+}
+.balance-comparison-help > summary::-webkit-details-marker { display: none; }
+.balance-comparison-help[open] > summary svg { transform: rotate(180deg); }
+.balance-comparison-help > p { margin-top: 6px; color: var(--soft-ink); font-size: .9rem; }
+.balance-comparison-help .follow-up-list { margin-top: 8px; }
+@media (max-width: 620px) {
+  .editorial-thread .balance-comparison .compare-column { padding-inline: 0; }
+  .editorial-thread .balance-comparison .compare-column + .compare-column {
+    border-inline-start: 0;
+    border-block-start: 1px solid var(--line);
+  }
+  .balance-comparison-help > summary { min-height: 44px; }
+}
 
 .editorial-thread .experience-flow:not(.published-ui) {
   > .experience-intro {
@@ -125,6 +172,32 @@
   @container portfolio (min-width: 32rem) {
     .portfolio-body { grid-template-columns: 1fr 1fr; align-items: center; gap: 32px; }
     .portfolio-breakdown { padding: 0 0 0 26px; border: 0; border-inline-start: 1px solid var(--line); }
+  }
+}
+
+@media (max-width: 620px) {
+  .wealth-thread .experience-flow:not(.published-ui) {
+    .portfolio-body { margin-top: 14px; gap: 13px; }
+    .portfolio-values { gap: 8px 12px; }
+    .portfolio-breakdown { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; padding-top: 10px; }
+    .portfolio-allocation-bar {
+      display: flex;
+      gap: 2px;
+      width: 100%;
+      height: 7px;
+      aspect-ratio: auto;
+      margin: 0;
+      overflow: hidden;
+      mask-image: none;
+      border-radius: 999px;
+      background: var(--line);
+    }
+    .portfolio-allocation-bar > span { display: block; }
+    .portfolio-allocation { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+    .portfolio-allocation li { display: block; position: relative; padding-inline-start: 12px; }
+    .portfolio-allocation li > span { position: absolute; width: 6px; height: 6px; inset: .45em auto auto 0; }
+    .portfolio-allocation :is(strong, em) { display: block; margin-inline-start: 0; }
+    .portfolio-sim-wrap { margin-top: 10px; padding-top: 9px; }
   }
 }
 

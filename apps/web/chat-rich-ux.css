@@ -285,6 +285,35 @@
 }
 
 /* Turn rich action bar & citations */
+.reply-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  column-gap: 8px;
+}
+.reply-footer .feedback-controls { margin-inline-start: auto; }
+.response-more[open] { flex: 1 0 100%; padding-bottom: 7px; }
+.response-more > summary {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 32px;
+  padding: 3px 6px;
+  border-radius: 8px;
+  list-style: none;
+  color: var(--muted);
+  font-size: .8rem;
+  font-weight: 590;
+  cursor: pointer;
+}
+.response-more > summary::-webkit-details-marker { display: none; }
+.response-more > summary:hover { background: var(--surface-subtle); color: var(--ink); }
+.response-more .nba-companion-card { margin-top: 10px; }
+@media (max-width: 620px) {
+  .wealth-thread .reply-footer .feedback-label { display: none; }
+  .wealth-thread .response-more > summary { min-height: 40px; }
+}
 .turn-rich-actions {
   display: flex;
   flex-wrap: wrap;

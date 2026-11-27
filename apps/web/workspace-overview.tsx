@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from "react";
 import { ArrowRight, ArrowUpRight, House, ShieldCheck, Wallet } from "lucide-react";
 import type { DemoPersona } from "../../packages/contracts/api";
 import type { GoalProgress } from "../../packages/contracts/goal-progress";
-import { formatPortfolioAmount, type PortfolioSnapshot } from "../../packages/contracts/portfolio";
+import { formatPortfolioAmount, type PortfolioHistoryPoint, type PortfolioSnapshot } from "../../packages/contracts/portfolio";
 import type { WorkspaceNextStep, WorkspacePendingAction, WorkspacePin } from "../../packages/contracts/workspace";
 import { api } from "./api";
 import { SavingsGrowthChart } from "./goal-progress";
@@ -120,33 +120,38 @@ export function usePendingActions(personaId?: string) {
 
 export type PendingActions = ReturnType<typeof usePendingActions>;
 
+function PendingActionItem({ item, disabled, onReviewGuide, onPreviewFunding }: {
+  item: WorkspacePendingAction; disabled: boolean; onReviewGuide: (message: string) => void; onPreviewFunding: () => void;
+}) {
+  const { action } = item;
+  const Icon = action.kind === "guide" ? ShieldCheck : Wallet;
+  return <li>
+    <span className="pending-action-icon"><Icon size={17} aria-hidden="true" /></span>
+    <div><h4>{item.title}</h4><p>{item.body}</p></div>
+    <button className="overview-action" type="button" disabled={disabled}
+      onClick={() => action.kind === "guide" ? onReviewGuide(action.message) : onPreviewFunding()}>
+      {action.label} <ArrowUpRight size={15} aria-hidden="true" />
+    </button>
+  </li>;
+}
+
 function PendingActionsCard({ pendingActions, firstDepositConfirmedAt, disabled, onReviewGuide, onPreviewFunding }: {
   firstDepositConfirmedAt?: number;
   pendingActions: PendingActions; disabled: boolean; onReviewGuide: (message: string) => void; onPreviewFunding: () => void;
 }) {
   const title = useId();
   const { items, failed, refresh } = pendingActions;
+  const [first, ...remaining] = items ?? [];
+  const itemProps = { disabled, onReviewGuide, onPreviewFunding };
 
   return <section className="content-card pending-actions" aria-labelledby={title}>
-    <header className="pending-heading"><h3 id={title}>Pending actions</h3>
-      {items && items.length > 0 && <span className="pending-count">{items.length} to review</span>}
-    </header>
-    {items && (items.length ? <ul>
-      {items.map(({ contentId, title: name, body, action }) => {
-        const Icon = action.kind === "guide" ? ShieldCheck : Wallet;
-        const run = () => action.kind === "guide" ? onReviewGuide(action.message) : onPreviewFunding();
-        return <li key={contentId}>
-          <span className="pending-action-icon"><Icon size={17} aria-hidden="true" /></span>
-          <div>
-            <h4>{name}</h4>
-            <p>{body}</p>
-          </div>
-          <button className="overview-action" type="button" disabled={disabled} onClick={run}>
-            {action.label} <ArrowUpRight size={15} aria-hidden="true" />
-          </button>
-        </li>;
-      })}
-    </ul> : <p>No pending actions.</p>)}
+    <h3 id={title}>Pending actions</h3>
+    {first && <ul><PendingActionItem item={first} {...itemProps} /></ul>}
+    {remaining.length > 0 && <details className="inline-details remaining-pending-actions">
+      <summary>Other pending actions ({remaining.length})</summary>
+      <ul>{remaining.map((item) => <PendingActionItem key={item.contentId} item={item} {...itemProps} />)}</ul>
+    </details>}
+    {items?.length === 0 && <p>No pending actions.</p>}
     {!items && (failed ? <div className="next-step-error">
       <p role="status">Couldn’t load pending actions.</p>
       <button className="secondary-button" type="button" onClick={refresh}>Try again</button>
@@ -176,6 +181,32 @@ function WelcomeBanner({ displayName, portfolio, modelUnavailable }: {
   </section>;
 }
 
+function AccountSummary({ portfolio, history, disabled, onReview }: {
+  portfolio: PortfolioSnapshot; history?: PortfolioHistoryPoint[]; disabled: boolean; onReview: () => void;
+}) {
+  const title = useId();
+  const { asOf, cashCents, equityCents, fixedIncomeCents } = portfolio;
+  const invested = equityCents + fixedIncomeCents;
+  const showHistory = history && history.length >= 2;
+  return <section className={"content-card account-summary" + (showHistory ? " has-history" : "")} aria-labelledby={title}>
+    <div className="account-summary-values">
+      <header className="workspace-card-heading">
+        <h3 id={title}>Account summary</h3>
+        <p className="overview-date">As of <time dateTime={asOf}>{snapshotDate.format(new Date(asOf))}</time></p>
+      </header>
+      <p className="account-summary-total"><span>Portfolio value</span><strong>{formatPortfolioAmount(invested + cashCents)}</strong></p>
+      <dl>
+        <div><dt>Invested</dt><dd>{formatPortfolioAmount(invested)}</dd></div>
+        <div><dt>Cash</dt><dd>{formatPortfolioAmount(cashCents)}</dd></div>
+      </dl>
+      <button className="overview-action" type="button" disabled={disabled} onClick={onReview}>
+        View portfolio in chat <ArrowUpRight size={15} aria-hidden="true" />
+      </button>
+    </div>
+    {showHistory && <PortfolioHistory history={history} overview />}
+  </section>;
+}
+
 export function WorkspaceHome({ activeProfile, pendingActions, disabled, modelUnavailable, onReviewPortfolio, onReviewGuide, onPreviewFunding }: {
   activeProfile?: DemoPersona; pendingActions: PendingActions; disabled: boolean; modelUnavailable: boolean;
   onReviewPortfolio: () => void; onReviewGuide: (message: string) => void; onPreviewFunding: () => void;
@@ -185,11 +216,8 @@ export function WorkspaceHome({ activeProfile, pendingActions, disabled, modelUn
   return <div className="workspace-overview workspace-home">
     <WelcomeBanner displayName={activeProfile?.displayName} modelUnavailable={modelUnavailable} />
     {activeProfile && <>
-      {portfolio ? <PortfolioSnapshotBlock {...portfolio} compact history={activeProfile.overview?.portfolioHistory} title="Account summary" footer={
-        <button className="overview-action" type="button" disabled={actionsDisabled} onClick={onReviewPortfolio}>
-          Ask about portfolio <ArrowUpRight size={15} aria-hidden="true" />
-        </button>
-      } /> : <section className="content-card welcome-no-portfolio" aria-label="Account summary">
+      {portfolio ? <AccountSummary portfolio={portfolio} history={activeProfile.overview?.portfolioHistory}
+        disabled={actionsDisabled} onReview={onReviewPortfolio} /> : <section className="content-card welcome-no-portfolio" aria-label="Account summary">
         <h3>Account summary</h3>
         <p>Portfolio information is unavailable.</p>
       </section>}

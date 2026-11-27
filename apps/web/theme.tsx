@@ -3,7 +3,7 @@ import { Moon, Sun } from "lucide-react";
 
 export type CepTheme = "light" | "dark";
 const STORAGE_KEY = "cep-theme";
-const EVENT_NAME = "cep-theme-change";
+export const themeChangeEvent = "cep-theme-change";
 
 export function readStoredTheme(): CepTheme {
   try {
@@ -19,7 +19,7 @@ export function applyTheme(theme: CepTheme) {
   try {
     localStorage.setItem(STORAGE_KEY, theme);
   } catch { /* Storage may be restricted. */ }
-  window.dispatchEvent(new CustomEvent<CepTheme>(EVENT_NAME, { detail: theme }));
+  window.dispatchEvent(new CustomEvent<CepTheme>(themeChangeEvent, { detail: theme }));
 }
 
 export function initTheme() {
@@ -36,8 +36,8 @@ export function ThemeToggle({ compact = false }: { compact?: boolean }) {
       const next = (event as CustomEvent<CepTheme>).detail;
       if (next === "light" || next === "dark") setTheme(next);
     };
-    window.addEventListener(EVENT_NAME, sync);
-    return () => window.removeEventListener(EVENT_NAME, sync);
+    window.addEventListener(themeChangeEvent, sync);
+    return () => window.removeEventListener(themeChangeEvent, sync);
   }, []);
 
   const nextTheme: CepTheme = theme === "dark" ? "light" : "dark";

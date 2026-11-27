@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Cpu, Layers, Minimize2, RefreshCw, Sparkles } from "lucide-react";
 import { api } from "./api";
+import "./context-health.css";
 
 type ContextSnapshot = Awaited<ReturnType<typeof api.conversationContext>>;
 

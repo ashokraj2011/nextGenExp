@@ -1,0 +1,209 @@
+/* Conversation context in Admin Inspector */
+.context-health-wrap {
+  position: relative;
+  width: fit-content;
+}
+
+.context-health-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--white);
+  color: var(--soft-ink);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 630;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.context-health-pill:hover:not(:disabled) {
+  border-color: var(--teal);
+  color: var(--ink);
+}
+
+.context-health-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #2f7d32;
+}
+
+.context-health-pill.is-mid .context-health-dot {
+  background: #d97706;
+}
+
+.context-health-pill.is-high .context-health-dot {
+  background: #dc2626;
+}
+
+.context-health-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--teal-pale);
+  color: var(--teal-dark);
+  font-size: 0.66rem;
+  font-weight: 750;
+}
+
+.context-health-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  inset-inline-start: 0;
+  width: min(340px, calc(100vw - 38px));
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--white);
+  border: 1px solid var(--line);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14);
+  z-index: 60;
+  display: grid;
+  gap: 11px;
+}
+
+.context-health-pop-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.context-health-pop-head strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.84rem;
+  color: var(--ink);
+}
+
+.context-health-pop-head small {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.context-health-meter {
+  display: grid;
+  gap: 5px;
+}
+
+.context-health-meter-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.context-health-meter-row strong {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.context-health-track {
+  height: 7px;
+  border-radius: 999px;
+  background: var(--surface-subtle, #eef3f7);
+  overflow: hidden;
+}
+
+.context-health-track span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: #2f7d32;
+}
+
+.context-health-track span.is-mid {
+  background: #d97706;
+}
+
+.context-health-track span.is-high {
+  background: #dc2626;
+}
+
+.context-health-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.context-health-stats > div {
+  padding: 7px 8px;
+  border-radius: 8px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+
+.context-health-stats dt {
+  font-size: 0.67rem;
+  color: var(--muted);
+}
+
+.context-health-stats dd {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.context-health-summary,
+.context-health-clarify {
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--teal-pale);
+  border: 1px solid color-mix(in srgb, var(--teal) 25%, transparent);
+  display: grid;
+  gap: 4px;
+}
+
+.context-health-summary span,
+.context-health-clarify span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--teal-dark);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.context-health-summary p,
+.context-health-clarify p {
+  margin: 0;
+  font-size: 0.77rem;
+  line-height: 1.45;
+  color: var(--ink);
+  max-height: 110px;
+  overflow-y: auto;
+}
+
+.context-health-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.context-health-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.context-health-note {
+  font-size: 0.72rem;
+  color: var(--muted);
+  line-height: 1.35;
+}

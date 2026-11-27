@@ -22,13 +22,12 @@ import { installA2uiStyles } from "./surface";
 import { CEP_EMBED_PROTOCOL, type CepEmbedScreenContext } from "../../packages/embed-sdk";
 import type { ProactiveAlert } from "../../packages/contracts/proactive-events";
 import { usePendingActions } from "./workspace-overview";
-import { WorkspaceCustomization, WorkspaceMenu, type WorkspaceSection } from "./workspace-menu";
+import { WorkspaceCustomization, WorkspaceMenu, workspaceSections, type WorkspaceSection } from "./workspace-menu";
 import { FolderSettings, ThreadList, ThreadSettings, type ThreadBadge } from "./thread-list";
 import type { HandoffTicket } from "../../packages/contracts/handoff";
 import { isHandoffPhrase, MemoryDrawer, type MemoryEntry } from "./chat-rich-ux";
 import type { ExpertiseMode, Watchcard } from "../../packages/contracts/nextgen-chat";
 import { ChatToolsMenu, ConsumerA2aDrawer } from "./nextgen-chat-features";
-import { ContextHealthPill } from "./context-health-pill";
 import { buildWealthDomContext, messageFor } from "./chat/chat-context";
 import { Chat } from "./chat/chat-thread";
 import "./customer-workbench.css";
@@ -77,6 +76,7 @@ function App() {
   const [proactiveAlert, setProactiveAlert] = useState<ProactiveAlert | null>(null);
   const [signedInProfileId, setSignedInProfileId] = useState(entry.profileId);
   const [domainPack, setDomainPack] = useDomainPack();
+  const simpleWealthHeader = !adminChat && !embedMode && domainPack.id === "wealth";
   const [configuration, setConfiguration] = useState<Bootstrap>();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [folders, setFolders] = useState<ConversationFolder[]>([]);
@@ -240,11 +240,11 @@ function App() {
     previousPanel.current = panel?.kind;
     if (panel || !closed) return;
     const triggers = { profiles: profilesTrigger, pins: customizeTrigger, thread: threadTrigger, folder: threadTrigger };
-    const isNavigationPanel = closed !== "pins";
+    const isNavigationPanel = closed !== "pins" || simpleWealthHeader;
     if (isNavigationPanel && window.matchMedia(narrowNavigation).matches) railTrigger.current?.focus();
     else if (triggers[closed].current?.isConnected) triggers[closed].current?.focus();
     else newThreadTrigger.current?.focus();
-  }, [panel]);
+  }, [panel, simpleWealthHeader]);
 
   useEffect(() => {
     if (!configuration) return;
@@ -740,6 +740,15 @@ function App() {
           <LayoutDashboard size={16} aria-hidden="true" />Overview
         </button>
       </div>
+      {simpleWealthHeader && <div className="rail-mobile-shortcuts">
+        <WorkspaceMenu sidebar pins={pins} section={activeSection} disabled={!configuration}
+          onSelect={(next) => {
+            setSection(next);
+            setOverviewOpen(true);
+            setRailOpen(false);
+          }}
+          onCustomize={() => openPanel({ kind: "pins" })} />
+      </div>}
       <ThreadList threads={visibleConversations} folders={visibleFolders} profiles={profilesById} activeId={chat?.id}
         showNames={adminChat} pending={pending || !configuration} threadBadges={threadBadges}
         open={(id) => {
@@ -817,7 +826,7 @@ function App() {
           </div>
         </header>
       ) : (
-        <header className="topbar unified-topbar">
+        <header className={"topbar unified-topbar" + (simpleWealthHeader ? " wealth-topbar" : "")}>
           <div className="topbar-left">
             <button className="icon-button rail-menu" ref={railTrigger} type="button" aria-label="Show conversations" aria-expanded={railOpen}
               aria-controls="conversation-rail" onClick={() => setRailOpen((open) => !open)}><PanelLeft size={19} aria-hidden="true" /></button>
@@ -829,7 +838,7 @@ function App() {
               {adminChat ? "Admin chat" : (domainPack.id === "wealth" ? (activeProfile?.displayName ?? "Workspace") : domainPack.label)}
               <ChevronRight size={13} aria-hidden="true" />
             </span>
-            <h1>{chat?.title ?? "Overview"}</h1>
+            <h1>{chat?.title ?? (activeSection === "summary" ? "Overview" : workspaceSections[activeSection].label)}</h1>
           </div>
           {domainPack.id === "wealth" && (
             <div className="topbar-center">
@@ -838,14 +847,7 @@ function App() {
             </div>
           )}
           <div className="topbar-actions">
-            {!adminChat && (
-              <>
-                <ContextHealthPill
-                  conversationId={chat?.id}
-                  turnCount={chat?.turns.filter((t) => t.status === "completed").length ?? 0}
-                  disabled={!configuration}
-                />
-                <ChatToolsMenu
+            {!adminChat && <ChatToolsMenu
                 expertiseMode={expertiseMode}
                 onChangeExpertise={changeExpertiseMode}
                 futuresOpen={futuresOpen}
@@ -859,9 +861,7 @@ function App() {
                 onOpenMemory={() => { setMemoryOpen(true); void loadMemory(); }}
                 handoffActive={Boolean(activeHandoff)}
                 onStartHandoff={() => void startHandoff()}
-              />
-              </>
-            )}
+              />}
             <ThemeToggle compact />
             {adminChat && configuration && (
               <span className="model-status" data-connected={configuration.gatewayConfigured}>

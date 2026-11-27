@@ -1,12 +1,11 @@
-import { useId, useState, type CSSProperties, type ReactNode } from "react";
-import { ArrowUpRight, ChartNoAxesCombined, ChevronDown, ChevronUp, SlidersHorizontal } from "lucide-react";
-import { formatPortfolioAmount, type PortfolioHistoryPoint, type PortfolioSnapshot } from "../../packages/contracts/portfolio";
-import { PortfolioHistory } from "./portfolio-history";
+import { useId, useState, type CSSProperties } from "react";
+import { ArrowUpRight, ChevronDown, ChevronUp, SlidersHorizontal } from "lucide-react";
+import { formatPortfolioAmount, type PortfolioSnapshot } from "../../packages/contracts/portfolio";
 
 const asOfFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" });
 
-export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedIncomeCents, title = "Portfolio snapshot", compact = false, history, footer, onExploreAllocation, allowSimulation = Boolean(onExploreAllocation) }:
-  PortfolioSnapshot & { title?: string; compact?: boolean; history?: PortfolioHistoryPoint[]; footer?: ReactNode; onExploreAllocation?: (prompt: string) => void; allowSimulation?: boolean }) {
+export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedIncomeCents, onExploreAllocation, allowSimulation = Boolean(onExploreAllocation) }:
+  PortfolioSnapshot & { onExploreAllocation?: (prompt: string) => void; allowSimulation?: boolean }) {
   const titleId = useId();
   const deployId = useId();
   const splitId = useId();
@@ -41,17 +40,16 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
 
   return <section className="content-card portfolio-snapshot" aria-labelledby={titleId}>
     <header className="portfolio-heading">
-      <h3 id={titleId}>{title}</h3>
+      <h3 id={titleId}>Portfolio snapshot</h3>
       <p>As of <time dateTime={asOf}>{asOfFormat.format(new Date(asOf))}</time></p>
     </header>
     <div className="portfolio-body">
       <dl className="portfolio-values">
         <div><dt>Total value</dt><dd>{formatPortfolioAmount(total)}</dd></div>
-        <div><dt>Invested{compact && total > 0 && <small>{Math.round(percent(invested))}%</small>}</dt><dd>{formatPortfolioAmount(invested)}</dd></div>
-        <div><dt>Cash{compact && total > 0 && <small>{Math.round(percent(cashCents))}%</small>}</dt><dd>{formatPortfolioAmount(cashCents)}</dd></div>
+        <div><dt>Invested</dt><dd>{formatPortfolioAmount(invested)}</dd></div>
+        <div><dt>Cash</dt><dd>{formatPortfolioAmount(cashCents)}</dd></div>
       </dl>
-      {compact && total > 0 && <div className="portfolio-mix" aria-hidden="true"><span style={{ width: percent(invested) + "%" }} /></div>}
-      {!compact && <div className="portfolio-breakdown">
+      <div className="portfolio-breakdown">
         <div className="breakdown-heading">
           <h4>Portfolio breakdown</h4>
           <div className="allocation-units" role="group" aria-label="Allocation display">
@@ -77,7 +75,7 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
             </li>;
           })}
         </ul>
-      </div>}
+      </div>
     </div>
 
     {allowSimulation && maxCashDollars >= 500 && (
@@ -137,10 +135,5 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
       </div>
     )}
 
-    {compact && history && history.length >= 2 && <details className="summary-history">
-      <summary><ChartNoAxesCombined size={16} aria-hidden="true" />Value history<ChevronDown size={15} aria-hidden="true" /></summary>
-      <PortfolioHistory history={history} embedded />
-    </details>}
-    {footer && <div className="portfolio-footer">{footer}</div>}
   </section>;
 }

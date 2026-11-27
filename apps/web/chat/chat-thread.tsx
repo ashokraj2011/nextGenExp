@@ -146,7 +146,7 @@ export function Chat({
   const canWrite = Boolean(configuration) && !pending && !running && !archived;
   const showWelcomeCards = !adminChat && !turns.length && section === "summary";
   const showOverview = adminChat || section !== "summary";
-  const useHeroComposer = !archived && !turns.length && section === "summary" && !adminChat;
+  const useHeroComposer = showWelcomeCards && !archived && domainPack.id !== "wealth";
 
   const overviewProps = {
     activeProfile, pins, onSelect, disabled: !canWrite,
@@ -175,6 +175,7 @@ export function Chat({
       activeExperienceId,
       allowRuleCreation: adminChat,
       accountPortalAvailable: !adminChat && conversation?.domainId === "wealth",
+      simplifyBalanceComparison: !adminChat && domainPack.id === "wealth",
       askPrompt: canWrite ? (prompt) => void onSend(prompt) : undefined,
       onWriteBack,
       followUp: onFollowUp,
@@ -189,7 +190,7 @@ export function Chat({
       }}>
         <ExperienceDataUI />
         <div className="chat-split-shell">
-        <ThreadPrimitive.Root className={adminChat ? "thread" : "thread customer-workbench editorial-thread"}>
+        <ThreadPrimitive.Root className={adminChat ? "thread" : "thread customer-workbench editorial-thread" + (domainPack.id === "wealth" ? " wealth-thread" : "")}>
           <ThreadPrimitive.Viewport className="thread-scroll" ref={viewport}
             autoScroll={false} scrollToBottomOnInitialize={false} scrollToBottomOnRunStart={false} scrollToBottomOnThreadSwitch={false}
             aria-label="Conversation">
@@ -213,20 +214,14 @@ export function Chat({
             {!adminChat && activeHandoff && (
               <LiveHandoffCard ticket={activeHandoff} onDismiss={onDismissHandoff} />
             )}
-            {useHeroComposer && (
-              <div className="editorial-hero-stage">
-                {domainPack.id === "wealth"
-                  ? <WorkspaceHome {...overviewProps} pendingActions={pendingActions}
-                      onReviewGuide={(message) => void onSend(message)} onPreviewFunding={() => onPreviewFunding(pendingActionsContext)} />
-                  : <DomainWelcomeHome domainId={domainPack.id} disabled={!canWrite} onPrompt={(prompt) => void onSend(prompt)} />}
-                {composerEl}
-              </div>
-            )}
-            {!useHeroComposer && showWelcomeCards && (
+            {showWelcomeCards && (
               domainPack.id === "wealth"
                 ? <WorkspaceHome {...overviewProps} pendingActions={pendingActions}
                     onReviewGuide={(message) => void onSend(message)} onPreviewFunding={() => onPreviewFunding(pendingActionsContext)} />
-                : <DomainWelcomeHome domainId={domainPack.id} disabled={!canWrite} onPrompt={(prompt) => void onSend(prompt)} />
+                : <div className="editorial-hero-stage">
+                    <DomainWelcomeHome domainId={domainPack.id} disabled={!canWrite} onPrompt={(prompt) => void onSend(prompt)} />
+                    {useHeroComposer && composerEl}
+                  </div>
             )}
             {showOverview && <WorkspaceOverview {...overviewProps} section={section} showNextStep={!turns.length} />}
             {updates.length > 0 && <section className="thread-updates" aria-label="Record updates" aria-live="polite">{updates.map((w) => <p key={w.id}>{w.state === "reached" ? <strong>Update received</strong> : <strong>Watching</strong>} · {w.label} · Current status: {w.value}</p>)}</section>}

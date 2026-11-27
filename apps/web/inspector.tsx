@@ -6,6 +6,7 @@ import { adminPaths } from "../../packages/contracts/admin-paths";
 import { recommendationContextLabel } from "../../packages/contracts/self-service-pzn";
 import { diagnosticHref } from "./admin-navigation";
 import { api, type Trace } from "./api";
+import { ContextHealthPill } from "./context-health-pill";
 
 function Detail({ label, children }: { label: string; children: ReactNode }) {
   return <div><dt>{label}</dt><dd>{children}</dd></div>;
@@ -197,6 +198,7 @@ export function Inspector({ configuration, conversation, turnId, create }: {
         {turns.map((turn, index) => <option value={turn.id} key={turn.id}>{index + 1}. {turn.message.slice(0, 70)}</option>)}
       </select> : <p>Send a question to see its execution trace.</p>}
     </section>
+    {conversation && <ContextHealthPill conversationId={conversation.id} turnCount={turns.filter(({ status }) => status === "completed").length} />}
     {displayedTurn && <a className="secondary-button inspector-logs-link"
       href={diagnosticHref(adminPaths.logs, conversation?.id, displayedTurn.id)}><FileText size={16} aria-hidden="true" />Open call logs</a>}
     {traceError && <p role="alert">The turn trace is unavailable.</p>}

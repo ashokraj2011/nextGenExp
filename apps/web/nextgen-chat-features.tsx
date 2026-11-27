@@ -914,13 +914,14 @@ export function ChatToolsMenu({
         className={"topbar-rich-btn" + (open || futuresOpen || handoffActive || watchTriggered ? " is-active" : "")}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label="Assistant tools"
         title="Assistant tools & display settings (or type / in chat)"
         onClick={() => setOpen((v) => !v)}
       >
         <Sparkles size={14} aria-hidden="true" />
-        <span>Tools</span>
+        <span className="tools-menu-trigger-label">Tools</span>
         {activeBadgeCount > 0 && <span className="topbar-rich-count">{activeBadgeCount}</span>}
-        <ChevronDown size={13} aria-hidden="true" />
+        <ChevronDown className="tools-menu-trigger-caret" size={13} aria-hidden="true" />
       </button>
 
       {open && (

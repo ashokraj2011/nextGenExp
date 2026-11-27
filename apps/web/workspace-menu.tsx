@@ -12,24 +12,24 @@ export const workspaceSections = {
 };
 export type WorkspaceSection = keyof typeof workspaceSections;
 
-export function WorkspaceMenu({ pins, section, onSelect, onCustomize, trigger, disabled }: {
+export function WorkspaceMenu({ pins, section, onSelect, onCustomize, trigger, disabled, sidebar = false }: {
   pins: WorkspacePin[]; section: WorkspaceSection; onSelect: (section: WorkspaceSection) => void;
-  onCustomize: () => void; trigger: React.RefObject<HTMLButtonElement | null>; disabled: boolean;
+  onCustomize: () => void; trigger?: React.RefObject<HTMLButtonElement | null>; disabled: boolean; sidebar?: boolean;
 }) {
-  const items = ["summary", ...pins] as const;
+  const items: readonly WorkspaceSection[] = sidebar ? pins : ["summary", ...pins];
   return <div className="workspace-menu">
-    <label className="workspace-section-picker"><span className="sr-only">Workspace section</span>
+    {!sidebar && <label className="workspace-section-picker"><span className="sr-only">Workspace section</span>
       <select value={section} onChange={(event) => onSelect(event.target.value as WorkspaceSection)}>
         {items.map((item) => <option key={item} value={item}>{workspaceSections[item].label}</option>)}
       </select>
-    </label>
-    <nav aria-label="Workspace shortcuts">
+    </label>}
+    {items.length > 0 && <nav aria-label="Workspace shortcuts">
       {items.map((item) => {
         const { label, Icon } = workspaceSections[item];
         return <button key={item} className="workspace-shortcut" type="button" aria-pressed={item === section}
           onClick={() => onSelect(item)}><Icon size={16} aria-hidden="true" />{label}</button>;
       })}
-    </nav>
+    </nav>}
     <button ref={trigger} className="workspace-customize" type="button" aria-label="Customize shortcuts" aria-haspopup="dialog"
       disabled={disabled} onClick={onCustomize}><Settings2 size={16} aria-hidden="true" /><span>Customize</span></button>
   </div>;

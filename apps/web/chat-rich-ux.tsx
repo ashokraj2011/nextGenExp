@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  Brain, Check, CheckCircle2, Copy, Download, GitBranch, Headphones, PanelRightOpen,
+  Brain, Check, CheckCircle2, Copy, Download, Ellipsis, GitBranch, Headphones, PanelRightOpen,
   Plus, Search, Send, Sparkles, Table2, Trash2, UserCheck, X,
 } from "lucide-react";
 import type { TurnView } from "../../packages/contracts/api";
@@ -306,7 +306,7 @@ export function LiveHandoffCard({ ticket: initialTicket, onDismiss }: {
  * 4. Policy citations
  * ========================================================================== */
 
-export function PolicyCitations({ userMessage }: { userMessage: string }) {
+function PolicyCitations({ userMessage }: { userMessage: string }) {
   const [ragOpen, setRagOpen] = useState(false);
   const [ragLoading, setRagLoading] = useState(false);
   const [ragHits, setRagHits] = useState<KnowledgeCitation[] | null>(null);
@@ -339,22 +339,22 @@ export function PolicyCitations({ userMessage }: { userMessage: string }) {
       </button>
 
       {ragOpen && (
-        <div className="citation-popover" role="region" aria-label="Hybrid RAG policy citations">
+        <div className="citation-popover" role="region" aria-label="Related policy references">
           <div className="citation-popover-head">
-            <strong>Hybrid BM25 + Vector Policy Matches</strong>
+            <strong>Related policy references</strong>
             <button type="button" className="icon-button" aria-label="Close policy citations" onClick={() => setRagOpen(false)}>
               <X size={13} aria-hidden="true" />
             </button>
           </div>
           {ragLoading && <p className="rich-muted">Searching verified policy knowledge base…</p>}
-          {!ragLoading && ragHits && ragHits.length === 0 && <p className="rich-muted">No matching enterprise policy snippets for this topic.</p>}
+          {!ragLoading && ragHits && ragHits.length === 0 && <p className="rich-muted">No related policy references found.</p>}
           {!ragLoading && ragHits && ragHits.length > 0 && (
             <ul className="rag-hit-list">
               {ragHits.map((hit) => (
                 <li key={`${hit.docId}-${hit.chunkIndex}`}>
                   <div className="rag-hit-top">
                     <strong>{hit.docTitle}</strong>
-                    <span>v{hit.version} · score {hit.score}{hit.vectorScore !== undefined ? ` (vec ${hit.vectorScore}%)` : ""}</span>
+                    <span>Version {hit.version}</span>
                   </div>
                   <p>{hit.excerpt}</p>
                 </li>
@@ -392,13 +392,14 @@ function buildTurnBriefMarkdown(turn: TurnView): string {
   return lines.filter((l, i, arr) => l !== "" || arr[i - 1] !== "").join("\n");
 }
 
-export function TurnRichActions({ turn, pending, pinnedInCanvas, onPinCanvas, onReframe, onBranch }: {
+export function TurnRichActions({ turn, pending, pinnedInCanvas, onPinCanvas, onReframe, onBranch, children }: {
   turn: TurnView;
   pending: boolean;
   pinnedInCanvas: boolean;
   onPinCanvas: (turn: TurnView) => void;
   onReframe: (prompt: string) => void;
   onBranch?: (turn: TurnView) => void;
+  children?: React.ReactNode;
 }) {
   const [copied, setCopied] = useState(false);
   const hasBlocks = (turn.experience?.blocks.length ?? 0) > 0;
@@ -420,52 +421,57 @@ export function TurnRichActions({ turn, pending, pinnedInCanvas, onPinCanvas, on
   }
 
   return (
-    <div className="turn-rich-actions" aria-label="Response tools">
-      {hasBlocks && (
-        <button
-          type="button"
-          className={"rich-action-chip" + (pinnedInCanvas ? " is-active" : "")}
-          onClick={() => onPinCanvas(turn)}
-        >
-          <PanelRightOpen size={12} aria-hidden="true" />
-          {pinnedInCanvas ? "In Canvas" : "Open in Canvas"}
+    <details className="response-more">
+      <summary aria-label="More response options"><Ellipsis size={16} aria-hidden="true" />More</summary>
+      <div className="turn-rich-actions" aria-label="Response tools">
+        {hasBlocks && (
+          <button
+            type="button"
+            className={"rich-action-chip" + (pinnedInCanvas ? " is-active" : "")}
+            onClick={() => onPinCanvas(turn)}
+          >
+            <PanelRightOpen size={12} aria-hidden="true" />
+            {pinnedInCanvas ? "In Canvas" : "Open in Canvas"}
+          </button>
+        )}
+        <button type="button" className="rich-action-chip" onClick={copyBrief}>
+          {copied ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
+          {copied ? "Copied" : "Copy brief"}
         </button>
-      )}
-      <button type="button" className="rich-action-chip" onClick={copyBrief}>
-        {copied ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
-        {copied ? "Copied" : "Copy brief"}
-      </button>
-      <button type="button" className="rich-action-chip" onClick={downloadBrief}>
-        <Download size={12} aria-hidden="true" />Export
-      </button>
-      <button
-        type="button"
-        className="rich-action-chip is-subtle"
-        disabled={pending}
-        onClick={() => onReframe(`Summarize your last answer about "${turn.message.slice(0, 80)}" in 3 bullet points.`)}
-      >
-        <Sparkles size={11} aria-hidden="true" />Summarize
-      </button>
-      <button
-        type="button"
-        className="rich-action-chip is-subtle"
-        disabled={pending}
-        onClick={() => onReframe(`Show your last answer about "${turn.message.slice(0, 80)}" as a clear comparison table.`)}
-      >
-        <Table2 size={11} aria-hidden="true" />As table
-      </button>
-      {onBranch && (
+        <button type="button" className="rich-action-chip" onClick={downloadBrief}>
+          <Download size={12} aria-hidden="true" />Export
+        </button>
         <button
           type="button"
           className="rich-action-chip is-subtle"
           disabled={pending}
-          title="Branch a new conversation from this message"
-          onClick={() => onBranch(turn)}
+          onClick={() => onReframe(`Summarize your last answer about "${turn.message.slice(0, 80)}" in 3 bullet points.`)}
         >
-          <GitBranch size={11} aria-hidden="true" />Branch
+          <Sparkles size={11} aria-hidden="true" />Summarize
         </button>
-      )}
-    </div>
+        <button
+          type="button"
+          className="rich-action-chip is-subtle"
+          disabled={pending}
+          onClick={() => onReframe(`Show your last answer about "${turn.message.slice(0, 80)}" as a clear comparison table.`)}
+        >
+          <Table2 size={11} aria-hidden="true" />As table
+        </button>
+        {onBranch && (
+          <button
+            type="button"
+            className="rich-action-chip is-subtle"
+            disabled={pending}
+            title="Branch a new conversation from this message"
+            onClick={() => onBranch(turn)}
+          >
+            <GitBranch size={11} aria-hidden="true" />Branch
+          </button>
+        )}
+      </div>
+      <PolicyCitations userMessage={turn.message} />
+      {children}
+    </details>
   );
 }
 
