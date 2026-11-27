@@ -151,28 +151,47 @@
   position: absolute;
   left: 0;
   right: 0;
-  bottom: calc(100% + 8px);
+  bottom: calc(100% + 10px);
   z-index: 40;
-  background: var(--surface, #ffffff);
-  border: 1px solid var(--line-strong);
+  background: color-mix(in srgb, var(--surface, #ffffff) 88%, transparent);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  border: 1px solid color-mix(in srgb, var(--line-strong) 80%, var(--teal-dark, #0f766e) 20%);
   border-radius: 16px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.14);
+  box-shadow: 0 18px 44px rgba(10, 28, 22, 0.16), 0 2px 8px rgba(10, 28, 22, 0.06);
   overflow: hidden;
   display: grid;
+  transform-origin: bottom center;
+  animation: cepPopUp 0.18s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .slash-menu-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 14px;
+  padding: 9px 14px;
   font-size: 0.72rem;
   font-weight: 650;
   color: var(--muted);
   border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-alt, #f4f7f6) 65%, transparent);
+}
+.slash-menu-kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.slash-menu-kbd kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.68rem;
+  padding: 1px 5px;
+  border-radius: 5px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface, #ffffff);
+  color: var(--ink);
 }
 .slash-menu-item {
   display: grid;
-  grid-template-columns: 112px minmax(0, 1fr) auto;
+  grid-template-columns: 118px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 9px 14px;
@@ -182,10 +201,23 @@
   text-align: left;
   font-size: 0.84rem;
   cursor: pointer;
+  transition: background 0.14s ease, transform 0.14s ease;
 }
 .slash-menu-item:hover,
 .slash-menu-item.is-active {
-  background: var(--teal-pale, rgba(13, 148, 136, 0.1));
+  background: var(--teal-pale, rgba(13, 148, 136, 0.12));
+  transform: translateX(2px);
+}
+.slash-menu-domain {
+  font-size: 0.66rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--teal-pale, rgba(13, 148, 136, 0.12));
+  color: var(--teal-dark, #0f766e);
+  margin-left: 6px;
 }
 .slash-menu-item code {
   font-weight: 700;
@@ -598,7 +630,179 @@
 [data-theme="dark"] .citation-popover,
 [data-theme="dark"] .live-handoff-card,
 [data-theme="dark"] .rich-drawer {
+  background: color-mix(in srgb, #141922 90%, transparent);
+}
+
+/* ============================================================================
+ * Chat Motion Choreography, Live Governance Pill & Tactile Micro-Interactions
+ * ========================================================================== */
+@keyframes cepRevealUp {
+  from { opacity: 0; transform: translateY(10px) scale(0.992); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes cepPopUp {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes cepSlideInRight {
+  from { opacity: 0; transform: translateX(18px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes cepShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes cepBarGrow {
+  from { transform: scaleX(0); transform-origin: left center; }
+  to { transform: scaleX(1); transform-origin: left center; }
+}
+
+.user-message,
+.assistant-message {
+  animation: cepRevealUp 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.assistant-content .content-card,
+.assistant-content .nba-companion-card,
+.assistant-content .dyn-canvas-card {
+  animation: cepRevealUp 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.assistant-content > :nth-child(2) { animation-delay: 45ms; }
+.assistant-content > :nth-child(3) { animation-delay: 95ms; }
+.assistant-content > :nth-child(4) { animation-delay: 145ms; }
+
+.assistant-content .content-card:hover,
+.assistant-content .nba-companion-card:hover {
+  box-shadow: 0 10px 28px rgba(15, 118, 110, 0.08);
+}
+
+.live-canvas-pane {
+  animation: cepSlideInRight 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.composer {
+  transition: border-color 0.18s ease, box-shadow 0.22s ease, transform 0.18s ease;
+}
+
+.composer:focus-within {
+  border-color: var(--teal-dark, #0f766e);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12), 0 10px 26px rgba(10, 28, 22, 0.07);
+}
+
+.composer-tool-btn,
+.starter,
+.next-suggestion-chip,
+.send-button {
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.composer-tool-btn:hover:not(:disabled),
+.starter:hover:not(:disabled),
+.next-suggestion-chip:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.composer-slash-btn {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 750;
+  font-size: 0.85rem;
+}
+
+.composer-slash-btn.is-active {
+  background: var(--teal-pale, rgba(13, 148, 136, 0.14));
+  color: var(--teal-dark, #0f766e);
+  border-color: rgba(15, 118, 110, 0.35);
+}
+
+.cep-live-status-wrap {
+  display: grid;
+  gap: 10px;
+  animation: cepRevealUp 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.cep-live-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  width: fit-content;
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--teal-dark, #0f766e);
+  border: 1px solid color-mix(in srgb, var(--teal-dark, #0f766e) 26%, var(--line));
+  background: linear-gradient(
+    90deg,
+    var(--teal-pale, rgba(13, 148, 136, 0.08)) 0%,
+    rgba(13, 148, 136, 0.18) 50%,
+    var(--teal-pale, rgba(13, 148, 136, 0.08)) 100%
+  );
+  background-size: 220% 100%;
+  animation: cepShimmer 2.2s linear infinite;
+}
+
+.cep-live-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--teal-dark, #0f766e);
+  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.18);
+  animation: pulse 1.3s ease-in-out infinite;
+}
+
+.cep-shimmer-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--surface, #ffffff);
+  max-width: 460px;
+}
+
+.cep-shimmer-line {
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(128, 150, 142, 0.12) 25%, rgba(128, 150, 142, 0.24) 50%, rgba(128, 150, 142, 0.12) 75%);
+  background-size: 200% 100%;
+  animation: cepShimmer 1.6s ease-in-out infinite;
+}
+
+.cep-shimmer-line.is-short { width: 58%; }
+.cep-shimmer-line.is-med { width: 82%; }
+
+.goal-bar-fill,
+.metric-bar-fill {
+  animation: cepBarGrow 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+[data-theme="dark"] .cep-shimmer-card {
   background: #141922;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .user-message,
+  .assistant-message,
+  .assistant-content .content-card,
+  .assistant-content .nba-companion-card,
+  .assistant-content .dyn-canvas-card,
+  .slash-menu,
+  .live-canvas-pane,
+  .cep-live-status-wrap,
+  .cep-live-status-pill,
+  .cep-live-status-dot,
+  .cep-shimmer-line,
+  .goal-bar-fill,
+  .metric-bar-fill {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 @media (max-width: 960px) {

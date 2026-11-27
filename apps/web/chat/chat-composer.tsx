@@ -203,6 +203,24 @@ export function Composer({
               onChange={(event) => onDraft(event.target.value)} onKeyDown={onKeyDown} />
           </div>
           <div className="composer-tools">
+            <button
+              type="button"
+              className={"composer-tool-btn composer-slash-btn" + (slashCommands.length > 0 ? " is-active" : "")}
+              aria-label="Open slash commands"
+              aria-pressed={slashCommands.length > 0}
+              title="Browse tenant slash commands (/)"
+              disabled={disabled || pending}
+              onClick={() => {
+                if (draft.trimStart().startsWith("/")) {
+                  onDraft("");
+                } else {
+                  onDraft("/");
+                  input.current?.focus();
+                }
+              }}
+            >
+              /
+            </button>
             <input
               ref={fileInput}
               type="file"

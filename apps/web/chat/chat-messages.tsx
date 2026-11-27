@@ -148,7 +148,18 @@ export function AssistantMessage() {
 
           {turn.status === "working" ? (
             <>
-              <div role="status" aria-live="polite" className={adminChat ? "sr-only" : "customer-progress"}>{progressLabels[turn.progress]}…</div>
+              <div role="status" aria-live="polite" className={adminChat ? "sr-only" : "cep-live-status-wrap"}>
+                <div className="cep-live-status-pill">
+                  <span className="cep-live-status-dot" aria-hidden="true" />
+                  <span>{progressLabels[turn.progress]}…</span>
+                </div>
+                {!adminChat && !(turn.harnessStages && turn.harnessStages.length > 0) && (
+                  <div className="cep-shimmer-card" aria-hidden="true">
+                    <div className="cep-shimmer-line is-med" />
+                    <div className="cep-shimmer-line is-short" />
+                  </div>
+                )}
+              </div>
               {!adminChat && turn.harnessStages && turn.harnessStages.length > 0 && (
                 <div className="dyn-harness-trace dyn-harness-live" aria-live="polite">
                   <div className="dyn-harness-summary-main">

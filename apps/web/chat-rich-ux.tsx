@@ -19,8 +19,9 @@ export type SlashCommand = {
   command: string;
   label: string;
   hint: string;
-  action: "prompt" | "advisor" | "memory" | "upload" | "futures" | "watch" | "delegate";
+  action: "prompt" | "advisor" | "memory" | "upload" | "futures" | "watch" | "delegate" | string;
   prompt?: string;
+  domain?: string;
 };
 
 export const SLASH_COMMANDS: SlashCommand[] = [
@@ -53,8 +54,10 @@ export function SlashCommandMenu({ commands, activeIndex, onPick }: {
   return (
     <div className="slash-menu" role="listbox" aria-label="Quick slash commands">
       <div className="slash-menu-head">
-        <span>Quick commands</span>
-        <small>Enter to select · Esc to close</small>
+        <span>Tenant commands ({commands.length})</span>
+        <span className="slash-menu-kbd">
+          <kbd>↑↓</kbd> <kbd>↵</kbd> select · <kbd>Esc</kbd>
+        </span>
       </div>
       {commands.map((cmd, idx) => (
         <button
@@ -66,7 +69,10 @@ export function SlashCommandMenu({ commands, activeIndex, onPick }: {
           onMouseDown={(e) => { e.preventDefault(); onPick(cmd); }}
         >
           <code>{cmd.command}</code>
-          <span className="slash-menu-label">{cmd.label}</span>
+          <span className="slash-menu-label">
+            {cmd.label}
+            {cmd.domain && <span className="slash-menu-domain">{cmd.domain}</span>}
+          </span>
           <small className="slash-menu-hint">{cmd.hint}</small>
         </button>
       ))}
