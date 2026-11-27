@@ -109,6 +109,25 @@ export function Chat({
   const input = useRef<HTMLTextAreaElement>(null);
   const viewport = useRef<HTMLDivElement>(null);
   const lastAnchor = useRef<string | undefined>(undefined);
+  const lastScrolledConvId = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const convId = conversation?.id;
+    if (!convId || turns.length === 0) return;
+    if (lastScrolledConvId.current === convId) return;
+    lastScrolledConvId.current = convId;
+    lastAnchor.current = latest?.id;
+    const scrollToEnd = () => {
+      const scroll = viewport.current;
+      if (!scroll) return;
+      scroll.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" });
+    };
+    const raf1 = requestAnimationFrame(() => requestAnimationFrame(scrollToEnd));
+    const timer = setTimeout(scrollToEnd, 140);
+    return () => {
+      cancelAnimationFrame(raf1);
+      clearTimeout(timer);
+    };
+  }, [conversation?.id, turns.length, latest?.id]);
   const anchorTurn = useCallback((id: string, message: HTMLElement) => {
     const scroll = viewport.current;
     if (!scroll || lastAnchor.current === id) return;
