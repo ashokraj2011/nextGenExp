@@ -11,6 +11,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { TelemetrySink } from "@sfield/core";
+import { createOtelTelemetrySink, type OtelTelemetrySink } from "@sfield/telemetry-otel";
 import type { OtelSpan, TelemetryModelStats, TelemetryToolStats, TelemetryView } from "../../packages/contracts/telemetry";
 import { serverTenantId } from "./tenant";
 
@@ -87,6 +88,7 @@ export class CepTelemetry implements TelemetrySink {
   private readonly tenantId: string;
   private readonly otlpEndpoint?: string;
   private readonly otlpHeaders: Record<string, string>;
+  private readonly sdkOtelSink: OtelTelemetrySink;
   private state: PersistedTelemetry;
 
   constructor(
@@ -104,7 +106,18 @@ export class CepTelemetry implements TelemetrySink {
     const endpoint = opts?.otlpEndpoint ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim();
     this.otlpEndpoint = endpoint ? (endpoint.endsWith("/v1/traces") ? endpoint : `${endpoint.replace(/\/+$/, "")}/v1/traces`) : undefined;
     this.otlpHeaders = opts?.otlpHeaders ?? parseOtlpHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS);
+    this.sdkOtelSink = createOtelTelemetrySink({
+      serviceName: this.serviceName,
+      serviceVersion: "1.1.0",
+      ...(this.otlpEndpoint ? { otlpEndpoint: this.otlpEndpoint } : {}),
+      headers: this.otlpHeaders,
+    });
     this.state = this.load();
+  }
+
+  /** Exposes the underlying @sfield/telemetry-otel OtelTelemetrySink snapshot for SDK diagnostics. */
+  sdkOtelSnapshot() {
+    return this.sdkOtelSink.snapshot();
   }
 
   private empty(): PersistedTelemetry {
@@ -156,6 +169,7 @@ export class CepTelemetry implements TelemetrySink {
 
   /** Implements @sfield/core TelemetrySink.metric */
   metric(name: string, value: number, attributes: Record<string, string | number | boolean> = {}): void {
+    this.sdkOtelSink.metric(name, value, attributes);
     const endMs = Date.now();
     const durationMs = Math.max(0, Math.round(value));
     const startMs = endMs - durationMs;
@@ -237,6 +251,7 @@ export class CepTelemetry implements TelemetrySink {
 
   /** Implements @sfield/core TelemetrySink.event */
   event(name: string, attributes: Record<string, string | number | boolean>): void {
+    this.sdkOtelSink.event(name, attributes);
     if (name === "sfield.run.finished") {
       this.state.totalAgentRuns += 1;
       const nowMs = Date.now();
@@ -278,6 +293,16 @@ export class CepTelemetry implements TelemetrySink {
   }): void {
     const endMs = Date.now();
     const durationMs = Math.max(0, Math.round(input.durationMs));
+    this.sdkOtelSink.recordModelCall({
+      provider: input.provider,
+      model: input.model,
+      operation: input.operation,
+      durationMs,
+      inputTokens: input.inputTokens,
+      outputTokens: input.outputTokens,
+      costMicroUsd: input.costMicroUsd,
+      status: input.status,
+    });
     const startMs = endMs - durationMs;
     const inTok = Math.max(0, Math.round(input.inputTokens ?? 0));
     const outTok = Math.max(0, Math.round(input.outputTokens ?? 0));

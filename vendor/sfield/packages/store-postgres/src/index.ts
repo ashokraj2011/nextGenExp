@@ -39,8 +39,24 @@ import {
   type RunState,
 } from "@sfield/core";
 import { POSTGRES_SCHEMA_SQL } from "./schema.js";
+import { PostgresMemoryRepository } from "./postgres-memory.js";
+import {
+  JsonFilePersistence,
+  PostgresOrJsonPersistence,
+  createPostgresOrJsonPersistence,
+  type JsonFilePersistenceOptions,
+  type PostgresOrJsonOptions,
+} from "./json-fallback.js";
 
-export { POSTGRES_SCHEMA_SQL };
+export {
+  POSTGRES_SCHEMA_SQL,
+  PostgresMemoryRepository,
+  JsonFilePersistence,
+  PostgresOrJsonPersistence,
+  createPostgresOrJsonPersistence,
+  type JsonFilePersistenceOptions,
+  type PostgresOrJsonOptions,
+};
 
 export interface PostgresQueryResult<T = Record<string, unknown>> {
   rows: T[];
@@ -93,7 +109,7 @@ export class PostgresPersistence implements ExecutionPersistence {
   constructor(options: PostgresPersistenceOptions) {
     this.sql = options.client;
     this.autoMigrate = options.autoMigrate ?? true;
-    this.memory = options.memory;
+    this.memory = options.memory ?? new PostgresMemoryRepository(this.sql, () => this.namespace);
     this.artifacts = options.artifacts;
   }
 

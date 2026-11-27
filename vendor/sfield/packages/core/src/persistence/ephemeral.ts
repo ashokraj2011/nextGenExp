@@ -546,6 +546,66 @@ export class EphemeralPersistence implements ExecutionPersistence {
       return deepClone([...this.evalReportMap.values()].filter((r) => (!filter.suite || r.suite === filter.suite) && (!filter.candidateDigest || r.candidateDigest === filter.candidateDigest)));
     },
   };
+
+  /** Exports all persisted tables into a plain JSON-serializable snapshot (used by durable JSON fallback stores). */
+  exportSnapshot(): Record<string, unknown> {
+    return deepClone({
+      version: 1,
+      runs: [...this.runs.entries()],
+      idempotency: [...this.idempotency.entries()],
+      conversations: [...this.conversations.entries()],
+      messages: [...this.messages.entries()],
+      calls: [...this.calls.entries()],
+      runCalls: [...this.runCalls.entries()],
+      approvals: [...this.approvals.entries()],
+      inputs: [...this.inputs.entries()],
+      checkpoints: [...this.checkpoints.entries()],
+      events: [...this.events.entries()],
+      audit: this.audit,
+      reservations: [...this.reservations.entries()],
+      attempts: [...this.attempts.entries()],
+      explanations: [...this.explanations.entries()],
+      ownership: [...this.ownership.entries()],
+      epochs: [...this.epochs.entries()],
+      lockApprovals: [...this.lockApprovalMap.entries()],
+      evalReports: [...this.evalReportMap.entries()],
+    });
+  }
+
+  /** Restores state from a snapshot previously created by `exportSnapshot()`. */
+  importSnapshot(snapshot: Record<string, unknown>): void {
+    const loadMap = <V>(target: Map<string, V>, raw: unknown) => {
+      target.clear();
+      if (Array.isArray(raw)) {
+        for (const pair of raw) {
+          if (Array.isArray(pair) && typeof pair[0] === "string") {
+            target.set(pair[0], deepClone(pair[1] as V));
+          }
+        }
+      }
+    };
+    loadMap(this.runs, snapshot["runs"]);
+    loadMap(this.idempotency, snapshot["idempotency"]);
+    loadMap(this.conversations, snapshot["conversations"]);
+    loadMap(this.messages, snapshot["messages"]);
+    loadMap(this.calls, snapshot["calls"]);
+    loadMap(this.runCalls, snapshot["runCalls"]);
+    loadMap(this.approvals, snapshot["approvals"]);
+    loadMap(this.inputs, snapshot["inputs"]);
+    loadMap(this.checkpoints, snapshot["checkpoints"]);
+    loadMap(this.events, snapshot["events"]);
+    this.audit.length = 0;
+    if (Array.isArray(snapshot["audit"])) {
+      this.audit.push(...deepClone(snapshot["audit"] as AuditRecord[]));
+    }
+    loadMap(this.reservations, snapshot["reservations"]);
+    loadMap(this.attempts, snapshot["attempts"]);
+    loadMap(this.explanations, snapshot["explanations"]);
+    loadMap(this.ownership, snapshot["ownership"]);
+    loadMap(this.epochs, snapshot["epochs"]);
+    loadMap(this.lockApprovalMap, snapshot["lockApprovals"]);
+    loadMap(this.evalReportMap, snapshot["evalReports"]);
+  }
 }
 
 function isTerminalState(state: RunState): boolean {

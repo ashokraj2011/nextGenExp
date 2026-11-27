@@ -22,7 +22,7 @@
     "sfield": "npm run build:sfield && node vendor/sfield/packages/cli/dist/bin.js",
     "eval:live": "node --env-file-if-exists=.env --import tsx tests/evaluate-live.ts",
     "eval:openai": "node --env-file-if-exists=.env.openai --import tsx tests/evaluate-live.ts --openai --smoke",
-    "build:sfield": "tsc -b vendor/sfield/packages/store-sqlite vendor/sfield/packages/telemetry-otel vendor/sfield/packages/store-postgres vendor/sfield/packages/cli",
+    "build:sfield": "tsc -b vendor/sfield/packages/preset-memory vendor/sfield/packages/preset-local vendor/sfield/packages/store-sqlite vendor/sfield/packages/telemetry-otel vendor/sfield/packages/store-postgres vendor/sfield/packages/cli",
     "pretest": "npm run build:sfield",
     "eval:agentic": "node --env-file-if-exists=.env --import tsx tests/evaluate-agentic.ts"
   },

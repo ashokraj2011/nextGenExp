@@ -1,11 +1,11 @@
-import { digestJson, EnvSecretResolver, OpenAICompatibleProvider, Scrubber, stableBody } from "@sfield/core";
+import { digestJson, EnvSecretResolver, GEMINI_DEFAULT_BASE_URL, GeminiProvider, OpenAICompatibleProvider, Scrubber, stableBody } from "@sfield/core";
 import type { JsonObject, JsonValue, ModelBinding, ModelProvider, ModelStreamEvent, OpenAIQuirk, SFieldOptions, SFieldPlugin } from "@sfield/core";
 import type { GatewayExchange } from "../../packages/contracts/inspector";
 import { copilotEnvironment, type CopilotAcpSettings } from "./copilot-acp-client";
 import { createPayloadCapture } from "./payload-capture";
 
 export type HttpGatewaySettings = {
-  profile?: "openai";
+  profile?: "openai" | "gemini";
   baseUrl: string;
   model: string;
   apiKey?: string;
@@ -79,6 +79,17 @@ export function gatewayFromEnv(env: NodeJS.ProcessEnv = process.env, profile: "g
       ...modelLimits(env.OPENAI_CONTEXT_WINDOW, env.OPENAI_MAX_OUTPUT_TOKENS),
     };
   }
+  if (provider === "gemini") {
+    const apiKey = env.GEMINI_API_KEY?.trim() || env.LLM_API_KEY?.trim();
+    if (!apiKey) throw new Error("Set GEMINI_API_KEY in the server environment before using Gemini API mode.");
+    return {
+      profile: "gemini",
+      baseUrl: env.GEMINI_BASE_URL?.trim() || GEMINI_DEFAULT_BASE_URL,
+      apiKey,
+      model: env.GEMINI_MODEL?.trim() || env.LLM_MODEL?.trim() || "gemini-2.5-flash",
+      ...modelLimits(env.GEMINI_CONTEXT_WINDOW || env.LLM_CONTEXT_WINDOW, env.GEMINI_MAX_OUTPUT_TOKENS || env.LLM_MAX_OUTPUT_TOKENS),
+    };
+  }
   if (provider === "copilot_acp" || provider === "copilot-acp") {
     return {
       profile: "copilot_acp", model: env.LLM_MODEL?.trim() || "auto",
@@ -87,7 +98,7 @@ export function gatewayFromEnv(env: NodeJS.ProcessEnv = process.env, profile: "g
     };
   }
   if (provider !== "gateway" && provider !== "openai_compatible") {
-    throw new Error("LLM_PROVIDER must be gateway, openai, or copilot_acp.");
+    throw new Error("LLM_PROVIDER must be gateway, openai, gemini, or copilot_acp.");
   }
   const baseUrl = env.LLM_BASE_URL?.trim();
   const model = env.LLM_MODEL?.trim();
@@ -160,12 +171,13 @@ export function configureGateway(
 ): GatewayConfiguration {
   const env = { LLM_API_KEY: settings.apiKey };
   const directOpenAi = settings.profile === "openai";
-  const headers = directOpenAi ? {} : settings.headers ?? {};
-  const bodyFields = directOpenAi ? {} : settings.bodyFields ?? {};
+  const directGemini = settings.profile === "gemini";
+  const headers = directOpenAi || directGemini ? {} : settings.headers ?? {};
+  const bodyFields = directOpenAi || directGemini ? {} : settings.bodyFields ?? {};
   const headerNames = Object.keys(headers);
   const bodyFieldNames = Object.keys(bodyFields);
   const hasOverrides = headerNames.length > 0 || bodyFieldNames.length > 0;
-  if (!hasOverrides && !record && !directOpenAi) {
+  if (!hasOverrides && !record && !directOpenAi && !directGemini) {
     return {
       model: {
         provider: "openai_compatible", model: settings.model, base_url: settings.baseUrl,
@@ -180,11 +192,13 @@ export function configureGateway(
   const id = "pzn_chat_gateway";
   const credentialValues = [...Object.values(headers).flatMap(headerSecrets), ...(settings.apiKey ? [settings.apiKey] : [])];
   const scrubber = new Scrubber(credentialValues);
-  const adapter = new OpenAICompatibleProvider(hasOverrides || directOpenAi ? (input, init) => {
-    const outgoing = new Headers(init?.headers);
-    for (const [name, value] of Object.entries(headers)) outgoing.set(name, value);
-    return fetch(input, { ...init, headers: outgoing, redirect: "error" });
-  } : undefined);
+  const adapter: ModelProvider = directGemini
+    ? new GeminiProvider()
+    : new OpenAICompatibleProvider(hasOverrides || directOpenAi ? (input, init) => {
+        const outgoing = new Headers(init?.headers);
+        for (const [name, value] of Object.entries(headers)) outgoing.set(name, value);
+        return fetch(input, { ...init, headers: outgoing, redirect: "error" });
+      } : undefined);
   const capture = record && createPayloadCapture([...credentialValues, ...headerSecrets(JSON.stringify(bodyFields))], bodyFieldNames);
   const provider: ModelProvider = {
     id,

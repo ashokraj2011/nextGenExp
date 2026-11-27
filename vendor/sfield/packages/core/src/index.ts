@@ -61,9 +61,17 @@ export {
 export { ToolPipeline, type PipelineDeps, type PreparedCall, type DispatchRequest } from "./pipeline/execute.js";
 export { shortenForModel } from "./pipeline/views.js";
 export { InMemoryArtifactStore } from "./persistence/artifacts-memory.js";
+export { FilesystemArtifactStore, type FilesystemArtifactStoreOptions } from "./persistence/artifacts-fs.js";
 export { EphemeralPersistence } from "./persistence/ephemeral.js";
 export { InMemoryMemoryRepository } from "./memory/repository-memory.js";
 export { InMemoryMemoryIndex } from "./memory/index-memory.js";
+export {
+  VectorMemoryIndex,
+  HashEmbeddingProvider,
+  cosineSimilarity,
+  type EmbeddingProvider,
+  type VectorMemoryIndexOptions,
+} from "./memory/vector-index.js";
 export { MemoryService, looksLikeSecret } from "./memory/service.js";
 export { RetrievalService, type RetrievalOutcome } from "./retrieval/service.js";
 export { buildContext, validatePairing, type ContextBuildInput, type ContextBuildOutput } from "./context/builder.js";

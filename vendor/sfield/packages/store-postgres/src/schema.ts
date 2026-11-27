@@ -134,4 +134,34 @@ CREATE TABLE IF NOT EXISTS sfield_eval_reports (
   created_at TIMESTAMPTZ NOT NULL,
   doc JSONB NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS sfield_memory (
+  tenant_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  namespace TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL,
+  idempotency_key TEXT,
+  expires_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  doc JSONB NOT NULL,
+  PRIMARY KEY (tenant_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_sfield_memory_scope ON sfield_memory (namespace, tenant_id, scope_key, kind, status);
+
+CREATE TABLE IF NOT EXISTS sfield_memory_generations (
+  namespace TEXT NOT NULL,
+  tenant_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  generation INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (namespace, tenant_id, scope_key)
+);
+
+CREATE TABLE IF NOT EXISTS sfield_memory_outbox (
+  id TEXT PRIMARY KEY,
+  namespace TEXT NOT NULL,
+  at TIMESTAMPTZ NOT NULL,
+  doc JSONB NOT NULL
+);
 `;

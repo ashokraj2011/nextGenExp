@@ -1,99 +1,64 @@
 /**
- * Integration resilience primitives (roadmap item 3.3):
- * - Per-integration Token-Bucket Rate Limiter
- * - Per-integration Circuit Breaker (closed -> open -> half_open -> closed)
- * - HMAC-SHA256 signature creation & constant-time verification for async completion callbacks
+ * Integration resilience primitives backed directly by @sfield/core's
+ * `TokenBucketRateLimiter` and `CircuitBreaker`, plus HMAC-SHA256 async callback signing.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { CircuitBreaker, TokenBucketRateLimiter } from "@sfield/core";
 import type { Integration, IntegrationResilienceSnapshot } from "../../packages/contracts/integration-task";
-
-type Bucket = {
-  tokens: number;
-  lastRefillMs: number;
-  rejectedCount: number;
-};
-
-type Breaker = {
-  state: "closed" | "open" | "half_open";
-  consecutiveFailures: number;
-  openedAtMs?: number;
-  rejectedCount: number;
-};
 
 const DEFAULT_FAILURE_THRESHOLD = 5;
 const DEFAULT_RESET_TIMEOUT_MS = 30_000;
 
 export class IntegrationResilience {
-  private readonly buckets = new Map<string, Bucket>();
-  private readonly breakers = new Map<string, Breaker>();
+  private readonly limiter: TokenBucketRateLimiter;
+  private readonly breaker: CircuitBreaker;
+  private readonly openedAt = new Map<string, number>();
+  private readonly rejectedRateLimit = new Map<string, number>();
+  private readonly rejectedCircuit = new Map<string, number>();
 
-  constructor(private readonly now: () => number = Date.now) {}
+  constructor(private readonly now: () => number = Date.now) {
+    this.limiter = new TokenBucketRateLimiter({ capacity: 60, refillPerSecond: 1 }, now);
+    this.breaker = new CircuitBreaker({ failureThreshold: DEFAULT_FAILURE_THRESHOLD, cooldownMs: DEFAULT_RESET_TIMEOUT_MS }, now);
+  }
 
   private breakerConfig(integration: Integration) {
     return {
       failureThreshold: integration.circuitBreaker?.failureThreshold ?? DEFAULT_FAILURE_THRESHOLD,
-      resetTimeoutMs: integration.circuitBreaker?.resetTimeoutMs ?? DEFAULT_RESET_TIMEOUT_MS,
+      cooldownMs: integration.circuitBreaker?.resetTimeoutMs ?? DEFAULT_RESET_TIMEOUT_MS,
     };
-  }
-
-  private getBreaker(id: string): Breaker {
-    let b = this.breakers.get(id);
-    if (!b) {
-      b = { state: "closed", consecutiveFailures: 0, rejectedCount: 0 };
-      this.breakers.set(id, b);
-    }
-    return b;
   }
 
   /** Checks circuit breaker first, then consumes a rate-limit token if configured. */
   checkBeforeCall(integration: Integration):
     | { ok: true }
     | { ok: false; kind: "circuit_open" | "rate_limited"; retryAfterMs: number; message: string } {
-    const t = this.now();
     const cfg = this.breakerConfig(integration);
-    const breaker = this.getBreaker(integration.id);
+    const status = this.breaker.inspect(integration.id, cfg);
 
-    if (breaker.state === "open") {
-      const openedAt = breaker.openedAtMs ?? t;
-      const elapsed = t - openedAt;
-      if (elapsed >= cfg.resetTimeoutMs) {
-        breaker.state = "half_open";
-      } else {
-        breaker.rejectedCount += 1;
-        const retryAfterMs = Math.max(100, cfg.resetTimeoutMs - elapsed);
-        return {
-          ok: false,
-          kind: "circuit_open",
-          retryAfterMs,
-          message: `Circuit breaker is OPEN for "${integration.name}" after ${breaker.consecutiveFailures} consecutive failure(s). Retry in ${Math.ceil(retryAfterMs / 1000)}s or reset the circuit.`,
-        };
-      }
+    if (status.state === "open") {
+      this.rejectedCircuit.set(integration.id, (this.rejectedCircuit.get(integration.id) ?? 0) + 1);
+      const retryAfterMs = Math.max(100, status.retryAfterMs);
+      return {
+        ok: false,
+        kind: "circuit_open",
+        retryAfterMs,
+        message: `Circuit breaker is OPEN for "${integration.name}" after ${status.consecutiveFailures} consecutive failure(s). Retry in ${Math.ceil(retryAfterMs / 1000)}s or reset the circuit.`,
+      };
     }
 
     if (integration.rateLimit) {
       const rpm = integration.rateLimit.requestsPerMinute;
       const burst = integration.rateLimit.burst ?? rpm;
-      let bucket = this.buckets.get(integration.id);
-      if (!bucket) {
-        bucket = { tokens: burst, lastRefillMs: t, rejectedCount: 0 };
-        this.buckets.set(integration.id, bucket);
-      } else {
-        const refill = ((t - bucket.lastRefillMs) / 60_000) * rpm;
-        bucket.tokens = Math.min(burst, bucket.tokens + Math.max(0, refill));
-        bucket.lastRefillMs = t;
-      }
-
-      if (bucket.tokens < 1) {
-        bucket.rejectedCount += 1;
-        const retryAfterMs = Math.ceil(((1 - bucket.tokens) / rpm) * 60_000);
+      const res = this.limiter.consume(integration.id, 1, { capacity: burst, refillPerSecond: rpm / 60 });
+      if (!res.allowed) {
+        this.rejectedRateLimit.set(integration.id, (this.rejectedRateLimit.get(integration.id) ?? 0) + 1);
         return {
           ok: false,
           kind: "rate_limited",
-          retryAfterMs,
-          message: `Local rate limit exceeded for "${integration.name}" (${rpm} req/min, burst ${burst}). Retry in ${Math.max(1, Math.ceil(retryAfterMs / 1000))}s.`,
+          retryAfterMs: res.retryAfterMs,
+          message: `Local rate limit exceeded for "${integration.name}" (${rpm} req/min, burst ${burst}). Retry in ${Math.max(1, Math.ceil(res.retryAfterMs / 1000))}s.`,
         };
       }
-      bucket.tokens -= 1;
     }
 
     return { ok: true };
@@ -101,62 +66,52 @@ export class IntegrationResilience {
 
   /** Records a healthy response (closes half-open circuit and clears failure streak). */
   recordSuccess(integration: Integration) {
-    const breaker = this.getBreaker(integration.id);
-    breaker.state = "closed";
-    breaker.consecutiveFailures = 0;
-    breaker.openedAtMs = undefined;
+    this.breaker.recordSuccess(integration.id);
+    this.openedAt.delete(integration.id);
   }
 
   /** Records a transport/timeout/5xx failure and trips the breaker once threshold is reached. */
   recordFailure(integration: Integration) {
     const cfg = this.breakerConfig(integration);
-    const breaker = this.getBreaker(integration.id);
-    breaker.consecutiveFailures += 1;
-    if (breaker.state === "half_open" || breaker.consecutiveFailures >= cfg.failureThreshold) {
-      breaker.state = "open";
-      breaker.openedAtMs = this.now();
+    const nextState = this.breaker.recordFailure(integration.id, cfg);
+    if (nextState === "open") {
+      this.openedAt.set(integration.id, this.now());
     }
   }
 
   /** Operator reset: closes circuit and restores full token bucket. */
   reset(integrationId: string) {
-    this.breakers.delete(integrationId);
-    this.buckets.delete(integrationId);
+    this.breaker.reset(integrationId);
+    this.limiter.reset(integrationId);
+    this.openedAt.delete(integrationId);
+    this.rejectedRateLimit.delete(integrationId);
+    this.rejectedCircuit.delete(integrationId);
   }
 
   snapshot(integration: Integration): IntegrationResilienceSnapshot {
-    const t = this.now();
     const cfg = this.breakerConfig(integration);
-    const breaker = this.getBreaker(integration.id);
-    let effectiveState = breaker.state;
-    if (effectiveState === "open" && breaker.openedAtMs !== undefined && t - breaker.openedAtMs >= cfg.resetTimeoutMs) {
-      effectiveState = "half_open";
-    }
-    const bucket = this.buckets.get(integration.id);
+    const status = this.breaker.inspect(integration.id, cfg);
+    const openedAtMs = status.state === "closed" ? undefined : this.openedAt.get(integration.id);
     let rateLimitSnap: IntegrationResilienceSnapshot["rateLimit"];
     if (integration.rateLimit) {
       const rpm = integration.rateLimit.requestsPerMinute;
       const burst = integration.rateLimit.burst ?? rpm;
-      let tokens = burst;
-      if (bucket) {
-        const refill = ((t - bucket.lastRefillMs) / 60_000) * rpm;
-        tokens = Math.min(burst, bucket.tokens + Math.max(0, refill));
-      }
+      const tokens = this.limiter.remaining(integration.id, { capacity: burst, refillPerSecond: rpm / 60 });
       rateLimitSnap = { requestsPerMinute: rpm, burst, tokensRemaining: Math.floor(tokens * 10) / 10 };
     }
     return {
       integrationId: integration.id,
-      circuitState: effectiveState,
-      consecutiveFailures: breaker.consecutiveFailures,
+      circuitState: status.state,
+      consecutiveFailures: status.consecutiveFailures,
       failureThreshold: cfg.failureThreshold,
-      resetTimeoutMs: cfg.resetTimeoutMs,
-      ...(breaker.openedAtMs !== undefined ? {
-        openedAt: new Date(breaker.openedAtMs).toISOString(),
-        nextAttemptAt: new Date(breaker.openedAtMs + cfg.resetTimeoutMs).toISOString(),
+      resetTimeoutMs: cfg.cooldownMs,
+      ...(openedAtMs !== undefined ? {
+        openedAt: new Date(openedAtMs).toISOString(),
+        nextAttemptAt: new Date(openedAtMs + cfg.cooldownMs).toISOString(),
       } : {}),
       ...(rateLimitSnap ? { rateLimit: rateLimitSnap } : {}),
-      rejectedRateLimitCount: bucket?.rejectedCount ?? 0,
-      rejectedCircuitCount: breaker.rejectedCount,
+      rejectedRateLimitCount: this.rejectedRateLimit.get(integration.id) ?? 0,
+      rejectedCircuitCount: this.rejectedCircuit.get(integration.id) ?? 0,
     };
   }
 }

@@ -11,8 +11,10 @@
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { SField, EphemeralPersistence, approveLock, createDevAuthorizer, LOCAL_DEV_PRINCIPAL, nowIso, type JsonObject } from "@sfield/core";
 import { sqlitePersistence } from "@sfield/store-sqlite";
+import { runEvalSuite, evaluateReleaseGate, type EvalCaseDefinition } from "@sfield/testing";
 
 export interface CliIo {
   stdout?: (chunk: string) => void;
@@ -39,6 +41,10 @@ Usage:
   sfield inspect <runId> --db <sqlitePath> [--json]
       Inspect a persisted run: status, tool calls, model attempts, audit trail,
       and multi-agent delegation tree.
+
+  sfield eval <suiteModule> --db <sqlitePath> [--config <configPath> | --digest <digest>] [--suite <name>] [--gate-min-pass <0..1>] [--json]
+      Execute an evaluation suite module (exporting 'cases' or default array),
+      persist its EvalReportRecord into SQLite, and evaluate the release gate.
 
   sfield mcp serve --db <sqlitePath> [--config <configPath>] [--name <name>] [--preset <preset>]
       Expose the SField runtime's governed tools over MCP stdio (JSON-RPC 2.0).
@@ -425,6 +431,88 @@ async function cmdInspect(args: ParsedArgs, cwd: string, out: (s: string) => voi
   }
 }
 
+async function cmdEval(args: ParsedArgs, cwd: string, out: (s: string) => void, err: (s: string) => void): Promise<number> {
+  const suiteFile = args.positionals[1];
+  const asJson = flagBool(args.flags, "json");
+  if (!suiteFile) {
+    err("Usage: sfield eval <suiteModule> --db <sqlitePath> [--config <configPath> | --digest <digest>] [--suite <name>] [--gate-min-pass <0..1>] [--json]\n");
+    return 1;
+  }
+  const fullSuitePath = resolve(cwd, suiteFile);
+  if (!existsSync(fullSuitePath)) {
+    err(`Eval suite module not found: ${fullSuitePath}\n`);
+    return 1;
+  }
+
+  const mod = (await import(pathToFileURL(fullSuitePath).href)) as {
+    cases?: EvalCaseDefinition[];
+    suite?: string;
+    default?: EvalCaseDefinition[] | { suite?: string; cases?: EvalCaseDefinition[] };
+  };
+  const cases = Array.isArray(mod.cases)
+    ? mod.cases
+    : Array.isArray(mod.default)
+      ? mod.default
+      : Array.isArray(mod.default?.cases)
+        ? mod.default.cases
+        : null;
+  if (!cases || cases.length === 0) {
+    err(`Eval module ${fullSuitePath} must export a non-empty 'cases' array.\n`);
+    return 1;
+  }
+
+  const suiteName = flagString(args.flags, "suite")
+    ?? mod.suite
+    ?? (!Array.isArray(mod.default) ? mod.default?.suite : undefined)
+    ?? "default";
+  const digest = (await resolveDigest(args, cwd, 99)) ?? "sha256:unpinned";
+  const minPassRaw = flagString(args.flags, "gate-min-pass");
+  const minPassRate = minPassRaw !== undefined ? Number(minPassRaw) : 1.0;
+
+  const dbFlag = flagString(args.flags, "db");
+  const store = dbFlag ? sqlitePersistence({ path: resolve(cwd, dbFlag) }) : null;
+  if (store) {
+    await store.init({ namespace: "sfield-cli", ownerId: `cli-${process.pid}` });
+  }
+
+  try {
+    const result = await runEvalSuite(cases, {
+      suite: suiteName,
+      candidateDigest: digest,
+      ...(store ? { evalReports: store.evalReports } : {}),
+    });
+    const gate = evaluateReleaseGate(result.report, {
+      minPassRate: Number.isFinite(minPassRate) ? minPassRate : 1.0,
+    });
+
+    const payload = {
+      ok: gate.decision === "ready_to_publish",
+      suite: suiteName,
+      reportId: result.report.id,
+      candidateDigest: digest,
+      totalCases: result.totalCases,
+      passedCases: result.passedCases,
+      failedCases: result.failedCases,
+      passRate: result.report.passRate,
+      avgLatencyMs: result.avgLatencyMs,
+      gate,
+      cases: result.cases,
+    };
+
+    if (asJson) {
+      emitJson(out, payload);
+    } else {
+      out(`Eval suite "${suiteName}" — ${result.passedCases}/${result.totalCases} passed (${Math.round(result.report.passRate * 100)}%)\n`);
+      out(`  reportId : ${result.report.id}\n`);
+      out(`  digest   : ${digest}\n`);
+      out(`  gate     : ${gate.decision}${gate.reasons.length ? ` (${gate.reasons.join("; ")})` : ""}\n`);
+    }
+    return gate.decision === "ready_to_publish" ? 0 : 1;
+  } finally {
+    await store?.close();
+  }
+}
+
 async function cmdMcpServe(args: ParsedArgs, cwd: string, err: (s: string) => void): Promise<number> {
   const sub = args.positionals[1];
   if (sub !== "serve") {
@@ -494,6 +582,8 @@ export async function runCli(argv: string[], io: CliIo = {}): Promise<number> {
         return await cmdLock(args, cwd, out, err);
       case "inspect":
         return await cmdInspect(args, cwd, out, err);
+      case "eval":
+        return await cmdEval(args, cwd, out, err);
       case "mcp":
         return await cmdMcpServe(args, cwd, err);
       default:

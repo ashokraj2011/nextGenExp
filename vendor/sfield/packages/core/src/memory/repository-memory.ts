@@ -106,6 +106,52 @@ export class InMemoryMemoryRepository implements MemoryRepository {
     const set = new Set(ids);
     this.outbox = this.outbox.filter((e) => !set.has(e.id));
   }
+
+  /** Exports memory state to a plain JSON-serializable snapshot (used by durable JSON fallback stores). */
+  exportSnapshot(): Record<string, unknown> {
+    return {
+      items: [...this.items.entries()].map(([tenantId, map]) => [tenantId, [...map.entries()]]),
+      idempotency: [...this.idempotency.entries()],
+      deletes: [...this.deletes.entries()],
+      generations: [...this.generations.entries()],
+      outbox: [...this.outbox],
+    };
+  }
+
+  /** Restores memory state from a snapshot previously created by `exportSnapshot()`. */
+  importSnapshot(snapshot: Record<string, unknown>): void {
+    this.items.clear();
+    if (Array.isArray(snapshot["items"])) {
+      for (const entry of snapshot["items"]) {
+        if (Array.isArray(entry) && typeof entry[0] === "string" && Array.isArray(entry[1])) {
+          const map = new Map<string, MemoryItem>();
+          for (const pair of entry[1]) {
+            if (Array.isArray(pair) && typeof pair[0] === "string") map.set(pair[0], pair[1] as MemoryItem);
+          }
+          this.items.set(entry[0], map);
+        }
+      }
+    }
+    this.idempotency.clear();
+    if (Array.isArray(snapshot["idempotency"])) {
+      for (const p of snapshot["idempotency"]) {
+        if (Array.isArray(p) && typeof p[0] === "string") this.idempotency.set(p[0], String(p[1]));
+      }
+    }
+    this.deletes.clear();
+    if (Array.isArray(snapshot["deletes"])) {
+      for (const p of snapshot["deletes"]) {
+        if (Array.isArray(p) && typeof p[0] === "string") this.deletes.set(p[0], p[1] as { generation: number; count: number });
+      }
+    }
+    this.generations.clear();
+    if (Array.isArray(snapshot["generations"])) {
+      for (const p of snapshot["generations"]) {
+        if (Array.isArray(p) && typeof p[0] === "string") this.generations.set(p[0], Number(p[1]) || 0);
+      }
+    }
+    this.outbox = Array.isArray(snapshot["outbox"]) ? [...(snapshot["outbox"] as MemoryOutboxEvent[])] : [];
+  }
 }
 
 export function matches(it: MemoryItem, filter: MemoryFilter, now: string): boolean {
