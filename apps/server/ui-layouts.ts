@@ -3,7 +3,7 @@ import { retirementBeneficiaryIntent, retirementListIntent } from "../../package
 import profiles from "../../fixtures/host.json";
 import { findProfileById, listAllProfiles } from "../../packages/customer-profiles";
 import { resolveMultiDomainBindings } from "../../packages/customer-profiles/bindings";
-import type { DomainPackId } from "../../packages/contracts/domain-packs";
+import { getDomainPack, type DomainPackId } from "../../packages/contracts/domain-packs";
 import type { IncidentRecord } from "../../packages/contracts/ops";
 import type { DealRecord } from "../../packages/contracts/sales";
 import { availableFundingOptions, fundingPreviewFrom } from "../../packages/capabilities";
@@ -66,7 +66,7 @@ export function uiTargetOptions(registry: CapabilityRegistry, principalId: strin
   ];
 }
 
-function slotBindingKeys(slot: UiDesign["slots"][number]) {
+export function slotBindingKeys(slot: UiDesign["slots"][number]) {
   const keys = [...JSON.stringify(slot).matchAll(/\{\{\s*([^{}\s]+)\s*\}\}/g)].map((match) => match[1]);
   if (slot.kind === "widget") {
     keys.push(...slot.metrics.flatMap((metric) => metric.binding ? [metric.binding] : []));
@@ -114,9 +114,15 @@ export function validateUiDesign(design: UiDesign, options: UiTargetOption[], pu
         if (field) throw new ApiError(400, "ui_field_read_only", `${field.defaultBinding} is read-only. Disable saving bound fields or choose a writable field.`);
       }
       for (const key of slotBindingKeys(slot)) {
-        if (!dataBindingKeySchema.safeParse(key).success || bindingDomain(key) !== domain
-          || (domain !== "wealth" && targets.some(({ target }) => target.id === recordIntentId(domain, "list") || (target.id === declaration?.id && declaration.view === "list")))) {
-          throw new ApiError(400, "ui_binding_unavailable", `The selected view cannot supply ${key}. Choose a field for this view.`);
+        if (!dataBindingKeySchema.safeParse(key).success) {
+          throw new ApiError(400, "ui_binding_unavailable", `The data dictionary has no field called ${key}. Choose an available field.`);
+        }
+        const sourceDomain = bindingDomain(key);
+        if (sourceDomain !== domain) {
+          throw new ApiError(400, "ui_binding_unavailable", `${key} belongs to ${getDomainPack(sourceDomain).shortLabel}. Choose that workspace in Design domain.`);
+        }
+        if (domain !== "wealth" && targets.some(({ target }) => target.id === recordIntentId(domain, "list") || (target.id === declaration?.id && declaration.view === "list"))) {
+          throw new ApiError(400, "ui_binding_unavailable", `The list view cannot supply ${key} for a single record. Attach a detail or timeline view.`);
         }
       }
     }

@@ -1,6 +1,7 @@
 import { dataBindingKeySchema, dataDictionary, type DataBindingKey } from "../../packages/contracts/data-bindings";
+import { getDomainPack, type DomainPackId } from "../../packages/contracts/domain-packs";
 import {
-  layoutComponents,
+  bindingDomain,
   targetKey,
   uiDesignSchema,
   type BoundWidgetMetric,
@@ -12,6 +13,7 @@ import {
 } from "../../packages/contracts/ui-layout";
 import { callConfiguredLlmJson } from "./dynamic-ui-generator";
 import type { GatewaySettings } from "./gateway";
+import { slotBindingKeys, validateUiDesign } from "./ui-layouts";
 
 export interface GeneratedBoundUiLayout {
   design: UiDesign;
@@ -20,7 +22,6 @@ export interface GeneratedBoundUiLayout {
   summary: string;
 }
 
-const VALID_COMPONENTS = new Set<string>(layoutComponents.map((c) => c.id));
 const VALID_FIELD_TYPES = new Set(["text", "number", "currency", "select", "date", "checkbox"]);
 const VALID_TONES = new Set(["default", "positive", "caution"]);
 
@@ -35,38 +36,8 @@ function safeBinding(raw: unknown): DataBindingKey | undefined {
   return parsed.success ? parsed.data : undefined;
 }
 
-export function extractBoundKeys(design: UiDesign): string[] {
-  const keys = new Set<string>();
-  const scanTokens = (text?: string) => {
-    if (!text) return;
-    const matches = text.matchAll(/\{\{\s*([a-z]+\.[a-zA-Z0-9_]+)\s*\}\}/g);
-    for (const m of matches) {
-      if (m[1]) keys.add(m[1]);
-    }
-  };
-  for (const slot of design.slots) {
-    if (slot.kind === "widget") {
-      scanTokens(slot.badge);
-      scanTokens(slot.title);
-      scanTokens(slot.body);
-      scanTokens(slot.progressLabel);
-      if (slot.progressBinding) keys.add(slot.progressBinding);
-      for (const m of slot.metrics) {
-        if (m.binding) keys.add(m.binding);
-        scanTokens(m.subtext);
-      }
-    } else if (slot.kind === "form") {
-      scanTokens(slot.title);
-      scanTokens(slot.description);
-      for (const f of slot.fields) {
-        if (f.defaultBinding) keys.add(f.defaultBinding);
-      }
-    } else if (slot.kind === "text") {
-      scanTokens(slot.heading);
-      scanTokens(slot.body);
-    }
-  }
-  return [...keys];
+function extractBoundKeys(design: UiDesign) {
+  return [...new Set(design.slots.flatMap(slotBindingKeys))];
 }
 
 function sanitizeCandidateDesign(
@@ -77,6 +48,7 @@ function sanitizeCandidateDesign(
   if (!raw || typeof raw !== "object") return null;
   const obj = raw as Record<string, unknown>;
   const knownTargets = new Map(validTargets.map((opt) => [targetKey(opt.target), opt.target]));
+  const validComponents = new Set<string>(validTargets.flatMap(({ components }) => components ?? []));
   const rawSlots = Array.isArray(obj.slots) ? obj.slots : [];
   const usedIds = new Set<string>();
   const uniqueId = (preferred: unknown, prefix: string, idx: number) => {
@@ -159,7 +131,7 @@ function sanitizeCandidateDesign(
           fields,
         });
       }
-    } else if (s.kind === "block" && typeof s.component === "string" && VALID_COMPONENTS.has(s.component)) {
+    } else if (s.kind === "block" && typeof s.component === "string" && validComponents.has(s.component)) {
       slots.push({
         kind: "block",
         id: uniqueId(s.id, "block", idx),
@@ -203,16 +175,14 @@ function sanitizeCandidateDesign(
   return parsed.success ? parsed.data : null;
 }
 
-function synthesizeBoundLayoutFromPrompt(prompt: string, validTargets: UiTargetOption[]): UiDesign {
+function synthesizeBoundLayoutFromPrompt(prompt: string, domainId: DomainPackId, validTargets: UiTargetOption[]): UiDesign {
   const lower = prompt.toLowerCase();
   const wantsForm = /\b(form|edit|editable|update|write-?back|change|modify|submit|input)\b/i.test(lower);
-  const isOps = /\b(incident|p1|sre|ops|latency|error\s*rate|rollback|release|outage|pagerduty)\b/i.test(lower);
-  const isSales = /\b(sales|deal|revops|arr|discount|pipeline|crm|win\s*prob|close\s*date|acme)\b/i.test(lower);
   const isGoal = /\b(home|goal|down\s*payment|saving|target|progress)\b/i.test(lower);
 
   const findIntentTarget = (id: string) => validTargets.find((t) => t.target.kind === "intent" && t.target.id === id)?.target;
 
-  if (isOps) {
+  if (domainId === "it_ops") {
     return {
       name: "IT Ops · Live P1 Incident Command",
       description: "Data-bound SRE triage view linked directly to live incident metrics, release tags, and rollback status.",
@@ -239,7 +209,7 @@ function synthesizeBoundLayoutFromPrompt(prompt: string, validTargets: UiTargetO
     };
   }
 
-  if (isSales) {
+  if (domainId === "sales_revops") {
     return {
       name: "Sales RevOps · Live Deal Desk Card",
       description: "Data-bound CRM Deal Desk view linked directly to live ARR, discount %, win probability, and close date.",
@@ -368,36 +338,38 @@ function synthesizeBoundLayoutFromPrompt(prompt: string, validTargets: UiTargetO
   };
 }
 
-function buildLayoutSystemPrompt(validTargets: UiTargetOption[], customKeys: string[]): string {
-  const dictLines = dataDictionary.map((d) => `- ${d.key} (${d.group}, ${d.kind}): ${d.label}`);
+function buildLayoutSystemPrompt(domainId: DomainPackId, fields: (typeof dataDictionary)[number][], validTargets: UiTargetOption[], customKeys: string[]): string {
+  const dictLines = fields.map((d) => `- ${d.key} (${d.group}, ${d.kind}): ${d.label}`);
   if (customKeys.length > 0) {
     for (const key of customKeys) dictLines.push(`- ${key} (Custom Customer 360 Attribute, text)`);
   }
-  const intentIds = validTargets
-    .filter((t) => t.target.kind === "intent")
-    .map((t) => `${t.target.id} (${t.label})`)
-    .join(", ");
+  const intentIds = validTargets.filter(({ target }) => target.kind === "intent");
+  const componentIds = [...new Set(validTargets.flatMap(({ components }) => components ?? []))];
+  const writeBack = domainId === "wealth";
+  const exampleField = fields[0].key;
 
   return [
-    "You are CEP UI Builder Copilot. Given a user prompt, design a LIVE DATA-BOUND UI layout matching the UiDesign JSON schema.",
+    `Design a data-bound UI for the ${getDomainPack(domainId).label} workspace. Use only this workspace's listed fields and targets.`,
     "CRITICAL RULES:",
     "1. NEVER invent hardcoded customer balances, error rates, or ARR figures when a live Data Dictionary binding exists. Always set `binding` / `progressBinding` / `defaultBinding` to exact keys from the Data Dictionary below, and use `{{key}}` tokens inside `title`, `body`, `badge`, `subtext`, and `progressLabel`.",
-    "2. If the user asks for editing, updating, submitting, or a form, include a slot with `kind: 'form'`, `writeBack: true`, and fields using `defaultBinding` keys.",
-    "3. Keep `slots` between 1 and 4 slots. Use `kind: 'widget'` for data-bound KPI/progress cards, `kind: 'form'` for write-back forms, and optionally `kind: 'block'` with one of: " + layoutComponents.map((c) => c.id).join(", ") + ".",
-    "4. `progressBinding` MUST be a percent binding (`goal.percentFunded`, `portfolio.cashPct`, `portfolio.equitiesPct`, `portfolio.fixedIncomePct`, `incident.errorRate`, `deal.discountPct`, `deal.winProbability`).",
+    writeBack
+      ? "2. If the user asks for editing, use a form with writeBack true and editable profile bindings."
+      : "2. Use read-only bindings and set writeBack to false on forms. Attach widgets that use record fields to a detail or timeline intent.",
+    "3. Keep slots between 1 and 4. Use widget slots for data-bound cards, form slots for inputs, and block slots with one of these components: " + componentIds.join(", ") + ".",
+    "4. Set progressBinding only to a field listed below with kind percent.",
     "5. Do NOT use any external company names. Return ONLY valid JSON.",
     "",
     "AVAILABLE DATA DICTIONARY KEYS (exact strings):",
     ...dictLines,
     "",
-    `AVAILABLE INTENT TARGETS (optional): ${intentIds}`,
+    `AVAILABLE INTENT TARGETS (optional): ${intentIds.map(({ target, label }) => `${target.id} (${label})`).join(", ")}`,
     "",
     "OUTPUT JSON SHAPE:",
     JSON.stringify({
       name: "Short layout title (max 72 chars)",
       description: "When this layout appears (max 200 chars)",
       layout: "stack | dashboard",
-      targets: [{ kind: "intent", id: "portfolio_summary" }],
+      targets: [],
       slots: [
         {
           kind: "widget",
@@ -407,10 +379,9 @@ function buildLayoutSystemPrompt(validTargets: UiTargetOption[], customKeys: str
           body: "Summary sentence (supports {{key}})",
           accentTop: true,
           metrics: [
-            { id: "m1", label: "Label", binding: "portfolio.total", staticValue: "", subtext: "{{portfolio.cashPct}} cash", tone: "positive" },
+            { id: "m1", label: "Label", binding: exampleField, staticValue: "", subtext: "", tone: "positive" },
           ],
           progressLabel: "Optional progress label",
-          progressBinding: "goal.percentFunded",
           ctaLabel: "Optional button label",
           ctaPrompt: "Optional follow-up chat prompt",
         },
@@ -420,9 +391,9 @@ function buildLayoutSystemPrompt(validTargets: UiTargetOption[], customKeys: str
           title: "Optional form title",
           description: "Optional description",
           submitLabel: "Save changes",
-          writeBack: true,
+          writeBack,
           fields: [
-            { id: "f1", label: "Cash reserve ($)", type: "currency", placeholder: "", required: true, options: [], defaultBinding: "portfolio.cash" },
+            { id: "f1", label: "Field name", type: "text", placeholder: "", required: true, options: [], defaultBinding: exampleField },
           ],
         },
       ],
@@ -434,11 +405,15 @@ export async function generateBoundUiLayoutWithLlm(input: {
   prompt: string;
   gateway: GatewaySettings | null | undefined;
   dataDir: string;
+  domainId: DomainPackId;
   validTargets: UiTargetOption[];
   customAttributeKeys?: string[];
   signal?: AbortSignal;
 }): Promise<GeneratedBoundUiLayout> {
-  const { prompt, gateway, dataDir, validTargets, customAttributeKeys = [] } = input;
+  const { prompt, gateway, dataDir, domainId, validTargets } = input;
+  const customKeys = domainId === "wealth" ? input.customAttributeKeys ?? [] : [];
+  const fields = dataDictionary.filter(({ key }) => bindingDomain(key) === domainId);
+  const allowedKeys = new Set<string>([...fields.map(({ key }) => key), ...customKeys]);
   if (gateway) {
     const controller = new AbortController();
     const onParentAbort = () => controller.abort();
@@ -446,12 +421,13 @@ export async function generateBoundUiLayoutWithLlm(input: {
     const timer = setTimeout(() => controller.abort(), 16_000);
     timer.unref();
     try {
-      const systemPrompt = buildLayoutSystemPrompt(validTargets, customAttributeKeys);
+      const systemPrompt = buildLayoutSystemPrompt(domainId, fields, validTargets, customKeys);
       const raw = await callConfiguredLlmJson(gateway, dataDir, systemPrompt, prompt, controller.signal);
       const design = sanitizeCandidateDesign(raw, prompt, validTargets);
       if (design) {
+        validateUiDesign(design, validTargets, false, domainId);
         const boundKeys = extractBoundKeys(design);
-        if (boundKeys.length > 0) {
+        if (boundKeys.length > 0 && boundKeys.every((key) => allowedKeys.has(key))) {
           return {
             design,
             generatedBy: "copilot_llm",
@@ -461,14 +437,14 @@ export async function generateBoundUiLayoutWithLlm(input: {
         }
       }
     } catch {
-      // Fall back cleanly to deterministic data-bound synthesizer
+      // An unavailable model or incompatible layout can fall back to the selected workspace.
     } finally {
       clearTimeout(timer);
       input.signal?.removeEventListener("abort", onParentAbort);
     }
   }
 
-  const design = synthesizeBoundLayoutFromPrompt(prompt, validTargets);
+  const design = synthesizeBoundLayoutFromPrompt(prompt, domainId, validTargets);
   const boundKeys = extractBoundKeys(design);
   return {
     design,

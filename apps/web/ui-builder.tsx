@@ -88,6 +88,12 @@ const salesRevOpsStarter = (): UiDesign => ({
   targets: [{ kind: "capability", id: "sales_deal_desk" }],
 });
 
+const layoutPrompts: { label: string; domainId: DomainPackId; prompt: string }[] = [
+  { label: "Wealth Snapshot + Write-Back", domainId: "wealth", prompt: "Build a wealth snapshot showing customer name, live total portfolio, cash reserve, equities, home goal progress bar, and an editable form to update cash reserve and beneficiary status" },
+  { label: "Home Goal Tracker", domainId: "wealth", prompt: "Create a home-buying tracker bound to live goal saved, target, remaining amount, funded progress bar, and home goal progress chart" },
+  { label: "IT Ops P1 War Room", domainId: "it_ops", prompt: "Build an IT Ops P1 incident triage card linked to live incident ID, service, error rate, p95 latency, release version, and rollback status" },
+  { label: "Sales Deal Desk Card", domainId: "sales_revops", prompt: "Design a Sales RevOps executive card bound to live deal account name, ARR, requested discount %, win probability progress bar, and close date" },
+];
 const domainStarters = { wealth: starter, it_ops: itOpsStarter, sales_revops: salesRevOpsStarter };
 
 const componentLabel = (id: LayoutComponent) => layoutComponents.find((component) => component.id === id)!.label;
@@ -309,6 +315,7 @@ function LayoutPreview({ domainId, design, customers, previewPersonaId, onChange
   const [preview, setPreview] = useState<DisplayExperience>();
   const [error, setError] = useState("");
   const [updating, setUpdating] = useState(false);
+  const persona = domainId === "wealth" ? previewPersonaId || undefined : undefined;
 
   useEffect(() => {
     if (!design.slots.length) return;
@@ -316,7 +323,7 @@ function LayoutPreview({ domainId, design, customers, previewPersonaId, onChange
     setUpdating(true);
     setError("");
     const timer = window.setTimeout(() => {
-      void api.previewUiLayout({ ...design, name: design.name.trim() || "Untitled layout" }, previewPersonaId || undefined, domainId).then((result) => {
+      void api.previewUiLayout({ ...design, name: design.name.trim() || "Untitled layout" }, persona, domainId).then((result) => {
         if (active) {
           setPreview(result);
           setUpdating(false);
@@ -332,7 +339,7 @@ function LayoutPreview({ domainId, design, customers, previewPersonaId, onChange
       active = false;
       window.clearTimeout(timer);
     };
-  }, [design, previewPersonaId, domainId]);
+  }, [design, persona, domainId]);
 
   const activeCustomerName = customers.find((c) => c.personaId === previewPersonaId)?.displayName;
 
@@ -341,7 +348,8 @@ function LayoutPreview({ domainId, design, customers, previewPersonaId, onChange
       <header className="ui-preview-head">
         <div>
           <h2>Layout preview</h2>
-          <p>{activeCustomerName ? `Sample layout for ${activeCustomerName}` : "Sample layout"}</p>
+          <p>{activeCustomerName ? `Sample layout for ${activeCustomerName}`
+            : domainId === "wealth" ? "Sample layout" : `Sample ${getDomainPack(domainId).shortLabel} record`}</p>
         </div>
         <div className="ui-preview-head-right">
           {customers.length > 0 && (
@@ -842,15 +850,22 @@ function UiWorkspace({ initial, customers }: {
       setError("Describe the UI and the live data fields you want Copilot to link.");
       return;
     }
+    const generationDomain = layoutPrompts.find(({ prompt }) => prompt === text)?.domainId ?? domainId;
+    if (!initial.domains.includes(generationDomain)) {
+      setError(`You need authoring access to ${getDomainPack(generationDomain).shortLabel} to use this prompt.`);
+      return;
+    }
     if (overridePrompt) setAiPrompt(overridePrompt);
     setAiGenerating(true);
     setError("");
     setNotice("");
+    setAiBoundKeys([]);
+    setAiSource("");
     try {
-      const result = await api.generateUiLayout(text, domainId);
+      const result = await api.generateUiLayout(text, generationDomain);
       setEdits((prev) => ({ ...prev, new: result.design }));
-      setSelected("new");
-      setExpandedSlotId(null);
+      setNewDomain(generationDomain);
+      select("new");
       setAiBoundKeys(result.boundKeys);
       setAiSource(result.generatedBy);
       setNotice(result.summary);
@@ -1201,12 +1216,7 @@ function UiWorkspace({ initial, customers }: {
             </form>
             <div className="ui-copilot-examples">
               <span>Quick prompts:</span>
-              {[
-                { label: "Wealth Snapshot + Write-Back", prompt: "Build a wealth snapshot showing customer name, live total portfolio, cash reserve, equities, home goal progress bar, and an editable form to update cash reserve and beneficiary status" },
-                { label: "Home Goal Tracker", prompt: "Create a home-buying tracker bound to live goal saved, target, remaining amount, funded progress bar, and goal progress chart" },
-                { label: "IT Ops P1 War Room", prompt: "Build an IT Ops P1 incident triage card linked to live incident ID, service, error rate, p95 latency, release version, and rollback status" },
-                { label: "Sales Deal Desk Card", prompt: "Design a Sales RevOps executive card bound to live deal account name, ARR, requested discount %, win probability progress bar, and close date" },
-              ].map((ex) => (
+              {layoutPrompts.filter((example) => initial.domains.includes(example.domainId)).map((ex) => (
                 <button
                   key={ex.label}
                   type="button"
@@ -1426,6 +1436,7 @@ function UiWorkspace({ initial, customers }: {
             </section>
 
             <LayoutPreview
+              key={domainId}
               domainId={domainId}
               design={activeDesign}
               customers={domainId === "wealth" ? customers : []}

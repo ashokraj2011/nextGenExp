@@ -175,6 +175,22 @@ try {
   await shipping.waitForFunction(() => document.documentElement.scrollWidth <= window.innerWidth);
   await shipping.close();
 
+  await page.getByRole("button", { name: "New", exact: true }).click();
+  const domain = page.getByLabel("Design domain", { exact: true });
+  assert.equal(await domain.inputValue(), "wealth");
+  const generation = page.waitForRequest("**/api/admin/ui-layout-generate?domain=it_ops");
+  await page.getByRole("button", { name: "IT Ops P1 War Room", exact: true }).click();
+  await generation;
+  await preview.getByRole("heading", { name: /INC-4821/ }).waitFor();
+  assert.equal(await domain.inputValue(), "it_ops");
+  assert.equal(await preview.getByLabel("Preview as customer").count(), 0);
+
+  // The same draft can be recovered without removing its blocks by switching to its workspace.
+  await domain.selectOption("wealth");
+  await preview.getByRole("alert").filter({ hasText: "Choose that workspace in Design domain" }).waitFor();
+  await domain.selectOption("it_ops");
+  await preview.getByRole("heading", { name: /INC-4821/ }).waitFor();
+
   assert.deepEqual(pageErrors, []);
   console.log("UI builder preview, publishing, intent routing, Inspector, Widget Studio, interactive actions, and responsive layout passed.");
 } finally {

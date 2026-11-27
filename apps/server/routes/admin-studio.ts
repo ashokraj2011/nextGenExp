@@ -242,10 +242,11 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
       prompt,
       gateway,
       dataDir,
+      domainId,
       validTargets,
       customAttributeKeys: customKeys,
     });
-    validateUiDesign(generated.design, validTargets, false);
+    validateUiDesign(generated.design, validTargets, false, domainId);
     json(res, generated);
     return true;
   }
