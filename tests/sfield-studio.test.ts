@@ -299,6 +299,9 @@ test("CEP embeds @sfield/studio at /admin/sfield-studio with host plugins and sf
     const html = await page.text();
     assert.match(html, /sfield Studio · CEP/);
     assert.match(html, /Self-Service PZN Studio/);
+    const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
+    assert.ok(scriptMatch, "Studio HTML must contain inline script");
+    assert.doesNotThrow(() => new Function(scriptMatch[1]), "Studio inline script must parse without SyntaxError");
 
     const overviewRes = await fetch(`${app.url}/admin/sfield-studio/api/overview`, { headers: authHeaders });
     assert.equal(overviewRes.status, 200);

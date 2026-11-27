@@ -639,7 +639,7 @@ export function renderStudioHtml(opts: {
             '<div class="row" style="justify-content:space-between"><h2>MCP 2026 Tool &amp; Async Task Launcher</h2>' + pill("Protocol " + (m.protocolVersion || "2026-07-28"), "accent") + '</div>' +
             '<div class="muted">Invoke any MCP tool synchronously or as an Async Task (<code>task.ttl</code>). Choose <code>studio.mcp2026.demo@1.0.0</code> to trigger a live mid-flight JSON Schema Elicitation form.</div>' +
             '<label class="field">Tool<select id="mcp-tool-select">' + toolOpts + '</select></label>' +
-            '<label class="field">Arguments JSON<textarea id="mcp-args-json" class="mono">{\n  "action": "rebalance_portfolio"\n}</textarea></label>' +
+            '<label class="field">Arguments JSON<textarea id="mcp-args-json" class="mono">{"action": "rebalance_portfolio"}</textarea></label>' +
             '<label class="row" style="font-size:13px"><input type="checkbox" id="mcp-async-chk" style="width:auto" checked /> <span>Run as MCP 2026 Async Task (<code>task: { ttl: 60000 }</code>)</span></label>' +
             '<div class="row"><button class="btn primary" id="mcp-invoke-btn" type="button"' + (BOOT.readOnly ? " disabled" : "") + '>Invoke via MCP 2026</button></div>' +
             (state.mcpLastOut ? '<div><h3>Last JSON-RPC Response</h3><pre>' + esc(JSON.stringify(state.mcpLastOut, null, 2)) + '</pre></div>' : '') +
