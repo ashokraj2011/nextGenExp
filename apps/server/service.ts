@@ -52,6 +52,8 @@ import type { WorkflowEngine } from "./workflow-engine";
 import { buildPolicyRagCanvas, isPolicyQuestion, type KnowledgeBaseStore } from "./knowledge-base";
 import { extractDocumentAction, hasAttachedDocumentBlock } from "./document-extractor";
 import type { ApprovalStore } from "./approval-store";
+import type { ApprovalRecord } from "../../packages/contracts/approval";
+import { approvalReviewId, buildApprovalQueueCanvas } from "./domains/action-canvases";
 import type { SettlementCallback, TradeStore } from "./trade-store";
 import type { ActionFlowStore } from "./action-flow-store";
 import { type WidgetLibraryStore } from "./widget-library";
@@ -159,6 +161,7 @@ export class ExperienceService {
       salesStore?: SalesDealStore;
       connectorStore?: ConnectorStore;
       approvalStore?: ApprovalStore;
+      mayReviewApproval?: (actor: string, record: ApprovalRecord) => boolean;
       tradeStore?: TradeStore;
       actionFlowStore?: ActionFlowStore;
       workflowEngine?: WorkflowEngine;
@@ -412,6 +415,21 @@ export class ExperienceService {
   private async execute(id: string, recovering: boolean) {
     const initial = this.store.turn(id);
     if (this.closing || initial?.public.status !== "working") return;
+    const admin = this.dynamicUi;
+    const reviewActor = initial.operatorName;
+    if (admin?.approvalStore && reviewActor && (approvalReviewId(initial.public.message) || isApprovalQueuePrompt(initial.public.message))
+      && this.store.conversation(initial.scope.conversationId, initial.scope.principalId).audience === "admin") {
+      const reply = buildApprovalQueueCanvas(admin.approvalStore, initial.public.message,
+        (record) => admin.mayReviewApproval?.(reviewActor, record) ?? true);
+      const now = this.now();
+      const result = compileDynamicCanvas(reply.intro, reply.canvas, now + DECISION_TTL);
+      this.store.update(id, (row) => {
+        row.public.actionMode = "dynamic_ui";
+        row.trace.components = result.display.blocks.map(({ component }) => component);
+      });
+      this.store.finish(id, { type: "completed", result }, now);
+      return;
+    }
     const workspaceContext = workspaceFundingContext(initial.origin);
     const domain = initial.scope.domainId ?? "wealth";
     const tenantTools = Boolean(initial.operatorName && this.dynamicUi?.isTenantAdmin?.(initial.operatorName));

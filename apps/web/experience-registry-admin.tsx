@@ -21,7 +21,7 @@ import type {
   ManagedNbaRuleRecord,
   NbaConditionKind,
 } from "../../packages/contracts/experience-registry";
-import { api } from "./api";
+import { api, isPublicationReview } from "./api";
 import "./experience-registry-admin.css";
 
 type RegistryTab = "intents" | "content" | "nba";
@@ -372,6 +372,7 @@ function WealthRegistry() {
     };
     try {
       const next = await api.saveRegistryIntent(payload);
+      if (isPublicationReview(next)) return;
       hydrateSelections(next, payload.intentId, selectedContentId === "new" ? undefined : selectedContentId, selectedNbaId === "new" ? undefined : selectedNbaId);
       setNotice({ tone: "ok", text: `Saved intent "${payload.intentId}" → TS context "${payload.contextId}". Live in Context Router & UI Builder.` });
     } catch (error: unknown) {
@@ -387,6 +388,7 @@ function WealthRegistry() {
     setNotice(null);
     try {
       const next = await api.deleteOrResetRegistryIntent(selectedIntent.intentId);
+      if (isPublicationReview(next)) return;
       hydrateSelections(next, selectedIntent.isBuiltIn ? selectedIntent.intentId : undefined);
       setNotice({ tone: "ok", text: selectedIntent.isBuiltIn ? `Reset intent "${selectedIntent.intentId}" to defaults.` : `Deleted custom intent "${selectedIntent.intentId}".` });
     } catch (error: unknown) {
@@ -411,6 +413,7 @@ function WealthRegistry() {
     };
     try {
       const next = await api.saveRegistryContent(payload);
+      if (isPublicationReview(next)) return;
       hydrateSelections(next, selectedIntentId === "new" ? undefined : selectedIntentId, payload.contentId, selectedNbaId === "new" ? undefined : selectedNbaId);
       setNotice({ tone: "ok", text: `Saved content "${payload.contentId}". Available immediately in Treatment Selector & Tool setup.` });
     } catch (error: unknown) {
@@ -426,6 +429,7 @@ function WealthRegistry() {
     setNotice(null);
     try {
       const next = await api.deleteOrResetRegistryContent(selectedContent.contentId);
+      if (isPublicationReview(next)) return;
       hydrateSelections(next, undefined, selectedContent.isBuiltIn ? selectedContent.contentId : undefined);
       setNotice({ tone: "ok", text: selectedContent.isBuiltIn ? `Reset "${selectedContent.contentId}" to defaults.` : `Deleted custom content "${selectedContent.contentId}".` });
     } catch (error: unknown) {
@@ -459,6 +463,7 @@ function WealthRegistry() {
     };
     try {
       const next = await api.saveRegistryNba(payload);
+      if (isPublicationReview(next)) return;
       hydrateSelections(next, selectedIntentId === "new" ? undefined : selectedIntentId, selectedContentId === "new" ? undefined : selectedContentId, payload.id);
       setNotice({ tone: "ok", text: `Saved NBA rule "${payload.id}". Customer 360 arbitration updated live.` });
     } catch (error: unknown) {
@@ -477,6 +482,7 @@ function WealthRegistry() {
     setSaving(true);
     try {
       const next = await api.reorderRegistryNba(ids);
+      if (isPublicationReview(next)) return;
       hydrateSelections(next, undefined, undefined, selectedNbaId === "new" ? undefined : selectedNbaId);
       setNotice({ tone: "ok", text: "Updated Next Best Action priority order." });
     } catch (error: unknown) {
@@ -492,6 +498,7 @@ function WealthRegistry() {
     setNotice(null);
     try {
       const next = await api.deleteOrResetRegistryNba(selectedNba.id);
+      if (isPublicationReview(next)) return;
       hydrateSelections(next, undefined, undefined, selectedNba.isBuiltIn ? selectedNba.id : undefined);
       setNotice({ tone: "ok", text: selectedNba.isBuiltIn ? `Reset NBA rule "${selectedNba.id}" to defaults.` : `Deleted custom NBA rule "${selectedNba.id}".` });
     } catch (error: unknown) {

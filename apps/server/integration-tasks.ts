@@ -462,7 +462,7 @@ export class IntegrationTaskStore {
       .sort((a, b) => compareSemver(b.version, a.version))[0];
   }
 
-  upsertIntegration(raw: unknown): Integration {
+  upsertIntegration(raw: unknown, preview = false): Integration {
     const integration = integrationSchema.parse(raw);
     if (integration.transport !== "sandbox") {
       let url: URL | null = null;
@@ -478,8 +478,10 @@ export class IntegrationTaskStore {
       && this.state.contracts.some((c) => c.integrationId === integration.id && c.status !== "draft")) {
       throw new IntegrationTaskError("integration_in_use", `${integration.id} has published tasks, so its transport and URL are fixed. Create a new integration for a different endpoint.`);
     }
-    this.state.integrations = [integration, ...this.state.integrations.filter((i) => i.id !== integration.id)];
-    this.save();
+    if (!preview) {
+      this.state.integrations = [integration, ...this.state.integrations.filter((i) => i.id !== integration.id)];
+      this.save();
+    }
     return integration;
   }
 
@@ -610,7 +612,7 @@ export class IntegrationTaskStore {
     return { deleted: true, id, removedDrafts };
   }
 
-  publish(ref: string): { contract: TaskContract; breaking: string[] } {
+  publish(ref: string, preview = false): { contract: TaskContract; breaking: string[] } {
     const draft = this.contract(ref);
     if (!draft) throw new IntegrationTaskError("contract_not_found", `${ref} not found.`);
     if (draft.status !== "draft") throw new IntegrationTaskError("not_a_draft", `${ref} is already ${draft.status}.`);
@@ -632,6 +634,7 @@ export class IntegrationTaskStore {
       }
     }
     const published: TaskContract = { ...draft, status: "published", publishedAt: new Date().toISOString() };
+    if (preview) return { contract: published, breaking };
     this.state.contracts = this.state.contracts.map((c) => (c.ref === ref ? published : c));
     this.save();
     return { contract: published, breaking };

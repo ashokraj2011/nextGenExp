@@ -137,12 +137,12 @@ test("published tool settings reach other browsers and take effect on subsequent
     enabled: { ...defaultToolSetup.enabled, propensity: false },
     treatmentOverrides: [{ scenarioId: "normal", contextId: "balance", output: { mode: "ranked", contentIds } }],
   };
-  await client.request(path, rank);
+  await client.publish(path, rank);
   const accepted = await client.submit(conversation.id, message);
   const timeout: ToolSetup = {
     ...rank, treatmentOverrides: [{ scenarioId: "normal", contextId: "balance", output: { mode: "timeout" } }],
   };
-  await client.request(path, timeout);
+  await client.publish(path, timeout);
   const ranked = await client.wait(accepted);
   assert.equal(ranked.turn.status, "completed");
   assert.equal(ranked.trace.propensity?.status, "unavailable");
@@ -166,21 +166,21 @@ test("published tool settings reach other browsers and take effect on subsequent
   assert.deepEqual((await restored.request<ToolSetupView>(path)).setup, timeout);
   const other = await restored.response(path, undefined, { Cookie: "" });
   assert.deepEqual((await other.json() as ToolSetupView).setup, timeout);
-  await restored.request(path, rank);
+  await restored.publish(path, rank);
   const retried = await restored.request<TurnAccepted>("/api/turns/" + failed.turn.id + "/retry", { clientRequestId: randomUUID() }, 202);
   assert.deepEqual((await restored.wait(retried)).trace.ts?.baseline, contentIds);
 
-  await restored.request(path, { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, selection: false } });
+  await restored.publish(path, { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, selection: false } });
   const disabled = await restored.ask(conversation.id, message);
   assert.equal(disabled.turn.failureCode, "ts_unavailable");
   assert.ok(disabled.trace.failures.some(({ code }) => code === "TOOL_DISABLED"));
 
-  await restored.request(path, { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, balances: false } });
+  await restored.publish(path, { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, balances: false } });
   const metric = await restored.ask(conversation.id, "Show my synthetic demo balance summary.");
   assert.equal(metric.turn.failureCode, "metric_unavailable");
   assert.equal(metric.trace.metricReadSucceeded, false);
 
-  await restored.request(path, { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, catalog: false } });
+  await restored.publish(path, { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, catalog: false } });
   const missing = await restored.ask(conversation.id, message);
   assert.equal(missing.turn.failureCode, "catalog_unavailable");
 });
@@ -232,7 +232,7 @@ test("CCRE mock rules filter ranked treatments the same way in preview and chat"
   await client.request(path, { ...setup, ccreRules: [{ ...rule, contentId: "promotion_blocked" }] }, 400);
   await client.request(path, { ...setup, ccreRules: [{ ...rule, scenarioId: "cross-turn-change" }] }, 400);
   await client.request(preview, { ...input, ccreRules: [{ ...rule, contextId: "portsum" }] }, 400);
-  assert.deepEqual(await client.request<ToolSetup>(path, setup), setup);
+  assert.deepEqual(await client.publish<ToolSetup>(path, setup), setup);
 
   const message = "Compare available and current balance.";
   const learner = await client.conversation("normal", "demo-learner");
@@ -303,7 +303,7 @@ test("create rule reads the sfield glossary and uses its attributes for preview 
   const output = { mode: "ranked" as const, contentIds: ["balance_current_definition", "balance_available_definition"] };
   const { glossary: _glossary, ...oldEnabledSettings } = defaultToolSetup.enabled;
   const setup: ToolSetup = { enabled: oldEnabledSettings, treatmentOverrides: [{ scenarioId: "normal", contextId: "balance", output }] };
-  await client.request(toolsPath, setup);
+  await client.publish(toolsPath, setup);
 
   const { turn, trace, events } = await client.ask(conversation.id, "Create rule");
   assert.equal(turn.experience?.outcome, "create_rule");
@@ -368,7 +368,7 @@ test("create rule reads the sfield glossary and uses its attributes for preview 
   await client.request(rulesPath, { ...rule, condition: { ...condition, operator: "gte" } }, 400);
   await client.request(rulesPath, { ...rule, condition: { ...condition, value: true } }, 400);
   await client.request(rulesPath, { ...rule, condition: { ...condition, glossaryVersion: "stale" } }, 400);
-  assert.deepEqual(await client.request(rulesPath, rule), rule);
+  assert.deepEqual((await client.publish<ToolSetup>(rulesPath, rule)).ccreRules, [rule]);
   assert.deepEqual(await client.request(rulesPath, rule), rule);
   await client.request(rulesPath, { ...rule, name: "Overwriting the rule" }, 409);
   assert.equal((await client.response(toolsPath, { ...setup, treatmentOverrides: [] }, { "If-Match": revision })).status, 412);
@@ -383,7 +383,7 @@ test("create rule reads the sfield glossary and uses its attributes for preview 
   const restored = await f.restart();
   const savedPayloads = await restored.request<TurnPayloads>("/api/debug/payloads/" + turn.id);
   assert.deepEqual(savedPayloads.glossary, payloads.glossary);
-  await restored.request(toolsPath, { ...setup, enabled: { ...setup.enabled, glossary: false }, ccreRules: [rule] });
+  await restored.publish(toolsPath, { ...setup, enabled: { ...setup.enabled, glossary: false }, ccreRules: [rule] });
   const unavailable = await restored.ask(conversation.id, "Create rule");
   assert.equal(unavailable.turn.failureCode, "glossary_unavailable");
   assert.equal(unavailable.turn.experience, undefined);
@@ -689,14 +689,14 @@ test("portfolio summaries combine the scoped snapshot with the cash treatment on
   assert.equal(summary.trace.composerRunId, null);
   assert.equal(summary.turn.experience?.status, "ready");
 
-  await client.request("/api/admin/tools", { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, selection: false } });
+  await client.publish("/api/admin/tools", { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, selection: false } });
   const unavailable = await client.ask(empty.id, question);
   assert.equal(unavailable.turn.status, "completed");
   assert.deepEqual(unavailable.trace.components, ["PznPortfolioSnapshot"]);
   assert.equal(unavailable.turn.experience?.partial, true);
   assert.equal(unavailable.trace.composerRunId, null);
 
-  await client.request("/api/admin/tools", { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, portfolio: false } });
+  await client.publish("/api/admin/tools", { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, portfolio: false } });
   const missing = await client.ask(empty.id, question);
   assert.equal(missing.turn.failureCode, "portfolio_unavailable");
   assert.equal(missing.turn.experience, undefined);
@@ -710,13 +710,13 @@ test("first-model requests use the saved tenant and domain catalog for the custo
   const oldRevision = (await f.client.response(wealth)).headers.get("etag")!;
   const description = "Account services, including changes to the customer’s mailing address.";
   const example = "Please change where my statements are mailed.";
-  await f.client.request(tenant, { stock_trade: { enabled: false }, verified_experience: { description } });
+  await f.client.publish(tenant, { stock_trade: { enabled: false }, verified_experience: { description } });
   await f.client.request(wealth, {}, 412, { "If-Match": oldRevision });
   await f.client.request(wealth, { ops_incident: { enabled: false } }, 400);
   await f.client.request(wealth, { unregistered: { enabled: true } }, 400);
   const inherited = await f.client.request<import("../packages/contracts/routing-flows").FlowCatalogSetup>(wealth);
   assert.equal(inherited.inherited.find((flow) => flow.id === "verified_experience")?.description, description);
-  await f.client.request(wealth, {
+  await f.client.publish(wealth, {
     stock_holdings: { enabled: false }, stock_trade: { enabled: true }, verified_experience: { examples: [example] },
   });
   const chat = await f.client.conversation("normal", "demo-new-account");
@@ -732,7 +732,7 @@ test("first-model requests use the saved tenant and domain catalog for the custo
   assert.deepEqual([...system.matchAll(/^- (\w+) \(/gm)].map((match) => match[1]), ids);
   assert.ok(system.includes(description) && system.includes(example));
   assert.doesNotMatch(system, /stock_trade|stock_holdings|ops_incident|sales_deal_desk|external_connector|hitl_approvals/);
-  await f.client.request(wealth, { verified_experience: { enabled: false }, stock_holdings: { enabled: false }, custom_dynamic_ui: { enabled: false } });
+  await f.client.publish(wealth, { verified_experience: { enabled: false }, stock_holdings: { enabled: false }, custom_dynamic_ui: { enabled: false } });
   const client = await f.restart();
   assert.deepEqual((await client.request<TurnPayloads>(logsPath)).sentFlowList, logs.sentFlowList);
   assert.deepEqual((await client.request<TurnPayloads>(logsPath)).handoffs?.flowRouting, logs.handoffs?.flowRouting);
@@ -747,7 +747,7 @@ test("the address guide can launch the funding workflow only when Treatment Sele
   const f = await fixture();
   t.after(() => f.close());
   const { client, gateway } = f;
-  await client.request("/api/admin/tools", { ...defaultToolSetup, fundingWorkflow: defaultFundingWorkflow });
+  await client.publish("/api/admin/tools", { ...defaultToolSetup, fundingWorkflow: defaultFundingWorkflow });
   const prompt = "I moved and need to update my address.";
   const contextId = "address-update";
   const guide = "address_update_guide";
@@ -870,7 +870,7 @@ test("the address guide can launch the funding workflow only when Treatment Sele
     }
   }
 
-  await client.request("/api/admin/tools", {
+  await client.publish("/api/admin/tools", {
     ...defaultToolSetup,
     ccreRules: [{ scenarioId: "normal", contextId, contentId: suggestion, name: "Pause first deposit suggestion", condition: { kind: "never" } }],
   } satisfies ToolSetup);
@@ -885,7 +885,7 @@ test("an address action runs independently of content and both clicks link to th
   t.after(() => f.close());
   const { client } = f;
   const fundingWorkflow = { ...defaultFundingWorkflow, steps: [fundingToolRef("fundingStatus"), ...defaultFundingWorkflow.steps] };
-  await client.request("/api/admin/tools", { ...defaultToolSetup, fundingWorkflow } satisfies ToolSetup);
+  await client.publish("/api/admin/tools", { ...defaultToolSetup, fundingWorkflow } satisfies ToolSetup);
   const prompt = "I moved and need to update my address.";
   const chat = await client.conversation("normal", "demo-new-account");
   const source = (await client.ask(chat.id, prompt)).turn;
@@ -928,7 +928,7 @@ test("an address action runs independently of content and both clicks link to th
   const later = (await client.ask(chat.id, prompt)).turn;
   assert.deepEqual((await client.request<TreatmentRun[]>(runPath)).map((r) => [r.turnId, r.clicks.length]), [[later.id, 0], [source.id, 2]]);
 
-  await client.request("/api/admin/tools", { ...defaultToolSetup, treatmentOverrides: [
+  await client.publish("/api/admin/tools", { ...defaultToolSetup, treatmentOverrides: [
     { scenarioId: "normal", contextId: "address-update", output: { mode: "empty" } },
   ] } satisfies ToolSetup);
   const other = await client.conversation("normal", "demo-returning");
@@ -984,7 +984,7 @@ test("a rule offers its registered workflow only for displayed, matched content 
   const settings = await client.request<ToolSetupView>(path);
   const rule: MockCcreRule = { ...settings.defaultCcreRules.find((entry) => entry.contextId === "learning")!,
     scenarioId: "normal", workflow: review };
-  const save = (rules: MockCcreRule[]) => client.request(path, { ...defaultToolSetup, ccreRules: rules });
+  const save = (rules: MockCcreRule[]) => client.publish(path, { ...defaultToolSetup, ccreRules: rules });
   await client.request(path, { ...defaultToolSetup, ccreRules: [{ ...rule, workflow: { ...review, version: "9.0.0" } }] }, 400);
   await save([rule]);
   const ask = async (persona: string) => {
@@ -1055,7 +1055,7 @@ test("the funding workflow uses the saved step order for the Treatment Selector 
   assert.equal(unknownVersion.status, 400);
 
   const definition = { ...defaultFundingWorkflow, steps: [options, status, preview] };
-  await client.request("/api/admin/tools", { ...defaultToolSetup, fundingWorkflow: definition });
+  await client.publish("/api/admin/tools", { ...defaultToolSetup, fundingWorkflow: definition });
   const accepted = await client.request<TurnAccepted>("/api/experiences/" + source.experienceId + "/actions", {
     clientRequestId: randomUUID(), envelope: actionFor(source),
   }, 202);
@@ -1067,7 +1067,7 @@ test("the funding workflow uses the saved step order for the Treatment Selector 
   assert.deepEqual(workflow?.definition?.data, definition);
   assert.deepEqual(workflow?.calls.map(({ tool }) => tool), definition.steps);
   assert.deepEqual(workflow?.calls[1].result?.data, { accountFundingStatus: "unfunded" });
-  await client.request("/api/admin/tools", defaultToolSetup);
+  await client.publish("/api/admin/tools", defaultToolSetup);
   assert.deepEqual((await client.request<TurnPayloads>(path)).workflow, workflow);
 });
 
@@ -1188,7 +1188,7 @@ test("home-buying progress reads the eligible member's target and history throug
   assert.equal(excluded.turn.experience?.outcome, "eligible_empty");
   assert.equal(excluded.trace.goalScopeId, null);
 
-  await client.request("/api/admin/tools", { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, goal: false } });
+  await client.publish("/api/admin/tools", { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, goal: false } });
   const chat = await client.conversation();
   const disabled = await client.ask(chat.id, "Show my mortgage goal.");
   assert.equal(disabled.turn.failureCode, "goal_unavailable");

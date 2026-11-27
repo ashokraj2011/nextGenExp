@@ -18,6 +18,7 @@ export function renderStudioHtml(opts: {
   basePath: string;
   readOnly: boolean;
   plugins: StudioPluginTab[];
+  approvalChatPath?: string;
 }): string {
   const safeTitle = escapeHtml(opts.title);
   const bootConfig = JSON.stringify({
@@ -25,6 +26,7 @@ export function renderStudioHtml(opts: {
     basePath: opts.basePath,
     readOnly: opts.readOnly,
     plugins: opts.plugins,
+    approvalChatPath: opts.approvalChatPath,
   }).replace(/</g, "\\u003c");
 
   return `<!doctype html>
@@ -320,7 +322,10 @@ export function renderStudioHtml(opts: {
             '<div class="row" style="justify-content:space-between"><h2>Config Digest & Governance Lock</h2>' + (lock && lock.approved ? pill("Approved", "ok") : pill("Unapproved", "warn")) + '</div>' +
             '<div class="muted">Digest: <code>' + esc(o.configDigest || "N/A (persistence-only mode)") + '</code></div>' +
             (lock && lock.record ? '<div class="muted">Approver: <strong>' + esc(lock.record.approver) + '</strong> · ' + esc(lock.record.decidedAt) + (lock.record.comment ? ' · "' + esc(lock.record.comment) + '"' : '') + '</div>' : '<div class="muted">No lock approval recorded yet for the active digest.</div>') +
-            (!BOOT.readOnly && o.configDigest ? '<div class="row"><input id="lock-approver" placeholder="Approver name" value="studio-operator" style="max-width:180px" /><input id="lock-comment" placeholder="Approval note" style="flex:1" /><button class="btn primary" id="approve-lock-btn" type="button">Approve Lock</button></div><div id="lock-msg"></div>' : '') +
+            (!BOOT.readOnly && o.configDigest ? '<div class="row">' +
+              (BOOT.approvalChatPath ? '' : '<input id="lock-approver" placeholder="Approver name" value="studio-operator" style="max-width:180px" />') +
+              '<input id="lock-comment" placeholder="Approval note" style="flex:1" /><button class="btn primary" id="approve-lock-btn" type="button">' +
+              (BOOT.approvalChatPath ? 'Request lock approval' : 'Approve Lock') + '</button></div><div id="lock-msg"></div>' : '') +
           '</div>' +
           '<div class="card stack">' +
             '<h2>Agents & Models</h2>' +
@@ -335,9 +340,16 @@ export function renderStudioHtml(opts: {
         btn.onclick = async () => {
           const msg = document.getElementById("lock-msg");
           try {
-            const approver = document.getElementById("lock-approver").value.trim() || "studio-operator";
+            const approver = document.getElementById("lock-approver")?.value.trim();
             const comment = document.getElementById("lock-comment").value.trim();
-            await api("/locks/approve", { method: "POST", body: JSON.stringify({ digest: o.configDigest, approver, comment, noBaseline: true }) });
+            const out = await api("/locks/approve", { method: "POST", body: JSON.stringify({
+              digest: o.configDigest, comment,
+              ...(BOOT.approvalChatPath ? {} : { approver: approver || "studio-operator", noBaseline: true }),
+            }) });
+            if (BOOT.approvalChatPath && out.status === "pending_approval" && out.approval) {
+              msg.innerHTML = '<div class="notice ok"><a href="' + esc(BOOT.approvalChatPath + '?review=' + encodeURIComponent(out.approval.id)) + '">Review in Admin chat</a></div>';
+              return;
+            }
             msg.innerHTML = '<div class="notice ok">Lock approved for ' + esc(o.configDigest.slice(0, 16)) + '…</div>';
             await loadActiveTab();
           } catch (e) {

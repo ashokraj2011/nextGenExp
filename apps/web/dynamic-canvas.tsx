@@ -4,6 +4,7 @@ import type { DynamicCanvasNode, DynamicCanvasProps } from "../../packages/contr
 import type { WidgetDraft } from "../../packages/contracts/widget";
 import { api } from "./api";
 import { notifyDomainDataUpdated } from "./domain-pack-ui";
+import { PublicationReviewDetails } from "./publication-review-details";
 import { TradeTicketNode } from "./trade-ticket";
 import { WorkflowRunnerNode } from "./workflow-runner";
 
@@ -628,7 +629,8 @@ function ApprovalNode({ node, onFollowUp }: {
         setDecision(next);
         if (next === "approved" && apr.executionResult) {
           setLiveMessage(
-            `${apr.executionResult.summary} · sfield run ${apr.executionResult.sfieldRunId}${apr.executionResult.auditId ? ` · audit ${apr.executionResult.auditId}` : ""}`,
+            apr.executionResult.summary + (apr.executionResult.sfieldRunId !== "offline" ? ` · sfield run ${apr.executionResult.sfieldRunId}` : "")
+              + (apr.executionResult.auditId ? ` · audit ${apr.executionResult.auditId}` : ""),
           );
         } else {
           setLiveMessage(`Approval ${apr.id} ${apr.status} by ${apr.decidedBy ?? "operator"}.`);
@@ -740,6 +742,7 @@ function ApprovalNode({ node, onFollowUp }: {
           <div key={d.label}><dt>{d.label}</dt><dd>{d.value}</dd></div>
         ))}
       </dl>
+      {node.approvalId && node.approveLabel === "Approve publication" && <PublicationReviewDetails id={node.approvalId} />}
       {error && <p className="dyn-form-error" role="alert">{error}</p>}
       {decision === "pending" ? (
         <div style={{ display: "grid", gap: "10px" }}>

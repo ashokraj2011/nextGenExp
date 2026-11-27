@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from "react";
 import { FlaskConical } from "lucide-react";
 import type { RuleCreationProps } from "../../packages/contracts/surface";
 import { MAX_CCRE_RULES, treatmentOverride, type MockCcreRule, type ToolSetupView, type TreatmentPreview } from "../../packages/contracts/tool-setup";
-import { api, toolSetupErrorMessage } from "./api";
+import { api, isPublicationReview, toolSetupErrorMessage } from "./api";
 import { CcreRuleForm } from "./ccre-rule-form";
 import { TreatmentPreviewResult } from "./treatment-preview";
 
@@ -72,7 +72,8 @@ function RuleCreationEditor({ data, scenarioId, personaId, glossary }: RuleCreat
     setPending("save");
     setSaveError("");
     try {
-      setSaved(await api.createCcreRule(rule));
+      const saved = await api.createCcreRule(rule);
+      if (!isPublicationReview(saved)) setSaved(saved);
     } catch (error) {
       setSaveError(toolSetupErrorMessage(error));
     } finally {

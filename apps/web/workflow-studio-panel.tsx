@@ -6,7 +6,7 @@ import type {
   WorkflowRun,
   WorkflowStep,
 } from "../../packages/contracts/workflow-definition";
-import { api } from "./api";
+import { api, isPublicationReview } from "./api";
 import { WorkflowDagView } from "./workflow-dag";
 
 function makeBlankWorkflow(): WorkflowDefinitionUpsertInput {
@@ -196,6 +196,7 @@ export function WorkflowStudioPanel() {
         ? (JSON.parse(jsonText) as WorkflowDefinitionUpsertInput)
         : draft!;
       const view = await api.saveWorkflow(payload);
+      if (isPublicationReview(view)) return;
       setDefinitions(view.definitions);
       setRecentRuns(view.recentRuns);
       const saved = view.definitions.find((d) => d.id === payload.id);
@@ -214,6 +215,7 @@ export function WorkflowStudioPanel() {
     setNotice(null);
     try {
       const view = await api.deleteWorkflow(draft.id);
+      if (isPublicationReview(view)) return;
       setDefinitions(view.definitions);
       setRecentRuns(view.recentRuns);
       const next = view.definitions.find((d) => d.id === draft.id) ?? view.definitions[0];

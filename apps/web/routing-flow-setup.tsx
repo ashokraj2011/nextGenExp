@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { getDomainPack } from "../../packages/contracts/domain-packs";
 import type { CepCapabilityId } from "../../packages/contracts/capabilities-catalog";
 import { applyFlowOverride, flowOverridesSchema, type FlowOverride, type FlowOverrides, type FlowScope } from "../../packages/contracts/routing-flows";
-import { api, toolSetupErrorMessage } from "./api";
+import { api, isPublicationReview, toolSetupErrorMessage } from "./api";
 
 const scopeName = (scope: FlowScope) => scope === "tenant" ? "Tenant defaults" : getDomainPack(scope).shortLabel;
 
@@ -45,7 +45,9 @@ export function RoutingFlowSetup() {
     setSaving(true); setError("");
     try {
       const result = await api.saveRoutingFlows(loaded.data.scope, parsed.data, loaded.revision);
-      setLoaded(result); setDraft(result.data.overrides); setNotice("Flow settings saved for " + scopeName(result.data.scope) + ".");
+      if (isPublicationReview(result.data)) return;
+      setLoaded({ data: result.data, revision: result.revision });
+      setDraft(result.data.overrides); setNotice("Flow settings saved for " + scopeName(result.data.scope) + ".");
     } catch (err) { setError(toolSetupErrorMessage(err)); }
     finally { setSaving(false); }
   }

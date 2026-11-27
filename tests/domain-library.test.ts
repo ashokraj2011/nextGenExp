@@ -60,9 +60,9 @@ test("a published domain design reaches independent members with their own data 
   t.after(async () => { await Promise.all([north.close(), south?.close()]); await rm(base, { recursive: true, force: true }); });
   south = await startTenant(base, "south");
   const owner = await testClient(north.url);
-  const published = await owner.request<UiLayoutRecord>(path, { operation: "publish", domainId: "wealth", design });
+  const published = await owner.publish<UiLayoutRecord>(path, { operation: "publish", domainId: "wealth", design });
   await owner.request(path, { operation: "draft", id: published.id, revision: published.revision, design: { ...design, name: "Unreleased design" } });
-  await owner.request(path, { operation: "publish", domainId: "it_ops", design: {
+  await owner.publish(path, { operation: "publish", domainId: "it_ops", design: {
     ...design, name: "Incident status", targets: [{ kind: "capability", id: "ops_incident" }],
     slots: [{ ...design.slots[0], title: "{{incident.id}}", metrics: [] }],
   } });
@@ -122,7 +122,7 @@ test("a published domain design reaches independent members with their own data 
   assert.ok(!(await owner.request<Bootstrap>("/api/bootstrap?domain=wealth")).conversations.some(({ id }) => id === ops.id));
   const widget = generateWidgetFromText("Incident recovery checklist");
   const opsWidgets = "/api/admin/widgets?domain=it_ops";
-  const saved = await owner.request<{ widget: { id: string } }>(opsWidgets, { operation: "save", widget: { ...widget, availableForConsumption: true } });
+  const saved = await owner.publish<{ widget: { id: string } }>(opsWidgets, { operation: "save", widget: { ...widget, availableForConsumption: true } });
   const sameOperator = await testClient(north.url);
   assert.deepEqual((await sameOperator.request<{ widgets: { id: string }[] }>(opsWidgets)).widgets.map(({ id }) => id), [saved.widget.id]);
   assert.ok(!(await owner.request<{ widgets: { id: string }[] }>("/api/admin/widgets?domain=wealth")).widgets.some(({ id }) => id === saved.widget.id));
@@ -131,9 +131,9 @@ test("a published domain design reaches independent members with their own data 
   const southOwner = await testClient(south.url);
   assert.deepEqual((await southOwner.request<UiLayoutCatalog>(path)).library, []);
   await southOwner.request("/api/conversations/" + ops.id, undefined, 404);
-  await southOwner.request(path, { operation: "publish", domainId: "wealth", design });
+  await southOwner.publish(path, { operation: "publish", domainId: "wealth", design });
   const flowSettings = "/api/admin/routing-flows?scope=wealth";
-  await owner.request(flowSettings, { stock_trade: { enabled: false } });
+  await owner.publish(flowSettings, { stock_trade: { enabled: false } });
   await reader.request(flowSettings, {}, 403, readerHeaders);
   await reader.request("/api/admin/routing-flows?scope=tenant", {}, 403, readerHeaders);
   assert.deepEqual((await southOwner.request<{ overrides: object }>(flowSettings)).overrides, {});
@@ -146,7 +146,7 @@ test("a published domain design reaches independent members with their own data 
     tenantId: "north", domains: ["sales_revops"], tenantTools: false,
   });
   const named = { id: "it_ops_intent_shift_notes", label: "Shift notes", view: "timeline", phrases: ["Show shift notes"] };
-  const namedLayout = await owner.request<UiLayoutRecord>(path, { operation: "publish", domainId: "it_ops", design: {
+  const namedLayout = await owner.publish<UiLayoutRecord>(path, { operation: "publish", domainId: "it_ops", design: {
     ...design, name: "Shift notes layout", targets: [{ kind: "intent", id: named.id }], recordIntent: named,
     slots: [{ kind: "block", id: "timeline", component: "PznDynamicCanvas" }],
   } });
@@ -169,7 +169,8 @@ test("a published domain design reaches independent members with their own data 
     task: "explain", description: "Review the start of the year with the customer.", samplePhrases: ["Help me review the start of the year"], enabled: true };
   await reader.request("/api/admin/registry-intent?domain=sales_revops", intent, 400, readerHeaders);
   await reader.request("/api/admin/registry-intent", intent, 403, readerHeaders);
-  const wealth = await owner.request<ExperienceRegistryView>("/api/admin/registry-intent?domain=wealth", intent);
+  await owner.publish("/api/admin/registry-intent?domain=wealth", intent);
+  const wealth = await owner.request<ExperienceRegistryView>(registry + "?domain=wealth");
   assert.equal(wealth.domainId, "wealth");
   assert.ok(wealth.intents.some(({ intentId }) => intentId === intent.intentId));
   const separateWealth = await southOwner.request<ExperienceRegistryView>(registry + "?domain=wealth");

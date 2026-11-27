@@ -17,6 +17,7 @@ import type { ApprovalStore } from "../approval-store";
 import type { Customer360Service } from "../customer-360";
 import type { IntegrationTaskService } from "../integration-tasks";
 import type { OpsIncidentStore } from "../ops-store";
+import type { PublicationReviews } from "../publication-reviews";
 import { domainWriteToolRef, type Runtime } from "../runtime";
 import type { SalesDealStore } from "../sales-store";
 import { ApiError, type Store } from "../store";
@@ -39,6 +40,7 @@ export interface DomainsOpsSalesRouteDeps {
   runtime: Runtime | null;
   tradeStore: TradeStore;
   approvalStore: ApprovalStore;
+  publicationReviews: PublicationReviews;
   writeAudit: WriteAuditStore;
   customer360: Customer360Service;
   opsStore: OpsIncidentStore;
@@ -57,10 +59,22 @@ export interface DomainsOpsSalesRouteDeps {
 export async function handleDomainsOpsSalesRoutes(deps: DomainsOpsSalesRouteDeps): Promise<boolean> {
   const {
     req, res, resource, id, operation, method, principalId, operator, inspectorEnabled,
-    streams, store, runtime, tradeStore, approvalStore, writeAudit, customer360,
+    streams, store, runtime, tradeStore, approvalStore, publicationReviews, writeAudit, customer360,
     opsStore, salesStore, integrationService, workflowEngine,
     json, body, requireOperator, requireChatDomain, makeTradeSettler, executeApprovedRecord,
   } = deps;
+  const approvalView = (actor: string) => {
+    const view = approvalStore.view();
+    const approvals = view.approvals.filter((record) => publicationReviews.mayReview(actor, record));
+    return { ...view, approvals, pendingCount: approvals.filter(({ status }) => status === "pending").length };
+  };
+  const reviewable = (actor: string, approvalId: string) => {
+    const record = approvalStore.findById(approvalId);
+    if (!record || !publicationReviews.mayReview(actor, record)) {
+      throw new ApiError(404, "approval_not_found", "This approval request is unavailable.");
+    }
+    return record;
+  };
 
   if (resource === "trading") {
     if (id && operation && ["status", "cancel", "events"].includes(operation)) {
@@ -159,17 +173,25 @@ export async function handleDomainsOpsSalesRoutes(deps: DomainsOpsSalesRouteDeps
   }
 
   if (resource === "approvals" && !id && method === "GET") {
-    json(res, approvalStore.view());
+    json(res, approvalView(requireOperator()));
+    return true;
+  }
+  if (resource === "approvals" && id && !operation && method === "GET") {
+    json(res, reviewable(requireOperator(), id));
     return true;
   }
   if (resource === "approvals" && id === "policy" && !operation && method === "POST" && inspectorEnabled) {
     const next = await body(req, approvalPolicySettingsSchema.partial());
     const policy = approvalStore.updatePolicy(next);
-    json(res, { policy, view: approvalStore.view() });
+    json(res, { policy, view: approvalView(requireOperator()) });
     return true;
   }
   if (resource === "approvals" && id && operation === "decide" && method === "POST") {
     const decisionInput = { ...await body(req, approvalDecisionInputSchema.omit({ actor: true }).extend({ actor: z.string().optional() })), actor: requireOperator() };
+    const record = reviewable(decisionInput.actor, id);
+    if (decisionInput.decision === "approve" && record.status === "pending" && record.targetKind === "publication") {
+      publicationReviews.planForApproval(record, decisionInput.actor);
+    }
     const outcome = approvalStore.decide(id, decisionInput);
     if (!outcome.ok) {
       throw new ApiError(outcome.status, outcome.code, outcome.message);
@@ -194,7 +216,7 @@ export async function handleDomainsOpsSalesRoutes(deps: DomainsOpsSalesRouteDeps
         status: "denied",
         approvalId: outcome.record.id,
       });
-      json(res, { approval: outcome.record, view: approvalStore.view() });
+      json(res, { approval: outcome.record, view: approvalView(decisionInput.actor) });
       return true;
     }
     const executed = await executeApprovedRecord(principalId, outcome.record);
@@ -202,7 +224,7 @@ export async function handleDomainsOpsSalesRoutes(deps: DomainsOpsSalesRouteDeps
       approval: executed.approval,
       execution: executed.execution,
       ...("taskRun" in executed ? { taskRun: executed.taskRun } : {}),
-      view: approvalStore.view(),
+      view: approvalView(decisionInput.actor),
     });
     return true;
   }

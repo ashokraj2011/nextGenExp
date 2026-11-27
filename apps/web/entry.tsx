@@ -6,6 +6,7 @@ import { domainPackFromPath, getDomainPack } from "../../packages/contracts/doma
 import { readProfileSession, saveProfileSession } from "./conversation-storage";
 import { setStoredDomainPack } from "./domain-pack-ui";
 import { applyTheme, initTheme } from "./theme";
+import { PublicationReviewNotice } from "./publication-review-notice";
 import "./styles.css";
 import "./theme.css";
 
@@ -43,13 +44,13 @@ if (location.pathname === "/embed") {
   }
 } else if (isAdminPath(location.pathname) && location.pathname !== adminPaths.chat) {
   document.title = "Administration";
-  void import("./admin-workspace").then(({ AdminWorkspace }) => createRoot(document.getElementById("root")!).render(<AdminWorkspace />));
+  void import("./admin-workspace").then(({ AdminWorkspace }) => createRoot(document.getElementById("root")!).render(<><AdminWorkspace /><PublicationReviewNotice /></>));
 } else if (location.pathname === "/integrations") {
   document.title = "Integrations";
-  void import("./integrations-workspace").then(({ IntegrationsWorkspace }) => createRoot(document.getElementById("root")!).render(<IntegrationsWorkspace />));
+  void import("./integrations-workspace").then(({ IntegrationsWorkspace }) => createRoot(document.getElementById("root")!).render(<><IntegrationsWorkspace /><PublicationReviewNotice /></>));
 } else if (location.pathname === "/recommendations") {
   document.title = "Recommendations Workspace";
-  void import("./recommendation-workspace").then(({ RecommendationWorkspace }) => createRoot(document.getElementById("root")!).render(<RecommendationWorkspace />));
+  void import("./recommendation-workspace").then(({ RecommendationWorkspace }) => createRoot(document.getElementById("root")!).render(<><RecommendationWorkspace /><PublicationReviewNotice /></>));
 } else if (location.pathname === "/advisor") {
   document.title = "Advisor Co-Pilot & Shared Card Room";
   void import("./advisor-workspace").then(({ AdvisorWorkspace }) => createRoot(document.getElementById("root")!).render(<AdvisorWorkspace />));

@@ -1,3 +1,4 @@
+import type { ApprovalRecord } from "../../../packages/contracts/approval";
 /**
  * Action-oriented Dynamic Canvas builders (HITL Approval Queue, External Connectors,
  * No-Code Action Flows, Stock Trading & Tax-Loss Harvesting, and Equity Holdings).
@@ -12,75 +13,63 @@ import type { ConnectorStore } from "../connector-store";
 import { connectorInvokeToolRef, domainWriteToolRef } from "../runtime";
 import { parseStockTradePrompt, type TradeStore } from "../trade-store";
 
-export function buildApprovalQueueCanvas(approvalStore: ApprovalStore, prompt: string): { intro: string; canvas: DynamicCanvasProps } {
-  const view = approvalStore.view();
-  const pending = view.approvals.filter((a) => a.status === "pending");
-  const decided = view.approvals.filter((a) => a.status !== "pending").slice(0, 6);
-  const nodes: DynamicCanvasNode[] = [
-    {
-      type: "metrics",
-      items: [
-        { label: "Pending Approvals", value: String(view.pendingCount), delta: "Live sfield HITL queue" },
-        { label: "Approval Mode", value: view.policy.defaultDualControl ? "4-Eyes Dual Control" : "Inline Chat Allowed", delta: "/admin/logs?source=approvals" },
-        { label: "Total Logged", value: String(view.approvals.length), delta: "SHA-256 digest bound" },
-      ],
-    },
-  ];
-  if (pending.length === 0) {
+export const approvalReviewId = (prompt: string) => /^review approval (apr_[a-f0-9]{32})[.?!]?$/i.exec(prompt.trim())?.[1]?.toLowerCase();
+
+export function buildApprovalQueueCanvas(
+  approvalStore: ApprovalStore,
+  prompt: string,
+  mayReview: (record: ApprovalRecord) => boolean = () => true,
+): { intro: string; canvas: DynamicCanvasProps } {
+  const visible = approvalStore.list().filter(mayReview);
+  const reviewId = approvalReviewId(prompt);
+  const requested = reviewId ? visible.find(({ id }) => id === reviewId) : undefined;
+  const pending = visible.filter(({ status }) => status === "pending");
+  const items = reviewId ? (requested ? [requested] : []) : pending.slice(0, 3);
+  const nodes: DynamicCanvasNode[] = [];
+  for (const item of items) {
+    const publication = item.targetKind === "publication" || item.targetKind === "task_publish" || item.targetKind === "pzn_change";
+    const domain = item.domain === "ops_incident" || item.domain === "sales_deal" || item.domain === "external_connector"
+      || item.domain === "stock_trade" || item.domain === "workflow" ? item.domain : "generic";
     nodes.push({
-      type: "callout",
-      tone: "info",
-      title: "Approval queue is clear",
-      body: "No high-risk sfield writes or external connector calls are currently awaiting approval. Trigger an external connector (for example, \"invoke PagerDuty connector\") or enable 4-eyes dual control in /admin/logs?source=approvals to queue new approvals.",
+      type: "approval",
+      title: item.title,
+      summary: item.summary,
+      requester: item.requester,
+      riskLevel: item.riskLevel,
+      details: item.details,
+      approveLabel: publication ? "Approve publication" : "Approve & execute",
+      rejectLabel: "Deny request",
+      recordId: item.recordId,
+      domain,
+      approvalId: item.id,
+      payloadDigest: item.payloadDigest,
+      dualControl: item.dualControl,
+      sfieldToolRef: item.sfieldToolRef,
+      initialDecision: item.status === "pending" ? "pending" : item.status === "executed" ? "approved" : "rejected",
+      ...(item.executionResult && { decisionNote: item.executionResult.summary.slice(0, 240) }),
     });
-  } else {
-    for (const item of pending.slice(0, 3)) {
-      nodes.push({
-        type: "approval",
-        title: item.title,
-        summary: item.summary,
-        requester: item.requester,
-        riskLevel: item.riskLevel,
-        details: item.details,
-        approveLabel: "Approve & execute",
-        rejectLabel: "Deny request",
-        recordId: item.recordId,
-        domain: item.domain === "customer360" || item.domain === "pzn_self_service" || item.domain === "integration" ? "generic" : item.domain,
-        approvalId: item.id,
-        payloadDigest: item.payloadDigest,
-        dualControl: item.dualControl,
-        sfieldToolRef: item.sfieldToolRef,
-        initialDecision: "pending",
-      });
-    }
   }
-  if (decided.length > 0) {
+  if (!nodes.length) nodes.push({
+    type: "callout", tone: "info", title: reviewId ? "Review unavailable" : "Approval queue is clear",
+    body: reviewId ? "Open a request from your approval queue." : "Publication requests and actions waiting for approval will appear here.",
+  });
+  if (!reviewId && pending.length > items.length) {
     nodes.push({
-      type: "table",
-      caption: "Recent Approval Decisions",
-      columns: ["Approval ID", "Target", "Status", "Approver"],
-      rows: decided.map((a) => [
-        a.id,
-        `${a.domain}:${a.recordId}`,
-        a.status,
-        a.decidedBy ?? "—",
-      ]),
+      type: "table", caption: "More pending approvals", columns: ["Approval ID", "Change"],
+      rows: pending.slice(items.length, items.length + 14).map(({ id, title }) => [id, title]),
     });
   }
   return {
-    intro: pending.length > 0
-      ? `There ${pending.length === 1 ? "is 1 pending high-risk action" : `are ${pending.length} pending high-risk actions`} awaiting human approval. You can approve or deny directly in Chat below or from /admin/logs?source=approvals.`
-      : "Your live Human-in-the-Loop approval queue is currently clear.",
+    intro: reviewId ? "Review the prepared change below."
+      : pending.length ? `${pending.length} request${pending.length === 1 ? " is" : "s are"} waiting for review. To open a specific one, say “Review approval” followed by its ID.`
+      : "You're caught up on approvals.",
     canvas: {
-      title: "Human-in-the-Loop Approval Queue",
-      badge: "sfield HITL · Live Queue",
-      subtitle: `${view.pendingCount} pending · Synchronized live with /admin/logs?source=approvals`,
+      title: reviewId ? "Approval review" : "Approval queue",
+      badge: reviewId ? "Prepared change" : `${pending.length} pending`,
       generatedBy: "synthesizer",
-      dataSource: "approvals.json (sfield HITL)",
       prompt,
       nodes,
-      disclaimer: "Approvals are cryptographically bound to the prepared SHA-256 payload digest and execute through governed sfield write tools with immutable Write Audit logging.",
-      suggestedFollowUp: pending.length > 0 ? "Show pending approvals" : "Invoke PagerDuty connector for INC-4821",
+      disclaimer: "An approval applies the prepared change recorded on its card.",
     },
   };
 }
@@ -234,7 +223,7 @@ export function buildActionFlowCanvas(
             approveLabel: "Approve & run flow",
             rejectLabel: "Deny flow",
             recordId: approval.recordId,
-            domain: approval.domain === "customer360" || approval.domain === "pzn_self_service" || approval.domain === "integration" ? "generic" : approval.domain,
+            domain: approval.domain === "customer360" || approval.domain === "pzn_self_service" || approval.domain === "integration" || approval.domain === "publication" ? "generic" : approval.domain,
             approvalId: approval.id,
             payloadDigest: approval.payloadDigest,
             dualControl: approval.dualControl,

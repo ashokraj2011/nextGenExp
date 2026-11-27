@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react";
-import { BarChart3, CheckCircle2, Clock, RotateCw, ShieldAlert, ShieldCheck, XCircle } from "lucide-react";
-import { adminPaths } from "../../packages/contracts/admin-paths";
+import { BarChart3, CheckCircle2, Clock, RotateCw, ShieldAlert, ShieldCheck } from "lucide-react";
+import { adminPaths, approvalChatHref } from "../../packages/contracts/admin-paths";
 import type { Bootstrap, ConversationView, DomainWriteAuditEntry, EngagementAnalyticsView } from "../../packages/contracts/api";
 import type { ApprovalPolicySettings, ApprovalsView } from "../../packages/contracts/approval";
 import { pendingActionsContext } from "../../packages/contracts/workspace";
@@ -19,9 +19,6 @@ function ApprovalQueuePanel() {
   const [data, setData] = useState<ApprovalsView>();
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [actorById, setActorById] = useState<Record<string, string>>({});
-  const [commentById, setCommentById] = useState<Record<string, string>>({});
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -46,41 +43,16 @@ function ApprovalQueuePanel() {
     }
   }
 
-  async function decide(id: string, decision: "approve" | "deny", defaultActor: string) {
-    setBusyId(id);
-    setError("");
-    setNotice("");
-    try {
-      const actor = (actorById[id] ?? defaultActor).trim() || "Duty Approver";
-      const comment = (commentById[id] ?? "").trim();
-      const res = await api.decideApproval(id, {
-        decision,
-        actor,
-        ...(comment ? { comment } : {}),
-      });
-      setData(res.view);
-      setNotice(
-        decision === "approve"
-          ? `Approved & executed ${id} via sfield (${res.approval.executionResult?.sfieldRunId ?? "ok"}).`
-          : `Denied approval ${id}.`,
-      );
-    } catch (err) {
-      setError(toolSetupErrorMessage(err));
-    } finally {
-      setBusyId(null);
-    }
-  }
-
   return (
     <section className="admin-card" aria-labelledby="hitl-approvals-title">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
         <div>
           <h2 id="hitl-approvals-title" style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
             <ShieldAlert size={18} aria-hidden="true" />
-            Human-in-the-Loop Approval Queue (sfield)
+            Approval history
           </h2>
           <p>
-            High-risk domain writes (<code>cep.domain.execute_write@1.0.0</code>) and external connectors (<code>cep.connector.invoke@1.0.0</code>) pause here and in Chat (type <em>"show pending approvals"</em>) until a human verifies the SHA-256 payload digest.
+            See who requested and reviewed each change. Open a pending request in Admin chat to make a decision.
           </p>
         </div>
         <button className="secondary-button" type="button" onClick={() => setTick((t) => t + 1)}>
@@ -138,14 +110,6 @@ function ApprovalQueuePanel() {
             />
             Require passing Guardrail Eval before publish / gateway activate
           </label>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "0.85rem" }}>
-            <input
-              type="checkbox"
-              checked={Boolean(data.policy.gateTaskPublish)}
-              onChange={(e) => void togglePolicy({ gateTaskPublish: e.target.checked })}
-            />
-            Require approval to publish Integration Tasks
-          </label>
         </div>
       )}
 
@@ -155,16 +119,13 @@ function ApprovalQueuePanel() {
 
       {data && data.approvals.length === 0 && (
         <p className="admin-muted" style={{ marginTop: "14px" }}>
-          No approvals queued yet. Click <strong>Invoke via sfield</strong> on a connector in <a href={adminPaths.tools}>Tool setup</a> or ask Chat to <em>"invoke PagerDuty connector"</em> to see live HITL approval gating.
+          Approval requests appear here when they are submitted.
         </p>
       )}
 
       {data && data.approvals.length > 0 && (
         <div style={{ display: "grid", gap: "12px", marginTop: "14px" }}>
           {data.approvals.map((apr) => {
-            const defaultActor = apr.dualControl ? "Duty Approver" : "CEP Admin";
-            const actorVal = actorById[apr.id] ?? defaultActor;
-            const commentVal = commentById[apr.id] ?? "";
             const isPending = apr.status === "pending";
             return (
               <article key={apr.id} className={"dyn-approval is-" + (apr.status === "executed" || apr.status === "approved" ? "approved" : apr.status === "denied" ? "rejected" : "pending")}>
@@ -192,34 +153,17 @@ function ApprovalQueuePanel() {
                   ))}
                 </dl>
                 {isPending ? (
-                  <div style={{ display: "grid", gap: "10px" }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.4fr)", gap: "8px" }}>
-                      <label className="dyn-form-field">
-                        <span>Approver</span>
-                        <input value={actorVal} onChange={(e) => setActorById((p) => ({ ...p, [apr.id]: e.target.value }))} />
-                      </label>
-                      <label className="dyn-form-field">
-                        <span>Comment (optional)</span>
-                        <input value={commentVal} onChange={(e) => setCommentById((p) => ({ ...p, [apr.id]: e.target.value }))} placeholder="Approval note or change ticket" />
-                      </label>
-                    </div>
-                    <div className="dyn-approval-actions">
-                      <button type="button" className="send-button" disabled={busyId === apr.id} onClick={() => void decide(apr.id, "approve", defaultActor)}>
-                        <CheckCircle2 size={14} aria-hidden="true" />{busyId === apr.id ? "Executing…" : "Approve & Execute"}
-                      </button>
-                      <button type="button" className="secondary-button" disabled={busyId === apr.id} onClick={() => void decide(apr.id, "deny", defaultActor)}>
-                        <XCircle size={14} aria-hidden="true" />Deny
-                      </button>
-                    </div>
-                  </div>
+                  <a href={approvalChatHref(apr.id)}>Review in Admin chat</a>
                 ) : (
                   <div className="dyn-approval-result" role="status">
                     {apr.status === "executed" || apr.status === "approved" ? (
                       <>
                         <CheckCircle2 size={15} aria-hidden="true" />
                         <span>
-                          <strong>Executed</strong> by {apr.decidedBy ?? "Approver"}
-                          {apr.executionResult ? ` — ${apr.executionResult.summary} (run ${apr.executionResult.sfieldRunId}${apr.executionResult.auditId ? `, audit ${apr.executionResult.auditId}` : ""})` : ""}
+                          <strong>{apr.status === "executed" ? "Applied" : "Approved"}</strong> by {apr.decidedBy ?? "Approver"}
+                          {apr.executionResult && ` · ${apr.executionResult.summary}`}
+                          {apr.executionResult?.sfieldRunId && apr.executionResult.sfieldRunId !== "offline" && ` · Run ${apr.executionResult.sfieldRunId}`}
+                          {apr.executionResult?.auditId && ` · Audit ${apr.executionResult.auditId}`}
                         </span>
                       </>
                     ) : (

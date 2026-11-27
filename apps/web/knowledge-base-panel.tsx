@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { BookOpen, Plus, RotateCcw, Save, Search, Trash2, Upload } from "lucide-react";
 import type { KnowledgeDocument, KnowledgeDocumentUpsertInput, KnowledgeSearchResult } from "../../packages/contracts/knowledge-base";
-import { api } from "./api";
+import { api, isPublicationReview } from "./api";
 
 function makeBlankDoc(): KnowledgeDocumentUpsertInput {
   return {
@@ -81,6 +81,7 @@ export function KnowledgeBasePanel() {
     setNotice(null);
     try {
       const view = await api.saveKnowledgeDoc(draft);
+      if (isPublicationReview(view)) return;
       setDocs(view.documents);
       setTotalChunks(view.totalChunks);
       const saved = view.documents.find((d) => d.id === draft.id);
@@ -99,6 +100,7 @@ export function KnowledgeBasePanel() {
     setNotice(null);
     try {
       const view = await api.deleteKnowledgeDoc(draft.id);
+      if (isPublicationReview(view)) return;
       setDocs(view.documents);
       setTotalChunks(view.totalChunks);
       const next = view.documents.find((d) => d.id === draft.id) ?? view.documents[0];

@@ -1,0 +1,36 @@
+.publication-review-notice {
+  position: fixed;
+  inset-inline-end: 1rem;
+  bottom: 1rem;
+  z-index: 80;
+  width: min(26rem, calc(100% - 2rem));
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper, #fff);
+  color: var(--ink);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 15%);
+}
+
+.publication-review-notice p {
+  margin: .35rem 0 .8rem;
+}
+
+.publication-review-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .8rem;
+}
+
+.publication-review-links a {
+  color: var(--teal-dark);
+  font-weight: 700;
+}
+
+.publication-review-details pre {
+  max-height: 20rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

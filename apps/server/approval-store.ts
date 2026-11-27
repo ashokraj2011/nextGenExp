@@ -30,7 +30,7 @@ const defaultPolicy: ApprovalPolicySettings = {
   pznDualControl: "high_risk",
   pznApprovalExpiryMinutes: 30,
   requireEvalBeforePublish: false,
-  gateTaskPublish: false,
+  gateTaskPublish: true,
 };
 
 interface PersistedApprovals {
@@ -112,11 +112,11 @@ export class ApprovalStore {
   }
 
   getPolicy(): ApprovalPolicySettings {
-    return { ...this.state.policy };
+    return { ...this.state.policy, gatePznPublish: true, gateTaskPublish: true };
   }
 
   updatePolicy(input: Partial<ApprovalPolicySettings>): ApprovalPolicySettings {
-    const parsed = approvalPolicySettingsSchema.parse({ ...this.state.policy, ...input });
+    const parsed = approvalPolicySettingsSchema.parse({ ...this.state.policy, ...input, gatePznPublish: true, gateTaskPublish: true });
     this.save({ ...this.state, policy: parsed });
     return { ...parsed };
   }
@@ -218,7 +218,9 @@ export class ApprovalStore {
       createdAt: new Date(now).toISOString(),
       expiresAt: new Date(now + (input.ttlMs ?? APPROVAL_TTL_MS)).toISOString(),
     };
-    const records = [record, ...this.state.records].slice(0, 150);
+    let history = 0;
+    const records = [record, ...this.state.records].filter(({ status }) =>
+      status === "pending" || status === "approved" || status === "executing" || ++history <= 150);
     this.save({ ...this.state, records });
     try {
       this.onCreatedListener?.(record);
@@ -239,7 +241,7 @@ export class ApprovalStore {
           ok: false,
           status: 409,
           code: "dual_control_violation",
-          message: `4-eyes dual control is enabled: approver must be different from requester ("${existing.requester}"). Approve from /admin/logs or enter a separate approver name.`,
+          message: `A different operator must sign in to approve this request from ${existing.requester}.`,
         };
       }
     }

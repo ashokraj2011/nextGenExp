@@ -12,6 +12,7 @@ import type { TurnPayloads } from "../packages/contracts/inspector";
 import { decodeChatInput } from "../packages/contracts/inspector";
 import type { DisplayExperience } from "../packages/contracts/surface";
 import type { EvalRunReport } from "../packages/contracts/eval-suite";
+import type { ApprovalRecord, PublicationReview } from "../packages/contracts/approval";
 import type { ExperienceRegistryView } from "../packages/contracts/experience-registry";
 import type { UxProposal } from "../packages/contracts/ux-evolution";
 import type { UiDesign, UiLayoutCatalog, UiLayoutRecord, WidgetSlot } from "../packages/contracts/ui-layout";
@@ -32,6 +33,44 @@ const design: UiDesign = {
     { kind: "block", id: "compare", component: "PznComparison" },
   ],
 };
+
+test("chat publication reviews hold the proposed revision and preserve the live layout after a stale or denied change", async (t) => {
+  const app = await startTestPreview();
+  t.after(() => app.close());
+  const client = await testClient(app.url);
+  const request = (record: UiLayoutRecord, next: UiDesign) => client.request<PublicationReview>(settingsPath, {
+    operation: "publish", id: record.id, revision: record.revision, design: next,
+  }, 202);
+  const decision = (approval: ApprovalRecord, action: "approve" | "deny", expected = 200) =>
+    client.request<{ approval: ApprovalRecord }>("/api/approvals/" + approval.id + "/decide", { decision: action }, expected, {
+      Authorization: operatorHeader(reviewer),
+    });
+  const draft = await client.request<UiLayoutRecord>(settingsPath, { operation: "draft", design });
+  const submitted = await request(draft, design);
+  const repeated = await request(draft, design);
+  assert.equal(submitted.approval.id, repeated.approval.id);
+  assert.deepEqual(submitted.approval.payload.preview, design);
+  const chat = await client.conversation();
+  assert.equal((await client.ask(chat.id, compare)).trace.uiLayout, undefined);
+
+  const secondDesign = { ...design, name: "Balance definitions review" };
+  const revised = await client.request<UiLayoutRecord>(settingsPath, {
+    operation: "draft", id: draft.id, revision: draft.revision, design: secondDesign,
+  });
+  await decision(submitted.approval, "approve", 409);
+  assert.equal((await client.request<UiLayoutCatalog>(settingsPath)).library.length, 0);
+
+  const ready = await request(revised, secondDesign);
+  assert.equal((await decision(ready.approval, "approve")).approval.status, "executed");
+  await decision(ready.approval, "approve", 409);
+  const { library, layouts } = await client.request<UiLayoutCatalog>(settingsPath);
+  assert.equal(library[0].design.name, secondDesign.name);
+  assert.equal((await client.ask(chat.id, compare)).trace.uiLayout?.name, secondDesign.name);
+
+  const proposed = await request(layouts[0], { ...design, name: "Another version" });
+  assert.equal((await decision(proposed.approval, "deny")).approval.status, "denied");
+  assert.equal((await client.request<UiLayoutCatalog>(settingsPath)).library[0].design.name, secondDesign.name);
+});
 
 test("layout generation sends only the selected workspace fields and returns a previewable draft", async (t) => {
   const incident: UiDesign = {
@@ -116,7 +155,7 @@ test("linked widgets form a single ordered surface and invalid links are rejecte
   assert.equal(wizard.props.steps[0].ctaPrompt, undefined);
   assert.equal(wizard.props.steps[2].ctaPrompt, "Show timeline for INC-4821");
 
-  const published = await client.request<UiLayoutRecord>(settingsPath, { operation: "publish", domainId: "it_ops", design });
+  const published = await client.publish<UiLayoutRecord>(settingsPath, { operation: "publish", domainId: "it_ops", design });
   assert.equal(published.published?.revision, 1);
   for (const nextWidgetId of ["missing", "overview"]) {
     const invalid = { ...design, slots: [{ ...recovery, nextWidgetId }, start, impact] };
@@ -143,8 +182,8 @@ test("a content layout arranges the verified goal and only applies to replies sh
   };
   const catalog = await client.request<UiLayoutCatalog>(settingsPath);
   assert.deepEqual(catalog.targets.find((option) => option.target.id === target.id)?.components, ["PznGoalProgress"]);
-  await client.request(settingsPath, { operation: "publish", design: { ...goal, targets: [{ kind: "intent", id: "show_home_goal" }] } });
-  const published = await client.request<UiLayoutRecord>(settingsPath, { operation: "publish", design: goal });
+  await client.publish(settingsPath, { operation: "publish", design: { ...goal, targets: [{ kind: "intent", id: "show_home_goal" }] } });
+  const published = await client.publish<UiLayoutRecord>(settingsPath, { operation: "publish", design: goal });
   const registry = await client.request<ExperienceRegistryView>("/api/admin/experience-registry?domain=wealth");
   assert.ok(registry.componentOptions.some(({ id, label }) => id === "PznGoalProgress" && label === "Goal progress"));
   assert.deepEqual(registry.content.find(({ contentId }) => contentId === target.id)?.publishedLayout, {
@@ -175,12 +214,12 @@ test("approved feedback replays the original request and detects when its card i
   const client = await testClient(app.url);
   const { created } = await client.request<{ created: UxProposal[] }>("/api/admin/ux-evolution-scan", { includeSampleTraffic: true });
   assert.ok(created.length);
-  const { proposal } = await client.request<{ proposal: UxProposal }>("/api/admin/ux-evolution-approve", { id: created[0].id });
+  const { proposal } = await client.publish<{ proposal: UxProposal }>("/api/admin/ux-evolution-approve", { id: created[0].id });
   assert.equal(proposal.regression?.prompt, created[0].samplePrompts[0]);
   const check = async () => (await client.request<{ report: EvalRunReport }>("/api/admin/eval-run", {}))
     .report.results.find((r) => r.id === "correction_" + proposal.shippedWidgetId);
   assert.equal((await check())?.passed, true);
-  await client.request("/api/admin/widgets", { operation: "set_availability", id: proposal.shippedWidgetId, availableForConsumption: false });
+  await client.publish("/api/admin/widgets", { operation: "set_availability", id: proposal.shippedWidgetId, availableForConsumption: false });
   assert.equal((await check())?.passed, false);
 });
 
@@ -200,7 +239,7 @@ test("publishes layouts for scoped chat intents and preserves drafts, snapshots 
   const unstyled = await client.ask(conversation.id, compare);
   assert.equal(unstyled.turn.experience?.theme, undefined);
 
-  const published = await client.request<UiLayoutRecord>(settingsPath, { operation: "publish", id: first.id, revision: first.revision, design });
+  const published = await client.publish<UiLayoutRecord>(settingsPath, { operation: "publish", id: first.id, revision: first.revision, design });
   assert.equal(published.published?.revision, published.revision);
   const turn = await client.submit(conversation.id, compare);
   const other = await testClient(app.url);
@@ -241,7 +280,7 @@ test("publishes layouts for scoped chat intents and preserves drafts, snapshots 
   const current = (await client.request<UiLayoutCatalog>(settingsPath)).layouts[0];
   assert.deepEqual(current.draft, nextDesign);
   assert.deepEqual(current.published?.design, design);
-  await client.request(settingsPath, { operation: "unpublish", id: current.id, revision: current.revision });
+  await client.publish(settingsPath, { operation: "unpublish", id: current.id, revision: current.revision });
   assert.equal((await client.ask(conversation.id, compare)).turn.experience?.theme, undefined);
   assert.equal((await client.turn(ready.turn.id)).experience?.theme, "evergreen");
 });
@@ -250,7 +289,7 @@ test("reorders an agentic layout while keeping verified results and signed form 
   const app = await startTestPreview();
   t.after(() => app.close());
   const client = await testClient(app.url);
-  await client.request(settingsPath, {
+  await client.publish(settingsPath, {
     operation: "publish", design: {
       name: "Home savings controls", description: "Place the savings controls before the projection.",
       targets: [{ kind: "capability", id: "goal.savings.simulate" }], layout: "dashboard",
@@ -286,7 +325,7 @@ test("layouts remain presentation-only when eligibility is empty and reject unre
   const app = await startTestPreview();
   t.after(() => app.close());
   const client = await testClient(app.url);
-  await client.request(settingsPath, { operation: "publish", design });
+  await client.publish(settingsPath, { operation: "publish", design });
   const empty = await client.conversation("empty");
   assert.equal((await client.ask(empty.id, compare)).turn.experience?.theme, undefined);
   await client.request(settingsPath, { operation: "publish", design: {

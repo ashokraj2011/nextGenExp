@@ -16,7 +16,7 @@ import {
   MAX_CCRE_RULES, sfieldTools, toolKeys, toolVersion, treatmentOverride,
   type MockCcreRule, type MockOutput, type ToolSetup, type ToolSetupView, type TreatmentPreview, type TreatmentPreviewInput,
 } from "../../packages/contracts/tool-setup";
-import { api, toolSetupErrorMessage as messageFor } from "./api";
+import { api, isPublicationReview, toolSetupErrorMessage as messageFor } from "./api";
 import { RoutingFlowSetup } from "./routing-flow-setup";
 import { CcreRuleEditor } from "./ccre-rule-editor";
 import { rememberActiveConversation } from "./conversation-storage";
@@ -188,6 +188,10 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
     setSaveError("");
     try {
       const { data: persisted, revision: updatedRevision } = await api.saveToolSetup(setup, saved.revision);
+      if (isPublicationReview(persisted)) {
+        setSaveNotice("Submitted for approval.");
+        return false;
+      }
       setSaved({ setup: persisted, revision: updatedRevision });
       setSetup(persisted);
       setSaveNotice("Tool settings saved.");
@@ -392,7 +396,6 @@ function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
   const [invokeResults, setInvokeResults] = useState<Record<string, { ok: boolean; text: string; approvalId?: string }>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [migrateNotice, setMigrateNotice] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -405,6 +408,7 @@ function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
     setError("");
     try {
       const res = await api.saveConnector({ ...conn, enabled: !conn.enabled });
+      if (isPublicationReview(res)) return;
       setConnectors(res.connectors);
       onUpdated();
     } catch (err) {
@@ -467,6 +471,7 @@ function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
     setBusyId(id);
     try {
       const res = await api.deleteConnector(id);
+      if (isPublicationReview(res)) return;
       setConnectors(res.connectors);
       onUpdated();
     } finally {
@@ -498,6 +503,7 @@ function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
         sandboxMode: url.trim().startsWith("sandbox://"),
         description: description.trim() || `External ${kind} connector`,
       });
+      if (isPublicationReview(res)) return;
       setConnectors(res.connectors);
       setName("");
       setUrl("");
@@ -527,16 +533,12 @@ function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
         </div>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
           <button type="button" className="secondary-button" disabled={busyId === "migrate"} onClick={async () => {
-            setBusyId("migrate"); setError(""); setMigrateNotice("");
+            setBusyId("migrate"); setError("");
             try {
-              const res = await api.migrateLegacyConnectors();
-              const migrated = res.results.filter((r) => r.status === "migrated").length;
-              const already = res.results.filter((r) => r.status === "already_migrated").length;
-              const skipped = res.results.filter((r) => r.status === "skipped").length;
-              setMigrateNotice(`Unified into governed Integration Tasks: ${migrated} migrated, ${already} already governed${skipped ? `, ${skipped} skipped` : ""}.`);
+              await api.migrateLegacyConnectors();
             } catch (e) { setError(messageFor(e)); } finally { setBusyId(null); }
           }}>
-            <Plug size={14} aria-hidden="true" />{busyId === "migrate" ? "Migrating…" : "Migrate to Governed Tasks"}
+            <Plug size={14} aria-hidden="true" />{busyId === "migrate" ? "Preparing…" : "Review task migration"}
           </button>
           <a className="secondary-button" href="/integrations" style={{ textDecoration: "none" }}>Open /integrations</a>
           <button type="button" className="secondary-button" onClick={() => setDraftOpen((v) => !v)}>
@@ -544,7 +546,6 @@ function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
           </button>
         </div>
       </div>
-      {migrateNotice && <p role="status" style={{ marginTop: "10px", color: "var(--teal-dark)", fontWeight: 600 }}>{migrateNotice} <a href="/integrations" style={{ textDecoration: "underline" }}>Manage in /integrations</a></p>}
       {error && <p className="admin-error" role="alert" style={{ marginTop: "10px" }}>{error}</p>}
       {draftOpen && (
         <form className="admin-rule-draft" onSubmit={(e) => void createConnector(e)}>

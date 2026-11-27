@@ -8,7 +8,7 @@ import type {
   TaskContractInput,
   ViewContract,
 } from "../../packages/contracts/integration-task";
-import { api, toolSetupErrorMessage } from "./api";
+import { api, isPublicationReview, toolSetupErrorMessage } from "./api";
 import { approvalLabel, RouteBadge } from "./integrations-cards";
 import "./integrations-authoring.css";
 
@@ -517,6 +517,7 @@ export function IntegrationFormCard({ prefill, existing, onPrompt, post }: { pre
         ...(rpmNum >= 1 ? { rateLimit: { requestsPerMinute: rpmNum, ...(burstNum >= 1 ? { burst: burstNum } : {}) } } : {}),
         ...(threshNum >= 1 && resetNum >= 500 ? { circuitBreaker: { failureThreshold: threshNum, resetTimeoutMs: resetNum } } : {}),
       });
+      if (isPublicationReview(out)) return;
       setSaved(out.integration);
       post?.(`Saved integration **${out.integration.name}** (\`${out.integration.id}\`).`, {
         suggestions: out.integration.transport === "mcp" ? [`Import tools from ${out.integration.id}`] : [`Create a task on ${out.integration.id}`],

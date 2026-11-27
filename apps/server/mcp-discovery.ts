@@ -1,6 +1,6 @@
+import type { ConnectorStore } from "./connector-store";
 import type { McpDiscoveredTool, McpDiscoveryResult } from "../../packages/contracts/mcp-discovery";
 import type { RecommendationDomain } from "../../packages/contracts/recommendation-provider";
-import type { ConnectorStore } from "./connector-store";
 
 interface RawMcpTool {
   name: string;
@@ -270,7 +270,7 @@ export async function discoverMcpServer(input: {
   };
 }
 
-export function importMcpToolAsConnector(input: {
+export function mcpToolConnector(input: {
   serverUrl: string;
   toolName: string;
   description: string;
@@ -280,14 +280,13 @@ export function importMcpToolAsConnector(input: {
   dualControl: boolean;
   authHeaderName?: string;
   authEnvVar?: string;
-  connectorStore: ConnectorStore;
 }) {
   const isSandbox = input.serverUrl.startsWith("mcp-sandbox://");
   const connectorUrl = isSandbox
     ? `sandbox://mcp/${input.toolName.replace(/[^a-zA-Z0-9_-]/g, "_")}`
     : input.serverUrl;
   const id = slugConnectorId(input.toolName);
-  return input.connectorStore.upsert({
+  return {
     id,
     name: `MCP · ${input.toolName}`.slice(0, 80),
     kind: "mcp_bridge",
@@ -303,5 +302,5 @@ export function importMcpToolAsConnector(input: {
     dualControl: input.dualControl,
     sandboxMode: isSandbox,
     description: `[MCP Auto-Imported from ${input.serverUrl}] ${input.description}`.slice(0, 240),
-  });
+  };
 }

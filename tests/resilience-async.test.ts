@@ -89,7 +89,7 @@ test("3.3: Per-integration token-bucket rate limiter and circuit breaker (open -
   const client = await testClient(app.url);
 
   // Configure tight rate limit (2 burst) and fast circuit breaker (2 failures -> 500ms reset) on itsm_sandbox.
-  await client.request("/api/integrations/integrations", {
+  await client.publish("/api/integrations/integrations", {
     id: "itsm_sandbox",
     name: "ITSM Sandbox",
     description: "Rate-limited & circuit-protected ITSM.",
@@ -120,7 +120,7 @@ test("3.3: Per-integration token-bucket rate limiter and circuit breaker (open -
 
   // Operator resets resilience -> bucket restored, remove tight rate limit so we can test circuit breaker cleanly.
   await client.request("/api/integrations/resilience/reset", { integrationId: "itsm_sandbox" });
-  await client.request("/api/integrations/integrations", {
+  await client.publish("/api/integrations/integrations", {
     id: "itsm_sandbox",
     name: "ITSM Sandbox",
     description: "Circuit-protected ITSM.",
@@ -172,10 +172,10 @@ test("3.3: Async long-running tasks — 202 Accepted, status polling, and HMAC-S
 
   // Publish async status read task + async submit task on itsm_sandbox.
   const statusSaved = await client.request<{ contract: TaskContract }>("/api/integrations/contracts", statusContract("itsm_sandbox"));
-  await client.request("/api/integrations/contracts/publish", { ref: statusSaved.contract.ref });
+  await client.publish("/api/integrations/contracts/publish", { ref: statusSaved.contract.ref });
 
   const submitSaved = await client.request<{ contract: TaskContract }>("/api/integrations/contracts", asyncSubmitContract("itsm_sandbox"));
-  await client.request("/api/integrations/contracts/publish", { ref: submitSaved.contract.ref });
+  await client.publish("/api/integrations/contracts/publish", { ref: submitSaved.contract.ref });
 
   // Path A: Poll lifecycle (202 Accepted -> poll 1 in_progress -> poll 2 succeeded + schema validated).
   const started = await client.request<{ run: TaskRun }>("/api/integrations/tasks/run", {

@@ -22,7 +22,6 @@ export function VerticalFactoryCard() {
   const [packs, setPacks] = useState<VerticalPackRecord[]>([]);
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -39,14 +38,8 @@ export function VerticalFactoryCard() {
     if (overridePrompt) setPrompt(overridePrompt);
     setBusy(true);
     setError("");
-    setNotice("");
     try {
-      const res = await api.generateVerticalPack(text);
-      setPacks(res.view.packs);
-      setNotice(
-        `Hot-loaded "${res.pack.name}" (${res.pack.generatedBy === "copilot_llm" ? "Copilot ACP" : "Synthesizer"}) — `
-        + `indexed Policy RAG "${res.pack.policyTitle}", registered Workflow DAG "${res.pack.workflowName}", and built live portal at ${res.embedDemoUrl}`,
-      );
+      await api.generateVerticalPack(text);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Could not generate vertical pack.");
     } finally {
@@ -55,10 +48,12 @@ export function VerticalFactoryCard() {
   }
 
   async function removePack(id: string) {
+    setError("");
     try {
-      const view = await api.deleteVerticalPack(id);
-      setPacks(view.packs);
-    } catch { /* ignore */ }
+      await api.deleteVerticalPack(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not request portal removal.");
+    }
   }
 
   return (
@@ -67,11 +62,10 @@ export function VerticalFactoryCard() {
         <div>
           <h2 id="vertical-factory-title">
             <Wand2 size={17} aria-hidden="true" />
-            App-in-a-Box Vertical Pack Factory (1 Prompt → Live Industry Portal)
+            Industry portal builder
           </h2>
           <p className="embed-card-sub">
-            Describe any industry in one sentence — Copilot generates and hot-loads a <strong>Policy RAG document</strong>, a{" "}
-            <strong>Declarative Multi-Step Workflow DAG</strong>, and a live <strong>DOM-Aware White-Label Host Portal</strong> (<code>/embed-demo?vertical=...</code>) in seconds.
+            Describe an industry to generate a portal, a policy reference, and a workflow. Review the draft in Admin chat before publishing.
           </p>
         </div>
       </div>
@@ -92,7 +86,7 @@ export function VerticalFactoryCard() {
         />
         <button type="submit" className="embed-primary-btn" disabled={busy || prompt.trim().length < 5}>
           <Sparkles size={14} aria-hidden="true" />
-          {busy ? "Generating Vertical…" : "Generate Live Vertical"}
+          {busy ? "Generating draft…" : "Generate draft for review"}
         </button>
       </form>
 
@@ -105,7 +99,6 @@ export function VerticalFactoryCard() {
         ))}
       </div>
 
-      {notice && <div className="embed-notice" role="status">{notice}</div>}
       {error && <p className="request-notice" role="alert">{error}</p>}
 
       {packs.length > 0 && (

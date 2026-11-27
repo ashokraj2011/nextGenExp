@@ -34,7 +34,7 @@ test("a customer click uses the originally published action and restoring the th
   const admin = await testClient(app.url);
   const customer = await testClient(app.url, admin.cookie, "customer");
   const design: UiDesign = { name: "Order tracking", description: "Track a delivery.", layout: "stack", targets: [], slots: [], experience: orderExperienceTemplate() };
-  const saved = await admin.request<UiLayoutRecord>("/api/admin/ui-layouts", { operation: "publish", domainId: "wealth", design });
+  const saved = await admin.publish<UiLayoutRecord>("/api/admin/ui-layouts", { operation: "publish", domainId: "wealth", design });
   const chat = await admin.conversation();
   const other = await admin.conversation("normal", "demo-returning");
   const customerWait = async (accepted: TurnAccepted) => {
@@ -50,7 +50,7 @@ test("a customer click uses the originally published action and restoring the th
   // Keep the original action usable after editing the published definition.
   const revision = structuredClone(design);
   revision.experience!.actions[1].title = "Updated tracking";
-  const next = await admin.request<UiLayoutRecord>("/api/admin/ui-layouts", { operation: "publish", id: saved.id, revision: saved.revision, design: revision });
+  const next = await admin.publish<UiLayoutRecord>("/api/admin/ui-layouts", { operation: "publish", id: saved.id, revision: saved.revision, design: revision });
   const envelope = actionFor(order.experience!);
   const request = { envelope, clientRequestId: randomUUID() };
   const path = "/api/experiences/" + order.experience!.experienceId + "/actions";
@@ -150,7 +150,7 @@ test("a separate domain binds a row’s stable ID into the same versioned task u
       outcomeMapping: [{ code: "OK", statusIn: [200] }],
     };
     const { contract: draft } = await client.request<{ contract: { ref: string } }>("/api/integrations/contracts", contract);
-    await client.request("/api/integrations/contracts/publish", { ref: draft.ref });
+    await client.publish("/api/integrations/contracts/publish", { ref: draft.ref });
     return draft.ref;
   }
   const queue = await publish("queue", object({}), object({ records: { type: "array", items: expense } }), "/queue");
@@ -168,7 +168,7 @@ test("a separate domain binds a row’s stable ID into the same versioned task u
   const broken = structuredClone(design);
   broken.experience!.actions[0].table!.onClick!.inputs.reference = "amount";
   await client.request("/api/admin/ui-layouts", { operation: "publish", domainId: "it_ops", design: broken }, 400);
-  await client.request("/api/admin/ui-layouts", { operation: "publish", domainId: "it_ops", design });
+  await client.publish("/api/admin/ui-layouts", { operation: "publish", domainId: "it_ops", design });
   const catalog = await client.request<RecordWorkspaceRegistry>("/api/admin/experience-registry?domain=it_ops");
   assert.ok(catalog.intents.some(({ label, phrases }) => label === "Expense review queue" && phrases?.[0] === "Show the expense queue"));
   const chat = await client.request<ConversationView>("/api/conversations", { domainId: "it_ops" }, 201);

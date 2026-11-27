@@ -43,6 +43,14 @@ try {
   await page.getByText(/Scrubbed Egress \(\d+ redactions\)/).waitFor();
   await page.getByText("[PII_SSN_1]").first().waitFor();
 
+  await page.getByRole("button", { name: "Overview & Locks", exact: true }).click();
+  await page.getByRole("button", { name: "Request lock approval", exact: true }).click();
+  await page.getByRole("link", { name: "Review in Admin chat", exact: true }).click();
+  await page.getByRole("button", { name: "Approve publication", exact: true }).click();
+  await page.getByText("Approved & Executed", { exact: true }).waitFor();
+  const studio = await page.request.get(preview.url + "/admin/sfield-studio/api/overview");
+  assert.equal((await studio.json()).lock.approved, true);
+
   // 5. Verify standalone /sfield-sdk.html guide links cleanly to sfield Studio
   await page.goto(preview.url + "/sfield-sdk.html");
   await page.getByRole("link", { name: "Open sfield Studio", exact: true }).waitFor();

@@ -1,13 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { KnowledgeDocumentUpsertInput } from "../../packages/contracts/knowledge-base";
+import { z } from "zod";
+import { knowledgeDocumentUpsertSchema, type KnowledgeDocumentUpsertInput } from "../../packages/contracts/knowledge-base";
 import {
   verticalPackRecordSchema,
   type VerticalPackRecord,
   type VerticalPacksView,
   type VerticalScreenContext,
 } from "../../packages/contracts/vertical-pack";
-import type { WorkflowDefinitionUpsertInput } from "../../packages/contracts/workflow-definition";
+import { workflowDefinitionUpsertSchema, type WorkflowDefinitionUpsertInput } from "../../packages/contracts/workflow-definition";
 import type { ExternalConnector } from "../../packages/contracts/connector";
 import { callConfiguredLlmJson } from "./dynamic-ui-generator";
 import type { GatewaySettings } from "./gateway";
@@ -40,6 +41,19 @@ interface VerticalBlueprint {
   screenViews: VerticalScreenContext[];
   quickPrompts: { label: string; prompt: string }[];
 }
+
+export const verticalPackDraftSchema = z.object({
+  blueprint: verticalPackRecordSchema.omit({
+    policyDocId: true, policyTitle: true, workflowId: true, workflowName: true,
+    workflowTriggerPhrase: true, createdAt: true, generatedBy: true,
+  }).extend({
+    policyDoc: knowledgeDocumentUpsertSchema,
+    workflow: workflowDefinitionUpsertSchema,
+  }),
+  generatedBy: z.enum(["copilot_llm", "synthesizer"]),
+}).strict();
+
+type VerticalPackDraft = z.input<typeof verticalPackDraftSchema>;
 
 function synthesizeBlueprint(prompt: string): VerticalBlueprint {
   const lower = prompt.toLowerCase();
@@ -482,17 +496,15 @@ export class VerticalPackStore {
     return this.view();
   }
 
-  async generateAndInstall(input: {
+  async generateDraft(input: {
     prompt: string;
     gateway: GatewaySettings | null | undefined;
     dataDir: string;
-    knowledgeBase: KnowledgeBaseStore;
-    workflowEngine: WorkflowEngine;
     connectors: ExternalConnector[];
-  }): Promise<{ pack: VerticalPackRecord; embedDemoUrl: string; view: VerticalPacksView }> {
+  }): Promise<VerticalPackDraft> {
     const fallback = synthesizeBlueprint(input.prompt);
     let blueprint = fallback;
-    let generatedBy: VerticalPackRecord["generatedBy"] = "synthesizer";
+    let generatedBy: VerticalPackDraft["generatedBy"] = "synthesizer";
 
     if (input.gateway) {
       try {
@@ -575,7 +587,14 @@ export class VerticalPackStore {
       }
     }
 
-    // Hot-load Policy RAG document AND Multi-Step Workflow DAG live!
+    return verticalPackDraftSchema.parse({ blueprint, generatedBy });
+  }
+
+  installDraft(draft: VerticalPackDraft, input: {
+    knowledgeBase: KnowledgeBaseStore;
+    workflowEngine: WorkflowEngine;
+  }): { pack: VerticalPackRecord; embedDemoUrl: string; view: VerticalPacksView } {
+    const { blueprint, generatedBy } = verticalPackDraftSchema.parse(draft);
     input.knowledgeBase.upsert(blueprint.policyDoc);
     input.workflowEngine.upsertDefinition(blueprint.workflow);
 

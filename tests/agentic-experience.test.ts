@@ -71,7 +71,7 @@ const liveCalls = (turnId: string) => "/api/debug/payloads/" + turnId;
 test("the savings projection quotes the configured investing rule when it evaluates projected cash", async (t) => {
   const { client } = await fixture(t);
   const condition = { kind: "attribute", glossaryVersion: "pzn-ccre-mock-v1", namespaceId: "portfolio", attributeId: "cash_usd", operator: "gt", value: 20000 };
-  await client.request("/api/admin/tools", { ...defaultToolSetup, ccreRules: [{ scenarioId: "normal", contextId: "portsum", contentId: "portfolio_cash_investing", name: "Investing cash minimum", condition }] });
+  await client.publish("/api/admin/tools", { ...defaultToolSetup, ccreRules: [{ scenarioId: "normal", contextId: "portsum", contentId: "portfolio_cash_investing", name: "Investing cash minimum", condition }] });
   const chat = await client.conversation();
   const result = await client.ask(chat.id, homeRequest);
   const verdict = block(result.turn.experience, "PznSavingsChart")?.props.investingEligibility;
@@ -202,7 +202,7 @@ test("TS and CCRE control beneficiary guidance, promotions, and the allowed fund
 
 test("a disabled prerequisite returns an independent result and reports incomplete savings steps", async (t) => {
   const { client } = await fixture(t);
-  await client.request("/api/admin/tools", { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, goal: false } });
+  await client.publish("/api/admin/tools", { ...defaultToolSetup, enabled: { ...defaultToolSetup.enabled, goal: false } });
   const alice = await client.conversation();
   const { turn, trace } = await client.ask(alice.id, homeRequest);
   assert.equal(turn.experience?.partial, true);
@@ -219,7 +219,7 @@ test("a published capability can be discovered with a new goal phrase without ce
     discovery: { ...base.discovery, keywords: ["horizon calculation"] },
   };
   await client.request("/api/admin/capability-validation", manifest);
-  await client.request("/api/admin/capabilities", manifest);
+  await client.publish("/api/admin/capabilities", manifest);
   const chat = await client.conversation();
   const { turn, trace } = await client.ask(chat.id, "Run the horizon calculation in 12 months.");
   assert.equal(block(turn.experience, "PznSavingsMetric")?.props.monthlyCents, 200_000);

@@ -187,6 +187,12 @@ test("Self-service Data Dictionary, Rule Engine, Draft/Publish isolation, and Li
     assert.equal(candidates.length, 1);
     const entry = lookupContent(candidates[0]);
     assert.equal(entry?.title, "Automate Monthly Investing");
+
+    env.pzn.deleteAttribute("loyalty", "vip_tier");
+    assert.deepEqual(env.pzn.evaluateLiveTs({
+      mid: alice.syntheticMid, contextId: "vip-wealth-banner",
+      attributeOverrides: { "loyalty.vip_tier": "platinum" },
+    }).experiencePayload.eligibleContentIds, evalWithPlatinum.experiencePayload.eligibleContentIds);
   } finally {
     env.cleanup();
   }
@@ -209,6 +215,7 @@ test("the wealth topic keeps its published ID and shows the new name for existin
     const { description, attachments } = env.pzn.getContext(contextId)!;
     env.pzn.upsertContext({ contextId, displayName: "My recommendations", description, attachments });
     assert.equal(env.pzn.getContext(contextId)?.displayName, "My recommendations");
+    assert.equal(env.pzn.listPublishedContextSummaries().find((c) => c.contextId === contextId)?.displayName, displayName);
     env.pzn.upsertContext({ contextId: "wealth", displayName: "Wealth", description, attachments });
     const turn = await runSelfServicePznCopilot({ message: "Test " + displayName + " for Marcus Reed", activeContextId: "wealth" }, env.pzn);
     assert.equal(turn.activeContextId, contextId);
@@ -378,13 +385,13 @@ test("configurable approvals gate publish/destructive changes and enforce 4-eyes
     });
     assert.throws(() => verifyPznApproval(approvals, env.pzn, "unpublish_context", { contextId: "appr_ctx", approvalId: unpublish.id }), /changed after approval/);
 
-    // 6. Policy is configurable: dual control off -> no second approver; gate off -> runs without approval.
+    // Dual control is configurable. Publishing a context always requires approval.
     approvals.updatePolicy({ pznDualControl: "off" });
     assert.equal(requestPznApproval(approvals, env.pzn, { operation: "delete_context", args: { contextId: "appr_ctx" } }).dualControl, false);
     approvals.updatePolicy({ pznDualControl: "always" });
     assert.equal(requestPznApproval(approvals, env.pzn, { operation: "publish_context", args: { contextId: "appr_ctx" } }).dualControl, true);
     approvals.updatePolicy({ gatePznPublish: false });
-    assert.deepEqual(verifyPznApproval(approvals, env.pzn, "publish_context", { contextId: "appr_ctx" }), { contextId: "appr_ctx" });
+    assert.throws(() => verifyPznApproval(approvals, env.pzn, "publish_context", { contextId: "appr_ctx" }), /requires an approved change request/);
   } finally {
     env.cleanup();
   }

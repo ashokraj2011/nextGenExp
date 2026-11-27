@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, Clock, Play, ShieldCheck, ShieldAlert, XCircle } from "lucide-react";
+import { approvalChatHref } from "../../packages/contracts/admin-paths";
 import type { ApprovalPolicySettings, ApprovalRecord, ApprovalsView, PznDualControlMode } from "../../packages/contracts/approval";
 import type { PznStudioWorkspaceState } from "../../packages/contracts/self-service-pzn";
 import { api, toolSetupErrorMessage } from "./api";
@@ -35,7 +36,6 @@ export function ApprovalRequestCard({
   onDecided?: (record: ApprovalRecord) => void;
 }) {
   const [record, setRecord] = useState(initial);
-  const [approver, setApprover] = useState(initial.dualControl ? "Recommendation Approver" : initial.requester);
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -55,7 +55,7 @@ export function ApprovalRequestCard({
     setBusy(true);
     setError("");
     try {
-      const res = await api.decideApproval(record.id, { decision, actor: approver.trim() || "Recommendation Approver", ...(comment.trim() ? { comment: comment.trim() } : {}) });
+      const res = await api.decideApproval(record.id, { decision, ...(comment.trim() ? { comment: comment.trim() } : {}) });
       setRecord(res.approval);
       setResult(res.execution?.summary ?? (decision === "deny" ? "Change denied. Nothing was applied." : "Approved."));
       onDecided?.(res.approval);
@@ -119,10 +119,6 @@ export function ApprovalRequestCard({
       {record.status === "pending" ? (
         <div className="pzn-form-grid">
           <div className="pzn-field">
-            <label>Approver name</label>
-            <input aria-label="Approver name" value={approver} onChange={(e) => setApprover(e.target.value)} />
-          </div>
-          <div className="pzn-field">
             <label>Comment (optional)</label>
             <input aria-label="Approval comment" value={comment} placeholder="Reason or note…" onChange={(e) => setComment(e.target.value)} />
           </div>
@@ -133,6 +129,7 @@ export function ApprovalRequestCard({
             <button type="button" className="pzn-btn pzn-btn-sm pzn-btn-danger" disabled={busy} onClick={() => void decide("deny")}>
               <XCircle size={13} /> Deny
             </button>
+            <a href={approvalChatHref(record.id)} className="pzn-btn pzn-btn-sm">Review in Admin chat</a>
             {record.dualControl && (
               <span className="pzn-subtitle" style={{ fontSize: "0.75rem" }}>
                 Approver must differ from “{record.requester}”.
@@ -219,8 +216,7 @@ export function ApprovalQueueWidget({
         <span className="pzn-stage-kicker">Configurable policy</span>
         <div className="pzn-rule-chips">
           {([
-            ["gatePznPublish", "Require approval to publish a context"],
-            ["gatePznDestructive", "Require approval to unpublish / delete"],
+            ["gatePznDestructive", "Require approval to delete rules, content, and dictionary entries"],
             ["gatePznDictionaryChanges", "Require approval for Data Dictionary edits"],
           ] as const).map(([key, label]) => (
             <label key={key} className={"pzn-rule-chip" + (policy[key] ? " is-checked" : "")} style={{ cursor: "pointer" }}>

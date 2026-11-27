@@ -45,8 +45,8 @@ test("published cards and preview use the connected snapshot and a matching widg
   assert.equal((await admin.wait(trial)).trace.uiLayout?.id, trial.layoutId);
   assert.deepEqual((await admin.request<UiLayoutCatalog>(layouts)).library, []);
   assert.equal((await admin.request<{ code: string }>(preview, { design: cashDesign, personaId: "missing-customer" }, 404)).code, "preview_profile_unavailable");
-  await admin.request(layouts, { operation: "publish", design: cashDesign });
-  await admin.request("/api/admin/widgets", { operation: "save", widget: { ...generateWidgetFromText(portfolioQuestion), availableForConsumption: true } });
+  await admin.publish(layouts, { operation: "publish", design: cashDesign });
+  await admin.publish("/api/admin/widgets", { operation: "save", widget: { ...generateWidgetFromText(portfolioQuestion), availableForConsumption: true } });
   const customer = await testClient(app.url);
   const conversation = await customer.conversation();
   const { turn } = await customer.ask(conversation.id, portfolioQuestion);
@@ -73,7 +73,7 @@ test("published eligibility is shared by MID and an admin preview exercises its 
     output: { mode: "ranked", contentIds: ["balance_current_definition", "balance_available_definition"] } }],
     ccreRules: [{ scenarioId: "normal", contextId: "balance", name: "Learner only", source: "Learners", contentId: "balance_available_definition",
       condition: { kind: "persona_is", personaId: "demo-learner" } }] };
-  await owner.request("/api/admin/tools", setup);
+  await owner.publish("/api/admin/tools", setup);
   await owner.request("/api/admin/tools?scope=preview", defaultToolSetup);
   assert.deepEqual((await owner.request<{ privateDraft: unknown }>("/api/admin/tools")).privateDraft, defaultToolSetup);
   for (const session of [owner, other]) {
@@ -151,7 +151,7 @@ test("record views, named intents and ordered choices survive publishing and reo
   for (const view of ["detail", "timeline"]) {
     const design = { ...cashDesign, name: "Incident " + view, targets: [{ kind: "intent", id: "it_ops_" + view }],
       slots: [{ kind: "block", id: "record", component: "PznDynamicCanvas" }] };
-    await owner.request(layouts, { operation: "publish", domainId: "it_ops", design });
+    await owner.publish(layouts, { operation: "publish", domainId: "it_ops", design });
     assert.equal((await owner.request<DisplayExperience>(preview + "?domain=it_ops", design)).blocks[0].component, "PznDynamicCanvas");
   }
   const bad = { ...cashDesign, targets: [{ kind: "intent", id: "it_ops_detail" }], slots: [cashDesign.slots[0]] };
@@ -162,7 +162,7 @@ test("record views, named intents and ordered choices survive publishing and reo
   const custom = { id: "it_ops_intent_handover", label: "Shift handover", view: "timeline", phrases: ["Prepare my shift handover"] };
   const handover = { ...cashDesign, slots: [{ kind: "block", id: "timeline", component: "PznDynamicCanvas" }],
     targets: [{ kind: "intent", id: custom.id }], recordIntent: custom };
-  await owner.request(layouts, { operation: "publish", domainId: "it_ops", design: handover });
+  await owner.publish(layouts, { operation: "publish", domainId: "it_ops", design: handover });
   const ops = await owner.request<ConversationView>("/api/conversations", { domainId: "it_ops" }, 201);
   const inc = await owner.ask(ops.id, "Prepare my shift handover INC-4821");
   assert.equal(inc.trace.uiLayout?.target.id, custom.id);

@@ -42,6 +42,8 @@ import { dealDecisionInputSchema, dealUpsertInputSchema } from "../../packages/c
 import { ConnectorStore } from "./connector-store";
 import { connectorInvokeInputSchema, connectorUpsertSchema } from "../../packages/contracts/connector";
 import { ApprovalStore } from "./approval-store";
+import { PublicationReviews, type PublicationResult } from "./publication-reviews";
+import { studioPublicationPlans } from "./studio-publications";
 import { approvalDecisionInputSchema, approvalPolicySettingsSchema, type ApprovalRecord } from "../../packages/contracts/approval";
 import { TradeStore, type SettlementCallback } from "./trade-store";
 import { taxHarvestPreviewInputSchema, tradeJobCreateInputSchema, type TradeLegInput } from "../../packages/contracts/trading";
@@ -50,7 +52,6 @@ import { actionFlowUpsertSchema } from "../../packages/contracts/action-flow";
 import { WorkflowEngine } from "./workflow-engine";
 import { workflowDefinitionUpsertSchema } from "../../packages/contracts/workflow-definition";
 import { generateWorkflowWithLlm } from "./workflow-generator";
-import { discoverMcpServer, importMcpToolAsConnector } from "./mcp-discovery";
 import { mcpDiscoverRequestSchema, mcpImportRequestSchema } from "../../packages/contracts/mcp-discovery";
 import { ProactiveEventStore } from "./proactive-engine";
 import { proactiveTriggerInputSchema } from "../../packages/contracts/proactive-events";
@@ -61,7 +62,6 @@ import { scheduledJobUpsertSchema } from "../../packages/contracts/scheduled-job
 import { VerticalPackStore } from "./vertical-factory";
 import { PiiFirewallStore, registerLlmEgressContext, scrubWithPiiFirewall, unregisterLlmEgressContext } from "./pii-firewall";
 import { CepTelemetry } from "./telemetry";
-import { migrateLegacyConnectors } from "./connector-migration";
 import { HandoffStore } from "./handoff-store";
 import { coBrowseSlidersSchema, createHandoffInputSchema } from "../../packages/contracts/handoff";
 import { buildA2aAgentCard, cepMcpExtensionStore, handleCepMcpRequest } from "./cep-mcp-server";
@@ -113,7 +113,7 @@ import { capabilityTools } from "../../packages/capabilities";
 import { CapabilityRegistry } from "./capability-registry";
 import { simulateCustomerEvent } from "./event-simulator";
 import { makeId } from "../../packages/experience/compile";
-import { ChatHarness, newId } from "@sfield/core";
+import { ChatHarness, digestJson, newId } from "@sfield/core";
 import { SqlitePersistence } from "@sfield/store-sqlite";
 import { readFile, stat } from "node:fs/promises";
 import { join, resolve, extname, sep } from "node:path";
@@ -139,7 +139,7 @@ import { addCcreRule, previewTreatmentSelector, toolSetupTag, toolSetupView, val
 import { readWorkspacePendingActions } from "./workspace-actions";
 
 import { operatorAccess } from "./operator-access";
-import { configDigest, GatewayConfigStore, gatewayConfigSchema, mergeStoredKey, testGatewayConfig } from "./gateway-config";
+import { configDigest, GatewayConfigStore, gatewayConfigSchema, mergeStoredKey, testGatewayConfig, type GatewayConfig } from "./gateway-config";
 
 type Options = {
   operators?: Record<string, string>;
@@ -447,6 +447,72 @@ export async function startApp(options: Options) {
   const integrationService = new IntegrationTaskService(integrationTasks, approvalStore, () => runtime);
   const goalStore = new CustomerGoalStore(tenantDataDirectory(options.dataDir));
   workflowEngine.setIntegrationService(integrationService);
+  const gatewayView = () => gatewayConfig.view(options.gateway, Boolean(options.onGatewayActivated), options.launchGatewaySource);
+  const restartGateway = () => {
+    if (options.onGatewayActivated) setTimeout(() => options.onGatewayActivated?.(), 250);
+  };
+  const requireGatewayTest = (config: GatewayConfig) => {
+    const last = gatewayConfig.read().lastTest;
+    if (!last?.ok || last.configDigest !== configDigest(config) || Date.now() - Date.parse(last.testedAt) > 30 * 60_000) {
+      throw new ApiError(409, "test_required", "Test this exact configuration successfully (within the last 30 minutes) before activating it.");
+    }
+  };
+  const publicationReviews = new PublicationReviews(
+    approvalStore,
+    {
+      ...studioPublicationPlans({ store, registry, widgetLibraries, experienceRegistry, integrationService, integrationTasks, workflowEngine,
+        actionFlowStore, connectorStore, knowledgeBase, uxEvolution, verticalFactory, now }),
+      "gateway-activate"(candidate) {
+        const { id } = z.object({ id: z.string().length(64) }).strict().parse(candidate);
+        const state = gatewayConfig.read();
+        if (!state.pending || state.pending.id !== id) {
+          throw new ApiError(409, "publication_changed", "The prepared gateway configuration changed. Submit a new review.");
+        }
+        const { config } = state.pending;
+        requireGatewayTest(config);
+        return {
+          recordId: "model-gateway", title: `Activate model gateway · ${config.model}`, current: state.active,
+          details: [{ label: "Provider", value: config.provider }, { label: "Model", value: config.model.slice(0, 160) }],
+          apply: (actor) => {
+            gatewayConfig.activate(config, actor);
+            restartGateway();
+            return { summary: `Activated model gateway ${config.model}.`, value: { activated: true, restarting: Boolean(options.onGatewayActivated), view: gatewayView() } };
+          },
+        };
+      },
+      "gateway-reset"() {
+        return {
+          recordId: "model-gateway", title: "Restore launcher gateway settings", current: gatewayConfig.active(),
+          apply: () => {
+            gatewayConfig.reset();
+            restartGateway();
+            return { summary: "Restored the gateway settings from the app launcher.", value: { reset: true, restarting: Boolean(options.onGatewayActivated), view: gatewayView() } };
+          },
+        };
+      },
+      "sfield-lock"(candidate) {
+        const input = z.object({ digest: z.string().min(1).max(128), comment: z.string().max(240).optional() }).strict().parse(candidate);
+        const sf = runtime?.sfieldInstance;
+        if (!sf || sf.config.digest() !== input.digest) {
+          throw new ApiError(409, "publication_changed", "The active sfield configuration changed. Submit a new review.");
+        }
+        return {
+          recordId: "sfield-config", title: "Approve sfield configuration", current: sf.config.digest(),
+          details: [{ label: "Configuration fingerprint", value: input.digest }],
+          preview: sf.config.lock(),
+          apply: async (actor) => {
+            await sf.lock.approve({ ...input, approver: actor, noBaseline: true });
+            return { summary: "Recorded approval for this sfield configuration." };
+          },
+        };
+      },
+    },
+    (actor) => [
+      ...membership.authoring(actor),
+      ...(membership.isTenantAdmin(actor) ? ["tenant" as const] : []),
+    ],
+    enforceEvalGate,
+  );
   const experience = new ExperienceService(store, runtime, selectionMode, now, inspectorEnabled, offline && {
     chat: new ChatHarness(offline), close: () => offline.close(),
   }, {
@@ -454,6 +520,7 @@ export async function startApp(options: Options) {
     gateway: options.gateway, dataDir: options.dataDir, customer360, profileStore, portfolioSnapshots, goalProgressProvider,
     opsStore, salesStore, connectorStore, approvalStore, tradeStore, actionFlowStore, workflowEngine, knowledgeBase, widgetLibraries, piiFirewall,
     goalStore, integrationService, onTradeSettle: makeTradeSettler,
+    mayReviewApproval: (actor, record) => publicationReviews.mayReview(actor, record),
   });
 
   const demoMcp = createDemoMcpServer();
@@ -470,8 +537,35 @@ export async function startApp(options: Options) {
   }
 
   async function executeApprovedRecord(principalId: string, record: ApprovalRecord) {
+    if (record.targetKind === "publication") {
+      const actor = record.decidedBy ?? record.requester;
+      const plan = publicationReviews.planForApproval(record, actor);
+      const claim = approvalStore.claimForExecution(record.id);
+      if (!claim.ok) throw new ApiError(409, claim.code, claim.message);
+      let applied: PublicationResult;
+      try {
+        applied = await plan.apply(actor);
+      } catch (err) {
+        approvalStore.releaseClaim(record.id);
+        throw err;
+      }
+      const summary = applied.summary.slice(0, 320);
+      const audit = writeAudit.record({
+        sfieldRunId: "offline", sfieldToolRef: record.sfieldToolRef, domain: record.domain,
+        recordId: record.recordId, action: record.action, actor, summary, status: "succeeded", approvalId: record.id,
+      });
+      const execution = { summary, sfieldRunId: "offline", auditId: audit.auditId };
+      return { approval: approvalStore.markExecuted(record.id, execution) ?? record, execution: { ...execution, value: applied.value } };
+    }
     if (record.targetKind === "task_publish") {
       const ref = typeof record.payload.ref === "string" ? record.payload.ref : record.recordId;
+      enforceEvalGate("publishing an integration task contract");
+      const candidate = integrationTasks.contract(ref);
+      if (!candidate || candidate.status !== "draft" || candidate.contractDigest !== record.payload.contractDigest
+        || candidate.bindingDigest !== record.payload.bindingDigest
+        || digestJson(integrationTasks.integration(candidate.integrationId) ?? null) !== record.payload.integrationDigest) {
+        throw new ApiError(409, "publication_changed", "The task or its connection changed. Submit a new review.");
+      }
       const claim = approvalStore.claimForExecution(record.id);
       if (!claim.ok) throw new ApiError(409, claim.code, claim.message);
       try {
@@ -696,6 +790,7 @@ export async function startApp(options: Options) {
     mcpExtensionStore: cepMcpExtensionStore,
     title: "sfield Studio · CEP",
     basePath: "/admin/sfield-studio",
+    approvalChatPath: adminPaths.chat,
     plugins: [
       { id: "pzn-studio", label: "Self-Service PZN Studio", description: "Treatment Selector & CCRE rule authoring", badge: "CEP", href: "/recommendations" },
       { id: "customer-360", label: "Customer 360 Admin", description: "Wealth profiles, balances, goals & NBA preview", badge: "Wealth", href: adminPaths.customers },
@@ -764,6 +859,12 @@ export async function startApp(options: Options) {
       requireOperator();
       if (req.method !== "GET" && ((req.headers.origin && req.headers.origin !== origin) || req.headers["sec-fetch-site"] === "cross-site")) {
         throw new ApiError(403, "origin_unavailable", "Use the local demo address.");
+      }
+      if (pathname === "/admin/sfield-studio/api/locks/approve" && req.method === "POST") {
+        const data = await body(req, z.object({ digest: z.string().min(1).max(128), comment: z.string().max(240).optional() }));
+        return json(res, publicationReviews.request("sfield-lock", data, {
+          scope: "tenant", principalId: "sfield-studio", operator: requireOperator(),
+        }), 202);
       }
       await sfieldStudioHandler(req, res);
       return;
@@ -865,7 +966,8 @@ export async function startApp(options: Options) {
       const actor = requireOperator();
       const domainAdmin = resource === "admin" && (isExperienceRegistryEndpoint(id) || ["routing-flows", "ui-layouts", "ui-layout-preview", "ui-layout-test", "ui-layout-generate", "widgets", "widget-generate",
         "customers", "bootstrap", "conversations", "logs", "inspector", "tools", "ccre-rules", "treatment-preview", "treatment-runs"].includes(id));
-      const domainApi = domainAdmin || ["debug", "ops", "ops-incidents", "sales", "sales-deals"].includes(resource);
+      const domainApproval = resource === "approvals" && id !== "policy";
+      const domainApi = domainAdmin || domainApproval || ["debug", "ops", "ops-incidents", "sales", "sales-deals"].includes(resource);
       if (!domainApi && !membership.isTenantAdmin(actor)) throw new ApiError(403, "tenant_admin_required", "This setting requires a tenant administrator.");
     }
     if (["ops", "ops-incidents"].includes(resource)) requireChatDomain("it_ops", "");
@@ -1001,15 +1103,13 @@ export async function startApp(options: Options) {
     })) return;
     if (resource === "admin" && id === "gateway" && inspectorEnabled) {
       const actor = requireOperator();
-      const restartSupported = Boolean(options.onGatewayActivated);
-      const view = () => gatewayConfig.view(options.gateway, restartSupported, options.launchGatewaySource);
       const parseConfig = async () => {
         const { config } = await body(req, z.object({ config: z.record(z.string(), z.unknown()) }).strict(), 32 * 1024);
         const parsed = gatewayConfigSchema.safeParse(config);
         if (!parsed.success) throw new ApiError(400, "invalid_gateway_config", parsed.error.issues.map((i) => `${i.path.join(".") || "config"}: ${i.message}`).join("; ").slice(0, 400));
         return mergeStoredKey(parsed.data, gatewayConfig.active());
       };
-      if (!operation && method === "GET") return json(res, view());
+      if (!operation && method === "GET") return json(res, gatewayView());
       if (operation === "test" && method === "POST") {
         const config = await parseConfig();
         const result = await testGatewayConfig(config, { dataDir: options.dataDir, capacityCheck: checkGatewayCapacity });
@@ -1017,22 +1117,15 @@ export async function startApp(options: Options) {
         return json(res, result);
       }
       if (operation === "activate" && method === "POST") {
+        if (!membership.isTenantAdmin(actor)) throw new ApiError(403, "domain_access_denied", "Tenant settings access is required.");
         enforceEvalGate("activating a new LLM Gateway configuration");
         const config = await parseConfig();
-        const last = gatewayConfig.read().lastTest;
-        if (!last?.ok || last.configDigest !== configDigest(config) || Date.now() - Date.parse(last.testedAt) > 30 * 60_000) {
-          throw new ApiError(409, "test_required", "Test this exact configuration successfully (within the last 30 minutes) before activating it.");
-        }
-        gatewayConfig.activate(config, actor);
-        json(res, { activated: true, restarting: restartSupported, view: view() });
-        if (restartSupported) setTimeout(() => options.onGatewayActivated?.(), 250);
-        return;
+        requireGatewayTest(config);
+        const id = gatewayConfig.stage(config);
+        return json(res, publicationReviews.request("gateway-activate", { id }, { scope: "tenant", principalId, operator: actor }), 202);
       }
       if (operation === "reset" && method === "POST") {
-        gatewayConfig.reset();
-        json(res, { reset: true, restarting: restartSupported, view: view() });
-        if (restartSupported) setTimeout(() => options.onGatewayActivated?.(), 250);
-        return;
+        return json(res, publicationReviews.request("gateway-reset", {}, { scope: "tenant", principalId, operator: actor }), 202);
       }
       throw new ApiError(404, "not_found", "This item is unavailable.");
     }
@@ -1040,7 +1133,7 @@ export async function startApp(options: Options) {
       req, res, url, origin, resource, id, operation, method, principalId, viewer, inspectorEnabled,
       store, runtime, gateway: options.gateway ?? null, dataDir: options.dataDir, experience,
       registry, membership, portfolioSnapshots, goalProgressProvider, recommendationRegistry, opsStore, salesStore,
-      profileStore, customer360, experienceRegistry, widgetLibrary, widgetLibraries,
+      profileStore, customer360, publicationReviews, widgetLibrary, widgetLibraries,
       omnichannelStore, evalRunner, uxEvolution, tradeStore, approvalStore, connectorStore,
       workflowEngine, writeAudit, mcpExposure, integrationService, knowledgeBase, scheduledJobs,
       verticalFactory, piiFirewall, now, json, body, requireOperator, requireChatDomain,
@@ -1311,19 +1404,19 @@ export async function startApp(options: Options) {
     if (await handleWorkflowsAndConnectorsRoutes({
       req, res, url, resource, id, operation, method, principalId, operator, selectedProfile,
       customerSession, inspectorEnabled, streams, runtime, gateway: options.gateway ?? null,
-      dataDir: options.dataDir, membership, connectorStore, approvalStore, actionFlowStore,
+      dataDir: options.dataDir, membership, connectorStore, approvalStore, actionFlowStore, publicationReviews,
       workflowEngine, proactiveStore, profileStore, writeAudit, json, body, requireOperator,
     })) return;
     if (await handleDomainsOpsSalesRoutes({
       req, res, resource, id, operation, method, principalId, operator, inspectorEnabled,
       streams, store, runtime, tradeStore, approvalStore, writeAudit, customer360,
       opsStore, salesStore, integrationService, workflowEngine,
-      json, body, requireOperator, requireChatDomain, makeTradeSettler, executeApprovedRecord,
+      json, body, requireOperator, requireChatDomain, makeTradeSettler, executeApprovedRecord, publicationReviews,
     })) return;
     if (await handleIntegrationsAndPznRoutes({
       req, res, resource, id, operation, method, principalId, inspectorEnabled,
       runtime, gateway: options.gateway ?? null, dataDir: options.dataDir, approvalStore,
-      connectorStore, integrationTasks, integrationService, selfServicePzn, demoMcp,
+      publicationReviews, integrationTasks, integrationService, selfServicePzn, demoMcp,
       json, body, requireOperator, enforceEvalGate,
     })) return;
     if (resource === "events" && !id && method === "POST") {

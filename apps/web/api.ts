@@ -15,6 +15,7 @@ import type {
   ApprovalPolicySettings,
   ApprovalRecord,
   ApprovalsView,
+  PublicationReview,
 } from "../../packages/contracts/approval";
 import type {
   PortfolioBalanceSnapshot,
@@ -31,7 +32,7 @@ import type { McpDiscoveryResult } from "../../packages/contracts/mcp-discovery"
 import type { ProactiveAlert, ProactiveTriggerInput, ProactiveView } from "../../packages/contracts/proactive-events";
 import type { KnowledgeBaseView, KnowledgeDocumentUpsertInput, KnowledgeSearchResult } from "../../packages/contracts/knowledge-base";
 import type { ScheduledJobExecution, ScheduledJobsView, ScheduledJobUpsertInput } from "../../packages/contracts/scheduled-jobs";
-import type { VerticalPackRecord, VerticalPacksView } from "../../packages/contracts/vertical-pack";
+import type { VerticalPacksView } from "../../packages/contracts/vertical-pack";
 import type { PiiFirewallConfig, PiiFirewallView, PiiRedactionTrace } from "../../packages/contracts/pii-firewall";
 import type { UxEvolutionView, UxProposal } from "../../packages/contracts/ux-evolution";
 import type { Customer360AdminRecord, Customer360ProfileInput } from "../../packages/contracts/customer-360";
@@ -77,6 +78,15 @@ import type {
   PznTsEvaluationResult,
 } from "../../packages/contracts/self-service-pzn";
 
+export const publicationReviewEvent = "publication-review-requested";
+
+export function isPublicationReview(value: unknown): value is PublicationReview {
+  return typeof value === "object" && value !== null && "status" in value && value.status === "pending_approval"
+    && "approval" in value && typeof value.approval === "object" && value.approval !== null;
+}
+
+type Reviewable<T> = T | PublicationReview;
+
 export class RequestError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
 }
@@ -92,7 +102,12 @@ async function requestJson<T>(path: string, payload?: unknown, revision?: string
     const error = await response.json().catch(() => ({}));
     throw new RequestError(response.status, error.code ?? "request_failed", error.message ?? "This request couldn’t be completed.");
   }
-  return { data: await response.json() as T, revision: response.headers.get("ETag") ?? undefined };
+  const data = await response.json() as T;
+  if (typeof window !== "undefined" && isPublicationReview(data)
+    && ["publication", "task_publish", "pzn_change"].includes(data.approval.targetKind)) {
+    window.dispatchEvent(new CustomEvent(publicationReviewEvent, { detail: data.approval }));
+  }
+  return { data, revision: response.headers.get("ETag") ?? undefined };
 }
 async function request<T>(path: string, payload?: unknown) {
   return (await requestJson<T>(path, payload)).data;
@@ -143,7 +158,7 @@ export const api = {
   adminBootstrap: (domainId?: Conversation["domainId"]) => request<Bootstrap>("/api/admin/bootstrap" + (domainId ? "?domain=" + domainId : "")),
   evaluation: () => request<{ mode: "live"; rows: EvaluationRow[] }>("/api/admin/evaluation"),
   capabilities: () => request<{ manifests: CapabilityManifest[]; tools: { ref: string; label: string; output: OutputKind; invariant: string }[] }>("/api/admin/capabilities"),
-  publishCapability: (manifest: unknown, validate: boolean) => request<CapabilityManifest>(
+  publishCapability: (manifest: unknown, validate: boolean) => request<Reviewable<CapabilityManifest>>(
     "/api/admin/" + (validate ? "capability-validation" : "capabilities"), manifest,
   ),
   previewCapability: (capability: CapabilityRef, personaId: string, message: string) => request<TurnAccepted>(
@@ -155,7 +170,7 @@ export const api = {
   uiLayouts: () => request<UiLayoutCatalog>("/api/admin/ui-layouts"),
   testUiLayout: (domain: Conversation["domainId"], design: UiDesign, message: string, personaId?: string) =>
     request<TurnAccepted & { layoutId: string }>("/api/admin/ui-layout-test?domain=" + domain, { design, message, personaId }),
-  saveUiLayout: (change: UiLayoutChange) => request<UiLayoutRecord>("/api/admin/ui-layouts", change),
+  saveUiLayout: (change: UiLayoutChange) => request<Reviewable<UiLayoutRecord>>("/api/admin/ui-layouts", change),
   previewUiLayout: (design: UiDesign, personaId?: string, domainId: Conversation["domainId"] = "wealth") => request<DisplayExperience>(
     "/api/admin/ui-layout-preview?domain=" + domainId,
     personaId ? { design, personaId } : design,
@@ -178,7 +193,7 @@ export const api = {
     source?: "copilot_vision" | "figma_api" | "copilot_llm" | "synthesizer";
     sourceSummary?: string;
   }>("/api/admin/widget-generate?domain=" + domainId, typeof input === "string" ? { prompt: input } : input),
-  saveWidgetLibrary: (change: WidgetLibraryChange, domainId: Conversation["domainId"] = "wealth") => request<{ widget?: SavedWidget; widgets: SavedWidget[] }>("/api/admin/widgets?domain=" + domainId, change),
+  saveWidgetLibrary: (change: WidgetLibraryChange, domainId: Conversation["domainId"] = "wealth") => request<Reviewable<{ widget?: SavedWidget; widgets: SavedWidget[] }>>("/api/admin/widgets?domain=" + domainId, change),
   customers: () => request<{ customers: Customer360AdminRecord[] }>("/api/admin/customers"),
   saveCustomer: (input: Customer360ProfileInput) => request<{ customer?: Customer360AdminRecord; customers: Customer360AdminRecord[] }>("/api/admin/customers", input),
   deleteOrResetCustomer: (personaId: string) => request<{ deleted: boolean; reset: boolean; customers: Customer360AdminRecord[] }>("/api/admin/customer-delete", { personaId }),
@@ -187,13 +202,13 @@ export const api = {
   experienceRegistry: () => request<ExperienceRegistryView>("/api/admin/experience-registry?domain=wealth"),
   recordWorkspaceRegistry: (domain: RecordWorkspaceRegistry["domainId"]) =>
     request<RecordWorkspaceRegistry>("/api/admin/experience-registry?domain=" + domain),
-  saveRegistryIntent: (input: ManagedIntentInput) => request<ExperienceRegistryView>("/api/admin/registry-intent", input),
-  deleteOrResetRegistryIntent: (intentId: string) => request<ExperienceRegistryView>("/api/admin/registry-intent-delete", { intentId }),
-  saveRegistryContent: (input: ManagedContentInput) => request<ExperienceRegistryView>("/api/admin/registry-content", input),
-  deleteOrResetRegistryContent: (contentId: string) => request<ExperienceRegistryView>("/api/admin/registry-content-delete", { contentId }),
-  saveRegistryNba: (input: ManagedNbaRuleInput) => request<ExperienceRegistryView>("/api/admin/registry-nba", input),
-  reorderRegistryNba: (orderedIds: string[]) => request<ExperienceRegistryView>("/api/admin/registry-nba-reorder", { orderedIds }),
-  deleteOrResetRegistryNba: (id: string) => request<ExperienceRegistryView>("/api/admin/registry-nba-delete", { id }),
+  saveRegistryIntent: (input: ManagedIntentInput) => request<Reviewable<ExperienceRegistryView>>("/api/admin/registry-intent", input),
+  deleteOrResetRegistryIntent: (intentId: string) => request<Reviewable<ExperienceRegistryView>>("/api/admin/registry-intent-delete", { intentId }),
+  saveRegistryContent: (input: ManagedContentInput) => request<Reviewable<ExperienceRegistryView>>("/api/admin/registry-content", input),
+  deleteOrResetRegistryContent: (contentId: string) => request<Reviewable<ExperienceRegistryView>>("/api/admin/registry-content-delete", { contentId }),
+  saveRegistryNba: (input: ManagedNbaRuleInput) => request<Reviewable<ExperienceRegistryView>>("/api/admin/registry-nba", input),
+  reorderRegistryNba: (orderedIds: string[]) => request<Reviewable<ExperienceRegistryView>>("/api/admin/registry-nba-reorder", { orderedIds }),
+  deleteOrResetRegistryNba: (id: string) => request<Reviewable<ExperienceRegistryView>>("/api/admin/registry-nba-delete", { id }),
   toolSetup: () => requestJson<ToolSetupView>("/api/admin/tools"),
   mcpServerConfig: () => request<{
     endpoint: string;
@@ -219,12 +234,12 @@ export const api = {
   }>("/api/mcp", { jsonrpc: "2.0", id: Date.now(), method, ...(params ? { params } : {}) }),
   routingFlows: (scope?: FlowScope) => requestJson<FlowCatalogSetup>("/api/admin/routing-flows" + (scope ? "?scope=" + scope : "")),
   saveRoutingFlows: (scope: FlowScope, changes: FlowOverrides, revision?: string) =>
-    requestJson<FlowCatalogSetup>("/api/admin/routing-flows?scope=" + scope, changes, revision),
-  saveToolSetup: (setup: ToolSetup, revision?: string) => requestJson<ToolSetup>("/api/admin/tools", setup, revision),
+    requestJson<Reviewable<FlowCatalogSetup>>("/api/admin/routing-flows?scope=" + scope, changes, revision),
+  saveToolSetup: (setup: ToolSetup, revision?: string) => requestJson<Reviewable<ToolSetup>>("/api/admin/tools", setup, revision),
   testToolSetup: (setup: ToolSetup, personaId: string, scenarioId: string) => request<ConversationView>(
     "/api/admin/conversations?scope=preview", { setup, conversation: { personaId, scenarioId } },
   ),
-  createCcreRule: (rule: MockCcreRule) => request<MockCcreRule>("/api/admin/ccre-rules", rule),
+  createCcreRule: (rule: MockCcreRule) => request<Reviewable<MockCcreRule>>("/api/admin/ccre-rules", rule),
   previewTreatmentSelector: (input: TreatmentPreviewInput) => request<TreatmentPreview>("/api/admin/treatment-preview", input),
   recordUpdates: (id: string) => request<RecordUpdate[]>("/api/conversations/" + id + "/updates"),
   conversation: (id: string) => request<ConversationView>("/api/conversations/" + id),
@@ -336,8 +351,8 @@ export const api = {
   ),
   recommendationProviders: () => request<{ toolRef: string; writeToolRef?: string; connectorToolRef?: string; providers: RecommendationProviderDescriptor[] }>("/api/admin/recommendation-providers"),
   connectors: () => request<{ connectors: ExternalConnector[] }>("/api/admin/connectors"),
-  saveConnector: (input: ConnectorUpsertInput) => request<{ connector: ExternalConnector; connectors: ExternalConnector[] }>("/api/admin/connectors", input),
-  deleteConnector: (id: string) => request<{ deleted: boolean; connectors: ExternalConnector[] }>("/api/admin/connector-delete", { id }),
+  saveConnector: (input: ConnectorUpsertInput) => request<Reviewable<{ connector: ExternalConnector; connectors: ExternalConnector[] }>>("/api/admin/connectors", input),
+  deleteConnector: (id: string) => request<Reviewable<{ deleted: boolean; connectors: ExternalConnector[] }>>("/api/admin/connector-delete", { id }),
   testConnector: (id: string) => request<ConnectorTestResult>("/api/admin/connector-test", { id }),
   invokeConnector: (input: ConnectorInvokeInput) => request<{
     status: "pending_approval" | "executed";
@@ -346,6 +361,7 @@ export const api = {
     execution?: ConnectorInvokeExecution;
   }>("/api/admin/connector-invoke", input),
   approvals: () => request<ApprovalsView>("/api/approvals"),
+  approval: (id: string) => request<ApprovalRecord>("/api/approvals/" + encodeURIComponent(id)),
   saveApprovalPolicy: (policy: Partial<ApprovalPolicySettings>) => request<{ policy: ApprovalPolicySettings; view: ApprovalsView }>("/api/approvals/policy", policy),
   decideApproval: (approvalId: string, input: Omit<ApprovalDecisionInput, "actor"> & { actor?: string }) => request<{
     approval: ApprovalRecord;
@@ -354,8 +370,8 @@ export const api = {
     view: ApprovalsView;
   }>("/api/approvals/" + approvalId + "/decide", input),
   actionFlows: () => request<{ flows: ActionFlow[] }>("/api/admin/action-flows"),
-  saveActionFlow: (input: ActionFlowUpsertInput) => request<{ flow: ActionFlow; flows: ActionFlow[] }>("/api/admin/action-flows", input),
-  deleteActionFlow: (id: string) => request<{ deleted: boolean; flows: ActionFlow[] }>("/api/admin/action-flow-delete", { id }),
+  saveActionFlow: (input: ActionFlowUpsertInput) => request<Reviewable<{ flow: ActionFlow; flows: ActionFlow[] }>>("/api/admin/action-flows", input),
+  deleteActionFlow: (id: string) => request<Reviewable<{ deleted: boolean; flows: ActionFlow[] }>>("/api/admin/action-flow-delete", { id }),
   tradingPortfolio: (personaId: string) => request<PortfolioBalanceSnapshot>("/api/trading/" + personaId + "/portfolio"),
   taxHarvestPreview: (input: TaxHarvestPreviewInput) => request<TaxHarvestAnalysis>("/api/trading/tax-harvest", input),
   startTradeJob: (input: TradeJobCreateInput) => request<TradeJob | { status: "pending_approval"; approval: ApprovalRecord; approvalsView?: ApprovalsView }>("/api/trading/jobs", input),
@@ -371,8 +387,8 @@ export const api = {
   compliancePacket: () => request<ComplianceAuditPacket>("/api/admin/compliance-packet"),
   workflows: () => request<WorkflowsAdminView>("/api/workflows"),
   generateWorkflow: (prompt: string) => request<{ definition: WorkflowDefinitionUpsertInput; generatedBy: "copilot_llm" | "synthesizer"; summary: string }>("/api/workflows/generate", { prompt }),
-  saveWorkflow: (input: WorkflowDefinitionUpsertInput) => request<WorkflowsAdminView>("/api/workflows", input),
-  deleteWorkflow: (id: string) => request<WorkflowsAdminView>("/api/workflows/" + id + "/delete", {}),
+  saveWorkflow: (input: WorkflowDefinitionUpsertInput) => request<Reviewable<WorkflowsAdminView>>("/api/workflows", input),
+  deleteWorkflow: (id: string) => request<Reviewable<WorkflowsAdminView>>("/api/workflows/" + id + "/delete", {}),
   discoverMcp: (input: { serverUrl: string; authHeaderName?: string; authEnvVar?: string }) => (
     request<McpDiscoveryResult>("/api/admin/mcp-discover", input)
   ),
@@ -386,26 +402,26 @@ export const api = {
     dualControl?: boolean;
     authHeaderName?: string;
     authEnvVar?: string;
-  }) => request<{ connector: ExternalConnector; connectors: ExternalConnector[] }>("/api/admin/mcp-import", input),
+  }) => request<Reviewable<{ connector: ExternalConnector; connectors: ExternalConnector[] }>>("/api/admin/mcp-import", input),
   proactiveAlerts: () => request<ProactiveView>("/api/proactive/alerts"),
   triggerProactiveEvent: (input: ProactiveTriggerInput) => request<{ alert: ProactiveAlert; view: ProactiveView }>("/api/proactive/trigger", input),
   dismissProactiveAlert: (id: string) => request<ProactiveView>("/api/proactive/" + id + "/dismiss", {}),
   knowledgeBase: () => request<KnowledgeBaseView>("/api/admin/knowledge-base"),
-  saveKnowledgeDoc: (input: KnowledgeDocumentUpsertInput) => request<KnowledgeBaseView>("/api/admin/knowledge-base", input),
-  deleteKnowledgeDoc: (id: string) => request<KnowledgeBaseView>("/api/admin/knowledge-base-delete", { id }),
+  saveKnowledgeDoc: (input: KnowledgeDocumentUpsertInput) => request<Reviewable<KnowledgeBaseView>>("/api/admin/knowledge-base", input),
+  deleteKnowledgeDoc: (id: string) => request<Reviewable<KnowledgeBaseView>>("/api/admin/knowledge-base-delete", { id }),
   searchKnowledgeBase: (query: string) => request<KnowledgeSearchResult>("/api/admin/knowledge-search", { query }),
   scheduledJobs: () => request<ScheduledJobsView>("/api/admin/scheduled-jobs"),
   saveScheduledJob: (input: ScheduledJobUpsertInput) => request<ScheduledJobsView>("/api/admin/scheduled-jobs", input),
   runScheduledJob: (id: string) => request<{ execution: ScheduledJobExecution; view: ScheduledJobsView }>("/api/admin/scheduled-jobs-run", { id }),
   verticalPacks: () => request<VerticalPacksView>("/api/admin/vertical-packs"),
-  generateVerticalPack: (prompt: string) => request<{ pack: VerticalPackRecord; embedDemoUrl: string; view: VerticalPacksView }>("/api/admin/vertical-packs-generate", { prompt }),
-  deleteVerticalPack: (id: string) => request<VerticalPacksView>("/api/admin/vertical-packs-delete", { id }),
+  generateVerticalPack: (prompt: string) => request<PublicationReview>("/api/admin/vertical-packs-generate", { prompt }),
+  deleteVerticalPack: (id: string) => request<PublicationReview>("/api/admin/vertical-packs-delete", { id }),
   piiFirewall: () => request<PiiFirewallView>("/api/admin/pii-firewall"),
   savePiiFirewall: (patch: Partial<PiiFirewallConfig>) => request<PiiFirewallView>("/api/admin/pii-firewall", patch),
   testPiiFirewall: (prompt: string, contextSummary?: string) => request<{ trace: PiiRedactionTrace }>("/api/admin/pii-firewall-test", { prompt, ...(contextSummary ? { contextSummary } : {}) }),
   uxEvolution: () => request<UxEvolutionView>("/api/admin/ux-evolution"),
   scanUxEvolution: (includeSampleTraffic = false) => request<{ created: UxProposal[]; view: UxEvolutionView }>("/api/admin/ux-evolution-scan", { includeSampleTraffic }),
-  approveUxProposal: (id: string) => request<{ proposal: UxProposal; view: UxEvolutionView }>("/api/admin/ux-evolution-approve", { id }),
+  approveUxProposal: (id: string) => request<Reviewable<{ proposal: UxProposal; view: UxEvolutionView }>>("/api/admin/ux-evolution-approve", { id }),
   dismissUxProposal: (id: string) => request<UxEvolutionView>("/api/admin/ux-evolution-dismiss", { id }),
   startWorkflow: (id: string, input: { personaId?: string; actorName?: string; initialInputs?: Record<string, string | number | boolean> } = {}) => (
     request<{ run: WorkflowRun; definition: WorkflowDefinition }>("/api/workflows/" + id + "/start", input)
@@ -482,7 +498,7 @@ export const api = {
   runIntegrationTask: (input: { toolRef: string; input: Record<string, unknown>; requestedBy?: string; provenance?: Record<string, string> }) => (
     request<{ run: TaskRun; approval?: ApprovalRecord }>("/api/integrations/tasks/run", input)
   ),
-  saveIntegration: (integration: Partial<Integration>) => request<{ integration: Integration; view: IntegrationTasksView }>("/api/integrations/integrations", integration),
+  saveIntegration: (integration: Partial<Integration>) => request<Reviewable<{ integration: Integration; view: IntegrationTasksView }>>("/api/integrations/integrations", integration),
   validateIntegrationDraft: (draft: TaskContractInput) => request<DraftCheck>("/api/integrations/contracts/validate", { draft }),
   saveIntegrationDraft: (draft: TaskContractInput) => request<{ contract: TaskContract; view: IntegrationTasksView }>("/api/integrations/contracts", draft),
   publishIntegrationTask: (ref: string) => request<{ status?: "pending_approval"; approval?: ApprovalRecord; contract?: TaskContract; breaking?: string[]; sfieldRegistered?: boolean; sfieldRoute?: "dedicated" | "dispatcher" | "unavailable"; registrationNote?: string; view: IntegrationTasksView }>("/api/integrations/contracts/publish", { ref }),
@@ -520,10 +536,10 @@ export const api = {
   publicKnowledgeSearch: (query: string) => request<import("../../packages/contracts/knowledge-base").KnowledgeSearchResult>("/api/knowledge-search", { query }),
   gatewayConfig: () => request<import("./gateway-admin").GatewayView>("/api/admin/gateway"),
   testGateway: (config: unknown) => request<import("./gateway-admin").GatewayTest>("/api/admin/gateway/test", { config }),
-  activateGateway: (config: unknown) => request<{ activated: boolean; restarting: boolean; view: import("./gateway-admin").GatewayView }>("/api/admin/gateway/activate", { config }),
-  resetGateway: () => request<{ reset: boolean; restarting: boolean; view: import("./gateway-admin").GatewayView }>("/api/admin/gateway/reset", {}),
+  activateGateway: (config: unknown) => request<Reviewable<{ activated: boolean; restarting: boolean; view: import("./gateway-admin").GatewayView }>>("/api/admin/gateway/activate", { config }),
+  resetGateway: () => request<Reviewable<{ reset: boolean; restarting: boolean; view: import("./gateway-admin").GatewayView }>>("/api/admin/gateway/reset", {}),
   discoverIntegrationMcp: (integrationId: string) => request<{ integrationId: string; candidates: McpImportCandidate[] }>("/api/integrations/mcp/discover", { integrationId }),
-  migrateLegacyConnectors: (connectorId?: string) => request<{ results: Array<{ connectorId: string; integrationId: string; toolRef: string; status: "migrated" | "already_migrated" | "skipped"; route?: string; reason?: string }>; view: IntegrationTasksView }>("/api/integrations/migrate-connectors", connectorId ? { connectorId } : {}),
+  migrateLegacyConnectors: (connectorId?: string) => request<PublicationReview>("/api/integrations/migrate-connectors", connectorId ? { connectorId } : {}),
   telemetry: () => request<import("../../packages/contracts/telemetry").TelemetryView>("/api/admin/telemetry"),
   exportOtlpTelemetry: () => request<Record<string, unknown>>("/api/admin/telemetry/export"),
   resetTelemetry: () => request<import("../../packages/contracts/telemetry").TelemetryView>("/api/admin/telemetry/reset", {}),

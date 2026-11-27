@@ -50,6 +50,8 @@ export interface StudioOptions {
   plugins?: StudioPluginTab[];
   /** When true, disables mutating actions (approval decisions, lock approvals, tool playground, memory writes). */
   readOnly?: boolean;
+  /** Host chat route that can open a prepared lock approval by ID. */
+  approvalChatPath?: string;
 }
 
 export interface StudioServerOptions extends StudioOptions {

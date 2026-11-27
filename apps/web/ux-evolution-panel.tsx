@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowUpRight, BookOpen, CheckCircle2, Rocket, Sparkles, Wand2, X } from "lucide-react";
 import type { UxEvolutionView } from "../../packages/contracts/ux-evolution";
-import { api, toolSetupErrorMessage } from "./api";
+import { api, isPublicationReview, toolSetupErrorMessage } from "./api";
 import { LiveWidgetPreview } from "./widget-studio";
 
 export function UxEvolutionPanel() {
@@ -40,6 +40,7 @@ export function UxEvolutionPanel() {
     setNotice("");
     try {
       const res = await api.approveUxProposal(id);
+      if (isPublicationReview(res)) return;
       setView(res.view);
       setNotice(
         `Shipped "${res.proposal.title}" LIVE! Widget (${res.proposal.shippedWidgetId}) is marked Available in Chat`

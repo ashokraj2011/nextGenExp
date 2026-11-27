@@ -277,7 +277,7 @@ test("3.1 & 3.2: A2A Agent Card, Streamable HTTP MCP Server, AG-UI SSE protocol,
   assert.equal((widgetCand.draft.artifact as { type?: string })?.type, "mcp_app_ui");
 
   const savedWidget = await client.request<{ contract: TaskContract }>("/api/integrations/contracts", widgetCand.draft);
-  await client.request("/api/integrations/contracts/publish", { ref: savedWidget.contract.ref });
+  await client.publish("/api/integrations/contracts/publish", { ref: savedWidget.contract.ref });
   const widgetRun = await client.request<{ run: TaskRun }>("/api/integrations/tasks/run", {
     toolRef: savedWidget.contract.ref,
     input: { orderId: "ORD-9001" },

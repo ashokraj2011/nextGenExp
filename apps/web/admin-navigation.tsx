@@ -1,5 +1,5 @@
 import { Activity, Blocks, Cpu, BookOpenText, Briefcase, Code2, FileText, GitBranch, Landmark, Layers, MessageSquare, Plug, PanelsTopLeft, Settings2, TerminalSquare, UsersRound } from "lucide-react";
-import { adminPaths } from "../../packages/contracts/admin-paths";
+import { adminPaths, approvalChatHref } from "../../packages/contracts/admin-paths";
 
 export const developerGuideHref = (guide = "start") => adminPaths.help + "?guide=" + encodeURIComponent(guide);
 
@@ -24,6 +24,7 @@ const destinations = [
   { label: "Architecture", path: adminPaths.help, Icon: BookOpenText },
   { label: "Developer docs", path: developerGuideHref(), Icon: Code2 },
   { label: "Admin chat", path: adminPaths.chat, Icon: MessageSquare },
+  { label: "Approvals chat", path: approvalChatHref(), Icon: FileText },
 ] as const;
 
 const workspaceDestinations = [

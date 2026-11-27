@@ -466,6 +466,9 @@ export class SelfServicePznStore implements ActiveSelfServicePznProvider {
     }
     this.initSchema();
     this.seedDefaults();
+    this.db.run(`UPDATE pzn_publications
+      SET record = json_set(record, '$.dictionary', json(?))
+      WHERE json_type(record, '$.dictionary') IS NULL`, JSON.stringify(this.getDictionary()));
     registerActiveSelfServicePznProvider(this);
   }
 
@@ -811,7 +814,7 @@ export class SelfServicePznStore implements ActiveSelfServicePznProvider {
     });
   }
 
-  publishContext(contextId: string, publishedBy = "Admin Operator", notes = ""): PznContextPublication {
+  contextPublicationDraft(contextId: string) {
     const ctx = this.getContext(contextId);
     if (!ctx) throw new ApiError(404, "context_not_found", `Context "${contextId}" not found.`);
     if (ctx.attachments.length === 0) {
@@ -838,6 +841,12 @@ export class SelfServicePznStore implements ActiveSelfServicePznProvider {
       attachedRules.push({ ...rule, status: "published" });
     }
 
+    return { context: ctx, dictionary, dictionaryVersion: dictionary.version, contents: attachedContents, rules: attachedRules };
+  }
+
+  publishContext(contextId: string, publishedBy = "Admin Operator", notes = ""): PznContextPublication {
+    const snapshot = this.contextPublicationDraft(contextId);
+    const { context: ctx } = snapshot;
     const nextVersion = (ctx.publishedVersion ?? 0) + 1;
     const ts = nowIso();
     const updatedCtx: PznContext = {
@@ -849,16 +858,14 @@ export class SelfServicePznStore implements ActiveSelfServicePznProvider {
     };
 
     const publication: PznContextPublication = {
+      ...snapshot,
       id: "pub_" + randomUUID().replaceAll("-", "").slice(0, 12),
       contextId: ctx.contextId,
       version: nextVersion,
       publishedAt: ts,
       publishedBy: publishedBy.trim() || "Admin Operator",
       notes: notes.trim().slice(0, 240),
-      dictionaryVersion: dictionary.version,
       context: updatedCtx,
-      contents: attachedContents,
-      rules: attachedRules,
     };
 
     this.db.tx(() => {
@@ -924,7 +931,6 @@ export class SelfServicePznStore implements ActiveSelfServicePznProvider {
 
   evaluateLiveTs(raw: PznTsEvaluateRequest): PznTsEvaluationResult {
     const req = pznTsEvaluateRequestSchema.parse(raw);
-    const dictionary = this.getDictionary();
 
     if (req.useDraft) {
       const ctx = this.getContext(req.contextId);
@@ -934,7 +940,7 @@ export class SelfServicePznStore implements ActiveSelfServicePznProvider {
         context: ctx,
         contents: this.listContents(),
         rules: this.listRules(),
-        dictionary,
+        dictionary: this.getDictionary(),
         sourceMode: "draft_preview",
         publicationVersion: ctx.publishedVersion,
         attributeOverrides: req.attributeOverrides,
@@ -955,7 +961,7 @@ export class SelfServicePznStore implements ActiveSelfServicePznProvider {
       context: pub.context,
       contents: pub.contents,
       rules: pub.rules,
-      dictionary,
+      dictionary: pub.dictionary ?? this.getDictionary(),
       sourceMode: "published",
       publicationVersion: pub.version,
       attributeOverrides: req.attributeOverrides,
@@ -964,22 +970,26 @@ export class SelfServicePznStore implements ActiveSelfServicePznProvider {
 
   // ---- ActiveSelfServicePznProvider Implementation (for Live Chat & Experience Layer) ----
 
+  private activePublications(): PznContextPublication[] {
+    return this.db.all<{ record: string }>(`SELECT p.record FROM pzn_publications p
+      JOIN pzn_contexts c ON c.context_id = p.context_id
+      WHERE json_extract(c.record, '$.status') = 'published'
+        AND p.version = json_extract(c.record, '$.publishedVersion')
+      ORDER BY p.published_at DESC, p.context_id`).map(({ record }) => JSON.parse(record) as PznContextPublication);
+  }
+
   listPublishedContextSummaries(): ContextCatalog["contexts"] {
-    return this.listContexts()
-      .filter((ctx) => ctx.status === "published" && ctx.publishedVersion > 0)
-      .map((ctx) => ({
-        contextId: ctx.contextId,
-        displayName: ctx.displayName,
-        description: ctx.description,
-        active: true,
-      }));
+    return this.activePublications().map(({ context }) => ({
+      contextId: context.contextId,
+      displayName: recommendationContextLabel(context.contextId, context.displayName),
+      description: context.description,
+      active: true,
+    }));
   }
 
   findPublishedContentEntry(contentId: string): ContentEntry | undefined {
-    const publishedContexts = this.listContexts().filter((c) => c.status === "published" && c.publishedVersion > 0);
-    for (const ctx of publishedContexts) {
-      const pub = this.getPublishedPublication(ctx.contextId);
-      const found = pub?.contents.find((item) => item.contentId === contentId);
+    for (const publication of this.activePublications()) {
+      const found = publication.contents.find((item) => item.contentId === contentId);
       if (found) {
         return pznTextContentToCatalogEntry(found);
       }
@@ -995,7 +1005,7 @@ export class SelfServicePznStore implements ActiveSelfServicePznProvider {
       context: pub.context,
       contents: pub.contents,
       rules: pub.rules,
-      dictionary: this.getDictionary(),
+      dictionary: pub.dictionary ?? this.getDictionary(),
       sourceMode: "published",
       publicationVersion: pub.version,
       attributeOverrides: overrides,

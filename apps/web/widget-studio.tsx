@@ -6,7 +6,7 @@ import {
 import {
   widgetKindLabels, widgetKinds, type SavedWidget, type WidgetDraft, type WidgetKind,
 } from "../../packages/contracts/widget";
-import { api, toolSetupErrorMessage } from "./api";
+import { api, isPublicationReview, toolSetupErrorMessage } from "./api";
 
 const examplePrompts = [
   "Create a net worth KPI card showing $145,000 total assets, $22,000 cash reserve, and +6.4% YTD growth",
@@ -368,6 +368,7 @@ export function WidgetStudio({
     setNotice("");
     try {
       const result = await api.saveWidgetLibrary({ operation: "save", id: editingId, widget: draft }, domainId);
+      if (isPublicationReview(result)) return;
       onWidgetsChange(result.widgets);
       setEditingId(result.widget?.id);
       setNotice(editingId ? `Updated "${draft.name}" in Widget Library.` : `Added "${draft.name}" to Widget Library.`);
@@ -390,6 +391,7 @@ export function WidgetStudio({
         id: item.id,
         availableForConsumption: nextValue,
       }, domainId);
+      if (isPublicationReview(result)) return;
       onWidgetsChange(result.widgets);
       if (editingId === item.id && draft) {
         setDraft({ ...draft, availableForConsumption: nextValue });
@@ -413,6 +415,7 @@ export function WidgetStudio({
     setNotice("");
     try {
       const result = await api.saveWidgetLibrary({ operation: "delete", id }, domainId);
+      if (isPublicationReview(result)) return;
       onWidgetsChange(result.widgets);
       if (editingId === id) setEditingId(undefined);
       setNotice(`Removed "${name}" from Widget Library.`);

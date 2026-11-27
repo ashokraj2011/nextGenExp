@@ -18,6 +18,7 @@ import type { ConnectorStore } from "../connector-store";
 import { extractDocumentAction } from "../document-extractor";
 import type { GatewaySettings } from "../gateway";
 import type { ProactiveEventStore } from "../proactive-engine";
+import type { PublicationReviews } from "../publication-reviews";
 import { connectorInvokeToolRef, domainWriteToolRef, type Runtime } from "../runtime";
 import { ApiError } from "../store";
 import type { WorkflowEngine } from "../workflow-engine";
@@ -46,6 +47,7 @@ export interface WorkflowsConnectorsRouteDeps {
   membership: { chat: (domain: DomainPackId, personaId: string, operator?: string) => boolean };
   connectorStore: ConnectorStore;
   approvalStore: ApprovalStore;
+  publicationReviews: PublicationReviews;
   actionFlowStore: ActionFlowStore;
   workflowEngine: WorkflowEngine;
   proactiveStore: ProactiveEventStore;
@@ -63,6 +65,9 @@ export async function handleWorkflowsAndConnectorsRoutes(deps: WorkflowsConnecto
     connectorStore, approvalStore, actionFlowStore, workflowEngine, proactiveStore,
     profileStore, writeAudit, json, body, requireOperator,
   } = deps;
+  const requestPublication = (action: string, input: unknown) => json(res, deps.publicationReviews.request(action, input, {
+    scope: "tenant", principalId, operator: requireOperator(),
+  }), 202);
 
   if (resource === "admin" && id === "recommendation-providers" && !operation && method === "GET" && inspectorEnabled) {
     json(res, {
@@ -79,12 +84,12 @@ export async function handleWorkflowsAndConnectorsRoutes(deps: WorkflowsConnecto
   }
   if (resource === "admin" && id === "connectors" && !operation && method === "POST" && inspectorEnabled) {
     const data = await body(req, connectorUpsertSchema);
-    json(res, connectorStore.upsert(data));
+    requestPublication("connectors", data);
     return true;
   }
   if (resource === "admin" && id === "connector-delete" && !operation && method === "POST" && inspectorEnabled) {
     const { id: connId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());
-    json(res, connectorStore.remove(connId));
+    requestPublication("connector-delete", { id: connId });
     return true;
   }
   if (resource === "admin" && id === "connector-test" && !operation && method === "POST" && inspectorEnabled) {
@@ -162,12 +167,12 @@ export async function handleWorkflowsAndConnectorsRoutes(deps: WorkflowsConnecto
   }
   if (resource === "admin" && id === "action-flows" && !operation && method === "POST" && inspectorEnabled) {
     const input = await body(req, actionFlowUpsertSchema);
-    json(res, actionFlowStore.upsert(input));
+    requestPublication("action-flows", input);
     return true;
   }
   if (resource === "admin" && id === "action-flow-delete" && !operation && method === "POST" && inspectorEnabled) {
     const { id: flowId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());
-    json(res, actionFlowStore.remove(flowId));
+    requestPublication("action-flow-delete", { id: flowId });
     return true;
   }
   if (resource === "workflows") {
@@ -187,11 +192,11 @@ export async function handleWorkflowsAndConnectorsRoutes(deps: WorkflowsConnecto
     }
     if (!id && method === "POST" && inspectorEnabled) {
       const input = await body(req, workflowDefinitionUpsertSchema, 48 * 1024);
-      json(res, workflowEngine.upsertDefinition(input));
+      requestPublication("workflows", input);
       return true;
     }
     if (id && operation === "delete" && method === "POST" && inspectorEnabled) {
-      json(res, workflowEngine.deleteOrResetDefinition(id));
+      requestPublication("workflow-delete", { id });
       return true;
     }
     if (id && operation === "start" && method === "POST") {

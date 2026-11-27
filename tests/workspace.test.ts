@@ -40,7 +40,7 @@ test("pending actions use each customer's MID and save the actual Treatment Sele
   const fundingLogs = await client.request<TurnPayloads>("/api/admin/logs/" + funding.turn.id);
   assert.deepEqual(fundingLogs.treatment?.mockInput?.data, { mid: "DEMO-MID-1003", context: pendingActionsContext });
 
-  await client.request("/api/admin/tools", {
+  await client.publish("/api/admin/tools", {
     ...defaultToolSetup,
     ccreRules: [{
       scenarioId: "normal", contextId: pendingActionsContext, contentId: "beneficiary_update", name: "Pause reminder", condition: { kind: "never" },

@@ -5,6 +5,7 @@
 import type { ExternalConnector } from "../../packages/contracts/connector";
 import type { Integration, TaskContractInput } from "../../packages/contracts/integration-task";
 import type { ConnectorStore } from "./connector-store";
+import { canonicalJson } from "./approval-store";
 import type { IntegrationTaskService, IntegrationTaskStore } from "./integration-tasks";
 import { slugifyTaskId } from "./integration-mcp";
 
@@ -110,55 +111,48 @@ function contractFromConnector(conn: ExternalConnector, integrationId: string, t
   };
 }
 
-/**
- * Migrates one or all legacy ConnectorStore entries into governed Integration + published TaskContract records.
- * Idempotent: already-published migrated tasks are left untouched.
- */
-export async function migrateLegacyConnectors(
-  connectorStore: ConnectorStore,
-  taskStore: IntegrationTaskStore,
-  taskService: IntegrationTaskService,
-  connectorId?: string,
-): Promise<ConnectorMigrationEntry[]> {
-  const list = connectorId
-    ? connectorStore.list().filter((c) => c.id === connectorId)
-    : connectorStore.list();
+function destination(taskStore: IntegrationTaskStore, integrationId: string, ref: string) {
+  return { integration: taskStore.integration(integrationId) ?? null, contract: taskStore.contract(ref) ?? null };
+}
 
-  const results: ConnectorMigrationEntry[] = [];
-  for (const conn of list) {
+export function prepareConnectorMigrations(connectorStore: ConnectorStore, taskStore: IntegrationTaskStore, connectorId?: string) {
+  const connectors = connectorStore.list().filter((connector) => !connectorId || connector.id === connectorId);
+  return connectors.map((conn) => {
     const { integration, target } = integrationFromConnector(conn);
     const contractInput = contractFromConnector(conn, integration.id, target);
     const ref = `int.${contractInput.integrationId}.${contractInput.taskId}@${contractInput.version}`;
-    const existing = taskStore.contract(ref);
-    if (existing && existing.status === "published") {
-      results.push({
-        connectorId: conn.id,
-        integrationId: integration.id,
-        toolRef: ref,
-        status: "already_migrated",
-      });
+    return { connectorId: conn.id, integration, contractInput, ref, current: destination(taskStore, integration.id, ref) };
+  });
+}
+
+/** Already-published migrated tasks are left untouched. */
+export async function migrateLegacyConnectors(
+  migrations: ReturnType<typeof prepareConnectorMigrations>,
+  taskStore: IntegrationTaskStore,
+  taskService: IntegrationTaskService,
+): Promise<ConnectorMigrationEntry[]> {
+  const results: ConnectorMigrationEntry[] = [];
+  for (const { connectorId, integration, contractInput, ref, current } of migrations) {
+    const result = { connectorId, integrationId: integration.id, toolRef: ref };
+    if (current.contract?.status === "published") {
+      results.push({ ...result, status: "already_migrated" });
       continue;
     }
     try {
-      if (!taskStore.integration(integration.id)) {
-        taskStore.upsertIntegration(integration);
+      if (canonicalJson(destination(taskStore, integration.id, ref)) !== canonicalJson(current)) {
+        throw new Error("The task or its connection changed. Submit a new review.");
       }
-      if (!existing) {
-        taskStore.upsertDraft(contractInput);
-      }
+      if (!current.integration) taskStore.upsertIntegration(integration);
+      if (!current.contract) taskStore.upsertDraft(contractInput);
       const published = await taskService.publish(ref);
       results.push({
-        connectorId: conn.id,
-        integrationId: integration.id,
-        toolRef: published.contract.ref,
+        ...result,
         status: "migrated",
         route: published.sfieldRoute,
       });
     } catch (err) {
       results.push({
-        connectorId: conn.id,
-        integrationId: integration.id,
-        toolRef: ref,
+        ...result,
         status: "skipped",
         reason: err instanceof Error ? err.message : String(err),
       });

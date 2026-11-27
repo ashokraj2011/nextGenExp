@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { startApp } from "./operator-fixture";
 import { breakingChanges, IntegrationTaskStore, needsApproval, schemaIssues } from "../apps/server/integration-tasks";
 import type { IntegrationTasksView, TaskRun } from "../packages/contracts/integration-task";
-import type { ApprovalRecord } from "../packages/contracts/approval";
+import type { ApprovalRecord, PublicationReview } from "../packages/contracts/approval";
 import { testClient, testProject } from "./client";
 import { startFixtureGateway } from "./gateway-fixture";
 
@@ -133,7 +133,7 @@ test("integration tasks run through sfield with native digest-bound approvals, r
   const { ref: _r, status: _s, contractDigest: _c, bindingDigest: _b, updatedAt: _u, publishedAt: _p, sfieldRegistered: _reg, sfieldRoute: _route, ...input } = current;
   await client.request("/api/integrations/contracts", { ...input, version: "1.1.0", description: "Create a ticket (minor wording change)." });
   const V11 = "int.itsm_sandbox.create_ticket@1.1.0";
-  const published = await client.request<{ sfieldRegistered: boolean; sfieldRoute: string }>("/api/integrations/contracts/publish", { ref: V11 });
+  const published = await client.publish<{ sfieldRegistered: boolean; sfieldRoute: string }>("/api/integrations/contracts/publish", { ref: V11 });
   assert.equal(published.sfieldRegistered, true);
   assert.equal(published.sfieldRoute, "dedicated");
   const viaDispatcher = await run({ title: "Cache misses on edge", priority: "P3", service: "edge" }, 200, V11);
@@ -317,7 +317,7 @@ test("chat authoring: connect an MCP server, import tools, publish, run, and dra
   const review = card<{ contract: { ref: string }; check: { ok: boolean; publishBlockers: string[] } }>(await chat(`Publish ${LOOKUP}`), "publish_review");
   assert.equal(review.contract.ref, LOOKUP);
   assert.equal(review.check.ok, true);
-  const published = await client.request<{ sfieldRoute: string }>("/api/integrations/contracts/publish", { ref: LOOKUP });
+  const published = await client.publish<{ sfieldRoute: string }>("/api/integrations/contracts/publish", { ref: LOOKUP });
   assert.equal(published.sfieldRoute, "dedicated");
   const found = await client.request<{ run: TaskRun }>("/api/integrations/tasks/run", { toolRef: LOOKUP, input: { orderId: "ORD-1001" } });
   assert.equal(found.run.state, "succeeded", JSON.stringify(found.run));
@@ -325,7 +325,7 @@ test("chat authoring: connect an MCP server, import tools, publish, run, and dra
 
   // 4. An imported write: approval always, idempotency key filled into the MCP tool's requestId, tool errors mapped.
   const REFUND = "int.demo_commerce.refund_order@1.0.0";
-  await client.request("/api/integrations/contracts/publish", { ref: REFUND });
+  await client.publish("/api/integrations/contracts/publish", { ref: REFUND });
   const refund = await client.request<{ run: TaskRun; approval: ApprovalRecord }>("/api/integrations/tasks/run", { toolRef: REFUND, input: { orderId: "ORD-1001", amount: 10 } }, 202);
   assert.match(String(refund.run.input.requestId), /^idem_/);
   const approved = await client.request<{ taskRun: TaskRun }>(`/api/approvals/${refund.approval.id}/decide`, { decision: "approve", actor: "Finance Lead" }, 200, { Authorization: operatorHeader(reviewer) });
@@ -360,6 +360,13 @@ test("chat authoring: connect an MCP server, import tools, publish, run, and dra
 
   // 7. Where calls go is fixed once tasks are published.
   await client.request("/api/integrations/integrations", { id: "demo_commerce", name: "Demo Commerce", transport: "mcp", baseUrl: "https://elsewhere.example/mcp" }, 409);
+  const path = "/api/integrations";
+  const pendingUpdate = await client.request<PublicationReview>(path + "/integrations", {
+    id: "demo_commerce", name: "Demo Commerce", transport: "mcp", baseUrl: mcpUrl, enabled: false,
+  }, 202);
+  assert.equal((await client.request<IntegrationTasksView>(path)).integrations.find(({ id }) => id === "demo_commerce")?.enabled, true);
+  await client.request("/api/approvals/" + pendingUpdate.approval.id + "/decide", { decision: "approve" });
+  assert.equal((await client.request<IntegrationTasksView>(path)).integrations.find(({ id }) => id === "demo_commerce")?.enabled, false);
 });
 
 test("operator sign-in can be switched off for local demos; it stays on by default", async (t) => {

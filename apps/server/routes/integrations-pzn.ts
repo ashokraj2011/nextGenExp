@@ -3,6 +3,7 @@
  * Extracted from `apps/server/http.ts` for clean separation of concerns.
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { digestJson } from "@sfield/core";
 import { z } from "zod";
 import type { ApprovalRecord } from "../../../packages/contracts/approval";
 import {
@@ -25,12 +26,11 @@ import {
   pznTsEvaluateRequestSchema,
 } from "../../../packages/contracts/self-service-pzn";
 import type { ApprovalStore } from "../approval-store";
-import { migrateLegacyConnectors } from "../connector-migration";
-import type { ConnectorStore } from "../connector-store";
 import type { GatewaySettings } from "../gateway";
 import { runIntegrationCopilot } from "../integration-copilot";
 import { IntegrationTaskError, type IntegrationTaskService, type IntegrationTaskStore } from "../integration-tasks";
 import { pznGateFor, requestPznApproval } from "../pzn-approvals";
+import type { PublicationReviews } from "../publication-reviews";
 import type { Runtime } from "../runtime";
 import { runSelfServicePznCopilot } from "../self-service-pzn-copilot";
 import type { SelfServicePznStore } from "../self-service-pzn-store";
@@ -49,7 +49,7 @@ export interface IntegrationsPznRouteDeps {
   gateway: GatewaySettings | null;
   dataDir: string;
   approvalStore: ApprovalStore;
-  connectorStore: ConnectorStore;
+  publicationReviews: PublicationReviews;
   integrationTasks: IntegrationTaskStore;
   integrationService: IntegrationTaskService;
   selfServicePzn: SelfServicePznStore;
@@ -64,7 +64,7 @@ export interface IntegrationsPznRouteDeps {
 export async function handleIntegrationsAndPznRoutes(deps: IntegrationsPznRouteDeps): Promise<boolean> {
   const {
     req, res, resource, id, operation, method, principalId, inspectorEnabled,
-    runtime, gateway, dataDir, approvalStore, connectorStore, integrationTasks,
+    runtime, gateway, dataDir, approvalStore, publicationReviews, integrationTasks,
     integrationService, selfServicePzn, demoMcp, json, body, requireOperator, enforceEvalGate,
   } = deps;
 
@@ -98,7 +98,16 @@ export async function handleIntegrationsAndPznRoutes(deps: IntegrationsPznRouteD
     }
     if (id === "integrations" && !operation && method === "POST") {
       const raw = await body(req, z.record(z.string(), z.unknown()), 16 * 1024);
-      json(res, { integration: await guard(() => integrationTasks.upsertIntegration(raw)), view: integrationService.view() });
+      await guard(() => {
+        const integration = integrationTasks.upsertIntegration(raw, true);
+        if (integrationTasks.published().some((contract) => contract.integrationId === integration.id)) {
+          json(res, publicationReviews.request("integration-config", integration, {
+            scope: "tenant", principalId, operator: requireOperator(),
+          }), 202);
+        } else {
+          json(res, { integration: integrationTasks.upsertIntegration(integration), view: integrationService.view() });
+        }
+      });
       return true;
     }
     if (id === "contracts" && operation === "validate" && method === "POST") {
@@ -126,35 +135,35 @@ export async function handleIntegrationsAndPznRoutes(deps: IntegrationsPznRouteD
     if (id === "contracts" && operation === "publish" && method === "POST") {
       enforceEvalGate("publishing an integration task contract");
       const { ref } = await body(req, z.object({ ref: z.string().min(3).max(120) }).strict());
-      if (approvalStore.getPolicy().gateTaskPublish) {
-        const contract = integrationTasks.contract(ref);
-        if (!contract) throw new ApiError(404, "contract_not_found", `Unknown task contract ${ref}`);
-        if (contract.status !== "draft") throw new ApiError(409, "not_draft", `${ref} is already ${contract.status}.`);
-        const actor = requireOperator();
-        const approval = approvalStore.createPending({
-          targetKind: "task_publish",
-          sfieldToolRef: contract.ref,
-          domain: "integration",
-          recordId: contract.ref,
-          action: "publish_task",
-          title: `Publish Integration Task · ${contract.ref}`,
-          summary: `Publish ${contract.effect} task "${contract.description.slice(0, 140)}" into the live sfield runtime.`,
-          riskLevel: contract.effect === "read" ? "low" : "high",
-          payload: { ref: contract.ref, contractDigest: contract.contractDigest, bindingDigest: contract.bindingDigest },
-          details: [
-            { label: "Task Ref", value: contract.ref },
-            { label: "Effect", value: contract.effect },
-            { label: "Contract Digest", value: contract.contractDigest.slice(0, 22) },
-            { label: "Binding Digest", value: contract.bindingDigest.slice(0, 22) },
-          ],
-          requester: actor,
-          dualControl: approvalStore.getPolicy().defaultDualControl,
-        });
-        json(res, { status: "pending_approval", approval, view: integrationService.view() }, 202);
-        return true;
-      }
-      const published = await guard(() => integrationService.publish(ref));
-      json(res, { ...published, view: integrationService.view() });
+      const contract = integrationTasks.contract(ref);
+      if (!contract) throw new ApiError(404, "contract_not_found", `Unknown task contract ${ref}`);
+      if (contract.status !== "draft") throw new ApiError(409, "not_draft", `${ref} is already ${contract.status}.`);
+      await guard(() => integrationTasks.publish(ref, true));
+      const actor = requireOperator();
+      const approval = approvalStore.createPending({
+        targetKind: "task_publish",
+        sfieldToolRef: contract.ref,
+        domain: "integration",
+        recordId: contract.ref,
+        action: "publish_task",
+        title: `Publish Integration Task · ${contract.ref}`,
+        summary: `Publish ${contract.effect} task "${contract.description.slice(0, 140)}" into the live sfield runtime.`,
+        riskLevel: contract.effect === "read" ? "low" : "high",
+        payload: {
+          ref: contract.ref, contractDigest: contract.contractDigest, bindingDigest: contract.bindingDigest,
+          integrationDigest: digestJson(integrationTasks.integration(contract.integrationId) ?? null),
+          preview: contract,
+        },
+        details: [
+          { label: "Task Ref", value: contract.ref },
+          { label: "Effect", value: contract.effect },
+          { label: "Contract Digest", value: contract.contractDigest.slice(0, 22) },
+          { label: "Binding Digest", value: contract.bindingDigest.slice(0, 22) },
+        ],
+        requester: actor,
+        dualControl: approvalStore.getPolicy().defaultDualControl,
+      });
+      json(res, { status: "pending_approval", approval, view: integrationService.view() }, 202);
       return true;
     }
     if (id === "tasks" && operation === "run" && method === "POST") {
@@ -200,10 +209,8 @@ export async function handleIntegrationsAndPznRoutes(deps: IntegrationsPznRouteD
       return true;
     }
     if (id === "migrate-connectors" && !operation && method === "POST") {
-      requireOperator();
       const data = await body(req, z.object({ connectorId: z.string().min(1).max(64).optional() }).strict());
-      const results = await guard(() => migrateLegacyConnectors(connectorStore, integrationTasks, integrationService, data.connectorId));
-      json(res, { results, view: integrationService.view() });
+      json(res, publicationReviews.request(id, data, { scope: "tenant", principalId, operator: requireOperator() }), 202);
       return true;
     }
   }

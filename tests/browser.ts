@@ -13,7 +13,7 @@ import { beneficiaryReviewWorkflow } from "../packages/contracts/customer-workfl
 import { activeContextCatalog, FixtureTsAdapter, tsFixtures } from "../packages/ts-adapter";
 import { adminPaths } from "../packages/contracts/admin-paths";
 import { pendingActionsContext } from "../packages/contracts/workspace";
-import { openAdmin, openCustomerChat } from "./browser-navigation";
+import { approvePublicationInChat, approvePublicationResponse, openAdmin, openCustomerChat } from "./browser-navigation";
 import { startTestPreview } from "./preview";
 
 async function assertArchitectureLabelsFit(map: Locator) {
@@ -429,7 +429,7 @@ try {
   await page.getByLabel("Topic", { exact: true }).selectOption("portsum");
   await page.getByLabel("Response", { exact: true }).selectOption("empty");
   await page.getByRole("button", { name: "Save settings" }).click();
-  await page.getByText("Tool settings saved.", { exact: true }).waitFor();
+  await approvePublicationInChat(page);
   await page.reload();
   await page.getByRole("list", { name: "Content order" }).waitFor();
   assert.equal(await page.getByLabel("Response", { exact: true }).inputValue(), "ranked");
@@ -520,7 +520,7 @@ try {
   const beforeRuleSave = await author.request.get(preview.url + "/api/admin/tools");
   assert.deepEqual((await beforeRuleSave.json()).setup.ccreRules ?? [], []);
   await ruleBlock.getByRole("button", { name: "Save rule", exact: true }).click();
-  await ruleBlock.getByRole("button", { name: "Saved", exact: true, disabled: true }).waitFor();
+  await approvePublicationInChat(author);
   await openAdmin(author, "logs");
   await author.getByText("CCRE glossary · succeeded", { exact: true }).click();
   assert.match(await author.locator('pre[aria-label="Glossary tool request"]').innerText(), /"routerRunId"/);
@@ -538,7 +538,7 @@ try {
 
   // Start the independent portfolio scenario with its standard shared treatment rules.
   const restoredDefaults = await author.request.post(preview.url + "/api/admin/tools", { data: defaultToolSetup });
-  assert.equal(restoredDefaults.status(), 200);
+  await approvePublicationResponse(author, restoredDefaults);
   const portfolioPage = await browser.newPage({ httpCredentials: { ...operatorCredentials, origin: preview.url }, viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   await portfolioPage.addInitScript(() => localStorage.setItem("cep_expertise_mode", "pro"));
   portfolioPage.setDefaultTimeout(12_000);
@@ -669,7 +669,7 @@ try {
   assert.equal(await saveSettings.isDisabled(), true);
   await editor.getByRole("button", { name: "Move " + fundingToolRef("fundingPreview") + " down", exact: true }).click();
   await saveSettings.click();
-  await portfolioPage.getByText("Tool settings saved.", { exact: true }).waitFor();
+  await approvePublicationInChat(portfolioPage);
   await portfolioPage.reload();
   await editorOrder.first().waitFor();
   assert.deepEqual(await editorOrder.allTextContents(), workflowSteps);
@@ -869,7 +869,7 @@ try {
   await editor.getByLabel("Goal", { exact: true }).waitFor();
   await editor.getByLabel("Tool call limit", { exact: true }).fill("6");
   await saveSettings.click();
-  await portfolioPage.getByText("Tool settings saved.", { exact: true }).waitFor();
+  await approvePublicationInChat(portfolioPage);
   await openAdmin(portfolioPage, "chat");
   await portfolioPage.getByRole("button", { name: "Profiles, current profile Marcus Reed", exact: true }).click();
   await marcusProfile.getByRole("button", { name: "Start chat as Marcus Reed", exact: true }).click();

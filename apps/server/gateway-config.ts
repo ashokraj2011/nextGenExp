@@ -46,6 +46,7 @@ export type GatewayTestResult = {
 type Saved = {
   active?: GatewayConfig & { activatedAt: string; activatedBy: string };
   lastTest?: GatewayTestResult;
+  pending?: { id: string; config: GatewayConfig };
 };
 
 /** What the admin UI sees: secrets masked. */
@@ -85,11 +86,18 @@ export class GatewayConfigStore {
   }
   active() { return this.read().active; }
   saveTest(result: GatewayTestResult) { this.write({ ...this.read(), lastTest: result }); }
+  stage(config: GatewayConfig) {
+    const state = this.read();
+    const id = createHash("sha256").update(JSON.stringify(sortKeys(config))).digest("hex");
+    if (state.pending?.id !== id) this.write({ ...state, pending: { id, config } });
+    return id;
+  }
   activate(config: GatewayConfig, by: string) {
-    this.write({ ...this.read(), active: { ...config, activatedAt: new Date().toISOString(), activatedBy: by } });
+    const { pending: _pending, ...state } = this.read();
+    this.write({ ...state, active: { ...config, activatedAt: new Date().toISOString(), activatedBy: by } });
   }
   reset() {
-    const { active: _a, ...rest } = this.read();
+    const { active: _a, pending: _pending, ...rest } = this.read();
     if (Object.keys(rest).length) this.write(rest); else rmSync(this.path, { force: true });
   }
   view(running: GatewaySettings | null, restartSupported: boolean, launchSource: "environment" | "default" = "environment"): GatewayConfigView {

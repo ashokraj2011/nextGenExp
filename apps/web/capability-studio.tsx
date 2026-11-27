@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { capabilityRef, type CapabilityManifest } from "../../packages/contracts/agentic";
-import { api, toolSetupErrorMessage } from "./api";
+import { api, isPublicationReview, toolSetupErrorMessage } from "./api";
 import { rememberActiveConversation } from "./conversation-storage";
 import { adminPaths } from "../../packages/contracts/admin-paths";
 
@@ -42,6 +42,7 @@ function Studio({ initial }: { initial: Setup }) {
   async function publish(validate: boolean) {
     await run(async () => {
       const normalized = await api.publishCapability(JSON.parse(draft), validate);
+      if (isPublicationReview(normalized)) return;
       if (validate) {
         setNotice("Manifest is valid.");
         return;

@@ -3,7 +3,7 @@ import { Plug, Plus, Save, ShieldCheck, Trash2, Zap } from "lucide-react";
 import type { ActionFlow, ActionFlowApprovalMode, ActionFlowTargetKind } from "../../packages/contracts/action-flow";
 import type { ExternalConnector } from "../../packages/contracts/connector";
 import type { RecommendationDomain } from "../../packages/contracts/recommendation-provider";
-import { api } from "./api";
+import { api, isPublicationReview } from "./api";
 
 export function ActionFlowsPanel() {
   const [flows, setFlows] = useState<ActionFlow[]>([]);
@@ -92,6 +92,7 @@ export function ActionFlowsPanel() {
         approvalMode,
         enabled,
       });
+      if (isPublicationReview(res)) return;
       setFlows(res.flows);
       loadIntoForm(res.flow);
       setNotice({ tone: "ok", text: `Saved No-Code Action Flow "${res.flow.name}". Ask "${res.flow.triggerPhrases[0]}" in Chat to trigger it immediately.` });
@@ -108,6 +109,7 @@ export function ActionFlowsPanel() {
     setNotice(null);
     try {
       const res = await api.deleteActionFlow(selectedId);
+      if (isPublicationReview(res)) return;
       setFlows(res.flows);
       if (res.flows[0]) loadIntoForm(res.flows[0]);
       else startNew();

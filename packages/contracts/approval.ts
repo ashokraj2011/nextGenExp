@@ -2,8 +2,8 @@ import { z } from "zod";
 
 export const approvalRiskLevelSchema = z.enum(["low", "medium", "high"]);
 export const approvalStatusSchema = z.enum(["pending", "approved", "executing", "denied", "executed", "expired"]);
-export const approvalTargetKindSchema = z.enum(["domain_write", "external_connector", "stock_trade", "workflow_step", "pzn_change", "integration_task", "task_publish"]);
-export const approvalDomainSchema = z.enum(["ops_incident", "sales_deal", "customer360", "external_connector", "stock_trade", "workflow", "pzn_self_service", "integration"]);
+export const approvalTargetKindSchema = z.enum(["domain_write", "external_connector", "stock_trade", "workflow_step", "pzn_change", "integration_task", "task_publish", "publication"]);
+export const approvalDomainSchema = z.enum(["ops_incident", "sales_deal", "customer360", "external_connector", "stock_trade", "workflow", "pzn_self_service", "integration", "publication"]);
 export const pznDualControlModeSchema = z.enum(["off", "high_risk", "always"]);
 export type PznDualControlMode = z.infer<typeof pznDualControlModeSchema>;
 
@@ -58,7 +58,7 @@ export const approvalPolicySettingsSchema = z.object({
   pznDualControl: pznDualControlModeSchema.default("high_risk"),
   pznApprovalExpiryMinutes: z.number().int().min(5).max(1440).default(30),
   requireEvalBeforePublish: z.boolean().default(false),
-  gateTaskPublish: z.boolean().default(false),
+  gateTaskPublish: z.boolean().default(true),
 }).strict();
 
 export const approvalDecisionInputSchema = z.object({
@@ -74,6 +74,8 @@ export type ApprovalDomain = z.infer<typeof approvalDomainSchema>;
 export type ApprovalRecord = z.infer<typeof approvalRecordSchema>;
 export type ApprovalPolicySettings = z.infer<typeof approvalPolicySettingsSchema>;
 export type ApprovalDecisionInput = z.infer<typeof approvalDecisionInputSchema>;
+
+export type PublicationReview = { status: "pending_approval"; approval: ApprovalRecord };
 
 export interface ApprovalsView {
   policy: ApprovalPolicySettings;

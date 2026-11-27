@@ -1,3 +1,4 @@
+import { digestJson } from "@sfield/core";
 import type { ApprovalPolicySettings, ApprovalRecord, ApprovalRiskLevel } from "../../packages/contracts/approval";
 import { pznSfieldToolRefs } from "../../packages/contracts/self-service-pzn";
 import { canonicalJson, type ApprovalStore } from "./approval-store";
@@ -29,11 +30,11 @@ export function pznGateFor(policy: ApprovalPolicySettings, operation: string): P
   if (operation === "publish_context") {
     category = "publish";
     riskLevel = "medium";
-    gated = policy.gatePznPublish;
+    gated = true;
   } else if (DESTRUCTIVE_OPS.has(operation)) {
     category = "destructive";
     riskLevel = "high";
-    gated = policy.gatePznDestructive;
+    gated = operation === "unpublish_context" || operation === "delete_context" || policy.gatePznDestructive;
   } else if (operation === "upsert_namespace" || operation === "upsert_attribute") {
     category = "dictionary";
     riskLevel = "medium";
@@ -59,7 +60,11 @@ function entityId(operation: string, args: Record<string, unknown>): string {
 
 /** A version token for the target entity, so an approval is invalidated if the entity changes after the request. */
 function stalenessToken(pzn: SelfServicePznStore, operation: string, args: Record<string, unknown>): string | undefined {
-  if (typeof args.contextId === "string") return pzn.getContext(args.contextId)?.updatedAt;
+  if (typeof args.contextId === "string") {
+    return operation === "publish_context"
+      ? digestJson(pzn.contextPublicationDraft(args.contextId))
+      : pzn.getContext(args.contextId)?.updatedAt;
+  }
   if (operation === "delete_rule" && typeof args.ruleId === "string") return pzn.getRule(args.ruleId)?.updatedAt;
   if (operation === "delete_content" && typeof args.contentId === "string") return pzn.getContent(args.contentId)?.updatedAt;
   return undefined;
@@ -154,7 +159,11 @@ export function requestPznApproval(
       400,
     ),
     riskLevel: gate.riskLevel,
-    payload: { args, toolRef: pznToolRefForOperation(input.operation), ...(token ? { stalenessToken: token } : {}) },
+    payload: {
+      args, toolRef: pznToolRefForOperation(input.operation),
+      ...(token ? { stalenessToken: token } : {}),
+      ...(input.operation === "publish_context" && ctx && { preview: pzn.contextPublicationDraft(ctx.contextId) }),
+    },
     details,
     requester: input.requester?.trim() || "Recommendation Author",
     dualControl: gate.dualControl,

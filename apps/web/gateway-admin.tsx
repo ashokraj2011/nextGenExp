@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, CircleAlert, Cpu, FlaskConical, Power, RotateCcw } from "lucide-react";
-import { api, toolSetupErrorMessage } from "./api";
+import { api, isPublicationReview, toolSetupErrorMessage } from "./api";
 import "./recommendation-studio.css";
 
 type Provider = "openai_compatible" | "openai" | "gemini" | "copilot_acp";
@@ -133,6 +133,7 @@ export function GatewayAdmin() {
     setBusy("activate"); setError(""); setNotice("");
     try {
       const out = await api.activateGateway(c);
+      if (isPublicationReview(out)) { setBusy(""); return; }
       if (!out.restarting) { setView(out.view); setNotice("Saved. Restart the server to switch the running model."); setBusy(""); return; }
       const ok = await waitForRestart((v) => v.source === "saved" && v.running?.provider === c.provider && v.running.model === c.model);
       setNotice(ok ? `Active: sfield now runs on ${c.model}.` : "Saved, but the server didn't come back with the new model. Check the server log.");
@@ -143,6 +144,7 @@ export function GatewayAdmin() {
     setBusy("reset"); setError(""); setNotice("");
     try {
       const out = await api.resetGateway();
+      if (isPublicationReview(out)) { setBusy(""); return; }
       if (!out.restarting) { setView(out.view); setBusy(""); return; }
       const ok = await waitForRestart((v) => v.source !== "saved");
       setNotice(ok ? "The startup gateway is active." : "Restart the server to use the startup gateway.");

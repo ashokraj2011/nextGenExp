@@ -14,3 +14,5 @@ export const adminPaths = {
 } as const;
 
 export const isAdminPath = (path: string) => path === adminPaths.tools || path.startsWith("/admin/");
+export const approvalChatHref = (id?: string) =>
+  adminPaths.chat + "?review=" + encodeURIComponent(id ?? "pending");

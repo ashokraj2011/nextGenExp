@@ -32,10 +32,8 @@ import { layoutTargetDomain, recordIntentOption, uiDesignSchema, uiLayoutChangeS
 import { widgetGenerateRequestSchema, widgetLibraryChangeSchema } from "../../../packages/contracts/widget";
 import type { CustomerProfileStore } from "../../../packages/customer-profiles";
 import { compileDynamicCanvas, makeId } from "../../../packages/experience/compile";
-import type { ExperienceRegistryStore } from "../../../packages/experience-registry";
 import type { GoalProgressProvider } from "../../../packages/goal-progress";
 import type { PortfolioSnapshotProvider } from "../../../packages/portfolio-snapshot";
-import { activeContexts } from "../../../packages/ts-adapter";
 import type { RecommendationProviderRegistry } from "../../../packages/recommendations";
 import type { ApprovalStore } from "../approval-store";
 import type { CapabilityRegistry } from "../capability-registry";
@@ -47,11 +45,13 @@ import { simulateCustomerEvent } from "../event-simulator";
 import type { GatewaySettings } from "../gateway";
 import type { IntegrationTaskService } from "../integration-tasks";
 import type { KnowledgeBaseStore } from "../knowledge-base";
-import { discoverMcpServer, importMcpToolAsConnector } from "../mcp-discovery";
+import { discoverMcpServer, mcpToolConnector } from "../mcp-discovery";
 import { mcpExposureConfigSchema, STANDALONE_SFIELD_MCP_TOOLS, type McpExposureStore } from "../mcp-exposure-store";
 import type { OmnichannelStore } from "../omnichannel-store";
 import type { OpsIncidentStore } from "../ops-store";
 import { scrubWithPiiFirewall, type PiiFirewallStore } from "../pii-firewall";
+import type { PublicationReviews } from "../publication-reviews";
+import { registryContentDeleteSchema, registryIntentDeleteSchema, registryNbaDeleteSchema, registryNbaOrderSchema } from "../studio-publications";
 import type { Runtime } from "../runtime";
 import type { SalesDealStore } from "../sales-store";
 import type { ScheduledJobStore } from "../scheduled-jobs";
@@ -70,13 +70,18 @@ import type { WriteAuditStore } from "../write-audit";
 
 const idPattern = /^[A-Za-z0-9._-]{1,80}$/;
 
-const wealthRegistryWrites = new Set([
-  "registry-intent", "registry-intent-delete", "registry-content", "registry-content-delete",
-  "registry-nba", "registry-nba-reorder", "registry-nba-delete",
-]);
+const registryChangeSchemas = {
+  "registry-intent": managedIntentInputSchema,
+  "registry-intent-delete": registryIntentDeleteSchema,
+  "registry-content": managedContentInputSchema,
+  "registry-content-delete": registryContentDeleteSchema,
+  "registry-nba": managedNbaRuleInputSchema,
+  "registry-nba-reorder": registryNbaOrderSchema,
+  "registry-nba-delete": registryNbaDeleteSchema,
+};
 
 export function isExperienceRegistryEndpoint(id: string) {
-  return id === "experience-registry" || wealthRegistryWrites.has(id);
+  return id === "experience-registry" || Object.hasOwn(registryChangeSchemas, id);
 }
 
 function recordWorkspaceRegistry(
@@ -144,7 +149,7 @@ export interface AdminStudioRouteDeps {
   salesStore: SalesDealStore;
   profileStore: CustomerProfileStore;
   customer360: Customer360Service;
-  experienceRegistry: ExperienceRegistryStore;
+  publicationReviews: PublicationReviews;
   widgetLibrary: WidgetLibraryStore;
   widgetLibraries: Record<DomainPackId, WidgetLibraryStore>;
   omnichannelStore: OmnichannelStore;
@@ -176,7 +181,7 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
   const {
     req, res, url, origin, resource, id, operation, method, principalId, viewer, inspectorEnabled,
     store, runtime, gateway, dataDir, experience, registry, membership, portfolioSnapshots,
-    goalProgressProvider, recommendationRegistry, opsStore, salesStore, profileStore, customer360, experienceRegistry,
+    goalProgressProvider, recommendationRegistry, opsStore, salesStore, profileStore, customer360, publicationReviews,
     widgetLibrary, widgetLibraries, omnichannelStore, evalRunner, uxEvolution, tradeStore,
     approvalStore, connectorStore, workflowEngine, writeAudit, mcpExposure, integrationService,
     knowledgeBase, scheduledJobs, verticalFactory, piiFirewall, now, json, body,
@@ -187,6 +192,8 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
   if (resource !== "admin" || !inspectorEnabled || operation) return false;
 
   const toolSetupLimit = 768 * 1024;
+  const requestReview = (action: string, scope: FlowScope, input: unknown) =>
+    json(res, publicationReviews.request(action, input, { scope, principalId, operator: requireOperator() }), 202);
   const experienceTool = (ref: string) => integrationService.interactiveReadContract(ref);
   if (id === "treatment-runs" && method === "GET") {
     const query = z.object({
@@ -233,12 +240,14 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
   if (id === "ui-layouts" && method === "POST") {
     const change = await body(req, uiLayoutChangeSchema, 32 * 1024);
     const actor = requireOperator();
-    if (change.operation !== "unpublish") {
-      const domain = change.domainId ?? ("id" in change ? store.listUiLayouts(principalId, actor).find((layout) => layout.id === change.id)?.domainId : undefined) ?? "wealth";
-      validateUiDesign(change.design, uiTargetOptions(registry, principalId), change.operation === "publish", change.operation === "publish" ? domain : undefined);
-      if (change.operation === "publish" && change.design.experience) validateInteractiveExperience(change.design.experience, domain, experienceTool);
+    if (change.operation === "draft") {
+      validateUiDesign(change.design, uiTargetOptions(registry, principalId), false);
+      json(res, store.changeUiLayout(principalId, actor, membership.authoring(actor), change, now()));
+    } else {
+      const current = "id" in change ? store.listUiLayouts(principalId, actor).find((layout) => layout.id === change.id) : undefined;
+      const scope = current?.domainId ?? ("domainId" in change ? change.domainId : undefined) ?? "wealth";
+      requestReview(id, scope, change);
     }
-    json(res, store.changeUiLayout(principalId, actor, membership.authoring(actor), change, now()));
     return true;
   }
   if (id === "ui-layout-preview" && method === "POST") {
@@ -310,8 +319,16 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
   }
   if (id === "widgets" && method === "POST") {
     const change = await body(req, widgetLibraryChangeSchema, 32 * 1024);
-    const library = widgetLibraries[authoringDomain()];
-    json(res, library.change(library.authorKey(principalId, requireOperator()), change, now()));
+    const scope = authoringDomain();
+    const library = widgetLibraries[scope];
+    const owner = library.authorKey(principalId, requireOperator());
+    const current = change.id ? library.list(owner, now()).find(({ id }) => id === change.id) : undefined;
+    if (change.operation === "set_availability" || current?.availableForConsumption
+      || (change.operation === "save" && change.widget.availableForConsumption)) {
+      requestReview(id, scope, change);
+    } else {
+      json(res, library.change(owner, change, now()));
+    }
     return true;
   }
   if (id === "customers" && method === "GET") {
@@ -349,55 +366,12 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
     json(res, domain === "wealth" ? buildExperienceRegistryView() : recordWorkspaceRegistry(domain, store, widgetLibraries[domain], runtime));
     return true;
   }
-  if (method === "POST" && id && wealthRegistryWrites.has(id) && authoringDomain() !== "wealth") {
-    throw new ApiError(400, "registry_domain_invalid", "Choose Wealth to edit customer intents, content, and Next Best Action rules.");
-  }
-  if (id === "registry-intent" && method === "POST") {
-    const input = await body(req, managedIntentInputSchema, 16 * 1024);
-    if (layoutTargetDomain({ kind: "intent", id: input.intentId }) !== "wealth") {
-      throw new ApiError(400, "registry_domain_invalid", "Use a Wealth intent ID here. Publish IT Ops and Sales intents in UI Builder.");
+  if (method === "POST" && id && Object.hasOwn(registryChangeSchemas, id)) {
+    if (authoringDomain() !== "wealth") {
+      throw new ApiError(400, "registry_domain_invalid", "Choose Wealth to edit customer intents, content, and Next Best Action rules.");
     }
-    if (!activeContexts.some((c) => c.contextId === input.contextId)) {
-      throw new ApiError(400, "invalid_context", "Choose an active Treatment Selector context.");
-    }
-    experienceRegistry.upsertIntent(input);
-    json(res, buildExperienceRegistryView());
-    return true;
-  }
-  if (id === "registry-intent-delete" && method === "POST") {
-    const { intentId } = await body(req, z.object({ intentId: z.string().regex(/^[a-z][a-z0-9_]{1,63}$/) }).strict());
-    experienceRegistry.deleteOrResetIntent(intentId);
-    json(res, buildExperienceRegistryView());
-    return true;
-  }
-  if (id === "registry-content" && method === "POST") {
-    const input = await body(req, managedContentInputSchema, 32 * 1024);
-    experienceRegistry.upsertContent(input);
-    json(res, buildExperienceRegistryView());
-    return true;
-  }
-  if (id === "registry-content-delete" && method === "POST") {
-    const { contentId } = await body(req, z.object({ contentId: z.string().regex(/^[a-z][a-z0-9_]{1,63}$/) }).strict());
-    experienceRegistry.deleteOrResetContent(contentId);
-    json(res, buildExperienceRegistryView());
-    return true;
-  }
-  if (id === "registry-nba" && method === "POST") {
-    const input = await body(req, managedNbaRuleInputSchema, 16 * 1024);
-    experienceRegistry.upsertNbaRule(input);
-    json(res, buildExperienceRegistryView());
-    return true;
-  }
-  if (id === "registry-nba-reorder" && method === "POST") {
-    const { orderedIds } = await body(req, z.object({ orderedIds: z.array(z.string().min(1)).min(1).max(30) }).strict());
-    experienceRegistry.reorderNbaRules(orderedIds);
-    json(res, buildExperienceRegistryView());
-    return true;
-  }
-  if (id === "registry-nba-delete" && method === "POST") {
-    const { id: ruleId } = await body(req, z.object({ id: z.string().regex(/^nba_[a-z0-9_]{3,40}$/) }).strict());
-    experienceRegistry.deleteOrResetNbaRule(ruleId);
-    json(res, buildExperienceRegistryView());
+    const schema = registryChangeSchemas[id as keyof typeof registryChangeSchemas];
+    requestReview(id, "wealth", await body(req, schema, 32 * 1024));
     return true;
   }
   if (id === "evaluation" && method === "GET") {
@@ -412,7 +386,9 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
     return true;
   }
   if ((id === "capabilities" || id === "capability-validation") && method === "POST") {
-    json(res, registry.publish(principalId, await body(req, z.unknown(), 48 * 1024), id === "capability-validation"));
+    const input = await body(req, z.unknown(), 48 * 1024);
+    if (id === "capability-validation") json(res, registry.publish(principalId, input, true));
+    else requestReview(id, authoringDomain(), input);
     return true;
   }
   if (id === "capability-preview" && method === "POST") {
@@ -444,10 +420,16 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
       throw new ApiError(403, "domain_access_denied", "Flow settings are unavailable for this scope.");
     }
     if (!scope.success) throw new ApiError(400, "domain_invalid", "Choose a valid settings scope.");
-    const result = method === "GET" ? store.flowSetup(scope.data, editableScopes)
-      : store.saveFlowSetup(scope.data, editableScopes, await body(req, flowOverridesSchema, 64 * 1024), req.headers["if-match"]);
-    res.setHeader("ETag", result.revision);
-    json(res, result.data);
+    const result = store.flowSetup(scope.data, editableScopes);
+    if (method === "GET") {
+      res.setHeader("ETag", result.revision);
+      json(res, result.data);
+    } else {
+      const input = await body(req, flowOverridesSchema, 64 * 1024);
+      const expected = req.headers["if-match"];
+      if (expected && expected !== result.revision) throw new ApiError(412, "flows_changed", "Flow settings changed. Reload them before saving.");
+      requestReview(id, scope.data, input);
+    }
     return true;
   }
   if (id === "tools" && method === "GET") {
@@ -473,9 +455,11 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
         throw new ApiError(412, "tool_setup_changed", "Tool settings changed. Reload Tool setup to review the latest settings.");
       }
     }
-    store.saveToolSetup(domainId, setup, previewSession);
-    res.setHeader("ETag", tag);
-    json(res, setup);
+    if (previewSession) {
+      store.saveToolSetup(domainId, setup, previewSession);
+      res.setHeader("ETag", tag);
+      json(res, setup);
+    } else requestReview(id, domainId, setup);
     return true;
   }
   if (id === "treatment-preview" && method === "POST") {
@@ -489,8 +473,8 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
     const domainId = authoringDomain();
     const current = store.toolSetup(domainId);
     const updated = addCcreRule(current, rule);
-    if (updated !== current) store.saveToolSetup(domainId, updated);
-    json(res, rule);
+    if (updated === current) json(res, rule);
+    else requestReview("tools", domainId, updated);
     return true;
   }
   if (id === "omnichannel" && method === "GET") {
@@ -590,11 +574,10 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
   }
   if (id === "mcp-import" && method === "POST") {
     const input = await body(req, mcpImportRequestSchema, 8 * 1024);
-    json(res, importMcpToolAsConnector({
+    requestReview("connectors", "tenant", mcpToolConnector({
       ...input,
       requiresApproval: input.requiresApproval ?? input.effect === "write",
       dualControl: input.dualControl ?? false,
-      connectorStore,
     }));
     return true;
   }
@@ -604,12 +587,12 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
   }
   if (id === "knowledge-base" && method === "POST") {
     const input = await body(req, knowledgeDocumentUpsertSchema, 32 * 1024);
-    json(res, knowledgeBase.upsert(input));
+    requestReview(id, "tenant", input);
     return true;
   }
   if (id === "knowledge-base-delete" && method === "POST") {
     const { id: docId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());
-    json(res, knowledgeBase.deleteOrReset(docId));
+    requestReview(id, "tenant", { id: docId });
     return true;
   }
   if (id === "knowledge-search" && method === "POST") {
@@ -641,19 +624,13 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
   }
   if (id === "vertical-packs-generate" && method === "POST") {
     const { prompt } = await body(req, z.object({ prompt: z.string().trim().min(5).max(600) }).strict(), 8 * 1024);
-    json(res, await verticalFactory.generateAndInstall({
-      prompt,
-      gateway,
-      dataDir,
-      knowledgeBase,
-      workflowEngine,
-      connectors: connectorStore.list(),
-    }), 201);
+    const draft = await verticalFactory.generateDraft({ prompt, gateway, dataDir, connectors: connectorStore.list() });
+    requestReview(id, "tenant", draft);
     return true;
   }
   if (id === "vertical-packs-delete" && method === "POST") {
     const { id: packId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());
-    json(res, verticalFactory.deletePack(packId));
+    requestReview(id, "tenant", { id: packId });
     return true;
   }
   if (id === "pii-firewall" && method === "GET") {
@@ -699,17 +676,8 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
   }
   if (id === "ux-evolution-approve" && method === "POST") {
     const { id: proposalId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());
-    try {
-      json(res, uxEvolution.approveProposal(proposalId, {
-        principalId: widgetLibrary.authorKey(principalId, requireOperator()),
-        widgetLibrary,
-        knowledgeBase,
-        now: now(),
-      }));
-      return true;
-    } catch (err) {
-      throw new ApiError(404, "ux_proposal_not_found", err instanceof Error ? err.message : "Proposal not found.");
-    }
+    requestReview(id, "wealth", { id: proposalId });
+    return true;
   }
   if (id === "ux-evolution-dismiss" && method === "POST") {
     const { id: proposalId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());

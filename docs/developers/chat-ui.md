@@ -2,19 +2,27 @@
 
 A layout controls how an existing result appears. Attach it to an intent, a capability, or a published Wealth content item. On a customer turn the server supplies verified content, values and actions. You can share the same design across customers with different results.
 
+### Review before publishing
+
+**Publish** submits the exact design for review. **Review in Admin chat** opens the request with its revision and a preview of the prepared change. You can also open **Approvals chat** from Administration to see pending requests. Select **Approve publication** or **Deny request** on the card. Decisions use the signed-in operator's identity and are recorded in Logs.
+
+Chat continues using the current publication while a change is under review. If the underlying revision changes, submit a new review from the latest revision. Widget availability, catalog changes, rules, tool and routing settings, workflows, connectors, and integration tasks use the same review chat. A Treatment Selector publication keeps its topic, content, rules, and dictionary together so later drafts leave the published decision intact.
+
+In **sfield Studio → Overview & Locks**, **Request lock approval** submits the current sfield configuration fingerprint for review. When approved, the lock records the exact configuration fingerprint and the operator who approved it.
+
 ### Publish a balance comparison
 
 1. In **Administration → UI Builder**, select **Wealth** and open the balance comparison layout or its starter design. Set **Layout name** to **Balance definitions**.
 2. In **Details**, set **When should this layout appear?** to “Explain available and current balances side by side.” Attach **Compare balances** (`compare_balances`). A description can help the router match an existing intent.
 3. Add or edit a text heading such as **How to read your balance**. Keep the **Balance comparison** block (`PznComparison`). Choose **Grid layout** to arrange blocks in columns.
 4. **Save draft**. In **Layout preview → Try a chat turn**, ask **“Compare available and current balances.”** The expected result says **Draft layout applied** and includes your heading. Layout preview uses sample blocks and reads the selected profile for supported data bindings. The chat check runs the configured model and domain rules.
-5. **Publish**, then ask the same question in customer chat. In **Inspector → Published UI**, check the design name and revision. **Design library → Use as template** gives another owner an editable copy. Publishing an edit affects subsequent turns. Earlier turns retain their recorded UI.
+5. **Publish**, open **Review in Admin chat**, and approve the prepared design. Then ask the same question in customer chat. In **Inspector → Published UI**, check the design name and revision. **Design library → Use as template** gives another owner an editable copy. Approved publications affect subsequent turns. Earlier turns retain their recorded UI.
 
 ### Configure how a content item appears
 
 In **Administration → Intents & Catalog → Wealth → Content Catalog**, select **Home down payment**. **Built-in formats** shows which verified formats this item may use. Save changes to the content item to update that list.
 
-Choose **Design in UI Builder** to start with the content item attached and its first allowed block in place. Add a saved widget, a linked sequence of widgets, or text. Preview with a customer who has a home-buying goal, then use **Try a chat turn** with **“Show my home-buying goal and savings progress.”** Publish to apply the layout in chat. The Content Catalog shows the published design and revision.
+Choose **Design in UI Builder** to start with the content item attached and its first allowed block in place. Add a saved widget, a linked sequence of widgets, or text. Preview with a customer who has a home-buying goal, then use **Try a chat turn** with **“Show my home-buying goal and savings progress.”** Submit it for publication and approve it in Admin chat. The Content Catalog then displays the published design and revision.
 
 The app checks content attachments after verifying which items the reply will show. If multiple items have designs, it tries them in the order the reply uses them, then tries the intent and capability attachments. The selected layout keeps the verified goal, balances, or other approved blocks and arranges the widgets around them.
 
@@ -61,7 +69,7 @@ const display = await response.json();
 console.log(display.blocks.map(block => block.component));
 ```
 
-`GET /api/admin/ui-layouts` lists the caller's drafts, visible publications and attachment targets. To save, send `{ operation: "draft", domainId: "wealth", design }` to `POST /api/admin/ui-layouts`. To publish that draft, send `{ operation: "publish", domainId: "wealth", id, revision, design }` using the returned ID and revision. A `409` can mean the revision is stale or another publication owns the target. Read the current record before retrying. The request shapes are in `packages/contracts/ui-layout.ts`.
+`GET /api/admin/ui-layouts` lists the caller's drafts, visible publications and attachment targets. To save, send `{ operation: "draft", domainId: "wealth", design }` to `POST /api/admin/ui-layouts`. To request publication, send `{ operation: "publish", domainId: "wealth", id, revision, design }` using the returned ID and revision. The `202` response includes the approval ID. Open `/admin/chat?review=<approvalId>` to review it. A `409` can mean the revision is stale or another publication owns the target. Read the current record before retrying.
 
 ### Bind values and handle clicks
 

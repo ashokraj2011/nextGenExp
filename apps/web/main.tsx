@@ -11,6 +11,7 @@ import {
 import { defaultWorkspacePins, pendingActionsContext, type WorkspacePin } from "../../packages/contracts/workspace";
 import { adminPaths } from "../../packages/contracts/admin-paths";
 import { api } from "./api";
+import { PublicationReviewNotice } from "./publication-review-notice";
 import { AdminNavigation } from "./admin-navigation";
 import { readActiveConversation, readProfileSession, rememberActiveConversation, saveProfileSession } from "./conversation-storage";
 import { DemoProfiles, ProfileAvatar } from "./demo-profiles";
@@ -68,6 +69,7 @@ function App() {
       embedBrand: query.get("brand")?.trim() || "Your assistant",
       embedAccent: query.get("accent")?.trim() || "",
       embedPrompt: query.get("prompt")?.trim() || "",
+      review: adminChat ? query.get("review") : null,
     };
   });
   const [embedBrand, setEmbedBrand] = useState(entry.embedBrand);
@@ -473,14 +475,14 @@ function App() {
     return () => { alive = false; stream.close(); };
   }, [activeProfile?.personaId, adminChat]);
 
-  const send = async (message: string) => {
+  const send = async (message: string, fresh = false) => {
     if (!configuration) return;
     if (!adminChat && isHandoffPhrase(message)) {
       void startHandoff(message);
     }
     await exclusive(async () => {
-      const target = chat ?? await createConversation(activeProfile?.personaId ?? configuration.defaultPersonaId, configuration.defaultScenarioId, domainPack.id);
-      if (!chat) choose(target);
+      const target = !fresh && chat ? chat : await createConversation(activeProfile?.personaId ?? configuration.defaultPersonaId, configuration.defaultScenarioId, domainPack.id);
+      if (target !== chat) choose(target);
       setSection("summary");
       try {
         accept(await api.send(target.id, message, requestId(target.id + ":" + message)));
@@ -603,6 +605,16 @@ function App() {
 
   const sendRef = useRef(send);
   sendRef.current = send;
+  const openedReview = useRef(false);
+  useEffect(() => {
+    const review = entry.review;
+    if (!configuration || !review || openedReview.current || (review !== "pending" && !/^apr_[a-f0-9]{32}$/.test(review))) return;
+    openedReview.current = true;
+    const url = new URL(location.href);
+    url.searchParams.delete("review");
+    history.replaceState(history.state, "", url);
+    void sendRef.current(review === "pending" ? "Show pending approvals" : "Review approval " + review, true);
+  }, [configuration, entry.review]);
   const startConversationRef = useRef(startConversation);
   startConversationRef.current = startConversation;
   const embedReadyPosted = useRef(false);
@@ -1073,4 +1085,4 @@ function App() {
 installA2uiStyles();
 const root = createRoot(document.getElementById("root")!);
 document.title = adminChat ? "Admin chat" : "Your assistant";
-root.render(<App />);
+root.render(<><App /><PublicationReviewNotice /></>);

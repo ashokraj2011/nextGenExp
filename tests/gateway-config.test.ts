@@ -102,7 +102,7 @@ test("model gateway admin: test, activate (restart hook), mask the key, reset", 
   await client.request("/api/admin/gateway/activate", { config: { ...good, model: "other-model" } }, 409);
 
   // Activate: saved, restart hook called, key stored only on the server and masked in the view.
-  const activated = await client.request<{ activated: boolean; restarting: boolean; view: View }>("/api/admin/gateway/activate", { config: good });
+  const activated = await client.publish<{ activated: boolean; restarting: boolean; view: View }>("/api/admin/gateway/activate", { config: good });
   assert.equal(activated.restarting, true);
   await new Promise((r) => setTimeout(r, 400));
   assert.equal(restarts, 1);
@@ -120,7 +120,7 @@ test("model gateway admin: test, activate (restart hook), mask the key, reset", 
   assert.equal(kept.ok, true);
 
   // Reset returns to the environment settings and restarts again.
-  const reset = await client.request<{ reset: boolean; view: View }>("/api/admin/gateway/reset", {});
+  const reset = await client.publish<{ reset: boolean; view: View }>("/api/admin/gateway/reset", {});
   assert.equal(reset.reset, true);
   await new Promise((r) => setTimeout(r, 400));
   assert.equal(restarts, 2);

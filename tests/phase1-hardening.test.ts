@@ -14,8 +14,10 @@ import { scrubNeutralModelRequest } from "../apps/server/pii-firewall";
 import { CepTelemetry } from "../apps/server/telemetry";
 import type { TelemetryView } from "../packages/contracts/telemetry";
 import type { IntegrationTasksView, TaskRun } from "../packages/contracts/integration-task";
-import type { WorkflowRun } from "../packages/contracts/workflow-definition";
-import type { ApprovalRecord } from "../packages/contracts/approval";
+import type { WorkflowRun, WorkflowsAdminView } from "../packages/contracts/workflow-definition";
+import type { ApprovalRecord, PublicationReview } from "../packages/contracts/approval";
+import type { KnowledgeBaseView } from "../packages/contracts/knowledge-base";
+import type { VerticalPacksView } from "../packages/contracts/vertical-pack";
 
 /** Fake OpenAI-compatible LLM that echoes the received user prompt inside a JSON object so tests can assert zero PII egress. */
 async function startEchoLlm() {
@@ -176,7 +178,7 @@ test("1.3 Unify legacy connectors & workflows onto governed Integration → Task
   const client = await testClient(app.url);
 
   // A. Migrate legacy sandbox connector (pagerduty_incident_webhook) into a governed Integration Task published live to sfield.
-  const migrated = await client.request<{
+  const migrated = await client.publish<{
     results: Array<{ connectorId: string; toolRef: string; status: string; route?: string }>;
     view: IntegrationTasksView;
   }>("/api/integrations/migrate-connectors", { connectorId: "pagerduty_incident_webhook" });
@@ -196,11 +198,11 @@ test("1.3 Unify legacy connectors & workflows onto governed Integration → Task
   assert.equal(approvedPd.taskRun.outcome?.code, "OK");
 
   // Re-running migration is idempotent.
-  const secondMigrate = await client.request<{ results: Array<{ status: string }> }>("/api/integrations/migrate-connectors", { connectorId: "pagerduty_incident_webhook" });
+  const secondMigrate = await client.publish<{ results: Array<{ status: string }> }>("/api/integrations/migrate-connectors", { connectorId: "pagerduty_incident_webhook" });
   assert.equal(secondMigrate.results[0]!.status, "already_migrated");
 
   // B. Workflow Engine executes a governed `integration_task` step — including pausing for sfield HITL approval and auto-resuming!
-  await client.request("/api/workflows", {
+  await client.publish("/api/workflows", {
     id: "governed_incident_flow",
     name: "Governed Incident Escalation Flow",
     domain: "operations",
@@ -259,4 +261,35 @@ test("1.3 Unify legacy connectors & workflows onto governed Integration → Task
   // Telemetry captured the governed sfield tool executions too.
   const tele = await client.request<TelemetryView>("/api/admin/telemetry");
   assert.ok(tele.summary.totalToolCalls >= 2, `Expected tool calls in telemetry, got ${tele.summary.totalToolCalls}`);
+});
+
+test("generated portals and their bundled assets become available together after review", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "cep-portal-review-"));
+  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: dir, gateway: null, inspectorEnabled: true });
+  t.after(async () => { await app.close(); await rm(dir, { recursive: true, force: true }); });
+  const client = await testClient(app.url);
+  const pending = await client.request<PublicationReview>("/api/admin/vertical-packs-generate", {
+    prompt: "Build an insurance claims review portal.",
+  }, 202);
+  const { blueprint } = pending.approval.payload.candidate as {
+    blueprint: { id: string; policyDoc: { id: string }; workflow: { id: string } };
+  };
+  const live = async () => {
+    const [portals, knowledge, workflows] = await Promise.all([
+      client.request<VerticalPacksView>("/api/admin/vertical-packs"),
+      client.request<KnowledgeBaseView>("/api/admin/knowledge-base"),
+      client.request<WorkflowsAdminView>("/api/workflows"),
+    ]);
+    return {
+      portal: portals.packs.find(({ id }) => id === blueprint.id),
+      policy: knowledge.documents.find(({ id }) => id === blueprint.policyDoc.id),
+      workflow: workflows.definitions.find(({ id }) => id === blueprint.workflow.id),
+    };
+  };
+  assert.deepEqual(await live(), { portal: undefined, policy: undefined, workflow: undefined });
+  await client.request("/api/approvals/" + pending.approval.id + "/decide", { decision: "approve" });
+  const { portal, policy, workflow } = await live();
+  assert.equal(portal?.id, blueprint.id);
+  assert.equal(policy?.id, blueprint.policyDoc.id);
+  assert.equal(workflow?.id, blueprint.workflow.id);
 });

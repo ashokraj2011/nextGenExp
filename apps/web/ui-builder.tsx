@@ -11,7 +11,7 @@ import {
 } from "../../packages/contracts/ui-layout";
 import type { DisplayExperience } from "../../packages/contracts/surface";
 import type { SavedWidget } from "../../packages/contracts/widget";
-import { api, toolSetupErrorMessage } from "./api";
+import { api, isPublicationReview, toolSetupErrorMessage } from "./api";
 import { ExperienceCanvasView, ExperienceControls, ExperienceLayoutPreview } from "./surface";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import { adminPaths } from "../../packages/contracts/admin-paths";
@@ -1029,6 +1029,10 @@ function UiWorkspace({ initial, customers }: {
         ? { operation, id: existing!.id, revision: existing!.revision }
         : { operation, ...existing, domainId, design: designToSave };
       const saved = await api.saveUiLayout(change);
+      if (isPublicationReview(saved)) {
+        setNotice("Submitted for approval.");
+        return;
+      }
       setRecords((previous) => [saved, ...previous.filter(({ id }) => id !== saved.id)]);
       setLibrary((previous) => {
         const others = previous.filter((item) => item.id !== saved.id);

@@ -428,7 +428,7 @@ export class Store {
       .map((row) => ({ ...JSON.parse(row.publication) as UiPublication, domainId: row.domain_id }));
   }
 
-  changeUiLayout(principalId: string, operator: string, allowedDomains: readonly DomainPackId[], change: UiLayoutChange, now: number) {
+  changeUiLayout(principalId: string, operator: string, allowedDomains: readonly DomainPackId[], change: UiLayoutChange, now: number, preview = false) {
     return this.db.tx(() => {
       const layouts = this.listUiLayouts(principalId, operator);
       const current = "id" in change ? layouts.find(({ id }) => id === change.id) : undefined;
@@ -477,6 +477,7 @@ export class Store {
         published = undefined;
       }
       const record: UiLayoutRecord = { id, domainId, revision, updatedAt: now, draft, published };
+      if (preview) return record;
       this.db.run(`INSERT INTO domain_ui_layouts VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(tenant_id, id) DO UPDATE SET owner_key=excluded.owner_key, updated_at=excluded.updated_at, record=excluded.record`,
         serverTenantId, domainId, "operator:" + operator, id, now, JSON.stringify(record));

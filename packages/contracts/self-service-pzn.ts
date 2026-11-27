@@ -89,15 +89,15 @@ export const pznAttributeSchema = pznAttributeInputSchema.extend({
 }).strict();
 export type PznAttribute = z.infer<typeof pznAttributeSchema>;
 
-export type PznDictionaryNamespaceView = PznNamespace & {
-  attributes: PznAttribute[];
-};
+const pznDictionaryNamespaceSchema = pznNamespaceSchema.extend({ attributes: z.array(pznAttributeSchema) });
+export type PznDictionaryNamespaceView = z.infer<typeof pznDictionaryNamespaceSchema>;
 
-export type PznDataDictionary = {
-  version: string;
-  updatedAt: string;
-  namespaces: PznDictionaryNamespaceView[];
-};
+const pznDataDictionarySchema = z.object({
+  version: z.string(),
+  updatedAt: z.string(),
+  namespaces: z.array(pznDictionaryNamespaceSchema),
+}).strict();
+export type PznDataDictionary = z.infer<typeof pznDataDictionarySchema>;
 
 export const pznTextContentInputSchema = z.object({
   contentId: pznSlugSchema,
@@ -208,6 +208,7 @@ export const pznContextPublicationSchema = z.object({
   publishedBy: z.string().min(1),
   notes: z.string().max(240).default(""),
   dictionaryVersion: z.string().min(1),
+  dictionary: pznDataDictionarySchema.optional(),
   context: pznContextSchema,
   contents: z.array(pznTextContentSchema),
   rules: z.array(pznRuleSchema),

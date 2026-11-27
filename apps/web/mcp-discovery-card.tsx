@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Check, Download, Plug, Search, ShieldCheck } from "lucide-react";
 import type { McpDiscoveredTool, McpDiscoveryResult } from "../../packages/contracts/mcp-discovery";
-import { api, toolSetupErrorMessage } from "./api";
+import { api, isPublicationReview, toolSetupErrorMessage } from "./api";
 
 const MCP_PRESETS = [
   { label: "Wealth Brokerage MCP", url: "mcp-sandbox://wealth-brokerage" },
@@ -62,6 +62,7 @@ export function McpDiscoveryCard({ onImported }: { onImported: () => void }) {
         ...(authHeaderName.trim() ? { authHeaderName: authHeaderName.trim() } : {}),
         ...(authEnvVar.trim() ? { authEnvVar: authEnvVar.trim() } : {}),
       });
+      if (isPublicationReview(imported)) return;
       setImportedSet((prev) => new Set([...prev, tool.name]));
       setNotice(`Imported "${tool.name}" as governed connector "${imported.connector.id}" (HITL ${imported.connector.requiresApproval ? "enabled" : "off"}). Available in External Connectors & Workflows.`);
       onImported();

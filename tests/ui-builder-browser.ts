@@ -4,7 +4,7 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { chromium } from "playwright";
 import { startTestPreview } from "./preview";
-import { openAdmin } from "./browser-navigation";
+import { approvePublicationInChat, approvePublicationResponse, openAdmin } from "./browser-navigation";
 
 const app = await startTestPreview();
 const browser = await chromium.launch();
@@ -42,7 +42,8 @@ try {
   await preview.getByText("Draft layout applied.", { exact: true }).waitFor();
   await preview.getByText("Try a chat turn", { exact: true }).click();
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await page.getByText("Published to the shared design library.", { exact: true }).waitFor();
+  await approvePublicationInChat(page, "Read both balances");
+  await page.reload();
   await preview.getByRole("heading", { name: "Understanding your balances" }).waitFor({ state: "hidden" });
 
   const colleague = await browser.newPage({ httpCredentials: { ...reviewer, origin: app.url } });
@@ -92,7 +93,7 @@ try {
       fields: [{ id: "amount", label: "New target", type: "currency", placeholder: "", required: true, options: [], defaultBinding: "goal.target" }] }],
   };
   const publication = await page.request.post(app.url + "/api/admin/ui-layouts", { data: { operation: "publish", design: formDesign } });
-  assert.equal(publication.status(), 200);
+  await approvePublicationResponse(page, publication);
   await customerInput.fill("Show my available and current balance amounts.");
   await customerInput.press("Enter");
   const form = customer.getByRole("region", { name: "Savings target" });
@@ -158,6 +159,8 @@ try {
   await experiencePreview.getByRole("heading", { name: "Delivery tracking" }).waitFor();
   assert.equal(await experiencePreview.locator('[data-renderer="a2ui"]').count(), 1);
   await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await approvePublicationInChat(page);
+  await page.reload();
   await page.getByText("Published revision 1", { exact: true }).waitFor();
 
   const shipping = await browser.newPage({ viewport: { width: 390, height: 850 }, reducedMotion: "reduce" });
@@ -210,7 +213,8 @@ try {
 
   await page.getByLabel("Attach to chat").selectOption("capability:ops_incident");
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await page.getByText("Published to the shared design library.", { exact: true }).waitFor();
+  await approvePublicationInChat(page);
+  await page.reload();
   await preview.getByRole("link", { name: "Open chat", exact: true }).click();
   const itQuestion = page.getByRole("textbox", { name: "Your question" });
   await itQuestion.fill("Show details for incident INC-4821.");
@@ -265,7 +269,8 @@ try {
   await page.getByRole("button", { name: "Remove Home down payment", exact: true }).waitFor();
   await preview.getByRole("heading", { name: "Home down payment", exact: true }).waitFor();
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await page.getByText("Published to the shared design library.", { exact: true }).waitFor();
+  await approvePublicationInChat(page);
+  await page.reload();
   await openAdmin(page, "intents");
   await page.getByRole("tab", { name: /Content Catalog/ }).click();
   await page.getByRole("region", { name: "Content catalog", exact: true }).getByRole("button", { name: /^Home down payment/ }).click();
