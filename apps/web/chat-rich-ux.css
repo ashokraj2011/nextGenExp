@@ -319,39 +319,14 @@
   color: var(--muted);
 }
 
-.citations-strip {
+.policy-citations {
   margin-top: 8px;
   display: grid;
+  justify-items: start;
   gap: 8px;
 }
-.citations-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.citation-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 9px;
-  border-radius: 999px;
-  border: 1px solid var(--teal-border, rgba(13, 148, 136, 0.3));
-  background: var(--teal-pale, rgba(13, 148, 136, 0.08));
-  color: var(--teal-dark, #0f766e);
-  font-size: 0.72rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-.citation-pill.is-rag {
-  border-color: var(--line-strong);
-  background: transparent;
-  color: var(--muted);
-}
-.citation-pill.is-active {
-  border-color: var(--teal, #0d9488);
-  color: var(--ink);
-}
 .citation-popover {
+  justify-self: stretch;
   padding: 10px 12px;
   border-radius: 12px;
   border: 1px solid var(--line-strong);

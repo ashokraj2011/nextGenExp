@@ -308,6 +308,7 @@ try {
   await page.getByRole("button", { name: /Compare two terms/ }).click();
   await page.getByRole("heading", { name: "Compare balance definitions" }).waitFor();
   await page.locator('[data-renderer="a2ui"]').waitFor();
+  assert.equal(await page.getByRole("button", { name: /^\[\d+\] / }).count(), 0);
   await page.getByText("For illustration.", { exact: true }).waitFor();
   assert.equal(await page.getByRole("button", { name: "Explain available balance", exact: true }).isVisible(), true);
   assert.equal(await page.getByText("Explore suggested questions", { exact: true }).count(), 0);
@@ -357,14 +358,22 @@ try {
   await page.getByRole("heading", { name: "Available balance", exact: true, level: 3 }).waitFor();
 
   const input = page.getByLabel("Your question");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   await input.fill("Explain this slow balance request");
   await input.press("Shift+Enter");
   await input.press("End");
   assert.match(await input.inputValue(), /\n/);
   await input.press("Enter");
+  const loading = page.locator(".reply-loading").getByRole("status");
+  await loading.waitFor();
+  assert.equal(await loading.textContent(), "Preparing your reply.");
+  assert.deepEqual(await loading.locator(".reply-dots > span").evaluateAll((dots) =>
+    dots.map((dot) => getComputedStyle(dot).animationName)), ["reply-dot-wave", "reply-dot-wave", "reply-dot-wave"]);
   await page.getByRole("button", { name: "End running task", exact: true }).click();
   await page.getByText("Response stopped.", { exact: true }).waitFor();
+  await loading.waitFor({ state: "hidden" });
   await page.getByRole("button", { name: "Retry", exact: true }).waitFor();
+  await page.emulateMedia({ reducedMotion: "reduce" });
 
   const abortPattern = /\/api\/conversations\/[^/]+\/turns$/;
   await page.route(abortPattern, (route) => route.abort(), { times: 1 });
@@ -551,7 +560,10 @@ try {
   const [pendingElement, placeholder] = await pendingCard;
   const snapshot = portfolioPage.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Portfolio snapshot" });
   await snapshot.getByText("$12,500", { exact: true }).waitFor();
-  await portfolioPage.getByText("Checking for recommendations…", { exact: true }).waitFor();
+  const waitingForRecommendations = portfolioPage.getByRole("status").filter({ hasText: "Checking for recommendations." });
+  await waitingForRecommendations.waitFor();
+  assert.equal(await waitingForRecommendations.locator(".reply-dots > span").first().evaluate((dot) =>
+    getComputedStyle(dot).animationName), "none");
   const earlyCard = await snapshot.elementHandle();
   const cashRecommendation = portfolioPage.getByText("You have $12,500 in cash. Would you like to explore investing options?", { exact: true });
   assert.equal(await cashRecommendation.count(), 0);
@@ -574,6 +586,7 @@ try {
   assert.ok(await discuss.isDisabled());
   releaseFinal();
   await cashRecommendation.waitFor();
+  await waitingForRecommendations.waitFor({ state: "hidden" });
   await portfolioPage.unroute(turnRead);
   assert.doesNotMatch(await pendingElement.innerText(), /mode=|exp=|blocks=|sources=|actions=/);
   assert.ok(await earlyCard.evaluate((card) => card.isConnected));

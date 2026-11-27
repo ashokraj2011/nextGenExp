@@ -7,7 +7,17 @@
 
 /* Match the geometry of the first card while the reply is being prepared. */
 .reply-loading { display: grid; gap: 12px; }
-.reply-status { margin: 0; color: var(--muted); font-size: .95rem; line-height: 1.6; }
+.reply-indicator { display: flex; align-items: center; min-block-size: 1.52rem; }
+.reply-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: var(--teal-pale);
+  color: var(--teal-dark);
+}
+.reply-dots > span { inline-size: 5px; block-size: 5px; border-radius: 50%; background: currentColor; opacity: .62; }
 .editorial-thread .reply-skeleton,
 .editorial-thread .experience-flow:not(.published-ui) .content-card,
 .editorial-thread .assistant-content > .nba-companion-card {
@@ -119,6 +129,9 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  .reply-dots > span { animation: reply-dot-wave 1.45s ease-in-out infinite; }
+  .reply-dots > span:nth-child(2) { animation-delay: 120ms; }
+  .reply-dots > span:nth-child(3) { animation-delay: 240ms; }
   .reply-skeleton::after {
     position: absolute;
     inset: 0;
@@ -135,6 +148,10 @@
   .assistant-message[data-live-reply] .surface-child ~ .surface-child ~ .surface-child,
   .assistant-message[data-live-reply] .nba-companion-card { animation-delay: 80ms; }
   .assistant-message[data-live-reply] .surface-child:focus-within { animation: none; }
+}
+@keyframes reply-dot-wave {
+  0%, 58%, 100% { transform: none; opacity: .45; }
+  28% { transform: translateY(-3px); opacity: 1; }
 }
 @keyframes reply-arrive {
   from { opacity: 0; transform: translateY(6px); }

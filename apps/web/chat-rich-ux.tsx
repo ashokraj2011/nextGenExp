@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  BookOpen, Brain, Check, CheckCircle2, Copy, Download, GitBranch, Headphones, PanelRightOpen,
-  Plus, Search, Send, ShieldCheck, Sparkles, Table2, Trash2, UserCheck, X,
+  Brain, Check, CheckCircle2, Copy, Download, GitBranch, Headphones, PanelRightOpen,
+  Plus, Search, Send, Sparkles, Table2, Trash2, UserCheck, X,
 } from "lucide-react";
 import type { TurnView } from "../../packages/contracts/api";
 import type { HandoffTicket } from "../../packages/contracts/handoff";
@@ -303,33 +303,10 @@ export function LiveHandoffCard({ ticket: initialTicket, onDismiss }: {
 }
 
 /* ============================================================================
- * 4. Verified Citations Strip & Policy KB Quick-Check Popover
+ * 4. Policy citations
  * ========================================================================== */
 
-type SourceItem = { title: string; label: string; version: string; ref: string };
-
-function extractExperienceSources(experience?: DisplayExperience): { sources: SourceItem[]; disclosures: string[] } {
-  if (!experience) return { sources: [], disclosures: [] };
-  const sources: SourceItem[] = [];
-  const seenRef = new Set<string>();
-  const disclosures: string[] = [];
-  const seenDisc = new Set<string>();
-
-  for (const block of experience.blocks) {
-    const props = block.props as { sources?: SourceItem[]; disclosures?: string[] };
-    for (const s of props.sources ?? []) {
-      if (!seenRef.has(s.ref)) { seenRef.add(s.ref); sources.push(s); }
-    }
-    for (const d of props.disclosures ?? []) {
-      if (!seenDisc.has(d)) { seenDisc.add(d); disclosures.push(d); }
-    }
-  }
-  return { sources, disclosures };
-}
-
-export function CitationsStrip({ experience, userMessage }: { experience?: DisplayExperience; userMessage: string }) {
-  const { sources, disclosures } = useMemo(() => extractExperienceSources(experience), [experience]);
-  const [openIdx, setOpenIdx] = useState<number | null>(null);
+export function PolicyCitations({ userMessage }: { userMessage: string }) {
   const [ragOpen, setRagOpen] = useState(false);
   const [ragLoading, setRagLoading] = useState(false);
   const [ragHits, setRagHits] = useState<KnowledgeCitation[] | null>(null);
@@ -350,43 +327,19 @@ export function CitationsStrip({ experience, userMessage }: { experience?: Displ
   }
 
   return (
-    <div className="citations-strip">
-      <div className="citations-pills">
-        {sources.map((s, idx) => (
-          <button
-            key={s.ref}
-            type="button"
-            className={"citation-pill" + (openIdx === idx ? " is-active" : "")}
-            aria-expanded={openIdx === idx}
-            onClick={() => setOpenIdx(openIdx === idx ? null : idx)}
-          >
-            <ShieldCheck size={11} aria-hidden="true" />
-            <span>[{idx + 1}] {s.title}</span>
-          </button>
-        ))}
-        <button
-          type="button"
-          className={"citation-pill is-rag" + (ragOpen ? " is-active" : "")}
-          aria-expanded={ragOpen}
-          onClick={() => void togglePolicyCheck()}
-        >
-          <Search size={11} aria-hidden="true" />
-          <span>Policy citations</span>
-        </button>
-      </div>
-
-      {openIdx !== null && sources[openIdx] && (
-        <div className="citation-popover" role="region" aria-label="Verified source details">
-          <div className="citation-popover-head">
-            <strong><BookOpen size={12} aria-hidden="true" /> {sources[openIdx]!.title}</strong>
-            <code>v{sources[openIdx]!.version} · {sources[openIdx]!.label}</code>
-          </div>
-          {disclosures[0] && <p>{disclosures[0]}</p>}
-        </div>
-      )}
+    <div className="policy-citations">
+      <button
+        type="button"
+        className={"rich-action-chip" + (ragOpen ? " is-active" : "")}
+        aria-expanded={ragOpen}
+        onClick={() => void togglePolicyCheck()}
+      >
+        <Search size={11} aria-hidden="true" />
+        Policy citations
+      </button>
 
       {ragOpen && (
-        <div className="citation-popover is-rag" role="region" aria-label="Hybrid RAG policy citations">
+        <div className="citation-popover" role="region" aria-label="Hybrid RAG policy citations">
           <div className="citation-popover-head">
             <strong>Hybrid BM25 + Vector Policy Matches</strong>
             <button type="button" className="icon-button" aria-label="Close policy citations" onClick={() => setRagOpen(false)}>

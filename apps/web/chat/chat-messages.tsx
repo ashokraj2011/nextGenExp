@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { progressLabels, type NextBestActionCard, type TurnView } from "../../../packages/contracts/api";
 import { api } from "../api";
-import { CitationsStrip, TurnRichActions } from "../chat-rich-ux";
+import { PolicyCitations, TurnRichActions } from "../chat-rich-ux";
 import { SpeakButton } from "../composer-extras";
 import { ProfileAvatar } from "../demo-profiles";
 import { LabMark } from "../lab-mark";
@@ -122,16 +122,22 @@ export function NbaCompanionCard({ nba, personaId, disabled, onRunPrompt, onPrev
   );
 }
 
-function ReplyLoading({ turn }: { turn: TurnView }) {
+function ReplyIndicator({ label }: { label: string }) {
+  return <div className="reply-indicator" role="status">
+    <span className="sr-only">{label}</span>
+    <span className="reply-dots" aria-hidden="true"><span /><span /><span /></span>
+  </div>;
+}
+
+function ReplyLoading() {
   const [showPlaceholder, setShowPlaceholder] = useState(false);
   useEffect(() => {
-    // A fast answer can replace the status line without flashing a skeleton.
+    // A fast answer can replace the indicator without flashing a skeleton.
     const timer = setTimeout(() => setShowPlaceholder(true), 220);
     return () => clearTimeout(timer);
   }, []);
-  const { progress } = turn;
   return <div className="reply-loading">
-    <p className="reply-status" role="status">{showPlaceholder ? progressLabels[progress] : "Preparing your reply"}…</p>
+    <ReplyIndicator label="Preparing your reply." />
     {showPlaceholder && <div className="reply-skeleton" aria-hidden="true">
       <span className="skeleton-title" />
       <span className="skeleton-value" />
@@ -170,7 +176,7 @@ export function AssistantMessage() {
             adminChat ? <>
               <span className="sr-only" role="status">{progressLabels[turn.progress]}</span>
               <ReasoningPanel status={turn.status} progress={turn.progress} history={steps} />
-            </> : !turn.previewExperience && <ReplyLoading turn={turn} />
+            </> : !turn.previewExperience && <ReplyLoading />
           )}
           {adminChat && steps.length > 0 && turn.status === "completed" && (
             <ReasoningPanel
@@ -190,7 +196,7 @@ export function AssistantMessage() {
             <ExpertiseTurnBanner mode={expertiseMode} turn={turn} />
           )}
           {(turn.status !== "working" || turn.previewExperience) && <MessagePrimitive.Parts />}
-          {turn.status === "working" && turn.previewExperience && <p className="reply-status" role="status">Checking for recommendations…</p>}
+          {!adminChat && turn.status === "working" && turn.previewExperience && <ReplyIndicator label="Checking for recommendations." />}
           {!adminChat && turn.status === "completed" && turn.nextBestAction && (
             <NbaCompanionCard
               nba={turn.nextBestAction}
@@ -209,7 +215,7 @@ export function AssistantMessage() {
           )}
           {experience?.status === "ready" && experience.outcome !== "create_rule" && (
             <>
-              <CitationsStrip experience={experience} userMessage={turn.message} />
+              <PolicyCitations userMessage={turn.message} />
               <TurnRichActions
                 turn={turn}
                 pending={pending}

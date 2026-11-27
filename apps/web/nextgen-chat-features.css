@@ -362,7 +362,7 @@
   font-size: 0.86rem;
   font-variant-numeric: tabular-nums;
 }
-.workspace[data-expertise="guided"] .citations-strip,
+.workspace[data-expertise="guided"] .policy-citations,
 .workspace[data-expertise="guided"] .rich-action-chip.is-subtle {
   display: none;
 }
