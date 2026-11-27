@@ -91,3 +91,11 @@ integration-task version) must restart.
 
 - Added `ConversationCompactor` (`sf.compactor`) to fold older turns outside the verbatim window into a structured `RollingThreadSummary` persisted in `sfield.memory` (`kind: "summary"`, `origin: "derived"`, automatic key supersession).
 - Added optional `onStage` observer on `AgenticHarnessSpec` so hosts can stream live stage transitions and thinking progress as each stage finishes.
+
+## 6. First-class SDK primitives (MCP Server + Client, PII Firewall, Resilience, Delegation & Streaming)
+
+- **MCP Server + Client Federation** ([mcp/server.ts](mcp/server.ts), [mcp/client.ts](mcp/client.ts)): `sf.createMcpServer()` exposes allowlisted & principal-scoped (`authenticate` + `allowTools(tool, principal)`) `sfield` tools over Streamable HTTP or `stdio` with HITL suspension/resume; `createMcpClient` + `createMcpProxyTools` mount remote MCP tools as native closed-schema `sfield` tools.
+- **PII Egress Firewall** ([security/pii-firewall.ts](security/pii-firewall.ts)): `createPiiFirewall` + `createPiiFirewallHook` tokenize sensitive identifiers in `beforeModelDispatch` and rehydrate locally via `rehydrateRunOutput`.
+- **Tool Resilience** ([policy/resilience.ts](policy/resilience.ts)): `TokenBucketRateLimiter`, 3-state `CircuitBreaker`, and `ToolResilienceGuard` (`RATE_LIMITED` / `CIRCUIT_OPEN` error codes).
+- **Governed Sub-Agent Delegation** ([runtime/delegation.ts](runtime/delegation.ts)): `sf.delegation.delegate()` + `sf.delegation.tree()` enforce zero identity escalation, bounded recursion depth (`maxDepth`), and parent→child audit linkage.
+- **Typed Run Streaming** ([runtime/stream.ts](runtime/stream.ts)): `sf.streamRun(handle)` and `formatRunStreamSse(chunk)` yield normalized lifecycle/delta stream chunks from `RunHandle.events()`.

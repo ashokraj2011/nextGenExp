@@ -43,6 +43,8 @@ import { EventBus } from "./runtime/events.js";
 import { RunService } from "./runtime/run-service.js";
 import { ExternalExecutionScope, type ExecutionScope, type ExecutionScopeOptions } from "./runtime/execution-scope.js";
 import { createSFieldMcpServer, type SFieldMcpServer, type SFieldMcpServerOptions } from "./mcp/server.js";
+import { DelegationService } from "./runtime/delegation.js";
+import { streamRun, type RunStreamChunk } from "./runtime/stream.js";
 import { approveLock, checkLockApproved, type ApproveLockInput } from "./governance/lock.js";
 import { buildContext, type ContextBuildOutput } from "./context/builder.js";
 import { computeEffectiveTools } from "./registry/effective.js";
@@ -104,6 +106,7 @@ export class SField {
   readonly chat: ChatHarness;
   readonly compactor: ConversationCompactor;
   readonly harness: AgenticHarness;
+  readonly delegation: DelegationService;
   private constructor(readonly i: Internals) {
     this.chat = new ChatHarness(i.persistence);
     this.compactor = new ConversationCompactor(i.memory);
@@ -112,6 +115,10 @@ export class SField {
       resolvePrincipal: (p) => i.runs.resolvePrincipal(p),
       configDigest: () => i.current.config.digest,
       presetName: i.preset?.name,
+    });
+    this.delegation = new DelegationService({
+      persistence: i.persistence,
+      openSession: (opts) => this.sessions.open(opts),
     });
   }
 
@@ -425,6 +432,11 @@ export class SField {
   /** Creates a governed MCP (Model Context Protocol) server backed by this SField runtime (Streamable HTTP + stdio). */
   createMcpServer(options: SFieldMcpServerOptions = {}): SFieldMcpServer {
     return createSFieldMcpServer(this, options);
+  }
+
+  /** Streams typed lifecycle and delta chunks from a RunHandle. */
+  streamRun(handle: RunHandle, opts?: { after?: string }): AsyncIterable<RunStreamChunk> {
+    return streamRun(handle, opts);
   }
 
   get persistence(): ExecutionPersistence {

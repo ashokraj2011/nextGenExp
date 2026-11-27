@@ -43,6 +43,8 @@ export interface McpCallResult {
 
 export interface McpCallContext {
   principal?: Principal;
+  /** Optional HTTP request headers passed to `options.authenticate(headers)` to resolve a Principal. */
+  headers?: Record<string, string | undefined>;
   preset?: PolicyPreset;
   signal?: AbortSignal;
   meta?: Record<string, unknown>;
@@ -91,6 +93,12 @@ export interface SFieldMcpServerOptions {
   sessionId?: string;
   /** Default Principal used when callers do not pass a per-request principal. */
   principal?: Principal;
+  /**
+   * Optional request authenticator (e.g., Bearer/JWT verifier) resolving a Principal from HTTP headers.
+   * When configured and `ctx.principal` is omitted, `authenticate(ctx.headers)` is invoked before
+   * tool listing/execution so RBAC `allowTools(tool, principal)` policies can enforce per-caller scopes.
+   */
+  authenticate?: (headers: Record<string, string | undefined>) => Promise<Principal | null> | Principal | null;
   /** Default execution policy preset. Defaults to `"read_only"` (safe by default). */
   preset?: PolicyPreset;
   /** Purpose string recorded on opened ExecutionScopes. Defaults to `"sfield-mcp"`. */
@@ -99,10 +107,10 @@ export interface SFieldMcpServerOptions {
   budget?: { maxCostMicroUsd?: number; maxToolCalls?: number };
   /**
    * Explicit allowlist of registered sfield tools to expose over MCP.
-   * Accepts an array of exact `ref` (`id@version`) or `id` strings, or a filter predicate.
+   * Accepts an array of exact `ref` (`id@version`) or `id` strings, or a principal-aware RBAC predicate.
    * When omitted, exposes only non-builtin tools whose `policy.effect === "read"`.
    */
-  allowTools?: readonly string[] | ((tool: ToolDescription) => boolean);
+  allowTools?: readonly string[] | ((tool: ToolDescription, principal?: Principal) => boolean);
   /** Optional host-defined virtual tools (e.g. RAG search or custom-routed dispatchers). */
   extraTools?: readonly McpExtraTool[] | ((ctx: McpCallContext) => readonly McpExtraTool[]);
   /** Optional MCP resources exposed via `resources/list` and `resources/read`. */
@@ -152,14 +160,14 @@ export class SFieldMcpServer {
   }
 
   /** Lists registered sfield tools permitted by `allowTools` (defaults to read-only non-builtins). */
-  allowedSFieldTools(): ToolDescription[] {
+  allowedSFieldTools(principal?: Principal): ToolDescription[] {
     const all = this.sf.registry.list().filter((t) => t.source !== "builtin");
     const rule = this.options.allowTools;
     if (!rule) {
       return all.filter((t) => t.policy.effect === "read");
     }
     if (typeof rule === "function") {
-      return all.filter((t) => rule(t));
+      return all.filter((t) => rule(t, principal));
     }
     const set = new Set(rule);
     return all.filter((t) => set.has(t.ref) || set.has(t.id));
@@ -177,8 +185,17 @@ export class SFieldMcpServer {
     return typeof raw === "function" ? raw(ctx) : raw;
   }
 
-  private resolvePrincipal(ctx: McpCallContext): Principal {
-    const p = ctx.principal ?? this.options.principal ?? this.sf.devPrincipal;
+  private async resolveOptionalPrincipal(ctx: McpCallContext): Promise<Principal | undefined> {
+    if (ctx.principal) return ctx.principal;
+    if (this.options.authenticate && ctx.headers) {
+      const authed = await this.options.authenticate(ctx.headers);
+      if (authed) return authed;
+    }
+    return this.options.principal ?? this.sf.devPrincipal;
+  }
+
+  private async resolvePrincipal(ctx: McpCallContext): Promise<Principal> {
+    const p = await this.resolveOptionalPrincipal(ctx);
     if (!p) {
       throw new SFieldError("ACCESS_DENIED", "MCP request requires an authenticated sfield Principal");
     }
@@ -222,7 +239,12 @@ export class SFieldMcpServer {
     }
 
     if (msg.method === "tools/list") {
-      const extras = this.resolveExtraTools(ctx);
+      const callerPrincipal = await this.resolveOptionalPrincipal(ctx);
+      if (this.options.authenticate && ctx.headers && !callerPrincipal) {
+        return err(-32001, "Unauthorized MCP client");
+      }
+      const enrichedCtx: McpCallContext = callerPrincipal ? { ...ctx, principal: callerPrincipal } : ctx;
+      const extras = this.resolveExtraTools(enrichedCtx);
       const seen = new Set<string>();
       const tools: McpToolDescriptor[] = [];
       for (const extra of extras) {
@@ -230,7 +252,7 @@ export class SFieldMcpServer {
         seen.add(extra.descriptor.name);
         tools.push(extra.descriptor);
       }
-      for (const tool of this.allowedSFieldTools()) {
+      for (const tool of this.allowedSFieldTools(callerPrincipal)) {
         if (seen.has(tool.ref)) continue;
         seen.add(tool.ref);
         tools.push(describeSFieldToolForMcp(tool));
@@ -278,8 +300,15 @@ export class SFieldMcpServer {
         }
       }
 
-      // 2. Enforce explicit sfield MCP allowlist (never expose hidden tools).
-      const allowed = this.allowedSFieldTools().find((t) => t.ref === name || t.id === name);
+      let principal: Principal;
+      try {
+        principal = await this.resolvePrincipal(ctx);
+      } catch (e) {
+        return err(-32001, e instanceof Error ? e.message : "Authentication required");
+      }
+
+      // 2. Enforce explicit principal-scoped sfield MCP allowlist (never expose hidden tools).
+      const allowed = this.allowedSFieldTools(principal).find((t) => t.ref === name || t.id === name);
       if (!allowed) {
         return err(-32602, `Unknown or disallowed sfield tool: ${name}`);
       }
@@ -292,13 +321,6 @@ export class SFieldMcpServer {
       for (const [k, v] of Object.entries(rawArgs)) {
         if (k === "_sfieldResume") continue;
         toolInputs[k] = v as JsonObject[string];
-      }
-
-      let principal: Principal;
-      try {
-        principal = this.resolvePrincipal(ctx);
-      } catch (e) {
-        return err(-32001, e instanceof Error ? e.message : "Authentication required");
       }
 
       const preset = ctx.preset ?? this.defaultPreset;

@@ -87,6 +87,16 @@ const mcp = sf.createMcpServer({
 
 Every `tools/call` runs inside a real `sfield` `ExecutionScope` (`executions.open` / `executions.resume`), preserving `Authorizer` policy checks, Ajv closed schema validation, HITL approval suspension (`APPROVAL_REQUIRED` → `status: "pending_approval"` with `approvalId` + `callId`), and `sfield.sqlite` audit receipts (`sfieldRunId`). CEP wires `POST /api/mcp` onto `runtime.createMcpServer(...)` in `apps/server/cep-mcp-server.ts`, exposing `cep.empathy.assess@1.0.0`, published `int.*` Integration Tasks, and `cep.knowledge.search@1.0.0`.
 
+### Core `@sfield/core` SDK primitives
+
+Beyond CEP-specific tools, `@sfield/core` ships standalone enterprise primitives usable in any TypeScript host:
+
+- **PII Egress Firewall (`createPiiFirewall` / `createPiiFirewallHook`)** — tokenizes SSN, email, phone, card, account IDs, known names, and custom rules in `beforeModelDispatch` and rehydrates locally via `firewall.rehydrateRunOutput(runId, output)`.
+- **Tool Resilience (`createToolResilienceGuard`)** — per-key `TokenBucketRateLimiter` (`RATE_LIMITED`) and 3-state `CircuitBreaker` (`CIRCUIT_OPEN` → `half_open` → `closed`).
+- **Federated MCP Client & RBAC Server (`createMcpClient`, `createMcpProxyTools`, `sf.createMcpServer`)** — discover tools from any remote Streamable HTTP MCP server (or another `sfield` instance) and mount them as closed-schema `sfield` tools with `Authorizer` + resilience enforcement; enforce per-caller RBAC on `SFieldMcpServer` via `authenticate(headers)` + `allowTools(tool, principal)`.
+- **Governed Sub-Agent Delegation (`sf.delegation.delegate` / `sf.delegation.tree`)** — delegates to child agents under the parent's exact `Principal` (blocking identity escalation and recursive depth loops) with immutable `delegation_started` / `delegation_finished` parent→child audit links.
+- **Typed Run Streaming (`sf.streamRun` / `formatRunStreamSse`)** — streams normalized `RunStreamChunk` lifecycle & delta events from any `RunHandle` ready for SSE or AG-UI transports.
+
 ### Connect an existing service
 
 For a configurable external read, author a task in the **Integrations** workspace at `/integrations`. Declare its effect, input/output fields and transport binding, then publish it. For customer record lookups, configure **Customer chat** with the record ID, member ID and visible fields. `Runtime.registerPublishedTask` attempts a dedicated registration and can fall back to the integration dispatcher. Check the published task's execution route there. `packages/contracts/integration-task.ts` defines the contract and `apps/server/integration-tasks.ts` runs the transport.

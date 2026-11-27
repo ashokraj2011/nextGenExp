@@ -65,6 +65,8 @@ const CATEGORY_BY_CODE: Record<string, ErrorCategory> = {
   STATE_UNAVAILABLE: "availability",
   TOOL_TIMEOUT: "availability",
   TOOL_UNAVAILABLE: "availability",
+  RATE_LIMITED: "availability",
+  CIRCUIT_OPEN: "availability",
   HOOK_TIMEOUT: "availability",
   // Accounting
   BUDGET_EXHAUSTED: "accounting",

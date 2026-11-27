@@ -38,6 +38,26 @@ export { computeEffectiveTools, aliasFor } from "./registry/effective.js";
 export { effectAllowed, approvalRequired, type PolicyPreset } from "./policy/presets.js";
 export { LoopDetector, callIdentity, emptyLoopState } from "./policy/loop-detector.js";
 export { ApprovalService } from "./policy/approvals.js";
+export {
+  TokenBucketRateLimiter,
+  CircuitBreaker,
+  ToolResilienceGuard,
+  createToolResilienceGuard,
+  type RateLimitConfig,
+  type CircuitBreakerConfig,
+  type CircuitState,
+  type ResilienceStatus,
+} from "./policy/resilience.js";
+export {
+  PiiFirewall,
+  createPiiFirewall,
+  createPiiFirewallHook,
+  type PiiCategory,
+  type PiiCustomRule,
+  type PiiFirewallOptions,
+  type PiiRedactionToken,
+  type PiiScrubResult,
+} from "./security/pii-firewall.js";
 export { ToolPipeline, type PipelineDeps, type PreparedCall, type DispatchRequest } from "./pipeline/execute.js";
 export { shortenForModel } from "./pipeline/views.js";
 export { InMemoryArtifactStore } from "./persistence/artifacts-memory.js";
@@ -101,6 +121,25 @@ export {
   type SFieldMcpHost,
   type SFieldMcpServerOptions,
 } from "./mcp/server.js";
+export {
+  McpClient,
+  createMcpClient,
+  createMcpProxyTools,
+  type McpClientOptions,
+  type McpProxyToolOptions,
+} from "./mcp/client.js";
+export {
+  DelegationService,
+  type DelegateInput,
+  type DelegationOutcome,
+  type DelegatedChildRecord,
+} from "./runtime/delegation.js";
+export {
+  streamRun,
+  normalizeRunEvent,
+  formatRunStreamSse,
+  type RunStreamChunk,
+} from "./runtime/stream.js";
 export { PluginManager, CORE_API_VERSION, CORE_VERSION } from "./plugins/manager.js";
 export { EnvSecretResolver, CompositeSecretResolver } from "./secrets.js";
 export { checkLockApproved, approveLock, effectiveRequireApproved } from "./governance/lock.js";
