@@ -3,7 +3,7 @@ import type { z } from "zod";
 import { CapabilityForm, FactSummary, LiveSimulationProvider, SavingsChart, SavingsMetric, formEnvelope } from "./agentic-experience";
 import "./agentic.css";
 import { RichText, renderInlineMarkdown } from "./markdown";
-import { Component, createContext, lazy, Suspense, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { Component, createContext, lazy, Suspense, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { A2uiSurface, createComponentImplementation, MarkdownComponentContext, type ReactCatalogComponent } from "@a2ui/react";
 import {
   ActionMessageSchema, Catalog, CreateSurfaceMessageSchema, MessageProcessor, basicCatalog, injectBasicCatalogStyles,
@@ -505,7 +505,8 @@ export function MountedSurface({ input, id, onAction, basic, onRendered }: {
   const [error, setError] = useState<Error | null>(null);
   const callbacks = useRef({ onAction, onRendered });
   callbacks.current = { onAction, onRendered };
-  useEffect(() => {
+  // Attach the verified surface before the browser paints the finished message.
+  useLayoutEffect(() => {
     let message: CreateSurfaceMessage;
     const processor = new MessageProcessor<ReactCatalogComponent>(
       basic ? [basicCatalog] : [pznCatalog],
@@ -562,7 +563,9 @@ function CanonicalFallback({ experience, enabled }: { experience: DisplayExperie
   useEffect(() => rendered.current(experienceId, true), [experienceId]);
   return <div className={surfaceClass({ ...experience, preview })} data-renderer="fallback">
     <Introduction intro={experience.intro} question={experience.question} partial={experience.partial} />
-    {experience.blocks.map((block, index) => <ContentBlock key={index} block={block} form={{ experienceId, componentId: "block_" + (index + 1), enabled }} />)}
+    {experience.blocks.map((block, index) => <div className="surface-child" key={index}>
+      <ContentBlock block={block} form={{ experienceId, componentId: "block_" + (index + 1), enabled }} />
+    </div>)}
     {experience.actions.length > 0 && <div className="follow-up-list">
       {experience.actions.map(({ actionId, componentId, label }) => (
         <button key={actionId} type="button" className="follow-up" disabled={!enabled} onClick={() => (

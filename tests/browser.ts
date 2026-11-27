@@ -537,12 +537,36 @@ try {
   await aliceProfileTrigger.waitFor();
   await portfolioPage.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Profiles, current profile Alice Morgan");
   const portfolioQuestion = portfolioPage.getByLabel("Your question");
+  // Hold the real turn read until the browser has painted the pending card.
+  const turnRead = /\/api\/turns\/[^/]+$/;
+  const pendingReply = portfolioPage.locator(".assistant-message:has(.reply-loading)");
+  const pendingCard = Promise.all([pendingReply.elementHandle(), pendingReply.locator(".reply-skeleton").boundingBox()]);
+  await portfolioPage.route(turnRead, async (route) => { await pendingCard; await route.continue(); });
   await portfolioQuestion.fill("Let me know my portfolio summary.");
   await portfolioQuestion.press("Enter");
+  const [pendingElement, placeholder] = await pendingCard;
   const snapshot = portfolioPage.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Portfolio snapshot" });
   await snapshot.getByText("$12,500", { exact: true }).waitFor();
+  await portfolioPage.unroute(turnRead);
+  assert.ok(await pendingElement.evaluate((row) => row.isConnected && row.hasAttribute("data-live-reply")));
+  const finished = await snapshot.boundingBox();
+  assert.ok(placeholder && finished);
+  assert.equal(finished.x, placeholder.x);
+  assert.equal(finished.width, placeholder.width);
+  assert.ok(Math.abs(finished.y - placeholder.y) < 2);
+  assert.equal(await snapshot.evaluate((card) => getComputedStyle(card.closest(".surface-child")!).animationName), "none");
   await portfolioPage.getByText("You have $12,500 in cash. Would you like to explore investing options?", { exact: true }).waitFor();
   await portfolioPage.screenshot({ path: resolve(screenshots, "portfolio-learner-chat.png") });
+  const simulation = snapshot.getByRole("button", { name: "Simulate cash deployment" });
+  await simulation.click();
+  await snapshot.getByRole("button", { name: "Growth (80/20)" }).click();
+  const stockShare = () => snapshot.locator(".portfolio-allocation li").filter({ hasText: "Stocks" }).locator("strong").innerText();
+  assert.equal(await stockShare(), "71%");
+  const helpful = portfolioPage.getByRole("button", { name: "Helpful", exact: true });
+  await helpful.click();
+  await portfolioPage.getByRole("button", { name: "Helpful", exact: true, pressed: true }).waitFor();
+  assert.equal(await simulation.getAttribute("aria-expanded"), "true");
+  assert.equal(await stockShare(), "71%");
   await openAdmin(portfolioPage, "logs");
   const portfolioLogs = portfolioPage.getByRole("region", { name: "Call log details" });
   for (const stage of ["Context Router · 1 attempt", "Treatment Selector · succeeded", "Portfolio Snapshot · succeeded", "Experience Composer · 1 attempt"]) {
@@ -912,6 +936,10 @@ try {
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await openCustomerChat(mobile);
   await mobile.locator('[data-renderer="a2ui"]').getByRole("heading", { name: "Portfolio snapshot", exact: true }).waitFor();
+  await mobile.waitForFunction(() => {
+    const scroll = document.querySelector(".thread-scroll");
+    return scroll && scroll.scrollHeight > scroll.clientHeight && Math.abs(scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop) <= 1;
+  });
   await mobileMessage.fill("Show my mortgage goal.");
   await mobileMessage.press("Enter");
   const mobileGoal = mobile.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Home down payment", exact: true });
@@ -988,6 +1016,7 @@ try {
   await signInPage.reload();
   await currentProfile("Jordan Lee").waitFor();
   await jordanCash.waitFor();
+  assert.equal(await signInPage.locator(".assistant-message[data-live-reply]").count(), 0);
   await signInPage.getByRole("button", { name: "New conversation", exact: true }).click();
   await signInPage.getByRole("heading", { name: "New conversation", exact: true, level: 1 }).waitFor();
   await welcomePortfolio.getByText("$10,000", { exact: true }).waitFor();

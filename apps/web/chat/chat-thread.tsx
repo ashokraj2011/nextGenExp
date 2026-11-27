@@ -2,7 +2,7 @@
  * Main Chat thread view (assistant-ui runtime, hero/welcome stage, split live canvas / futures pane).
  * Extracted from `apps/web/main.tsx` so the root entry file owns only app shell & session state.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AssistantRuntimeProvider, ThreadPrimitive, useExternalStoreRuntime } from "@assistant-ui/react";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import type { Bootstrap, ConversationView, DemoPersona, Progress, TurnView } from "../../../packages/contracts/api";
@@ -108,26 +108,27 @@ export function Chat({
   });
   const input = useRef<HTMLTextAreaElement>(null);
   const viewport = useRef<HTMLDivElement>(null);
-  const lastAnchor = useRef<string | undefined>(undefined);
-  const lastScrolledConvId = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    const convId = conversation?.id;
-    if (!convId || turns.length === 0) return;
-    if (lastScrolledConvId.current === convId) return;
-    lastScrolledConvId.current = convId;
-    lastAnchor.current = latest?.id;
-    const scrollToEnd = () => {
-      const scroll = viewport.current;
-      if (!scroll) return;
-      scroll.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" });
-    };
-    const raf1 = requestAnimationFrame(() => requestAnimationFrame(scrollToEnd));
-    const timer = setTimeout(scrollToEnd, 140);
-    return () => {
-      cancelAnimationFrame(raf1);
-      clearTimeout(timer);
-    };
-  }, [conversation?.id, turns.length, latest?.id]);
+  const messageList = useRef<HTMLDivElement>(null);
+  // Chat is keyed by conversation. Only turns present when it opens are restored history.
+  const initialTurn = useRef(latest?.id);
+  const restoring = Boolean(initialTurn.current && latest?.id === initialTurn.current);
+  const lastAnchor = useRef(initialTurn.current);
+  useLayoutEffect(() => {
+    const scroll = viewport.current;
+    if (!restoring || !scroll || !messageList.current) return;
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const interaction = new AbortController();
+    const observer = new ResizeObserver(() => {
+      if (!interaction.signal.aborted) scroll.scrollTo({ top: scroll.scrollHeight, behavior: motion.matches ? "instant" : "smooth" });
+    });
+    const stop = () => { observer.disconnect(); interaction.abort(); };
+    // Saved A2UI cards can finish laying out after the message rows mount.
+    observer.observe(messageList.current);
+    for (const event of ["wheel", "pointerdown", "touchstart", "keydown"]) {
+      scroll.addEventListener(event, stop, { passive: true, signal: interaction.signal });
+    }
+    return stop;
+  }, [restoring]);
   const anchorTurn = useCallback((id: string, message: HTMLElement) => {
     const scroll = viewport.current;
     if (!scroll || lastAnchor.current === id) return;
@@ -228,7 +229,7 @@ export function Chat({
             )}
             {showOverview && <WorkspaceOverview {...overviewProps} section={section} showNextStep={!turns.length} />}
             {updates.length > 0 && <section className="thread-updates" aria-label="Record updates" aria-live="polite">{updates.map((w) => <p key={w.id}>{w.state === "reached" ? <strong>Update received</strong> : <strong>Watching</strong>} · {w.label} · Current status: {w.value}</p>)}</section>}
-            {turns.length > 0 && <div className="messages">
+            {turns.length > 0 && <div className="messages" ref={messageList}>
               <ThreadPrimitive.Messages>{({ message }) => message.role === "user" ? <UserMessage /> : <AssistantMessage />}</ThreadPrimitive.Messages>
             </div>}
           </ThreadPrimitive.Viewport>

@@ -51,7 +51,8 @@ export function visibleMessages(turns: TurnView[]): ThreadMessageLike[] {
     return [
       { id: id + "_user", role: "user", content: turn.message, createdAt: new Date(turn.createdAt) },
       {
-        id: experience?.messageId ?? id + "_assistant",
+        // Keep the same chat row when the server delivers its completed A2UI surface.
+        id: id + "_assistant",
         role: "assistant", createdAt: new Date(turn.createdAt),
         content: experience ? [{ type: "data", name: "experience-surface", data: experience }]
           : status === "failed" ? failureCopy[failureCode ?? "internal_error"]

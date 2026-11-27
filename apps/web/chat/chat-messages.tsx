@@ -5,7 +5,7 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { MessagePrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import {
-  ArrowUpRight, BookOpenText, Columns2, GraduationCap, House, ListChecks, MapPin,
+  ArrowUpRight, BookOpenText, ChevronDown, Columns2, GraduationCap, House, ListChecks, MapPin,
   RotateCcw, Sparkles, ThumbsDown, ThumbsUp,
 } from "lucide-react";
 import { progressLabels, type NextBestActionCard, type TurnView } from "../../../packages/contracts/api";
@@ -122,6 +122,34 @@ export function NbaCompanionCard({ nba, personaId, disabled, onRunPrompt, onPrev
   );
 }
 
+function ReplyLoading({ turn }: { turn: TurnView }) {
+  const [showPlaceholder, setShowPlaceholder] = useState(false);
+  useEffect(() => {
+    // A fast answer can replace the status line without flashing a skeleton.
+    const timer = setTimeout(() => setShowPlaceholder(true), 220);
+    return () => clearTimeout(timer);
+  }, []);
+  const { progress, harnessStages } = turn;
+  return <div className="reply-loading">
+    <p className="reply-status" role="status">{showPlaceholder ? progressLabels[progress] : "Preparing your reply"}…</p>
+    {showPlaceholder && <div className="reply-skeleton" aria-hidden="true">
+      <span className="skeleton-title" />
+      <span className="skeleton-value" />
+      <div className="skeleton-detail"><span /><span /></div>
+    </div>}
+    {harnessStages && harnessStages.length > 0 && <details className="reply-progress">
+      <summary>View progress <ChevronDown size={13} aria-hidden="true" /></summary>
+      <ol className="dyn-harness-steps">
+        {harnessStages.map((step, index) => <li key={index} className={"is-" + step.status}>
+          <span className="dyn-harness-stage">{step.stage}</span>
+          <span>{step.summary}{step.thinking && <small className="dyn-harness-step-thought">{step.thinking}</small>}</span>
+          {step.durationMs !== undefined && <small>{step.durationMs}ms</small>}
+        </li>)}
+      </ol>
+    </details>}
+  </div>;
+}
+
 export function AssistantMessage() {
   const turn = useAuiState((state) => state.message.metadata.custom?.turn as TurnView | undefined);
   const {
@@ -129,6 +157,7 @@ export function AssistantMessage() {
     pinCanvas, branchTurn, retry, feedback, anchorTurn, runPrompt, previewFunding,
   } = useContext(ConversationControls);
   const element = useRef<HTMLDivElement>(null);
+  const [arrivedLive] = useState(turn?.status === "working");
   useEffect(() => {
     if (element.current && turn && latest?.id === turn.id) anchorTurn(turn.id, element.current);
   }, [anchorTurn, latest?.id, turn?.id]);
@@ -137,7 +166,8 @@ export function AssistantMessage() {
   const steps = progressHistory[turn.id] ?? [turn.progress];
 
   return (
-    <MessagePrimitive.Root ref={element} className="assistant-message">
+    <MessagePrimitive.Root ref={element} className="assistant-message"
+      data-live-reply={arrivedLive && turn.status === "completed" && !adminChat ? "" : undefined}>
       <div className="stream-assistant-row">
         <LabMark small />
         <div className="assistant-content">
@@ -147,43 +177,10 @@ export function AssistantMessage() {
           </header>
 
           {turn.status === "working" ? (
-            <>
-              <div role="status" aria-live="polite" className={adminChat ? "sr-only" : "cep-live-status-wrap"}>
-                <div className="cep-live-status-pill">
-                  <span className="cep-live-status-dot" aria-hidden="true" />
-                  <span>{progressLabels[turn.progress]}…</span>
-                </div>
-                {!adminChat && !(turn.harnessStages && turn.harnessStages.length > 0) && (
-                  <div className="cep-shimmer-card" aria-hidden="true">
-                    <div className="cep-shimmer-line is-med" />
-                    <div className="cep-shimmer-line is-short" />
-                  </div>
-                )}
-              </div>
-              {!adminChat && turn.harnessStages && turn.harnessStages.length > 0 && (
-                <div className="dyn-harness-trace dyn-harness-live" aria-live="polite">
-                  <div className="dyn-harness-summary-main">
-                    <strong>Thinking</strong>
-                    <span className="dyn-harness-chain">
-                      sfield Harness · {turn.harnessStages.map((s) => s.stage.charAt(0).toUpperCase() + s.stage.slice(1)).join(" → ")}…
-                    </span>
-                  </div>
-                  <ol className="dyn-harness-steps" style={{ marginTop: 6 }}>
-                    {turn.harnessStages.map((step, idx) => (
-                      <li key={idx} className={"is-" + step.status}>
-                        <span className="dyn-harness-stage">{step.stage}</span>
-                        <span>
-                          {step.summary}
-                          {step.thinking && <small className="dyn-harness-step-thought">{step.thinking}</small>}
-                        </span>
-                        {step.durationMs !== undefined && <small>{step.durationMs}ms</small>}
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-              )}
-              {adminChat && <ReasoningPanel status={turn.status} progress={turn.progress} history={steps} />}
-            </>
+            adminChat ? <>
+              <span className="sr-only" role="status">{progressLabels[turn.progress]}</span>
+              <ReasoningPanel status={turn.status} progress={turn.progress} history={steps} />
+            </> : <ReplyLoading turn={turn} />
           ) : (
             <>
               {adminChat && steps.length > 0 && turn.status === "completed" && (

@@ -32,6 +32,7 @@ import { ContextHealthPill } from "./context-health-pill";
 import { buildWealthDomContext, messageFor } from "./chat/chat-context";
 import { Chat } from "./chat/chat-thread";
 import "./customer-workbench.css";
+import "./chat/reply-cards.css";
 
 const adminChat = location.pathname === adminPaths.chat;
 const embedMode = location.pathname === "/embed";
@@ -284,7 +285,10 @@ function App() {
       const existing = previous.turns.find((item) => item.id === turn.id);
       if (existing) {
         if (existing.status !== "working" && turn.status === "working") return previous;
-        return { ...previous, turns: previous.turns.map((item) => item.id === turn.id ? turn : item) };
+        // A completed experience is issued once. Feedback refreshes the turn without rebuilding its form or chart.
+        const updated = existing.experience && existing.experience.experienceId === turn.experience?.experienceId
+          ? { ...turn, experience: existing.experience } : turn;
+        return { ...previous, turns: previous.turns.map((item) => item.id === turn.id ? updated : item) };
       }
       return { ...previous, turns: [...previous.turns, turn] };
     });

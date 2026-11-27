@@ -1,0 +1,155 @@
+.editorial-thread {
+  --reply-radius: clamp(18px, 3vw, 24px);
+  --reply-inset: clamp(18px, 3vw, 26px);
+  --reply-border: color-mix(in srgb, var(--ink) 10%, var(--surface));
+  --reply-shadow: 0 2px 5px -4px rgb(15 30 20 / 18%), 0 10px 26px -18px rgb(15 30 20 / 22%);
+}
+
+/* Match the geometry of the first card while the reply is being prepared. */
+.reply-loading { display: grid; gap: 12px; }
+.reply-status { margin: 0; color: var(--muted); font-size: .95rem; line-height: 1.6; }
+.editorial-thread .reply-skeleton,
+.editorial-thread .experience-flow:not(.published-ui) .content-card,
+.editorial-thread .assistant-content > .nba-companion-card {
+  min-width: 0;
+  padding: var(--reply-inset);
+  border: 1px solid var(--reply-border);
+  border-radius: var(--reply-radius);
+  background: var(--surface);
+  box-shadow: var(--reply-shadow);
+}
+.reply-skeleton {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 15px;
+  min-height: 154px;
+}
+.reply-skeleton span {
+  display: block;
+  max-width: 100%;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--muted) 12%, var(--surface));
+}
+.skeleton-title { width: 30%; height: 11px; }
+.skeleton-value { width: 43%; height: 23px; }
+.skeleton-detail { display: flex; gap: 12px; width: 60%; }
+.skeleton-detail span { width: 40%; height: 9px; }
+.reply-progress summary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: .8rem;
+}
+.reply-progress summary::-webkit-details-marker { display: none; }
+.reply-progress[open] summary svg { transform: rotate(180deg); }
+
+.editorial-thread .experience-flow:not(.published-ui) {
+  > .experience-intro {
+    padding: 0;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    color: var(--soft-ink);
+    line-height: 1.6;
+  }
+  .content-card h3 {
+    font-family: var(--font-sans);
+    font-size: clamp(1.12rem, 2vw, 1.38rem);
+    font-weight: 630;
+    letter-spacing: -.035em;
+    line-height: 1.25;
+  }
+  .content-kind { font-weight: 600; }
+  .content-card.suggested-next-step {
+    background: linear-gradient(120deg, color-mix(in srgb, var(--teal) 5%, var(--surface)), var(--surface) 70%);
+  }
+  .portfolio-snapshot {
+    container: portfolio / inline-size;
+    --stocks: #35825c;
+    --bonds: #6386a5;
+    --cash: #d1a256;
+    background: linear-gradient(135deg, var(--surface) 45%, color-mix(in srgb, var(--teal) 5%, var(--surface)));
+  }
+  .portfolio-body { display: grid; gap: 18px; margin-top: 20px; }
+  .portfolio-values {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 13px 18px;
+    padding: 0;
+    margin: 0;
+    border: 0;
+  }
+  .portfolio-values > div:first-child { grid-column: 1 / -1; }
+  .portfolio-values dd { margin-top: 3px; font-size: 1.13rem; font-weight: 580; letter-spacing: -.033em; }
+  .portfolio-values > div:first-child dd {
+    font-size: clamp(1.9rem, 6cqi, 2.8rem);
+    font-weight: 620;
+    line-height: 1.1;
+    overflow-wrap: anywhere;
+  }
+  .portfolio-breakdown {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    align-items: center;
+    gap: 8px 16px;
+    padding-block-start: 16px;
+    border-block-start: 1px solid var(--line);
+  }
+  .portfolio-breakdown h4 { grid-column: 1 / -1; font-weight: 600; font-size: .84rem; }
+  .portfolio-allocation-bar {
+    height: auto;
+    width: clamp(56px, 16cqi, 92px);
+    aspect-ratio: 1;
+    margin: 0;
+    border-radius: 50%;
+    background: conic-gradient(var(--stocks) 0 var(--stocks-end), var(--bonds) var(--stocks-end) var(--bonds-end), var(--cash) var(--bonds-end) 100%);
+    mask-image: radial-gradient(closest-side, transparent 72%, black 74%);
+  }
+  .portfolio-allocation-bar.is-empty { background: var(--line); }
+  .portfolio-allocation-bar > span { display: none; }
+  .portfolio-allocation { display: grid; gap: 8px; margin: 0; }
+  .portfolio-allocation li { gap: 6px; }
+  .portfolio-allocation strong { margin-inline-start: auto; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .portfolio-allocation li > span { border-radius: 50%; flex: 0 0 8px; }
+  .portfolio-allocation .equities { background: var(--stocks); }
+  .portfolio-allocation .fixed-income { background: var(--bonds); }
+  .portfolio-allocation .cash { background: var(--cash); }
+  @container portfolio (min-width: 32rem) {
+    .portfolio-body { grid-template-columns: 1fr 1fr; align-items: center; gap: 32px; }
+    .portfolio-breakdown { padding: 0 0 0 26px; border: 0; border-inline-start: 1px solid var(--line); }
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .reply-skeleton::after {
+    position: absolute;
+    inset: 0;
+    content: "";
+    pointer-events: none;
+    background: linear-gradient(105deg, transparent 28%, color-mix(in srgb, var(--surface) 64%, transparent) 50%, transparent 72%);
+    animation: reply-sweep 2s ease-in-out infinite;
+  }
+  .assistant-message[data-live-reply] .experience-flow > .surface-child,
+  .assistant-message[data-live-reply] .nba-companion-card {
+    animation: reply-arrive 260ms cubic-bezier(.2, .7, .25, 1) backwards;
+  }
+  .assistant-message[data-live-reply] .surface-child ~ .surface-child { animation-delay: 40ms; }
+  .assistant-message[data-live-reply] .surface-child ~ .surface-child ~ .surface-child,
+  .assistant-message[data-live-reply] .nba-companion-card { animation-delay: 80ms; }
+  .assistant-message[data-live-reply] .surface-child:focus-within { animation: none; }
+}
+@keyframes reply-arrive {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes reply-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}

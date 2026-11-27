@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from "react";
+import { useId, useState, type CSSProperties, type ReactNode } from "react";
 import { ArrowUpRight, ChevronDown, ChevronUp, SlidersHorizontal } from "lucide-react";
 import { formatPortfolioAmount, type PortfolioSnapshot } from "../../packages/contracts/portfolio";
 
@@ -42,26 +42,33 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
       <h3 id={titleId}>{title}</h3>
       <p>As of <time dateTime={asOf}>{asOfFormat.format(new Date(asOf))}</time></p>
     </header>
-    <dl className="portfolio-values">
-      <div><dt>Total value</dt><dd>{formatPortfolioAmount(total)}</dd></div>
-      <div><dt>Invested</dt><dd>{formatPortfolioAmount(invested)}</dd></div>
-      <div><dt>Cash</dt><dd>{formatPortfolioAmount(cashCents)}</dd></div>
-    </dl>
-    {!compact && <><h4>Portfolio breakdown</h4>
-    <div className="portfolio-allocation-bar" aria-hidden="true">
-      {allocation.map((item) => <span className={item.color} key={item.color} style={{ width: activePct(item) + "%" }} />)}
+    <div className="portfolio-body">
+      <dl className="portfolio-values">
+        <div><dt>Total value</dt><dd>{formatPortfolioAmount(total)}</dd></div>
+        <div><dt>Invested</dt><dd>{formatPortfolioAmount(invested)}</dd></div>
+        <div><dt>Cash</dt><dd>{formatPortfolioAmount(cashCents)}</dd></div>
+      </dl>
+      {!compact && <div className="portfolio-breakdown">
+        <h4>Portfolio breakdown</h4>
+        <div className={"portfolio-allocation-bar" + (total === 0 ? " is-empty" : "")} aria-hidden="true" style={{
+          "--stocks-end": percent(simOpen ? simEquity : equityCents) + "%",
+          "--bonds-end": percent(simOpen ? simEquity + simFixed : invested) + "%",
+        } as CSSProperties}>
+          {allocation.map((item) => <span className={item.color} key={item.color} style={{ width: activePct(item) + "%" }} />)}
+        </div>
+        <ul className="portfolio-allocation">
+          {allocation.map((item) => {
+            const base = Number(percent(item.amount).toFixed(1));
+            const next = Number(percent(item.simAmount).toFixed(1));
+            const diff = Number((next - base).toFixed(1));
+            return <li key={item.color}>
+              <span className={item.color} aria-hidden="true" />{item.label} <strong>{simOpen ? next : base}%</strong>
+              {simOpen && diff !== 0 && <em className={diff > 0 ? "alloc-delta-pos" : "alloc-delta-neg"}>({diff > 0 ? "+" : ""}{diff}%)</em>}
+            </li>;
+          })}
+        </ul>
+      </div>}
     </div>
-    <ul className="portfolio-allocation">
-      {allocation.map((item) => {
-        const base = Number(percent(item.amount).toFixed(1));
-        const next = Number(percent(item.simAmount).toFixed(1));
-        const diff = Number((next - base).toFixed(1));
-        return <li key={item.color}>
-          <span className={item.color} aria-hidden="true" />{item.label} <strong>{simOpen ? next : base}%</strong>
-          {simOpen && diff !== 0 && <em className={diff > 0 ? "alloc-delta-pos" : "alloc-delta-neg"}>({diff > 0 ? "+" : ""}{diff}%)</em>}
-        </li>;
-      })}
-    </ul></>}
 
     {onExploreAllocation && maxCashDollars >= 500 && (
       <div className="portfolio-sim-wrap">

@@ -18,7 +18,7 @@ export const progressLabels: Record<Progress, string> = {
   goal: "Reading your home-buying goal",
   composition: "Preparing your response",
   verifying: "Checking the response",
-  workflow: "Preparing your funding preview",
+  workflow: "Preparing your next step",
 };
 export const failureCopy = {
   experience_unavailable: "I couldn’t finish this plan. Try again to refresh it.",
