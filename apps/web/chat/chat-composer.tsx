@@ -170,17 +170,14 @@ export function Composer({
         />
       )}
       {activeNotice && <div className="request-notice" role="status">{activeNotice}</div>}
-      {running && !pending && !activeNotice && (
+      {running && !pending && !activeNotice && canSubmit && (
         <div className="submit-status" role="status">
-          Task running in this thread — you can send your next question anytime.
-          {canSubmit && (
-            <button type="button" className="inline-stop-link" onClick={() => aui.thread().cancelRun()}>
-              End running task
-            </button>
-          )}
+          <button type="button" className="inline-stop-link" onClick={() => aui.thread().cancelRun()}>
+            Stop current response
+          </button>
         </div>
       )}
-      {pending && !running && !activeNotice && <div className="submit-status" role="status">Sending your request…</div>}
+      {pending && !running && !activeNotice && <div className="submit-status" role="status">Sending…</div>}
       <div className="composer-slash-wrap">
       <SlashCommandMenu commands={slashCommands} activeIndex={slashIndex} onPick={runSlashCommand} />
       <form
@@ -199,7 +196,7 @@ export function Composer({
           <div className="composer-field">
             <label className="sr-only" htmlFor="composer-input">Your question</label>
             <textarea id="composer-input" ref={input} rows={1} value={draft} maxLength={MAX_MESSAGE_LENGTH}
-              placeholder={voice.listening ? "Listening… speak your question" : (domainPack?.composerPlaceholder ?? "Ask a question…")}
+              placeholder={voice.listening ? "Listening… speak your question" : running ? "Ask a follow-up anytime…" : (domainPack?.composerPlaceholder ?? "Ask a question…")}
               onChange={(event) => onDraft(event.target.value)} onKeyDown={onKeyDown} />
           </div>
           <div className="composer-tools">
