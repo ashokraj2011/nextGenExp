@@ -59,6 +59,7 @@ import {
   type EmpathyAssessInput,
 } from "../../packages/contracts/empathy";
 import { assessEmotionalState, firstNameOf } from "./response-personalizer";
+import { customer360ReadToolId, customer360ReadToolRef, customer360ReadToolVersion } from "./mcp-exposure-store";
 import {
   createCustomer360NbaProvider,
   createOpsRunbookProvider,
@@ -188,6 +189,7 @@ const toolRefs = {
   fundingPreview: fundingToolRef("fundingPreview"),
   arbitrateRecommendations: recommendationArbitrateToolRef,
   empathyAssess: empathyAssessToolRef,
+  customer360Read: customer360ReadToolRef,
 } as const;
 const registryPurposes = {
   catalogScopeId: "pzn-context-discovery",
@@ -209,6 +211,7 @@ const actions = new Set<string>([
   ...toolKeys.map((key) => sfieldTools[key].id),
   recommendationArbitrateToolId,
   empathyAssessToolId,
+  customer360ReadToolId,
   pznTreatmentSelectorToolId,
 ]);
 export const sfieldNamespace = "pzn-experience-runtime";
@@ -1430,6 +1433,60 @@ export class Runtime implements IntegrationTaskRuntime {
             llmJson,
             signal: ctx.signal,
           });
+        },
+      }),
+      defineTool({
+        id: customer360ReadToolId,
+        version: customer360ReadToolVersion,
+        description: "Reads live Customer 360 profile, advisor notes, balances, and portfolio totals by personaId.",
+        inputs: {
+          type: "object",
+          additionalProperties: false,
+          required: ["personaId"],
+          properties: { personaId: { type: "string", minLength: 1, maxLength: 80 } },
+        },
+        outputs: {
+          type: "object",
+          additionalProperties: false,
+          required: ["personaId", "displayName", "segment", "notes", "accountFundingStatus", "beneficiaryStatus", "cashCents", "equityCents", "fixedIncomeCents", "totalPortfolioCents"],
+          properties: {
+            personaId: { type: "string" },
+            displayName: { type: "string" },
+            segment: { type: "string" },
+            notes: { type: "string" },
+            accountFundingStatus: { type: "string" },
+            beneficiaryStatus: { type: "string" },
+            cashCents: { type: "integer" },
+            equityCents: { type: "integer" },
+            fixedIncomeCents: { type: "integer" },
+            totalPortfolioCents: { type: "integer" },
+          },
+        },
+        policy: {
+          action: customer360ReadToolId,
+          effect: "read",
+          requiresApproval: false,
+          maxAttempts: 1,
+          timeoutMs: 4_000,
+          classification: "public",
+          maxOutputBytes: 8_000,
+        },
+        handler: async (raw) => {
+          const personaId = String((raw as { personaId: string }).personaId);
+          const profile = this.profileStore?.findByPersonaId(personaId) ?? findProfileById(personaId);
+          if (!profile) throw new ToolError("CUSTOMER_NOT_FOUND", `Customer profile not found: ${personaId}`);
+          return {
+            personaId: profile.personaId,
+            displayName: profile.displayName,
+            segment: profile.segment,
+            notes: profile.notes,
+            accountFundingStatus: profile.accountFundingStatus,
+            beneficiaryStatus: profile.beneficiaryStatus,
+            cashCents: profile.cashCents,
+            equityCents: profile.equityCents,
+            fixedIncomeCents: profile.fixedIncomeCents,
+            totalPortfolioCents: profile.cashCents + profile.equityCents + profile.fixedIncomeCents,
+          };
         },
       }),
       defineTool({

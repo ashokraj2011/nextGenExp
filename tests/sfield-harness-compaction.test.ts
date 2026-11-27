@@ -740,3 +740,71 @@ test("CEP POST /api/mcp exposes native sfield tool cep.empathy.assess@1.0.0 via 
   assert.equal(sc?.output?.lifeEvent, "job_loss");
   assert.equal(sc?.output?.suppressPromotions, true);
 });
+
+test("Admin MCP exposure toggles, Inspector emotionalState trace, and Dynamic Canvas conversational follow-up refinements", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "cep-mcp-admin-refine-"));
+  const gateway = await startFixtureGateway();
+  const app = await startApp({
+    projectRoot: fileURLToPath(testProject),
+    dataDir: dir,
+    gateway: gateway.settings,
+    operatorAuth: "off",
+  });
+  t.after(async () => { await app.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
+  const client = await testClient(app.url);
+
+  // 1. Admin MCP Server config toggles cep.customer360.read@1.0.0 ON -> callable over /api/mcp, then OFF -> rejected
+  const initialCfg = await client.request<{ config: { enabledToolRefs: string[]; includeKnowledgeSearch: boolean; includePublishedTasks: boolean } }>("/api/admin/mcp-server");
+  assert.ok(initialCfg.config.enabledToolRefs.includes("cep.empathy.assess@1.0.0"));
+  assert.ok(!initialCfg.config.enabledToolRefs.includes("cep.customer360.read@1.0.0"));
+
+  await client.request("/api/admin/mcp-server", {
+    enabledToolRefs: ["cep.empathy.assess@1.0.0", "cep.customer360.read@1.0.0"],
+    includeKnowledgeSearch: true,
+    includePublishedTasks: true,
+  });
+
+  const c360Mcp = await client.request<{ result?: { structuredContent?: { status: string; sfieldRunId: string; output: { displayName: string; totalPortfolioCents: number } } } }>(
+    "/api/mcp",
+    { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "cep.customer360.read@1.0.0", arguments: { personaId: "demo-learner" } } },
+  );
+  assert.equal(c360Mcp.result?.structuredContent?.status, "succeeded");
+  assert.ok(c360Mcp.result?.structuredContent?.sfieldRunId.startsWith("run_"));
+  assert.equal(c360Mcp.result?.structuredContent?.output.displayName, "Alice Morgan");
+
+  // Disable cep.customer360.read@1.0.0 -> rejected immediately!
+  await client.request("/api/admin/mcp-server", {
+    enabledToolRefs: ["cep.empathy.assess@1.0.0"],
+    includeKnowledgeSearch: true,
+    includePublishedTasks: true,
+  });
+  const blockedMcp = await client.request<{ error?: { code: number; message: string } }>(
+    "/api/mcp",
+    { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "cep.customer360.read@1.0.0", arguments: { personaId: "demo-learner" } } },
+  );
+  assert.ok(blockedMcp.error, "disabled MCP tool must be blocked");
+
+  // 2. Conversational Dynamic Canvas follow-up refinements ("exclude Apple" -> "turn that into a bubble chart")
+  const chat = await client.conversation("normal", "demo-learner");
+  const t1 = (await client.ask(chat.id, "i want to see drill down based on industry")).turn;
+  assert.equal(t1.status, "completed");
+
+  const t2 = (await client.ask(chat.id, "exclude Apple")).turn;
+  assert.equal(t2.status, "completed");
+  const card2 = t2.experience?.blocks.find((b) => b.component === "PznDynamicCanvas");
+  assert.ok(card2 && card2.component === "PznDynamicCanvas");
+  assert.match(card2.props.subtitle ?? "", /excluding AAPL/i);
+  const table2 = card2.props.nodes.find((n) => n.type === "table");
+  assert.ok(table2 && table2.type === "table");
+  assert.doesNotMatch(JSON.stringify(table2.rows), /\bAAPL\b/, "AAPL must be excluded from filtered industry table");
+
+  const t3 = (await client.ask(chat.id, "turn that into a bubble chart")).turn;
+  assert.equal(t3.status, "completed");
+  const card3 = t3.experience?.blocks.find((b) => b.component === "PznDynamicCanvas");
+  assert.ok(card3 && card3.component === "PznDynamicCanvas");
+  assert.ok(card3.props.nodes.some((n) => n.type === "bubblechart"), "follow-up should switch industry card to bubblechart");
+
+  // 3. Inspector debug trace exposes emotionalState
+  const debugTrace = await client.request<{ emotionalState?: { toolRef: string; sentiment: string } | null }>(`/api/debug/turns/${t3.id}`);
+  assert.equal(debugTrace.emotionalState?.toolRef, "cep.empathy.assess@1.0.0");
+});

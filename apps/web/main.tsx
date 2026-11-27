@@ -263,6 +263,7 @@ function AssistantMessage() {
                   actionMode={turn.actionMode}
                   semanticRoute={turn.semanticRoute}
                   customerLookup={turn.customerLookup}
+                  emotionalState={turn.emotionalState}
                   providerArbitration={turn.providerArbitration}
                   piiRedaction={turn.piiRedaction}
                 />

@@ -101,10 +101,10 @@ export interface FetchedGroundedData {
 }
 
 const portfolioWord = /\b(port?f[oa]l?io|protfolio|portfoilo|portofolio|porfolio|allocation|asset\s*mix|net\s*worth|invested|investments?)\b/i;
-const holdingsWord = /\b(holdings?|stocks?|tickers?|equities|shares?|positions?|tax[- ]?loss|industry|industries|sector|sectors|drill\s*down)\b/i;
+const holdingsWord = /\b(holdings?|stocks?|tickers?|equities|shares?|positions?|tax[- ]?loss|industry|industries|sector|sectors|drill\s*down|apple|aapl|microsoft|msft|nvidia|nvda|intel|intc|boeing|pfizer|semiconductors?|technology)\b/i;
 const goalWord = /\b(goal|home\s+(?:goal|plan|savings?|purchase)|down\s*payment|savings?\s+target)\b/i;
 const balanceWord = /\b(balance|balances|cash|available|current\s+balance|beneficiar(?:y|ies)|funding|account\s+status)\b/i;
-const followUpOrCorrectionWord = /\b(this\s+is\s+not|that\s+is\s+not|not\s+a\s+(?:pie|bar|donut|table|chart)|instead|make\s+it|change\s+it|turn\s+(?:it|that|this)\s+into|show\s+(?:it|that|this)\s+as|last\s+answer|previous\s+answer|prior\s+answer|your\s+answer|above|reframe|try\s+again|where\s+is\s+(?:the|my)\s+drill\s*down)\b|^\s*(?:as|in|into|like|switch\s+to|convert\s+to)\s+(?:a\s+|an\s+)?[\w\s-]{2,28}(?:chart|graph|table|plot|diagram|map|view|summary|list|matrix|bullets?)\s*[.!?]*$/i;
+const followUpOrCorrectionWord = /\b(this\s+is\s+not|that\s+is\s+not|not\s+a\s+(?:pie|bar|donut|table|chart)|instead|make\s+it|change\s+it|turn\s+(?:it|that|this)\s+into|switch\s+(?:it|that|this)\s+to|convert\s+(?:it|that|this)\s+to|show\s+(?:it|that|this)\s+as|(?:exclude|without|remove|drop|hide)\s+(?:apple|aapl|microsoft|msft|nvidia|nvda|intel|intc|boeing|ba|pfizer|pfe)|(?:only|just|filter\s+to|focus\s+on)\s+(?:tech|technology|semiconductors?|industrials?|healthcare|pharma)|last\s+answer|previous\s+answer|prior\s+answer|your\s+answer|above|reframe|try\s+again|where\s+is\s+(?:the|my)\s+drill\s*down)\b|^\s*(?:as|in|into|like|switch\s+to|convert\s+to)\s+(?:a\s+|an\s+)?[\w\s-]{2,28}(?:chart|graph|table|plot|diagram|map|view|summary|list|matrix|bullets?)\s*[.!?]*$/i;
 const unsupportedVisualTypeRegex = /\b(heat\s*map|radar\s*chart|spider\s*chart|tree\s*map|sankey(?:\s*diagram)?|waterfall\s*chart|gantt\s*chart|candlestick(?:\s*chart)?|box\s*plot|funnel\s*chart|3d\s*chart)\b/i;
 const explicitUnconnectedWord = /\b(jira|confluence|snowflake|databricks|bigquery|sap|erp|workday|bamboohr|zendesk|freshdesk|hubspot|marketo|shopify|stripe\s+invoices|github\s+issues|linear\s+tickets|datadog|splunk|warehouse|shipments?|inventory|weather|sports\s+scores|flights?|hotels?)\b/i;
 
@@ -482,6 +482,43 @@ export async function fetchGroundedData(input: {
   };
 }
 
+const SYMBOL_ALIASES: Array<[string, RegExp]> = [
+  ["AAPL", /\b(apple|aapl)\b/i],
+  ["MSFT", /\b(microsoft|msft)\b/i],
+  ["NVDA", /\b(nvidia|nvda)\b/i],
+  ["INTC", /\b(intel|intc)\b/i],
+  ["BA", /\b(boeing|ba)\b/i],
+  ["PFE", /\b(pfizer|pfe)\b/i],
+];
+
+const SECTOR_MAP: Record<string, string> = {
+  AAPL: "Technology",
+  MSFT: "Technology",
+  NVDA: "Semiconductors",
+  INTC: "Semiconductors",
+  BA: "Industrials & Aerospace",
+  PFE: "Healthcare & Pharma",
+};
+
+function parseHoldingsFilter(prompt: string): { excludedSymbols: Set<string>; onlySector?: string } {
+  const excludedSymbols = new Set<string>();
+  const excludeClause = prompt.match(/\b(?:exclude|without|remove|drop|hide|except)\b([^.;!?]+)/i)?.[1];
+  if (excludeClause) {
+    for (const [sym, rx] of SYMBOL_ALIASES) {
+      if (rx.test(excludeClause)) excludedSymbols.add(sym);
+    }
+  }
+  const onlyMatch = prompt.match(/\b(?:only|just|filter\s+to|focus\s+on)\s+(tech(?:nology)?|semiconductors?|industrials?|aerospace|healthcare|pharma)\b/i)?.[1]?.toLowerCase();
+  let onlySector: string | undefined;
+  if (onlyMatch) {
+    if (onlyMatch.startsWith("tech")) onlySector = "Technology";
+    else if (onlyMatch.startsWith("semi")) onlySector = "Semiconductors";
+    else if (onlyMatch.startsWith("ind") || onlyMatch.startsWith("aero")) onlySector = "Industrials & Aerospace";
+    else if (onlyMatch.startsWith("health") || onlyMatch.startsWith("pharma")) onlySector = "Healthcare & Pharma";
+  }
+  return { excludedSymbols, onlySector };
+}
+
 export function buildGroundedFallbackCanvas(
   prompt: string,
   plan: DynamicUiPlan,
@@ -492,20 +529,26 @@ export function buildGroundedFallbackCanvas(
   const p = fetched.portfolio;
   const nodes: DynamicCanvasNode[] = [];
   const visuals = new Set(plan.requiredVisuals);
-  const isIndustryDrillDown = /\b(industry|industries|sector|sectors|drill\s*down)\b/i.test(`${prompt}\n${fetched.recentContext ?? ""}`);
+  const { excludedSymbols, onlySector } = parseHoldingsFilter(prompt);
+  const filteredHoldings = (fetched.holdings ?? []).filter((h) => {
+    if (excludedSymbols.has(h.symbol.toUpperCase())) return false;
+    if (onlySector && (SECTOR_MAP[h.symbol.toUpperCase()] ?? "Diversified Equities") !== onlySector) return false;
+    return true;
+  });
+  const activeHoldings = filteredHoldings.length > 0 ? filteredHoldings : (fetched.holdings ?? []);
+  const filterTags = [
+    ...(excludedSymbols.size > 0 ? [`excluding ${[...excludedSymbols].join(", ")}`] : []),
+    ...(onlySector ? [`${onlySector} only`] : []),
+  ];
+  const filterNote = filterTags.length ? ` (${filterTags.join(" · ")})` : "";
+  const isIndustryDrillDown = /\b(industry|industries|sector|sectors|drill\s*down)\b/i.test(`${prompt}\n${fetched.recentContext ?? ""}`)
+    || Boolean(onlySector)
+    || (excludedSymbols.size > 0 && /Industry Drill-Down/i.test(fetched.recentContext ?? ""));
 
-  if (isIndustryDrillDown && fetched.holdings?.length) {
-    const sectorMap: Record<string, string> = {
-      AAPL: "Technology",
-      MSFT: "Technology",
-      NVDA: "Semiconductors",
-      INTC: "Semiconductors",
-      BA: "Industrials & Aerospace",
-      PFE: "Healthcare & Pharma",
-    };
+  if (isIndustryDrillDown && activeHoldings.length) {
     const grouped = new Map<string, { symbols: string[]; valueCents: number; plCents: number }>();
-    for (const h of fetched.holdings) {
-      const sec = sectorMap[h.symbol.toUpperCase()] ?? "Diversified Equities";
+    for (const h of activeHoldings) {
+      const sec = SECTOR_MAP[h.symbol.toUpperCase()] ?? "Diversified Equities";
       const cur = grouped.get(sec);
       if (cur) {
         cur.symbols.push(h.symbol);
@@ -521,12 +564,57 @@ export function buildGroundedFallbackCanvas(
     const equityTotal = Math.max(1, sectors.reduce((sum, s) => sum + s.valueCents, 0));
     const palette = ["#2f7d32", "#0d9488", "#476b8a", "#c88a2b", "#6d5bd0"];
     const topSector = sectors[0]!;
+    const primaryVisual: DynamicCanvasNode[] = visuals.has("bubblechart")
+      ? [{
+          type: "bubblechart" as const,
+          title: `Equity Allocation by Industry${filterNote}`,
+          xLabel: "Market Value ($)",
+          yLabel: "Unrealized P/L ($)",
+          sizeLabel: "Portfolio Share (%)",
+          points: sectors.map((s, idx) => ({
+            label: s.sector,
+            x: Math.round(s.valueCents / 100),
+            y: Math.round(s.plCents / 100),
+            size: Math.max(8, Math.round(pct1(s.valueCents, equityTotal))),
+            xDisplay: fmtUsd(s.valueCents),
+            yDisplay: `${s.plCents >= 0 ? "+" : ""}${fmtUsd(s.plCents)}`,
+            sizeDisplay: `${pct1(s.valueCents, equityTotal)}% · ${s.symbols.join(", ")}`,
+            category: s.sector,
+            color: palette[idx % palette.length],
+          })),
+        }]
+      : visuals.has("barchart")
+        ? [{
+            type: "barchart" as const,
+            title: `Equity Allocation by Industry${filterNote}`,
+            bars: sectors.map((s, idx) => ({
+              label: s.sector,
+              value: Math.round(s.valueCents / 100),
+              displayValue: fmtUsd(s.valueCents),
+              highlight: idx === 0,
+            })),
+          }]
+        : sectors.length >= 2
+          ? [{
+              type: "piechart" as const,
+              title: `Equity Allocation by Industry${filterNote}`,
+              centerLabel: "Equities",
+              centerValue: fmtUsdWhole(equityTotal),
+              slices: sectors.map((s, idx) => ({
+                label: s.sector,
+                value: Math.round(s.valueCents / 100),
+                displayValue: fmtUsd(s.valueCents),
+                color: palette[idx % palette.length],
+                highlight: idx === 0,
+              })),
+            }]
+          : [];
     return {
-      intro: `Here is the industry drill-down of your equity holdings, ${firstName} — **${topSector.sector}** is your largest sector at ${pct1(topSector.valueCents, equityTotal)}% (${fmtUsd(topSector.valueCents)}). Click any sector slice or table row to inspect further.`,
+      intro: `Here is the updated industry drill-down${filterNote}, ${firstName} — **${topSector.sector}** is your largest sector at ${pct1(topSector.valueCents, equityTotal)}% (${fmtUsd(topSector.valueCents)}).`,
       canvas: {
-        title: "Portfolio Industry & Sector Drill-Down",
+        title: `Portfolio Industry & Sector Drill-Down${filterNote}`,
         badge: "Industry Drill-Down",
-        subtitle: `${name} · ${sectors.length} industries across ${fetched.holdings.length} equity holdings`,
+        subtitle: `${name} · ${sectors.length} ${sectors.length === 1 ? "industry" : "industries"} across ${activeHoldings.length} equity holdings${filterNote}`,
         generatedBy: "synthesizer",
         dataSource: fetched.sourceLabels.join(" + ") || "Live Stock Holdings + Customer 360",
         prompt: prompt.slice(0, 600),
@@ -534,28 +622,16 @@ export function buildGroundedFallbackCanvas(
           {
             type: "metrics",
             items: [
-              { label: "Equity Holdings", value: fmtUsd(equityTotal), delta: `${fetched.holdings.length} tickers` },
+              { label: "Equity Holdings", value: fmtUsd(equityTotal), delta: `${activeHoldings.length} tickers` },
               { label: "Top Industry", value: topSector.sector.slice(0, 34), delta: `${pct1(topSector.valueCents, equityTotal)}%` },
-              { label: "Sectors", value: String(sectors.length), delta: "Diversified" },
+              { label: "Sectors", value: String(sectors.length), delta: filterTags.length ? "Filtered" : "Diversified" },
               ...(p ? [{ label: "Cash Reserve", value: fmtUsd(p.cashCents) }] : []),
             ],
           },
-          ...(sectors.length >= 2 ? [{
-            type: "piechart" as const,
-            title: "Equity Allocation by Industry",
-            centerLabel: "Equities",
-            centerValue: fmtUsdWhole(equityTotal),
-            slices: sectors.map((s, idx) => ({
-              label: s.sector,
-              value: Math.round(s.valueCents / 100),
-              displayValue: fmtUsd(s.valueCents),
-              color: palette[idx % palette.length],
-              highlight: idx === 0,
-            })),
-          }] : []),
+          ...primaryVisual,
           {
             type: "table",
-            caption: "Holdings Breakdown by Industry",
+            caption: `Holdings Breakdown by Industry${filterNote}`,
             columns: ["Industry", "Tickers", "Market Value", "Share", "Unrealized P/L"],
             rows: sectors.map((s) => [
               s.sector,
@@ -857,6 +933,8 @@ export async function runDynamicUiHarness(input: {
   recentContext?: string;
   rollingSummary?: string;
   userMemorySummary?: string;
+  previousCanvas?: DynamicCanvasProps;
+  emotionalState?: import("../../packages/contracts/empathy").EmotionalAssessment;
   pendingClarification?: PendingClarificationState | null;
   gateway?: GatewaySettings | null;
   dataDir: string;
@@ -869,9 +947,17 @@ export async function runDynamicUiHarness(input: {
 }): Promise<{ intro: string; canvas: DynamicCanvasProps }> {
   const clarificationHit = resolveClarificationReply(input.prompt, input.pendingClarification);
   const effectivePrompt = clarificationHit ? clarificationHit.matchedPrompt : input.prompt;
+  const previousCanvasSummary = input.previousCanvas
+    ? `PREVIOUS DYNAMIC CANVAS CARD:\n- Title: ${input.previousCanvas.title}\n- Badge: ${input.previousCanvas.badge ?? "none"}\n- Subtitle: ${input.previousCanvas.subtitle ?? ""}\n- Node types: ${input.previousCanvas.nodes.map((n) => n.type).join(", ")}`
+    : "";
+  const emotionalContextNote = input.emotionalState && (input.emotionalState.suppressPromotions || input.emotionalState.lifeEvent !== "none")
+    ? `EMOTIONAL CONTEXT (cep.empathy.assess@1.0.0):\n- Sentiment: ${input.emotionalState.sentiment} | Life Event: ${input.emotionalState.lifeEvent} | Source: ${input.emotionalState.source}\n- Suppress promotional upsells: ${input.emotionalState.suppressPromotions}\n- Guidance: Keep tone warm, concise, and liquidity-focused.`
+    : "";
   const enrichedRecent = [
     input.rollingSummary?.trim() ? input.rollingSummary.trim() : "",
     input.userMemorySummary?.trim() ? `USER MEMORY & PREFERENCES:\n${input.userMemorySummary.trim()}` : "",
+    previousCanvasSummary,
+    emotionalContextNote,
     input.recentContext?.trim() ? input.recentContext.trim() : "",
   ].filter(Boolean).join("\n\n");
 

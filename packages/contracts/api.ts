@@ -176,6 +176,7 @@ export type DemoPersona = {
     accountFundingStatus: "funded" | "unfunded";
     firstDepositConfirmedAt?: number;
     cashCents: number | null;
+    notes?: string;
   };
   overview?: {
     portfolio: PortfolioSnapshot | null;

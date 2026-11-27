@@ -361,7 +361,7 @@ try {
   await input.press("End");
   assert.match(await input.inputValue(), /\n/);
   await input.press("Enter");
-  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  await page.getByRole("button", { name: "End running task", exact: true }).click();
   await page.getByText("Response stopped.", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Retry", exact: true }).waitFor();
 
@@ -371,7 +371,7 @@ try {
   await input.press("Enter");
   await page.getByText("Couldn’t connect. Your draft is still here.", { exact: true }).waitFor();
   assert.equal(await input.inputValue(), "Explain the fictional portfolio view.");
-  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
   await page.getByRole("heading", { name: "Understanding your portfolio" }).waitFor();
 
   await page.getByRole("button", { name: "New conversation", exact: true }).click();
@@ -386,6 +386,7 @@ try {
 
   await openAdmin(page, "tools");
   await page.getByRole("heading", { name: "Tool setup", level: 1 }).waitFor();
+  await page.getByRole("heading", { name: /sfield Governed MCP Server/i }).waitFor();
   assert.equal(await page.getByRole("switch", { name: "Treatment Selector", exact: true }).isChecked(), true);
   assert.equal(await page.getByRole("switch", { name: "CCRE glossary", exact: true }).isChecked(), true);
   await page.getByLabel("Response", { exact: true }).selectOption("ranked");
@@ -439,7 +440,7 @@ try {
   await page.getByRole("button", { name: "Open draft in chat", exact: true }).click();
   if (!await page.getByRole("button", { name: /Compare two terms/ }).isVisible()) await page.getByText("Explore suggested questions", { exact: true }).click();
   await page.getByRole("button", { name: /Compare two terms/ }).click();
-  await page.getByText("Available balance is the amount marked ready to use. Current balance is the total recorded in the ledger. Which one would you like to understand better?", { exact: true }).waitFor();
+  await page.getByText(/available balance is the amount marked ready to use\. Current balance is the total recorded in the ledger\. Which one would you like to understand better\?/i).waitFor();
   await openAdmin(page, "logs");
   await page.getByText("Treatment Selector · succeeded", { exact: true }).click();
   await page.getByText("Mock CCRE evaluation", { exact: true }).click();
@@ -971,7 +972,7 @@ try {
   const signOut = signInPage.getByRole("button", { name: "Sign out", exact: true });
   const askAsProfile = async (prompt: string) => {
     await signInPage.getByLabel("Your question", { exact: true }).fill(prompt);
-    await signInPage.getByRole("button", { name: "Send", exact: true }).click();
+    await signInPage.getByRole("button", { name: "Send message", exact: true }).click();
   };
   const portfolioPrompt = "Let me know my portfolio summary.";
   const jordanCash = signInPage.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Portfolio snapshot", exact: true })

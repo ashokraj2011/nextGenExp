@@ -126,6 +126,7 @@ export type Trace = {
   metricReadSucceeded: boolean;
   portfolioReadSucceeded: boolean;
   goalReadSucceeded: boolean;
+  emotionalState?: import("../../packages/contracts/empathy").EmotionalAssessment | null;
   ts?: { baseline: string[]; fixtureVersion: string; partial: boolean; source?: TreatmentSource; rejections: { contentId: string; stage: string; reasonCode: string }[] };
   routeRun?: Stage;
   composeRun?: Stage;
@@ -188,6 +189,28 @@ export const api = {
   reorderRegistryNba: (orderedIds: string[]) => request<ExperienceRegistryView>("/api/admin/registry-nba-reorder", { orderedIds }),
   deleteOrResetRegistryNba: (id: string) => request<ExperienceRegistryView>("/api/admin/registry-nba-delete", { id }),
   toolSetup: () => requestJson<ToolSetupView>("/api/admin/tools"),
+  mcpServerConfig: () => request<{
+    endpoint: string;
+    protocolVersion: string;
+    stdioCommand: string;
+    config: { enabledToolRefs: string[]; includeKnowledgeSearch: boolean; includePublishedTasks: boolean };
+    sfieldTools: Array<{ ref: string; label: string; description: string; effect: "read"; enabled: boolean; sampleArgs: Record<string, unknown> }>;
+    publishedTaskCount: number;
+  }>("/api/admin/mcp-server"),
+  saveMcpServerConfig: (input: { enabledToolRefs: string[]; includeKnowledgeSearch: boolean; includePublishedTasks: boolean }) => request<{
+    endpoint: string;
+    protocolVersion: string;
+    stdioCommand: string;
+    config: { enabledToolRefs: string[]; includeKnowledgeSearch: boolean; includePublishedTasks: boolean };
+    sfieldTools: Array<{ ref: string; label: string; description: string; effect: "read"; enabled: boolean; sampleArgs: Record<string, unknown> }>;
+    publishedTaskCount: number;
+  }>("/api/admin/mcp-server", input),
+  callMcpRpc: (method: string, params?: Record<string, unknown>) => request<{
+    jsonrpc: string;
+    id: number;
+    result?: Record<string, unknown>;
+    error?: { code: number; message: string };
+  }>("/api/mcp", { jsonrpc: "2.0", id: Date.now(), method, ...(params ? { params } : {}) }),
   routingFlows: (scope?: FlowScope) => requestJson<FlowCatalogSetup>("/api/admin/routing-flows" + (scope ? "?scope=" + scope : "")),
   saveRoutingFlows: (scope: FlowScope, changes: FlowOverrides, revision?: string) =>
     requestJson<FlowCatalogSetup>("/api/admin/routing-flows?scope=" + scope, changes, revision),

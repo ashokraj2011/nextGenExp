@@ -241,6 +241,11 @@ export function AdvisorWorkspace() {
               <div>
                 <strong>Chat with AI Agent</strong>
                 <small>Ask for {client?.displayName ?? "client"} — the card syncs live on the right</small>
+                {client?.profile?.notes && (
+                  <div style={{ marginTop: "4px", fontSize: "0.78rem", color: "var(--teal-dark, #1d4b3e)", fontWeight: 500 }}>
+                    Customer 360 Note: {client.profile.notes}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -279,6 +284,12 @@ export function AdvisorWorkspace() {
                         </span>
                       ) : turn.experience ? (
                         <div className="advisor-turn-summary">
+                          {turn.emotionalState && (turn.emotionalState.suppressPromotions || turn.emotionalState.lifeEvent !== "none") && (
+                            <div style={{ marginBottom: "6px", fontSize: "0.76rem", fontWeight: 600, color: "#92400e", background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: "6px", padding: "3px 8px", display: "inline-block" }}>
+                              {turn.emotionalState.source === "customer360_notes" ? "Customer 360 Note" : "Empathy Layer"} · {turn.emotionalState.lifeEvent.replace(/_/g, " ")}
+                              {turn.emotionalState.suppressPromotions ? " · Promotional offers paused" : ""}
+                            </div>
+                          )}
                           <p>{turn.experience.intro}</p>
                           <div className="advisor-turn-foot">
                             {isSynced ? (

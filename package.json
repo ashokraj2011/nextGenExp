@@ -18,6 +18,7 @@
     "test:browser": "node --import tsx tests/browser.ts && node --import tsx tests/agentic-browser.ts && node --import tsx tests/ui-builder-browser.ts",
     "preview": "node --env-file-if-exists=.env --import tsx apps/server/main.ts --preview",
     "chat:harness": "npm run build:sfield && node --import tsx apps/harness/chat.ts",
+    "mcp:stdio": "npm run build:sfield && node --env-file-if-exists=.env --import tsx apps/server/mcp-stdio.ts",
     "eval:live": "node --env-file-if-exists=.env --import tsx tests/evaluate-live.ts",
     "eval:openai": "node --env-file-if-exists=.env.openai --import tsx tests/evaluate-live.ts --openai --smoke",
     "build:sfield": "tsc -b vendor/sfield/packages/store-sqlite",

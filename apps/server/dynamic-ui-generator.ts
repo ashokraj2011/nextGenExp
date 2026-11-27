@@ -1227,6 +1227,8 @@ export async function generateDynamicUi(input: {
   recentContext?: string;
   rollingSummary?: string;
   userMemorySummary?: string;
+  previousCanvas?: DynamicCanvasProps;
+  emotionalState?: import("../../packages/contracts/empathy").EmotionalAssessment;
   pendingClarification?: PendingClarificationState | null;
   gateway?: GatewaySettings | null;
   dataDir: string;
@@ -1257,7 +1259,7 @@ export async function generateDynamicUi(input: {
   signal?: AbortSignal;
 }): Promise<{ intro: string; canvas: DynamicCanvasProps }> {
   const {
-    prompt, profileSummary, recentContext, rollingSummary, userMemorySummary, pendingClarification, gateway, dataDir, harness, onStage, portfolioSnapshots, goalProgressProvider, opsStore, salesStore, connectorStore, approvalStore,
+    prompt, profileSummary, recentContext, rollingSummary, userMemorySummary, previousCanvas, emotionalState, pendingClarification, gateway, dataDir, harness, onStage, portfolioSnapshots, goalProgressProvider, opsStore, salesStore, connectorStore, approvalStore,
     tradeStore, matchedActionFlow, personaId, conversationId, principalId, onTradeSettle, requesterName, semanticRoute, tradeContinuation, signal,
   } = input;
 
@@ -1402,6 +1404,8 @@ export async function generateDynamicUi(input: {
       recentContext,
       rollingSummary,
       userMemorySummary,
+      previousCanvas,
+      emotionalState,
       pendingClarification,
       gateway,
       dataDir,

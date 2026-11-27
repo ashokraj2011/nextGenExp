@@ -127,8 +127,9 @@ export function deterministicCapabilityRoute(prompt: string): SemanticRouteDecis
       reasoning: "Matched live Sales & RevOps Deal Desk workflow.",
     };
   }
-  if (isDynamicUiRequest(clean) || /\b(by\s+industry|based\s+on\s+industry|by\s+sector|sector\s+breakdown|industry\s+breakdown|drill\s*down)\b/i.test(clean)) {
-    const explicitFormatOrCorrection = /\b(pie\s*chart|donut\s*chart|bar\s*chart|bubble\s*chart|scatter\s*plot|radar\s*chart|heat\s*map|comparison\s+table|as\s+a\s+(?:clear\s+)?(?:comparison\s+)?table|summarize\s+(?:your\s+)?last\s+answer|in\s+\d+\s+bullet\s+points?|not\s+a\s+(?:pie|bar|donut)\s*chart|by\s+industry|based\s+on\s+industry|by\s+sector|sector\s+breakdown|industry\s+breakdown|drill\s*down)\b|^\s*as\s+(?:a\s+|an\s+)?[\w\s-]{2,24}(?:chart|table|graph|plot)\s*$/i.test(clean);
+  const refinementFollowUp = /\b((?:exclude|without|remove|drop|hide)\s+(?:apple|aapl|microsoft|msft|nvidia|nvda|intel|intc|boeing|ba|pfizer|pfe|cash|fixed\s+income)|(?:only|just|filter\s+to|focus\s+on)\s+(?:tech|technology|semiconductors?|industrials?|healthcare|pharma|stocks?|equities)|(?:turn|switch|convert|change)\s+(?:that|it|this)\s+(?:in)?to\s+(?:a\s+)?(?:pie|donut|bar|bubble|table)|show\s+(?:that|it|this)\s+as\s+(?:a\s+)?(?:pie|donut|bar|bubble|table))\b/i;
+  if (isDynamicUiRequest(clean) || refinementFollowUp.test(clean) || /\b(by\s+industry|based\s+on\s+industry|by\s+sector|sector\s+breakdown|industry\s+breakdown|drill\s*down)\b/i.test(clean)) {
+    const explicitFormatOrCorrection = refinementFollowUp.test(clean) || /\b(pie\s*chart|donut\s*chart|bar\s*chart|bubble\s*chart|scatter\s*plot|radar\s*chart|heat\s*map|comparison\s+table|as\s+a\s+(?:clear\s+)?(?:comparison\s+)?table|summarize\s+(?:your\s+)?last\s+answer|in\s+\d+\s+bullet\s+points?|not\s+a\s+(?:pie|bar|donut)\s*chart|by\s+industry|based\s+on\s+industry|by\s+sector|sector\s+breakdown|industry\s+breakdown|drill\s*down)\b|^\s*as\s+(?:a\s+|an\s+)?[\w\s-]{2,24}(?:chart|table|graph|plot)\s*$/i.test(clean);
     return {
       capabilityId: "custom_dynamic_ui",
       capabilityLabel: capabilityLabelFor("custom_dynamic_ui"),

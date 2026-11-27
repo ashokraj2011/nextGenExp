@@ -79,7 +79,7 @@ function verifiedFactsFor(experience?: DisplayExperience): string[] {
   return facts;
 }
 
-export function ReasoningPanel({ status, progress, history, experience, actionMode, semanticRoute, customerLookup, providerArbitration, piiRedaction }: {
+export function ReasoningPanel({ status, progress, history, experience, actionMode, semanticRoute, customerLookup, emotionalState, providerArbitration, piiRedaction }: {
   status: TurnStatus;
   progress: Progress;
   history: Progress[];
@@ -87,6 +87,7 @@ export function ReasoningPanel({ status, progress, history, experience, actionMo
   actionMode?: ActionMode;
   semanticRoute?: SemanticRouteTrace;
   customerLookup?: CustomerLookupSummary;
+  emotionalState?: import("../../packages/contracts/empathy").EmotionalAssessment;
   providerArbitration?: ProviderArbitrationTrace;
   piiRedaction?: PiiRedactionTrace;
 }) {
@@ -97,7 +98,7 @@ export function ReasoningPanel({ status, progress, history, experience, actionMo
   const open = isWorking ? true : expanded;
   const verifiedFacts = !isWorking ? verifiedFactsFor(experience) : [];
   const modeInfo = actionMode ? actionModeMeta[actionMode] : undefined;
-  const totalChecks = steps.length + (verifiedFacts.length > 0 ? 1 : 0) + (customerLookup ? 1 : 0) + (providerArbitration ? 1 : 0) + (semanticRoute ? 1 : 0) + (piiRedaction ? 1 : 0);
+  const totalChecks = steps.length + (verifiedFacts.length > 0 ? 1 : 0) + (customerLookup ? 1 : 0) + (emotionalState ? 1 : 0) + (providerArbitration ? 1 : 0) + (semanticRoute ? 1 : 0) + (piiRedaction ? 1 : 0);
 
   return (
     <div className={"reasoning-panel" + (isWorking ? " reasoning-panel-live" : "")}>
@@ -119,6 +120,13 @@ export function ReasoningPanel({ status, progress, history, experience, actionMo
                 {piiRedaction.firewallEnabled
                   ? <><Lock size={11} aria-hidden="true" />PII Shield{piiRedaction.redactedCount > 0 ? ` · ${piiRedaction.redactedCount} scrubbed` : " · Clean"}</>
                   : <><ShieldAlert size={11} aria-hidden="true" />PII Firewall OFF</>}
+              </span>
+            )}
+            {emotionalState && !isWorking && (emotionalState.sentiment !== "neutral" || emotionalState.suppressPromotions) && (
+              <span className="action-mode-badge mode-clarify" title={emotionalState.reason}>
+                {emotionalState.source === "customer360_notes" ? "C360 Note" : "Empathy"}
+                {emotionalState.lifeEvent !== "none" ? ` · ${emotionalState.lifeEvent.replace(/_/g, " ")}` : ` · ${emotionalState.sentiment}`}
+                {emotionalState.suppressPromotions ? " · Promos paused" : ""}
               </span>
             )}
             <span className="reasoning-count">
@@ -189,6 +197,23 @@ export function ReasoningPanel({ status, progress, history, experience, actionMo
                 <span>
                   {customerLookup.highlights.join(" · ")}
                   {customerLookup.nbaSelected ? ` · Arbitrated NBA: ${customerLookup.nbaSelected}` : ""}
+                </span>
+              </span>
+            </li>
+          )}
+          {emotionalState && !isWorking && (
+            <li className="reasoning-step-done">
+              <CheckCircle2 size={14} className="reasoning-check" aria-hidden="true" />
+              <span className="reasoning-step-copy">
+                <strong>
+                  Empathy &amp; Life-Event Layer · <code>{emotionalState.toolRef}</code> ({emotionalState.sentiment}
+                  {emotionalState.lifeEvent !== "none" ? ` · ${emotionalState.lifeEvent.replace(/_/g, " ")}` : ""}
+                  {" · "}{emotionalState.source === "customer360_notes" ? "Customer 360 notes" : emotionalState.source.toUpperCase()})
+                </strong>
+                <span>
+                  {emotionalState.reason}
+                  {emotionalState.suppressPromotions ? " · Promotional NBAs suppressed (excludePromotions: true)." : ""}
+                  {emotionalState.customerNoteToSave ? ` · Saved C360 note: "${emotionalState.customerNoteToSave}"` : ""}
                 </span>
               </span>
             </li>

@@ -1217,6 +1217,8 @@ export class ExperienceService {
           recentContext: recentTurnsJson,
           rollingSummary: rollingSummaryText,
           userMemorySummary,
+          previousCanvas: displayed?.component === "PznDynamicCanvas" ? displayed.props : undefined,
+          emotionalState,
           pendingClarification,
           gateway: domainTools.gateway,
           dataDir: domainTools.dataDir,

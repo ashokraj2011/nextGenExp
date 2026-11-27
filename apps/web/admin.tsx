@@ -1,5 +1,6 @@
 import { CapabilityStudio } from "./capability-studio";
 import { McpDiscoveryCard } from "./mcp-discovery-card";
+import { McpServerPanel } from "./mcp-server-panel";
 import "./agentic.css";
 import { useEffect, useState } from "react";
 import { ArrowDown, ArrowUp, FlaskConical, Layers, MessageSquare, Play, Plug, Plus, Trash2 } from "lucide-react";
@@ -692,6 +693,7 @@ export function AdminPage() {
       </div>}
       {loaded && <RecommendationProvidersCard key={`rp-${providerTick}`} />}
       {loaded && <ExternalConnectorsCard key={`ec-${providerTick}`} onUpdated={() => setProviderTick((n) => n + 1)} />}
+      {loaded && <McpServerPanel />}
       {loaded && <McpDiscoveryCard onImported={() => setProviderTick((n) => n + 1)} />}
       {loaded && <CapabilityStudio />}
     </main>

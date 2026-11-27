@@ -59,6 +59,7 @@ import { migrateLegacyConnectors } from "./connector-migration";
 import { HandoffStore } from "./handoff-store";
 import { coBrowseSlidersSchema, createHandoffInputSchema } from "../../packages/contracts/handoff";
 import { buildA2aAgentCard, handleCepMcpRequest } from "./cep-mcp-server";
+import { McpExposureStore, mcpExposureConfigSchema, STANDALONE_SFIELD_MCP_TOOLS } from "./mcp-exposure-store";
 import { agUiRunInputSchema, streamAgUiRun } from "./ag-ui";
 import { WatchcardStore } from "./watchcard-store";
 import { CustomerGoalStore } from "./goal-store";
@@ -253,7 +254,7 @@ export async function startApp(options: Options) {
   const goalProgressProvider = options.goalProgressProvider ?? fixtureGoalProgressProvider;
   async function loadBootstrapPersonas(principalId: string, allowed: (id: string) => boolean, selected?: string): Promise<Bootstrap["personas"]> {
     return Promise.all(profileStore.list().filter(({ personaId }) => allowed(personaId)).map(async ({
-      personaId, displayName, allowedScenarios, beneficiaryStatus, accountFundingStatus, syntheticMid,
+      personaId, displayName, allowedScenarios, beneficiaryStatus, accountFundingStatus, syntheticMid, notes,
     }) => {
       const [portfolio, homeGoal] = await Promise.all([
         (personaId === selected ? portfolioSnapshots : fixturePortfolioSnapshotProvider).read(syntheticMid),
@@ -270,6 +271,7 @@ export async function startApp(options: Options) {
           ),
           ...(confirmation && { firstDepositConfirmedAt: confirmation.occurredAt }),
           cashCents: portfolio?.cashCents ?? null,
+          ...(notes ? { notes } : {}),
         },
         overview: { portfolio, homeGoal, portfolioHistory: fixturePortfolioHistory(syntheticMid) },
       };
@@ -342,6 +344,7 @@ export async function startApp(options: Options) {
   const workflowEngine = new WorkflowEngine(options.dataDir, { approvalStore, connectorStore });
   const proactiveStore = new ProactiveEventStore(options.dataDir);
   const knowledgeBase = new KnowledgeBaseStore(options.dataDir);
+  const mcpExposure = new McpExposureStore(options.dataDir);
   const verticalFactory = new VerticalPackStore(options.dataDir);
   const piiFirewall = new PiiFirewallStore(options.dataDir, options.piiEnabledByDefault);
   const telemetry = new CepTelemetry(options.dataDir);
@@ -1261,6 +1264,7 @@ export async function startApp(options: Options) {
         principalId,
         operatorName: actor,
         runtime,
+        exposureConfig: mcpExposure.get(),
       });
       res.writeHead(out.status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...out.headers });
       res.end(out.body === undefined ? "" : JSON.stringify(out.body));
@@ -1620,6 +1624,37 @@ export async function startApp(options: Options) {
           workflowEngine,
           baseUrl: origin,
         }));
+      }
+      if (id === "mcp-server" && method === "GET") {
+        const config = mcpExposure.get();
+        const publishedTasks = integrationService.view().contracts.filter((c) => c.status === "published" && c.sfieldRoute !== "unavailable");
+        return json(res, {
+          endpoint: "/api/mcp",
+          protocolVersion: "2025-03-26",
+          stdioCommand: "npm run mcp:stdio",
+          config,
+          sfieldTools: STANDALONE_SFIELD_MCP_TOOLS.map((t) => ({
+            ...t,
+            enabled: config.enabledToolRefs.includes(t.ref),
+          })),
+          publishedTaskCount: publishedTasks.length,
+        });
+      }
+      if (id === "mcp-server" && method === "POST") {
+        const input = await body(req, mcpExposureConfigSchema, 8 * 1024);
+        const saved = mcpExposure.save(input);
+        const publishedTasks = integrationService.view().contracts.filter((c) => c.status === "published" && c.sfieldRoute !== "unavailable");
+        return json(res, {
+          endpoint: "/api/mcp",
+          protocolVersion: "2025-03-26",
+          stdioCommand: "npm run mcp:stdio",
+          config: saved,
+          sfieldTools: STANDALONE_SFIELD_MCP_TOOLS.map((t) => ({
+            ...t,
+            enabled: saved.enabledToolRefs.includes(t.ref),
+          })),
+          publishedTaskCount: publishedTasks.length,
+        });
       }
       if (id === "mcp-discover" && method === "POST") {
         const input = await body(req, mcpDiscoverRequestSchema, 8 * 1024);
@@ -2820,6 +2855,7 @@ export async function startApp(options: Options) {
         goalReadSucceeded: Boolean(turn.goalProgress),
         routerRunId: turn.attempts.route?.runId ?? null, composerRunId: turn.attempts.compose?.runId ?? null,
         metricReadSucceeded: Boolean(turn.proof),
+        emotionalState: turn.public.emotionalState ?? null,
         ...(turn.agentRunId && { agentic: runtime?.decisionTrace(turn) }),
         ...turn.trace,
       });

@@ -42,11 +42,23 @@ function TraceView({ trace }: { trace: Trace }) {
       <Detail label={trace.uiLayout.target.kind === "intent" ? "Intent" : "Capability"}><code>{trace.uiLayout.target.id}</code></Detail>
     </dl>
   </section>;
-  if (trace.agentic) return <>{context}{applied}<DecisionTrace trace={trace.agentic} /></>;
+  const empathy = trace.emotionalState && <section className="trace-stage">
+    <h3>Empathy &amp; life-event assessment</h3>
+    <dl className="trace-dl">
+      <Detail label="sfield tool"><code>{trace.emotionalState.toolRef}</code></Detail>
+      <Detail label="Sentiment">{trace.emotionalState.sentiment}</Detail>
+      <Detail label="Life event">{trace.emotionalState.lifeEvent}</Detail>
+      <Detail label="Source">{trace.emotionalState.source}</Detail>
+      <Detail label="Promotions suppressed">{trace.emotionalState.suppressPromotions ? "Yes (excludePromotions: true)" : "No"}</Detail>
+      <Detail label="Reason">{trace.emotionalState.reason}</Detail>
+      {trace.emotionalState.customerNoteToSave && <Detail label="Saved C360 note">{trace.emotionalState.customerNoteToSave}</Detail>}
+    </dl>
+  </section>;
+  if (trace.agentic) return <>{context}{empathy}{applied}<DecisionTrace trace={trace.agentic} /></>;
   const creatingRule = trace.routeOutcome === "create_rule";
   const elapsed = trace.markers.terminal === undefined ? null : trace.markers.terminal - trace.markers.accepted;
   return <div className="trace-view">
-    {context}{applied}
+    {context}{empathy}{applied}
     <section>
       <h3>Routing</h3>
       <dl className="trace-dl">

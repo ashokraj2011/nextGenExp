@@ -20,6 +20,7 @@ import {
 import { empathyAssessToolRef } from "../../packages/contracts/empathy";
 import type { IntegrationTaskService } from "./integration-tasks";
 import type { KnowledgeBaseStore } from "./knowledge-base";
+import type { McpExposureConfig } from "./mcp-exposure-store";
 import { principalFor, type Runtime } from "./runtime";
 import { serverTenantId } from "./tenant";
 
@@ -29,6 +30,7 @@ export interface CepMcpDeps {
   principalId: string;
   operatorName: string;
   runtime?: Runtime | null;
+  exposureConfig?: McpExposureConfig;
 }
 
 const OFFLINE_MCP_HOST: SFieldMcpHost = {
@@ -44,10 +46,17 @@ const OFFLINE_MCP_HOST: SFieldMcpHost = {
 
 /** Exposes native sfield tools, published Integration Tasks, and Knowledge Base over MCP JSON-RPC 2.0. */
 export async function handleCepMcpRequest(raw: unknown, deps: CepMcpDeps): Promise<McpHttpResponse> {
-  const publishedContracts = deps.integrationService
-    .view()
-    .contracts
-    .filter((c) => c.status === "published" && c.sfieldRoute !== "unavailable");
+  const exposure = deps.exposureConfig ?? {
+    enabledToolRefs: [empathyAssessToolRef],
+    includeKnowledgeSearch: true,
+    includePublishedTasks: true,
+  };
+  const publishedContracts = exposure.includePublishedTasks
+    ? deps.integrationService
+        .view()
+        .contracts
+        .filter((c) => c.status === "published" && c.sfieldRoute !== "unavailable")
+    : [];
 
   const extraTools: McpExtraTool[] = [
     ...publishedContracts.map((c): McpExtraTool => ({
@@ -96,7 +105,7 @@ export async function handleCepMcpRequest(raw: unknown, deps: CepMcpDeps): Promi
         };
       },
     })),
-    {
+    ...(exposure.includeKnowledgeSearch ? [{
       descriptor: {
         name: "cep.knowledge.search@1.0.0",
         description: "Search CEP enterprise policy & runbook Knowledge Base using hybrid BM25 + semantic vector retrieval.",
@@ -111,17 +120,17 @@ export async function handleCepMcpRequest(raw: unknown, deps: CepMcpDeps): Promi
         },
         annotations: { title: "CEP Knowledge Search", readOnlyHint: true, destructiveHint: false, idempotentHint: true },
       },
-      handler: async (args) => {
+      handler: async (args: Record<string, unknown>) => {
         const query = String(args.query ?? "").trim();
         if (!query) throw new Error("query is required");
         const limit = typeof args.limit === "number" ? Math.min(10, Math.max(1, Math.round(args.limit))) : 3;
         const res = deps.knowledgeBase.search(query, limit);
         return {
-          content: [{ type: "text", text: JSON.stringify(res) }],
+          content: [{ type: "text" as const, text: JSON.stringify(res) }],
           structuredContent: res,
         };
       },
-    },
+    }] : []),
   ];
 
   const resources: McpResourceDefinition[] = [
@@ -160,7 +169,7 @@ export async function handleCepMcpRequest(raw: unknown, deps: CepMcpDeps): Promi
     principal: principalFor(deps.principalId),
     preset: "read_only" as const,
     purpose: "cep-mcp",
-    allowTools: [empathyAssessToolRef],
+    allowTools: exposure.enabledToolRefs,
     extraTools,
     resources,
   };
