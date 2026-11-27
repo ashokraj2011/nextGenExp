@@ -157,13 +157,17 @@ export function AssistantMessage() {
   const turn = useAuiState((state) => state.message.metadata.custom?.turn as TurnView | undefined);
   const {
     latest, pending, adminChat, activeProfile, progressHistory, expertiseMode, pinnedTurnId,
-    pinCanvas, branchTurn, retry, feedback, anchorTurn, runPrompt, previewFunding,
+    pinCanvas, branchTurn, retry, feedback, followTurn, runPrompt, previewFunding,
   } = useContext(ConversationControls);
   const element = useRef<HTMLDivElement>(null);
   const [arrivedLive] = useState(turn?.status === "working");
+  const turnId = turn?.id;
+  const latestId = latest?.id;
+  const replyReady = Boolean(turn && (turn.status !== "working" || turn.previewExperience));
   useEffect(() => {
-    if (element.current && turn && latest?.id === turn.id) anchorTurn(turn.id, element.current);
-  }, [anchorTurn, latest?.id, turn?.id]);
+    if (!element.current || !turnId || turnId !== latestId) return;
+    return followTurn(turnId, element.current, replyReady);
+  }, [followTurn, latestId, turnId, replyReady]);
   if (!turn) return null;
   const experience = turn.experience;
   const steps = progressHistory[turn.id] ?? [turn.progress];

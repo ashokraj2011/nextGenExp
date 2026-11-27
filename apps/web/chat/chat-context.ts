@@ -26,7 +26,7 @@ export type ConversationOperations = {
   pinCanvas: (turn: TurnView) => void;
   branchTurn?: (turn: TurnView) => void;
   retry: (id: string) => void;
-  anchorTurn: (id: string, message: HTMLElement) => void;
+  followTurn: (id: string, message: HTMLElement, replyReady: boolean) => (() => void) | undefined;
   feedback: (turnId: string, experienceId: string, value: "helpful" | "unhelpful") => void;
   runPrompt: (prompt: string) => void;
   previewFunding: () => void;
@@ -40,7 +40,7 @@ export const ConversationControls = createContext<ConversationOperations>({
   pinCanvas: () => undefined,
   retry: () => undefined,
   feedback: () => undefined,
-  anchorTurn: () => undefined,
+  followTurn: () => undefined,
   runPrompt: () => undefined,
   previewFunding: () => undefined,
 });

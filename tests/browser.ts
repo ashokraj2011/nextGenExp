@@ -34,6 +34,14 @@ async function readExchange(drawer: Locator) {
   };
 }
 
+async function waitForCardInView(card: Locator) {
+  await card.page().waitForFunction((element) => {
+    const viewport = element.closest(".thread-scroll")!.getBoundingClientRect();
+    const bounds = element.getBoundingClientRect();
+    return bounds.top >= viewport.top - 1 && bounds.bottom <= viewport.bottom + 1;
+  }, await card.elementHandle());
+}
+
 const preview = await startTestPreview(undefined, ({ envelope }) => (
   envelope.request.toLowerCase().includes("slow") ? { delayMs: 4000 }
     : envelope.inputType === "PznContextRoutingInput" && envelope.request === "Let me know my portfolio summary." ? { delayMs: 600 } : undefined
@@ -593,10 +601,13 @@ try {
   assert.equal(await stockShare(), "71%");
   const discuss = snapshot.getByRole("button", { name: "Discuss this allocation" });
   assert.ok(await discuss.isDisabled());
+  const portfolioViewport = portfolioPage.locator(".thread-scroll");
+  const readingPosition = await portfolioViewport.evaluate((element) => element.scrollTop);
   releaseFinal();
   await cashRecommendation.waitFor();
   await waitingForRecommendations.waitFor({ state: "hidden" });
   await portfolioPage.unroute(turnRead);
+  assert.equal(await portfolioViewport.evaluate((element) => element.scrollTop), readingPosition, "A recommendation arriving during card interaction leaves the reader in place");
   assert.doesNotMatch(await pendingElement.innerText(), /mode=|exp=|blocks=|sources=|actions=/);
   assert.ok(await earlyCard.evaluate((card) => card.isConnected));
   assert.ok(await discuss.isEnabled());
@@ -983,9 +994,21 @@ try {
   await mobileMore.click();
   await mobile.getByRole("button", { name: "Copy brief", exact: true }).waitFor();
   await mobileMore.click();
+  await mobile.setViewportSize({ width: 360, height: 640 });
+  let releaseMobileFinal!: () => void;
+  const mobileFinalRead = new Promise<void>((resolve) => { releaseMobileFinal = resolve; });
+  await mobile.route(turnRead, async (route) => { await mobileFinalRead; await route.continue(); });
   await mobileMessage.fill("Let me know my portfolio summary.");
   await mobileMessage.press("Enter");
-  await mobile.locator('[data-renderer="a2ui"]').getByRole("heading", { name: "Portfolio snapshot", exact: true }).waitFor();
+  const mobileReply = mobile.locator('.assistant-message [data-renderer="a2ui"]').last();
+  try {
+    await mobile.getByRole("status").filter({ hasText: "Checking for recommendations." }).waitFor();
+    await waitForCardInView(mobileReply.getByRole("region", { name: "Portfolio snapshot", exact: true }));
+  } finally { releaseMobileFinal(); }
+  await waitForCardInView(mobileReply.locator(".content-card").filter({
+    has: mobile.getByRole("heading", { name: "Explore investing options", exact: true }),
+  }));
+  await mobile.unroute(turnRead);
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await openAdmin(mobile, "logs");
   const mobileLogs = mobile.getByRole("region", { name: "Call log details" });

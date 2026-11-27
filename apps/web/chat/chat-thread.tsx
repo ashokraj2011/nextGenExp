@@ -2,7 +2,7 @@
  * Main Chat thread view (assistant-ui runtime, hero/welcome stage, split live canvas / futures pane).
  * Extracted from `apps/web/main.tsx` so the root entry file owns only app shell & session state.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AssistantRuntimeProvider, ThreadPrimitive, useExternalStoreRuntime } from "@assistant-ui/react";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import type { Bootstrap, ConversationView, DemoPersona, Progress, TurnView } from "../../../packages/contracts/api";
@@ -111,31 +111,44 @@ export function Chat({
   const messageList = useRef<HTMLDivElement>(null);
   // Chat is keyed by conversation. Only turns present when it opens are restored history.
   const initialTurn = useRef(latest?.id);
-  const restoring = Boolean(initialTurn.current && latest?.id === initialTurn.current);
   const lastAnchor = useRef(initialTurn.current);
-  useLayoutEffect(() => {
+  const pausedTurn = useRef<string>(undefined);
+  const followTurn = useCallback((id: string, message: HTMLElement, replyReady: boolean) => {
     const scroll = viewport.current;
-    if (!restoring || !scroll || !messageList.current) return;
+    const list = messageList.current;
+    if (!scroll || !list) return;
+    const restoring = initialTurn.current === id;
+    if (lastAnchor.current !== id) {
+      lastAnchor.current = id;
+      const user = message.previousElementSibling ?? message;
+      const top = user.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop;
+      scroll.scrollTop = Math.max(0, top - 24);
+    }
+    if (pausedTurn.current === id) return;
+
     const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
     const interaction = new AbortController();
     const observer = new ResizeObserver(() => {
-      if (!interaction.signal.aborted) scroll.scrollTo({ top: scroll.scrollHeight, behavior: motion.matches ? "instant" : "smooth" });
+      // Leave the question in view when the reply fits. Otherwise reveal the end above the composer.
+      const top = restoring ? scroll.scrollHeight - scroll.clientHeight
+        : Math.ceil(scroll.scrollTop + message.getBoundingClientRect().bottom - scroll.getBoundingClientRect().bottom + 8);
+      if (top > scroll.scrollTop + 1) scroll.scrollTo({ top, behavior: motion.matches ? "instant" : "smooth" });
     });
     const stop = () => { observer.disconnect(); interaction.abort(); };
-    // Saved A2UI cards can finish laying out after the message rows mount.
-    observer.observe(messageList.current);
+    const pause = () => {
+      pausedTurn.current = id;
+      stop();
+      scroll.scrollTo({ top: scroll.scrollTop, behavior: "instant" });
+    };
+    // A2UI can finish laying out after the message mounts, and a recommendation can extend the preview.
+    if (restoring || replyReady) {
+      observer.observe(list);
+      observer.observe(scroll);
+    }
     for (const event of ["wheel", "pointerdown", "touchstart", "keydown"]) {
-      scroll.addEventListener(event, stop, { passive: true, signal: interaction.signal });
+      scroll.addEventListener(event, pause, { passive: true, signal: interaction.signal });
     }
     return stop;
-  }, [restoring]);
-  const anchorTurn = useCallback((id: string, message: HTMLElement) => {
-    const scroll = viewport.current;
-    if (!scroll || lastAnchor.current === id) return;
-    lastAnchor.current = id;
-    const user = message.previousElementSibling ?? message;
-    const top = user.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop;
-    scroll.scrollTop = Math.max(0, top - 24);
   }, []);
   const rendered = useCallback((experienceId: string, fallback?: boolean, previewTurnId?: string) => {
     const receipt = previewTurnId ? api.portfolioDisplayed(previewTurnId) : api.event(experienceId, fallback ? "render_fallback" : "rendered");
@@ -184,7 +197,7 @@ export function Chat({
       <ConversationControls.Provider value={{
         latest, pending, adminChat, activeProfile, progressHistory, expertiseMode, pinnedTurnId,
         pinCanvas: (t) => { onToggleFutures(false); pinCanvas(t); },
-        branchTurn: onBranch, retry: onRetry, feedback: onFeedback, anchorTurn,
+        branchTurn: onBranch, retry: onRetry, feedback: onFeedback, followTurn,
         runPrompt: (prompt) => void onSend(prompt),
         previewFunding: () => onPreviewFunding(pendingActionsContext),
       }}>
