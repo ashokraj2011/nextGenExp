@@ -177,6 +177,28 @@ export {
   formatRunStreamSse,
   type RunStreamChunk,
 } from "./runtime/stream.js";
+export {
+  SurfaceBinderService,
+  extractSchemaFields,
+  formatSurfaceValue,
+  resolvePath,
+  stitchTemplateData,
+  validateRefPathAgainstSchemas,
+  type BindableFieldDescriptor,
+  type BindableToolSchema,
+  type DataModelSlot,
+  type DataRefBinding,
+  type InputSlotBinding,
+  type RepeatBinding,
+  type SealedSurfaceAction,
+  type StitchedSurface,
+  type SurfaceActionDispatchResult,
+  type SurfaceActionSpec,
+  type SurfaceFormat,
+  type SurfaceHost,
+  type SurfaceSourceSpec,
+  type SurfaceTemplate,
+} from "./ui/surface-binder.js";
 export { PluginManager, CORE_API_VERSION, CORE_VERSION } from "./plugins/manager.js";
 export { EnvSecretResolver, CompositeSecretResolver } from "./secrets.js";
 export { checkLockApproved, approveLock, effectiveRequireApproved } from "./governance/lock.js";

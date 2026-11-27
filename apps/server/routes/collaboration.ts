@@ -22,7 +22,7 @@ import type { HandoffStore } from "../handoff-store";
 import type { IntegrationTaskService } from "../integration-tasks";
 import type { KnowledgeBaseStore } from "../knowledge-base";
 import type { McpExposureStore } from "../mcp-exposure-store";
-import { domainWriteToolRef, type Runtime } from "../runtime";
+import { domainWriteToolRef, principalFor, type Runtime } from "../runtime";
 import type { ExperienceService } from "../service";
 import { ApiError, type Store } from "../store";
 import type { WatchcardStore } from "../watchcard-store";
@@ -490,6 +490,68 @@ export async function handleCollaborationAndProtocolRoutes(deps: CollaborationRo
       const { id: memoryId } = await body(req, z.object({ id: z.string().trim().min(2).max(120) }).strict());
       const receipt = await runtime.forgetMemory(principalId, memoryId);
       json(res, { receipt, items: await runtime.listMemory(principalId) });
+      return true;
+    }
+  }
+
+  // Blind pass-through to @sfield/core SurfaceBinderService: CEP server does ZERO domain mapping.
+  if (resource === "surfaces") {
+    if (!runtime) throw new ApiError(503, "sfield_runtime_required", "Connect a model gateway to enable sfield SurfaceBinder.");
+    const sf = runtime.sfieldInstance;
+    if (id === "schemas" && !operation && method === "GET") {
+      json(res, { tools: sf.surfaces.inspectSchemas() });
+      return true;
+    }
+    if (id === "stitch" && !operation && method === "POST") {
+      const input = await body(req, z.object({
+        personaId: z.string().trim().min(1).max(64).optional(),
+        template: z.object({
+          component: z.string().trim().min(1).max(80),
+          props: z.record(z.string(), z.unknown()),
+          actions: z.array(z.object({
+            id: z.string().trim().min(1).max(64),
+            label: z.string().trim().min(1).max(80),
+            toolRef: z.string().trim().min(1).max(120),
+            inputs: z.record(z.string(), z.unknown()),
+            preset: z.enum(["read_only", "supervised", "bounded_auto"]).optional(),
+          }).strict()).optional(),
+        }).strict(),
+        sources: z.record(z.string(), z.object({
+          toolRef: z.string().trim().min(1).max(120),
+          inputs: z.record(z.string(), z.unknown()),
+        }).strict()),
+        strictSchemaValidation: z.boolean().optional(),
+      }).strict(), 64 * 1024);
+      const stitched = await sf.surfaces.stitch({
+        principal: principalFor(principalId, input.personaId ? { personaId: input.personaId, domainId: "wealth" } : undefined),
+        template: input.template,
+        sources: input.sources as Record<string, { toolRef: string; inputs: import("@sfield/core").JsonObject }>,
+        strictSchemaValidation: input.strictSchemaValidation,
+      });
+      json(res, stitched);
+      return true;
+    }
+    if (id === "action" && !operation && method === "POST") {
+      const input = await body(req, z.object({
+        personaId: z.string().trim().min(1).max(64).optional(),
+        action: z.object({
+          surfaceId: z.string(),
+          actionId: z.string(),
+          label: z.string(),
+          toolRef: z.string(),
+          preset: z.enum(["read_only", "supervised", "bounded_auto"]),
+          resolvedInputs: z.record(z.string(), z.unknown()),
+          inputSlots: z.record(z.string(), z.object({ field: z.string(), default: z.unknown().optional() })),
+          seal: z.string(),
+        }).strict(),
+        formInputs: z.record(z.string(), z.unknown()).optional(),
+      }).strict(), 32 * 1024);
+      const outcome = await sf.surfaces.dispatchAction({
+        principal: principalFor(principalId, input.personaId ? { personaId: input.personaId, domainId: "wealth" } : undefined),
+        action: input.action as import("@sfield/core").SealedSurfaceAction,
+        formInputs: input.formInputs as Record<string, import("@sfield/core").JsonValue> | undefined,
+      });
+      json(res, outcome, outcome.status === "denied" ? 403 : outcome.status === "pending_approval" ? 202 : 200);
       return true;
     }
   }
