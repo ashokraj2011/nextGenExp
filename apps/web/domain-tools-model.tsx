@@ -16,6 +16,7 @@ import {
   Play,
   Plus,
   ShieldCheck,
+  Sigma,
   Sparkles,
   Trash2,
   Wrench,
@@ -24,6 +25,7 @@ import {
 import { adminPaths } from "../../packages/contracts/admin-paths";
 import { getDomainPack, type DomainPackId } from "../../packages/contracts/domain-packs";
 import type {
+  SmassAggregateOp,
   SmassClassification,
   SmassFieldFormat,
   SmassFieldType,
@@ -62,7 +64,22 @@ type DraftComputedField = {
   exposed: boolean;
 };
 
-type DraftField = DraftMappedField | DraftComputedField;
+type DraftAggregateField = {
+  kind: "aggregate";
+  uid: string;
+  key: string;
+  label: string;
+  op: SmassAggregateOp;
+  sourceField?: string;
+  itemField?: string;
+  sourceFields?: string[];
+  type: SmassFieldType;
+  format?: SmassFieldFormat;
+  classification: SmassClassification;
+  exposed: boolean;
+};
+
+type DraftField = DraftMappedField | DraftComputedField | DraftAggregateField;
 
 type DragPayload =
   | { kind: "field"; toolRef: string; outputPath: string; type: string; label: string; format?: SmassFieldFormat }
@@ -73,6 +90,15 @@ type DragPayload =
     };
 
 const DRAG_MIME = "application/x-smass-schema";
+const AGGREGATE_OPS: Array<{ op: SmassAggregateOp; label: string }> = [
+  { op: "sum", label: "SUM" },
+  { op: "avg", label: "AVG" },
+  { op: "min", label: "MIN" },
+  { op: "max", label: "MAX" },
+  { op: "count", label: "COUNT" },
+  { op: "first", label: "FIRST" },
+  { op: "last", label: "LAST" },
+];
 
 function prettifyFieldLabel(path: string): string {
   const leaf = path.split(".").at(-1) ?? path;
@@ -103,6 +129,7 @@ function inferFormat(path: string, type: string): SmassFieldFormat | undefined {
   const lower = path.toLowerCase();
   if ((type === "integer" || type === "number") && lower.endsWith("cents")) return "currency_cents";
   if ((type === "integer" || type === "number") && (lower.includes("pct") || lower.includes("percent") || lower.includes("rate"))) return "percent";
+  if (type === "array") return "series";
   if (lower.includes("date") || lower === "asof") return "date";
   if (lower.includes("month")) return "month";
   return undefined;
@@ -118,6 +145,19 @@ function inferDependsOn(expression: string, knownKeys: readonly string[]): strin
   return [...found];
 }
 
+function formatAggregateSummary(agg: { op: string; sourceField?: string; itemField?: string; sourceFields?: string[] }): string {
+  const target = agg.sourceField
+    ? `${agg.sourceField}${agg.itemField ? `.${agg.itemField}` : ""}`
+    : (agg.sourceFields ?? []).join(", ");
+  return `${agg.op.toUpperCase()}(${target})`;
+}
+
+function replaceIdentifier(expression: string, oldKey: string, newKey: string): string {
+  if (!oldKey || !newKey || oldKey === newKey) return expression;
+  const escaped = oldKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return expression.replace(new RegExp(`\\b${escaped}\\b`, "g"), newKey);
+}
+
 function cardinalityLabel(cardinality: SmassRelationCardinality): string {
   switch (cardinality) {
     case "one_to_one":
@@ -131,16 +171,23 @@ function cardinalityLabel(cardinality: SmassRelationCardinality): string {
   }
 }
 
-export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId }) {
+export function DomainToolsAndModelPanel({
+  domainId,
+  defaultOpenBuilder = false,
+}: {
+  domainId: DomainPackId;
+  defaultOpenBuilder?: boolean;
+}) {
   const [data, setData] = useState<DomainWorkbenchData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
-  const [viewMode, setViewMode] = useState<ModelViewMode>("entities");
+  const [viewMode, setViewMode] = useState<ModelViewMode>(defaultOpenBuilder ? "builder" : "entities");
   const [copied, setCopied] = useState(false);
 
   // Drag-and-drop Virtual Model Builder state
+  const [editingPreviousId, setEditingPreviousId] = useState<string | null>(null);
   const [draftLabel, setDraftLabel] = useState("Customer Summary VDM");
   const [draftId, setDraftId] = useState(() => slugifyModelId(domainId, "Customer Summary VDM"));
   const [idManuallyEdited, setIdManuallyEdited] = useState(false);
@@ -151,12 +198,22 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
   const [savingModel, setSavingModel] = useState(false);
   const activeDragRef = useRef<DragPayload | null>(null);
 
-  // Computed field inline composer state
-  const [showComputedForm, setShowComputedForm] = useState(false);
+  // Derived (computed) column composer state
+  const [activeComposer, setActiveComposer] = useState<"none" | "computed" | "aggregate">("none");
   const [compKey, setCompKey] = useState("");
   const [compLabel, setCompLabel] = useState("");
   const [compExpr, setCompExpr] = useState("");
   const [compType, setCompType] = useState<SmassFieldType>("integer");
+
+  // Aggregate column composer state
+  const [aggMode, setAggMode] = useState<"array" | "columns">("array");
+  const [aggKey, setAggKey] = useState("");
+  const [aggLabel, setAggLabel] = useState("");
+  const [aggOp, setAggOp] = useState<SmassAggregateOp>("sum");
+  const [aggSourceField, setAggSourceField] = useState("");
+  const [aggItemField, setAggItemField] = useState("");
+  const [aggSelectedCols, setAggSelectedCols] = useState<string[]>([]);
+  const [aggType, setAggType] = useState<SmassFieldType>("integer");
 
   // Live VDM snapshot test state
   const [testingModelId, setTestingModelId] = useState<string | null>(null);
@@ -181,12 +238,14 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
   useEffect(() => {
     setNotice("");
     setCopied(false);
+    setEditingPreviousId(null);
     setDraftFields([]);
     setDraftLabel(`${pack.shortLabel} Virtual View`);
     setDraftId(slugifyModelId(domainId, `${pack.shortLabel} Virtual View`));
     setIdManuallyEdited(false);
     setDraftPrincipalKey(domainId === "wealth" ? "mid" : "");
     setSnapshotResults({});
+    setActiveComposer("none");
     void refresh();
   }, [domainId]);
 
@@ -205,6 +264,61 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
       [...new Set(draftFields.filter((f): f is DraftMappedField => f.kind === "mapped").map((f) => f.toolRef))],
     [draftFields],
   );
+
+  // Map array fields (e.g. `goal.progress.read@1.0.0::history`) to their JSON Schema item sub-fields (e.g. `month`, `savedCents`)
+  const arrayItemSubfields = useMemo(() => {
+    const map = new Map<string, Array<{ subPath: string; type: string }>>();
+    for (const tool of data?.tools ?? []) {
+      for (const field of tool.outputFields) {
+        const marker = field.path.indexOf("[].");
+        if (marker < 0) continue;
+        const arrayPath = field.path.slice(0, marker);
+        const subPath = field.path.slice(marker + 3);
+        const key = `${tool.toolRef}::${arrayPath}`;
+        const list = map.get(key) ?? [];
+        list.push({ subPath, type: field.type });
+        map.set(key, list);
+      }
+    }
+    return map;
+  }, [data?.tools]);
+
+  const arrayDraftFields = useMemo(
+    () => draftFields.filter((f): f is DraftMappedField => f.kind === "mapped" && f.type === "array"),
+    [draftFields],
+  );
+  const scalarDraftFields = useMemo(
+    () => draftFields.filter((f) => !(f.kind === "mapped" && f.type === "array")),
+    [draftFields],
+  );
+
+  // Auto-select sensible default mode & field when opening Aggregate composer
+  function openAggregateComposer() {
+    setError("");
+    if (arrayDraftFields.length > 0) {
+      const firstArr = arrayDraftFields[0]!;
+      const subs = arrayItemSubfields.get(`${firstArr.toolRef}::${firstArr.outputPath}`) ?? [];
+      const firstNumericSub = subs.find((s) => s.type === "integer" || s.type === "number") ?? subs[0];
+      setAggMode("array");
+      setAggSourceField(firstArr.key);
+      setAggItemField(firstNumericSub?.subPath ?? "");
+      setAggOp("last");
+      setAggKey(firstNumericSub ? `latest_${firstNumericSub.subPath}` : `${firstArr.key}_count`);
+      setAggLabel(firstNumericSub ? `Latest ${prettifyFieldLabel(firstNumericSub.subPath)}` : `${firstArr.label} Count`);
+      setAggType(firstNumericSub?.type === "integer" || firstNumericSub?.type === "number" ? firstNumericSub.type : "integer");
+    } else {
+      const numericScalars = scalarDraftFields
+        .filter((f) => f.type === "integer" || f.type === "number")
+        .map((f) => f.key);
+      setAggMode("columns");
+      setAggSelectedCols(numericScalars.slice(0, 3));
+      setAggOp("sum");
+      setAggKey("total_aggregate");
+      setAggLabel("Combined Total");
+      setAggType("integer");
+    }
+    setActiveComposer("aggregate");
+  }
 
   function addFieldsToDraft(
     items: Array<{ toolRef: string; outputPath: string; type: string; label?: string; format?: SmassFieldFormat }>,
@@ -250,6 +364,39 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
         setViewMode("builder");
       }
       return next;
+    });
+  }
+
+  /**
+   * Renames a column's canonical key and automatically rewires any downstream
+   * derived column expressions or aggregate references so renames never break dependencies.
+   */
+  function renameDraftFieldKey(index: number, nextKey: string) {
+    setDraftFields((prev) => {
+      const oldKey = prev[index]?.key ?? "";
+      return prev.map((field, i) => {
+        if (i === index) return { ...field, key: nextKey };
+        if (!oldKey || !nextKey || oldKey === nextKey) return field;
+        if (field.kind === "computed" && field.dependsOn.includes(oldKey)) {
+          return {
+            ...field,
+            expression: replaceIdentifier(field.expression, oldKey, nextKey),
+            dependsOn: field.dependsOn.map((d) => (d === oldKey ? nextKey : d)),
+          };
+        }
+        if (field.kind === "aggregate") {
+          const nextSourceField = field.sourceField === oldKey ? nextKey : field.sourceField;
+          const nextSourceFields = field.sourceFields?.map((d) => (d === oldKey ? nextKey : d));
+          if (nextSourceField !== field.sourceField || nextSourceFields?.some((d, j) => d !== field.sourceFields?.[j])) {
+            return {
+              ...field,
+              ...(nextSourceField ? { sourceField: nextSourceField } : {}),
+              ...(nextSourceFields ? { sourceFields: nextSourceFields } : {}),
+            };
+          }
+        }
+        return field;
+      });
     });
   }
 
@@ -345,13 +492,13 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
     const cleanKey = sanitizeFieldKey(compKey);
     const cleanExpr = compExpr.trim();
     if (!cleanKey || !cleanExpr) {
-      setError("Provide both a field key and an arithmetic formula for the computed field.");
+      setError("Provide both a column key and an arithmetic formula for the derived column.");
       return;
     }
     const existingKeys = draftFields.map((f) => f.key);
     const dependsOn = inferDependsOn(cleanExpr, existingKeys);
     if (dependsOn.length === 0) {
-      setError(`Formula must reference at least one dropped field key (${existingKeys.join(", ") || "drop fields first"}).`);
+      setError(`Formula must reference at least one column key (${existingKeys.join(", ") || "drop fields first"}).`);
       return;
     }
     setError("");
@@ -373,7 +520,62 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
     setCompKey("");
     setCompLabel("");
     setCompExpr("");
-    setShowComputedForm(false);
+    setActiveComposer("none");
+  }
+
+  function addAggregateFieldToDraft() {
+    const cleanKey = sanitizeFieldKey(aggKey);
+    if (!cleanKey) {
+      setError("Provide a column key for the aggregate.");
+      return;
+    }
+    if (aggMode === "array") {
+      if (!aggSourceField) {
+        setError("Select an array column (such as history) to aggregate over, or switch to Multi-Column mode.");
+        return;
+      }
+      setError("");
+      setDraftFields((prev) => [
+        ...prev,
+        {
+          kind: "aggregate",
+          uid: `agg:${cleanKey}:${Date.now()}`,
+          key: cleanKey,
+          label: aggLabel.trim() || prettifyFieldLabel(cleanKey),
+          op: aggOp,
+          sourceField: aggSourceField,
+          ...(aggItemField.trim() && aggOp !== "count" ? { itemField: aggItemField.trim() } : {}),
+          type: aggOp === "count" ? "integer" : aggType,
+          format: aggOp === "count" ? "number" : inferFormat(aggItemField || cleanKey, aggType),
+          classification: "internal",
+          exposed: true,
+        },
+      ]);
+    } else {
+      if (aggSelectedCols.length < 1) {
+        setError("Select at least one column to aggregate.");
+        return;
+      }
+      setError("");
+      setDraftFields((prev) => [
+        ...prev,
+        {
+          kind: "aggregate",
+          uid: `agg:${cleanKey}:${Date.now()}`,
+          key: cleanKey,
+          label: aggLabel.trim() || prettifyFieldLabel(cleanKey),
+          op: aggOp,
+          sourceFields: [...aggSelectedCols],
+          type: aggOp === "count" ? "integer" : aggType,
+          format: aggOp === "count" ? "number" : inferFormat(cleanKey, aggType),
+          classification: "internal",
+          exposed: true,
+        },
+      ]);
+    }
+    setAggKey("");
+    setAggLabel("");
+    setActiveComposer("none");
   }
 
   async function saveVirtualModel() {
@@ -387,39 +589,62 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
     try {
       const next = await api.saveDomainModel(domainId, {
         id: draftId.trim(),
+        ...(editingPreviousId ? { previousId: editingPreviousId } : {}),
         version: "1.0.0",
         label: draftLabel.trim(),
         ...(draftDescription.trim() ? { description: draftDescription.trim() } : {}),
         ...(draftPrincipalKey.trim() ? { principalKey: draftPrincipalKey.trim(), primaryKey: draftPrincipalKey.trim() } : {}),
-        fields: draftFields.map((f) =>
-          f.kind === "computed"
-            ? {
-                kind: "computed" as const,
-                key: f.key,
-                label: f.label,
-                expression: f.expression,
-                dependsOn: f.dependsOn,
-                type: f.type,
-                ...(f.format ? { format: f.format } : {}),
-                classification: f.classification,
-                exposed: f.exposed,
-              }
-            : {
-                kind: "mapped" as const,
-                key: f.key,
-                label: f.label,
-                toolRef: f.toolRef,
-                outputPath: f.outputPath,
-                ...(f.format ? { format: f.format } : {}),
-                classification: f.classification,
-                required: f.required,
-                exposed: f.exposed,
-              },
-        ),
+        fields: draftFields.map((f) => {
+          if (f.kind === "computed") {
+            return {
+              kind: "computed" as const,
+              key: f.key,
+              label: f.label,
+              expression: f.expression,
+              dependsOn: f.dependsOn,
+              type: f.type,
+              ...(f.format ? { format: f.format } : {}),
+              classification: f.classification,
+              exposed: f.exposed,
+            };
+          }
+          if (f.kind === "aggregate") {
+            return {
+              kind: "aggregate" as const,
+              key: f.key,
+              label: f.label,
+              op: f.op,
+              ...(f.sourceField ? { sourceField: f.sourceField } : {}),
+              ...(f.itemField ? { itemField: f.itemField } : {}),
+              ...(f.sourceFields?.length ? { sourceFields: f.sourceFields } : {}),
+              type: f.type,
+              ...(f.format ? { format: f.format } : {}),
+              classification: f.classification,
+              exposed: f.exposed,
+            };
+          }
+          return {
+            kind: "mapped" as const,
+            key: f.key,
+            label: f.label,
+            toolRef: f.toolRef,
+            outputPath: f.outputPath,
+            ...(f.format ? { format: f.format } : {}),
+            classification: f.classification,
+            required: f.required,
+            exposed: f.exposed,
+          };
+        }),
       });
+      const wasRenamed = editingPreviousId && editingPreviousId !== draftId.trim();
       setData(next);
+      setEditingPreviousId(null);
       setViewMode("entities");
-      setNotice(`Saved Virtual Data Model "${draftLabel.trim()}" (${draftId.trim()}) — compiled into smass ER graph, Draft 2020-12 JSON Schema & sphoton catalog.`);
+      setNotice(
+        wasRenamed
+          ? `Renamed & saved Virtual Data Model "${draftLabel.trim()}" (${editingPreviousId} → ${draftId.trim()}) into smass & sphoton.`
+          : `Saved Virtual Data Model "${draftLabel.trim()}" (${draftId.trim()}) — compiled into smass ER graph, Draft 2020-12 JSON Schema & sphoton catalog.`,
+      );
     } catch (err) {
       setError(toolSetupErrorMessage(err));
     } finally {
@@ -430,43 +655,77 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
   function loadCustomModelIntoBuilder(modelId: string) {
     const found = data?.customModels?.find((m) => m.id === modelId);
     if (!found) return;
+    const toolFieldTypes = new Map<string, string>();
+    for (const tool of data?.tools ?? []) {
+      for (const f of tool.outputFields) toolFieldTypes.set(`${tool.toolRef}::${f.path}`, f.type);
+    }
+    setEditingPreviousId(found.id);
     setDraftId(found.id);
     setDraftLabel(found.label);
     setIdManuallyEdited(true);
     setDraftDescription(found.description ?? "");
     setDraftPrincipalKey(found.principalKey ?? "");
     setDraftFields(
-      found.fields.map((f, idx) =>
-        f.kind === "computed"
-          ? {
-              kind: "computed",
-              uid: `edit:${f.key}:${idx}`,
-              key: f.key,
-              label: f.label,
-              expression: f.expression,
-              dependsOn: f.dependsOn,
-              type: f.type,
-              format: f.format,
-              classification: f.classification,
-              exposed: f.exposed,
-            }
-          : {
-              kind: "mapped",
-              uid: `edit:${f.toolRef}:${f.outputPath}:${idx}`,
-              key: f.key,
-              label: f.label,
-              toolRef: f.toolRef,
-              outputPath: f.outputPath,
-              type: "string",
-              format: f.format,
-              classification: f.classification,
-              required: f.required,
-              exposed: f.exposed,
-            },
-      ),
+      found.fields.map((f, idx) => {
+        if (f.kind === "computed") {
+          return {
+            kind: "computed",
+            uid: `edit:${f.key}:${idx}`,
+            key: f.key,
+            label: f.label,
+            expression: f.expression,
+            dependsOn: f.dependsOn,
+            type: f.type,
+            format: f.format,
+            classification: f.classification,
+            exposed: f.exposed,
+          };
+        }
+        if (f.kind === "aggregate") {
+          return {
+            kind: "aggregate",
+            uid: `edit:${f.key}:${idx}`,
+            key: f.key,
+            label: f.label,
+            op: f.op,
+            sourceField: f.sourceField,
+            itemField: f.itemField,
+            sourceFields: f.sourceFields,
+            type: f.type,
+            format: f.format,
+            classification: f.classification,
+            exposed: f.exposed,
+          };
+        }
+        return {
+          kind: "mapped",
+          uid: `edit:${f.toolRef}:${f.outputPath}:${idx}`,
+          key: f.key,
+          label: f.label,
+          toolRef: f.toolRef,
+          outputPath: f.outputPath,
+          type: toolFieldTypes.get(`${f.toolRef}::${f.outputPath}`) ?? "string",
+          format: f.format,
+          classification: f.classification,
+          required: f.required,
+          exposed: f.exposed,
+        };
+      }),
     );
     setViewMode("builder");
-    setNotice(`Loaded "${found.label}" into Virtual Model Builder. Drag additional fields from the left or edit mappings.`);
+    setNotice(`Loaded "${found.label}" into Virtual Model Builder. Rename the model or columns, drag more fields, or add aggregates & derived columns.`);
+  }
+
+  function startFreshVirtualModel() {
+    setEditingPreviousId(null);
+    setDraftFields([]);
+    setDraftLabel(`${pack.shortLabel} Virtual View`);
+    setDraftId(slugifyModelId(domainId, `${pack.shortLabel} Virtual View`));
+    setIdManuallyEdited(false);
+    setDraftDescription("Federated virtual model composed from tool JSON Schemas.");
+    setDraftPrincipalKey(domainId === "wealth" ? "mid" : "");
+    setActiveComposer("none");
+    setViewMode("builder");
   }
 
   async function deleteCustomModel(modelId: string) {
@@ -540,6 +799,10 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
 
   const entities = data?.dataModel?.entities ?? data?.models ?? [];
   const relations = data?.dataModel?.relations ?? [];
+  const selectedArrayField = arrayDraftFields.find((f) => f.key === aggSourceField);
+  const selectedArraySubfields = selectedArrayField
+    ? arrayItemSubfields.get(`${selectedArrayField.toolRef}::${selectedArrayField.outputPath}`) ?? []
+    : [];
 
   return (
     <section
@@ -551,17 +814,17 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
         <div>
           <h2 id="domain-tools-model-title" style={{ margin: "0 0 4px", display: "inline-flex", alignItems: "center", gap: "8px" }}>
             <Database size={18} aria-hidden="true" />
-            {pack.label} · Tools → Schema → Canonical <code>smass</code> Virtual Data Model
+            {pack.label} · Tool JSON Schemas → Canonical <code>smass</code> Virtual Data Model
           </h2>
           <p style={{ margin: 0, fontSize: "0.88rem", color: "var(--muted)" }}>
-            Drag &amp; drop closed JSON Schema fields from any <code>sfield</code> tool on the left into the <strong>Virtual Builder</strong> on the right to compose federated <code>smass</code> virtual models, compute derived fields, and test live 1× snapshots.
+            Drag closed JSON Schema fields from <code>sfield</code> tools on the left into the <strong>Virtual Builder</strong> — rename models &amp; columns, add <strong>aggregates</strong> and <strong>derived columns</strong>, and test live 1× snapshots.
           </p>
         </div>
         <div style={{ display: "inline-flex", gap: "8px", flexWrap: "wrap" }}>
           <button
             type="button"
             className="secondary-button"
-            onClick={() => setViewMode("builder")}
+            onClick={startFreshVirtualModel}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -575,7 +838,7 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
             }}
           >
             <Sparkles size={14} aria-hidden="true" />
-            Build Virtual Model (Drag &amp; Drop)
+            + New Virtual Model
           </button>
           <a
             href={`${adminPaths.builder}?domain=${domainId}`}
@@ -595,7 +858,7 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
       {loading && !data ? (
         <p className="admin-muted">Loading {pack.shortLabel} tools and smass data model…</p>
       ) : data ? (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))", gap: "16px", alignItems: "start" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(360px, 0.95fr) minmax(420px, 1.15fr)", gap: "16px", alignItems: "start" }}>
           {/* Column 1: Connected sfield Tools & Draggable Closed JSON Schemas */}
           <div style={{ display: "grid", gap: "10px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
@@ -604,7 +867,7 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
                 1. Tool JSON Schemas ({data.tools.length})
               </h3>
               <span style={{ fontSize: "0.74rem", color: "var(--muted)" }}>
-                Drag any field or tool → Virtual Builder
+                Drag any field or whole tool → Builder
               </span>
             </div>
 
@@ -691,6 +954,7 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
                           const key = `${tool.toolRef}::${field.path}`;
                           const isBusy = busyKey === key;
                           const inDraft = droppedSourceKeys.has(key);
+                          const subFields = field.type === "array" ? arrayItemSubfields.get(key) ?? [] : [];
                           return (
                             <li
                               key={field.path}
@@ -720,7 +984,9 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
                               <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", flexWrap: "wrap", minWidth: 0 }}>
                                 <GripVertical size={13} color="#64748b" aria-hidden="true" />
                                 <code>{field.path}</code>
-                                <span style={{ fontSize: "0.71rem", color: "var(--muted)" }}>({field.type})</span>
+                                <span style={{ fontSize: "0.71rem", color: "var(--muted)" }}>
+                                  ({field.type}{subFields.length ? ` · ${subFields.map((s) => s.subPath).join(", ")}` : ""})
+                                </span>
                                 {field.exposed && <strong style={{ fontSize: "0.75rem" }}>→ {field.label}</strong>}
                               </span>
                               <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
@@ -811,8 +1077,8 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
               <div role="tablist" aria-label="Data model representation" style={{ display: "inline-flex", gap: "4px", flexWrap: "wrap" }}>
                 {(
                   [
-                    ["entities", "Entity Model"],
                     ["builder", `Virtual Builder${draftFields.length ? ` (${draftFields.length})` : ""}`],
+                    ["entities", `Entity Models (${entities.length})`],
                     ["mermaid_er", "Mermaid ER"],
                     ["json_schema", "JSON Schema"],
                   ] as const
@@ -858,17 +1124,20 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
                   <div>
                     <strong style={{ fontSize: "0.92rem", display: "inline-flex", alignItems: "center", gap: "6px" }}>
                       <Sparkles size={15} color="#155331" aria-hidden="true" />
-                      Drag-and-Drop Virtual Model Composer
+                      {editingPreviousId ? `Editing & Renaming: ${editingPreviousId}` : "Drag-and-Drop Virtual Model Composer"}
                     </strong>
                     <p style={{ margin: "2px 0 0", fontSize: "0.78rem", color: "var(--muted)" }}>
-                      Compose one federated <code>smass</code> entity across multiple tool JSON Schemas.
+                      Rename any column or model ID freely — derived formulas and aggregates automatically follow column renames.
                     </p>
                   </div>
                   {draftFields.length > 0 && (
                     <button
                       type="button"
                       className="secondary-button"
-                      onClick={() => setDraftFields([])}
+                      onClick={() => {
+                        setDraftFields([]);
+                        setActiveComposer("none");
+                      }}
                       style={{ padding: "4px 8px", fontSize: "0.73rem" }}
                     >
                       Clear fields
@@ -876,7 +1145,7 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
                   )}
                 </div>
 
-                {/* Model Metadata */}
+                {/* Model Metadata (Renameable Model Name & Model ID) */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
                   <label style={{ display: "grid", gap: "3px", fontSize: "0.76rem", fontWeight: 600 }}>
                     Model name
@@ -893,7 +1162,7 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
                     />
                   </label>
                   <label style={{ display: "grid", gap: "3px", fontSize: "0.76rem", fontWeight: 600 }}>
-                    Model ID (smass)
+                    Model ID (renameable)
                     <input
                       type="text"
                       value={draftId}
@@ -919,7 +1188,7 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
                     />
                   </label>
                   <label style={{ display: "grid", gap: "3px", fontSize: "0.76rem", fontWeight: 600 }}>
-                    Principal Join Key (optional)
+                    Principal Join Key
                     <input
                       type="text"
                       value={draftPrincipalKey}
@@ -957,109 +1226,128 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
                           : "Drop JSON Schema fields (or an entire tool) from the left here"}
                       </strong>
                       <span style={{ fontSize: "0.76rem" }}>
-                        You can mix fields from multiple tools — <code>smass</code> automatically federates them into one closed-schema 1× snapshot.
+                        Mix fields from multiple tools (including arrays like <code>history</code>), rename columns, then add <strong>aggregates</strong> and <strong>derived columns</strong>.
                       </span>
                     </div>
                   ) : (
                     <>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.74rem", color: "#155331", fontWeight: 600 }}>
                         <span>
-                          Federates {federatedTools.length} tool{federatedTools.length === 1 ? "" : "s"} · {draftFields.length} virtual field{draftFields.length === 1 ? "" : "s"}
+                          Federates {federatedTools.length} tool{federatedTools.length === 1 ? "" : "s"} · {draftFields.length} virtual column{draftFields.length === 1 ? "" : "s"}
                         </span>
                         <span style={{ color: "var(--muted)", fontWeight: 500 }}>
-                          {isDragOver ? "Drop to append field…" : "Drag more fields here to expand"}
+                          {isDragOver ? "Drop to append column…" : "Drag more fields here to expand"}
                         </span>
                       </div>
                       <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "6px" }}>
-                        {draftFields.map((field, index) => (
-                          <li
-                            key={field.uid}
-                            style={{
-                              padding: "8px 10px",
-                              borderRadius: "8px",
-                              background: "#fff",
-                              border: field.kind === "computed" ? "1px solid #d8b4fe" : "1px solid var(--border, #d4e2da)",
-                              display: "grid",
-                              gap: "6px",
-                              fontSize: "0.79rem",
-                            }}
-                          >
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto auto", gap: "6px", alignItems: "center" }}>
-                              <input
-                                type="text"
-                                aria-label={`Canonical key for field ${index + 1}`}
-                                value={field.key}
-                                onChange={(e) => {
-                                  const key = e.target.value;
-                                  setDraftFields((prev) => prev.map((f, i) => (i === index ? { ...f, key } : f)));
-                                }}
-                                style={{ padding: "4px 6px", borderRadius: "6px", border: "1px solid var(--border, #cbd5e1)", fontFamily: "monospace", fontSize: "0.78rem", fontWeight: 700 }}
-                              />
-                              <input
-                                type="text"
-                                aria-label={`Display label for field ${index + 1}`}
-                                value={field.label}
-                                onChange={(e) => {
-                                  const label = e.target.value;
-                                  setDraftFields((prev) => prev.map((f, i) => (i === index ? { ...f, label } : f)));
-                                }}
-                                style={{ padding: "4px 6px", borderRadius: "6px", border: "1px solid var(--border, #cbd5e1)", fontSize: "0.78rem" }}
-                              />
-                              <select
-                                aria-label={`Classification for ${field.key}`}
-                                value={field.classification}
-                                onChange={(e) => {
-                                  const classification = e.target.value as SmassClassification;
-                                  setDraftFields((prev) => prev.map((f, i) => (i === index ? { ...f, classification } : f)));
-                                }}
-                                style={{ padding: "4px 6px", borderRadius: "6px", border: "1px solid var(--border, #cbd5e1)", fontSize: "0.74rem" }}
-                              >
-                                <option value="internal">internal</option>
-                                <option value="confidential">confidential</option>
-                                <option value="pii">pii</option>
-                                <option value="public">public</option>
-                              </select>
-                              <button
-                                type="button"
-                                className="secondary-button"
-                                aria-label={`Remove ${field.key}`}
-                                onClick={() => setDraftFields((prev) => prev.filter((_, i) => i !== index))}
-                                style={{ padding: "4px", display: "inline-flex" }}
-                              >
-                                <X size={13} aria-hidden="true" />
-                              </button>
-                            </div>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap", fontSize: "0.72rem", color: "var(--muted)" }}>
-                              {field.kind === "mapped" ? (
-                                <span>
-                                  Source: <code>{field.toolRef}</code> → <code>{field.outputPath}</code> ({field.type})
-                                </span>
-                              ) : (
-                                <span style={{ color: "#6b21a8" }}>
-                                  Computed: <code>{field.expression}</code> (deps: {field.dependsOn.join(", ")})
-                                </span>
-                              )}
-                              <label style={{ display: "inline-flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+                        {draftFields.map((field, index) => {
+                          const isRenamed = field.kind === "mapped" && field.key !== sanitizeFieldKey(field.outputPath);
+                          return (
+                            <li
+                              key={field.uid}
+                              style={{
+                                padding: "8px 10px",
+                                borderRadius: "8px",
+                                background: "#fff",
+                                border:
+                                  field.kind === "computed"
+                                    ? "1px solid #d8b4fe"
+                                    : field.kind === "aggregate"
+                                      ? "1px solid #fcd34d"
+                                      : "1px solid var(--border, #d4e2da)",
+                                display: "grid",
+                                gap: "6px",
+                                fontSize: "0.79rem",
+                              }}
+                            >
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto auto", gap: "6px", alignItems: "center" }}>
                                 <input
-                                  type="checkbox"
-                                  checked={field.exposed}
-                                  onChange={(e) => {
-                                    const exposed = e.target.checked;
-                                    setDraftFields((prev) => prev.map((f, i) => (i === index ? { ...f, exposed } : f)));
-                                  }}
+                                  type="text"
+                                  aria-label={`Canonical key for column ${index + 1}`}
+                                  title="Rename canonical column key"
+                                  value={field.key}
+                                  onChange={(e) => renameDraftFieldKey(index, e.target.value)}
+                                  style={{ padding: "4px 6px", borderRadius: "6px", border: "1px solid var(--border, #cbd5e1)", fontFamily: "monospace", fontSize: "0.78rem", fontWeight: 700 }}
                                 />
-                                UI-bindable
-                              </label>
-                            </div>
-                          </li>
-                        ))}
+                                <input
+                                  type="text"
+                                  aria-label={`Display label for column ${index + 1}`}
+                                  title="Rename display label"
+                                  value={field.label}
+                                  onChange={(e) => {
+                                    const label = e.target.value;
+                                    setDraftFields((prev) => prev.map((f, i) => (i === index ? { ...f, label } : f)));
+                                  }}
+                                  style={{ padding: "4px 6px", borderRadius: "6px", border: "1px solid var(--border, #cbd5e1)", fontSize: "0.78rem" }}
+                                />
+                                <select
+                                  aria-label={`Classification for ${field.key}`}
+                                  value={field.classification}
+                                  onChange={(e) => {
+                                    const classification = e.target.value as SmassClassification;
+                                    setDraftFields((prev) => prev.map((f, i) => (i === index ? { ...f, classification } : f)));
+                                  }}
+                                  style={{ padding: "4px 6px", borderRadius: "6px", border: "1px solid var(--border, #cbd5e1)", fontSize: "0.74rem" }}
+                                >
+                                  <option value="internal">internal</option>
+                                  <option value="confidential">confidential</option>
+                                  <option value="pii">pii</option>
+                                  <option value="public">public</option>
+                                </select>
+                                <button
+                                  type="button"
+                                  className="secondary-button"
+                                  aria-label={`Remove ${field.key}`}
+                                  onClick={() => setDraftFields((prev) => prev.filter((_, i) => i !== index))}
+                                  style={{ padding: "4px", display: "inline-flex" }}
+                                >
+                                  <X size={13} aria-hidden="true" />
+                                </button>
+                              </div>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap", fontSize: "0.72rem", color: "var(--muted)" }}>
+                                {field.kind === "mapped" ? (
+                                  <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", flexWrap: "wrap" }}>
+                                    <span>
+                                      Source: <code>{field.toolRef}</code> → <code>{field.outputPath}</code> ({field.type})
+                                    </span>
+                                    {isRenamed && (
+                                      <span style={{ padding: "1px 5px", borderRadius: "4px", background: "#e0f2fe", color: "#0369a1", fontWeight: 700, fontSize: "0.67rem" }}>
+                                        renamed from {field.outputPath}
+                                      </span>
+                                    )}
+                                  </span>
+                                ) : field.kind === "aggregate" ? (
+                                  <span style={{ color: "#92400e", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                                    <Sigma size={12} aria-hidden="true" />
+                                    <strong>Aggregate:</strong> <code>{formatAggregateSummary(field)}</code> ({field.type})
+                                  </span>
+                                ) : (
+                                  <span style={{ color: "#6b21a8" }}>
+                                    <strong>Derived:</strong> <code>{field.expression}</code> (deps: {field.dependsOn.join(", ")})
+                                  </span>
+                                )}
+                                <label style={{ display: "inline-flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={field.exposed}
+                                    onChange={(e) => {
+                                      const exposed = e.target.checked;
+                                      setDraftFields((prev) => prev.map((f, i) => (i === index ? { ...f, exposed } : f)));
+                                    }}
+                                  />
+                                  UI-bindable
+                                </label>
+                              </div>
+                            </li>
+                          );
+                        })}
                       </ul>
                     </>
                   )}
                 </div>
 
-                {/* Add Computed Field inline drawer */}
-                {showComputedForm ? (
+                {/* Derived Column Composer */}
+                {activeComposer === "computed" && (
                   <div
                     style={{
                       border: "1px solid #d8b4fe",
@@ -1071,8 +1359,8 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
                     }}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <strong style={{ fontSize: "0.8rem", color: "#6b21a8" }}>Add Deterministic Computed Field</strong>
-                      <button type="button" className="secondary-button" style={{ padding: "2px 6px", fontSize: "0.72rem" }} onClick={() => setShowComputedForm(false)}>
+                      <strong style={{ fontSize: "0.8rem", color: "#6b21a8" }}>Add Derived Column (Formula)</strong>
+                      <button type="button" className="secondary-button" style={{ padding: "2px 6px", fontSize: "0.72rem" }} onClick={() => setActiveComposer("none")}>
                         Cancel
                       </button>
                     </div>
@@ -1081,14 +1369,14 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
                         type="text"
                         value={compKey}
                         onChange={(e) => setCompKey(e.target.value)}
-                        placeholder="Field key (e.g. excessCashCents)"
+                        placeholder="Column key (e.g. remainingGapCents)"
                         style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #d8b4fe", fontFamily: "monospace", fontSize: "0.78rem" }}
                       />
                       <input
                         type="text"
                         value={compLabel}
                         onChange={(e) => setCompLabel(e.target.value)}
-                        placeholder="Label (e.g. Excess Cash)"
+                        placeholder="Display label (e.g. Remaining Gap)"
                         style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #d8b4fe", fontSize: "0.78rem" }}
                       />
                       <select
@@ -1100,31 +1388,270 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
                         <option value="number">number</option>
                       </select>
                     </div>
+                    {scalarDraftFields.length > 0 && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center", fontSize: "0.71rem", color: "#6b21a8" }}>
+                        <span>Insert column:</span>
+                        {scalarDraftFields.map((col) => (
+                          <button
+                            key={col.uid}
+                            type="button"
+                            onClick={() => setCompExpr((prev) => (prev ? `${prev} ${col.key}` : col.key))}
+                            style={{
+                              padding: "2px 6px",
+                              borderRadius: "999px",
+                              border: "1px solid #d8b4fe",
+                              background: "#fff",
+                              color: "#6b21a8",
+                              fontFamily: "monospace",
+                              fontSize: "0.71rem",
+                              cursor: "pointer",
+                            }}
+                          >
+                            + {col.key}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     <div style={{ display: "flex", gap: "6px" }}>
                       <input
                         type="text"
                         value={compExpr}
                         onChange={(e) => setCompExpr(e.target.value)}
-                        placeholder={`Formula using dropped keys (e.g. ${draftFields.slice(0, 2).map((f) => f.key).join(" - ") || "cashCents - availableCents"})`}
+                        placeholder="Formula (supports + - * / min max abs round, e.g. max(0, targetCents - cashCents))"
                         style={{ flex: 1, padding: "5px 7px", borderRadius: "6px", border: "1px solid #d8b4fe", fontFamily: "monospace", fontSize: "0.78rem" }}
                       />
-                      <button type="button" className="primary-button" onClick={addComputedFieldToDraft} style={{ padding: "5px 10px", fontSize: "0.76rem" }}>
-                        Add formula
+                      <button type="button" className="secondary-button" onClick={addComputedFieldToDraft} style={{ padding: "5px 10px", fontSize: "0.76rem", background: "#7e22ce", color: "#fff", borderColor: "#7e22ce", fontWeight: 600 }}>
+                        Add derived column
                       </button>
                     </div>
                   </div>
-                ) : (
+                )}
+
+                {/* Aggregate Column Composer */}
+                {activeComposer === "aggregate" && (
+                  <div
+                    style={{
+                      border: "1px solid #fcd34d",
+                      borderRadius: "8px",
+                      padding: "10px",
+                      background: "#fffbeb",
+                      display: "grid",
+                      gap: "8px",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                      <strong style={{ fontSize: "0.8rem", color: "#92400e", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                        <Sigma size={14} aria-hidden="true" />
+                        Add Aggregate Column
+                      </strong>
+                      <div style={{ display: "inline-flex", gap: "4px" }}>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => setAggMode("array")}
+                          style={{
+                            padding: "2px 8px",
+                            fontSize: "0.71rem",
+                            background: aggMode === "array" ? "#d97706" : undefined,
+                            color: aggMode === "array" ? "#fff" : undefined,
+                            borderColor: aggMode === "array" ? "#d97706" : undefined,
+                          }}
+                        >
+                          Array / Series ({arrayDraftFields.length})
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => setAggMode("columns")}
+                          style={{
+                            padding: "2px 8px",
+                            fontSize: "0.71rem",
+                            background: aggMode === "columns" ? "#d97706" : undefined,
+                            color: aggMode === "columns" ? "#fff" : undefined,
+                            borderColor: aggMode === "columns" ? "#d97706" : undefined,
+                          }}
+                        >
+                          Across Columns
+                        </button>
+                        <button type="button" className="secondary-button" style={{ padding: "2px 6px", fontSize: "0.71rem" }} onClick={() => setActiveComposer("none")}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 95px 95px", gap: "6px" }}>
+                      <input
+                        type="text"
+                        value={aggKey}
+                        onChange={(e) => setAggKey(e.target.value)}
+                        placeholder="Aggregate key"
+                        style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #fcd34d", fontFamily: "monospace", fontSize: "0.78rem" }}
+                      />
+                      <input
+                        type="text"
+                        value={aggLabel}
+                        onChange={(e) => setAggLabel(e.target.value)}
+                        placeholder="Display label"
+                        style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #fcd34d", fontSize: "0.78rem" }}
+                      />
+                      <select
+                        aria-label="Aggregate function"
+                        value={aggOp}
+                        onChange={(e) => setAggOp(e.target.value as SmassAggregateOp)}
+                        style={{ padding: "5px 6px", borderRadius: "6px", border: "1px solid #fcd34d", fontSize: "0.76rem", fontWeight: 700 }}
+                      >
+                        {AGGREGATE_OPS.map(({ op, label }) => (
+                          <option key={op} value={op}>{label}</option>
+                        ))}
+                      </select>
+                      <select
+                        aria-label="Aggregate result type"
+                        value={aggOp === "count" ? "integer" : aggType}
+                        disabled={aggOp === "count"}
+                        onChange={(e) => setAggType(e.target.value as SmassFieldType)}
+                        style={{ padding: "5px 6px", borderRadius: "6px", border: "1px solid #fcd34d", fontSize: "0.76rem" }}
+                      >
+                        <option value="integer">integer</option>
+                        <option value="number">number</option>
+                        <option value="string">string</option>
+                      </select>
+                    </div>
+
+                    {aggMode === "array" ? (
+                      arrayDraftFields.length === 0 ? (
+                        <p style={{ margin: 0, fontSize: "0.74rem", color: "#92400e" }}>
+                          Drop an array column (like <code>history</code> from <code>goal.progress.read@1.0.0</code>) into the canvas to aggregate over its entries, or switch to <strong>Across Columns</strong>.
+                        </p>
+                      ) : (
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "6px", alignItems: "center" }}>
+                          <select
+                            aria-label="Source array column"
+                            value={aggSourceField}
+                            onChange={(e) => {
+                              const nextField = e.target.value;
+                              setAggSourceField(nextField);
+                              const arr = arrayDraftFields.find((f) => f.key === nextField);
+                              const subs = arr ? arrayItemSubfields.get(`${arr.toolRef}::${arr.outputPath}`) ?? [] : [];
+                              setAggItemField(subs.find((s) => s.type === "integer" || s.type === "number")?.subPath ?? subs[0]?.subPath ?? "");
+                            }}
+                            style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #fcd34d", fontFamily: "monospace", fontSize: "0.78rem" }}
+                          >
+                            {arrayDraftFields.map((f) => (
+                              <option key={f.uid} value={f.key}>{f.key} (array)</option>
+                            ))}
+                          </select>
+                          {aggOp !== "count" ? (
+                            selectedArraySubfields.length > 0 ? (
+                              <select
+                                aria-label="Array item property"
+                                value={aggItemField}
+                                onChange={(e) => setAggItemField(e.target.value)}
+                                style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #fcd34d", fontFamily: "monospace", fontSize: "0.78rem" }}
+                              >
+                                <option value="">(whole element)</option>
+                                {selectedArraySubfields.map((sub) => (
+                                  <option key={sub.subPath} value={sub.subPath}>
+                                    .{sub.subPath} ({sub.type})
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <input
+                                type="text"
+                                value={aggItemField}
+                                onChange={(e) => setAggItemField(e.target.value)}
+                                placeholder="Item property (optional)"
+                                style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #fcd34d", fontFamily: "monospace", fontSize: "0.78rem" }}
+                              />
+                            )
+                          ) : (
+                            <span style={{ fontSize: "0.74rem", color: "#92400e" }}>Counts array length</span>
+                          )}
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={addAggregateFieldToDraft}
+                            style={{ padding: "5px 10px", fontSize: "0.76rem", background: "#d97706", color: "#fff", borderColor: "#d97706", fontWeight: 600 }}
+                          >
+                            Add aggregate
+                          </button>
+                        </div>
+                      )
+                    ) : (
+                      <div style={{ display: "grid", gap: "6px" }}>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
+                          {scalarDraftFields.map((col) => {
+                            const checked = aggSelectedCols.includes(col.key);
+                            return (
+                              <label
+                                key={col.uid}
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                  padding: "3px 8px",
+                                  borderRadius: "999px",
+                                  border: checked ? "1px solid #d97706" : "1px solid #fcd34d",
+                                  background: checked ? "#fef3c7" : "#fff",
+                                  fontSize: "0.73rem",
+                                  fontFamily: "monospace",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={(e) =>
+                                    setAggSelectedCols((prev) =>
+                                      e.target.checked ? [...prev, col.key] : prev.filter((k) => k !== col.key),
+                                    )
+                                  }
+                                />
+                                {col.key}
+                              </label>
+                            );
+                          })}
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={addAggregateFieldToDraft}
+                            style={{ padding: "5px 10px", fontSize: "0.76rem", background: "#d97706", color: "#fff", borderColor: "#d97706", fontWeight: 600 }}
+                          >
+                            Add aggregate
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Builder Footer Actions */}
+                {activeComposer === "none" && (
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      disabled={draftFields.length === 0}
-                      onClick={() => setShowComputedForm(true)}
-                      style={{ padding: "5px 10px", fontSize: "0.76rem", display: "inline-flex", alignItems: "center", gap: "5px" }}
-                    >
-                      <Sparkles size={13} aria-hidden="true" />
-                      + Add computed field
-                    </button>
+                    <div style={{ display: "inline-flex", gap: "6px", flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={draftFields.length === 0}
+                        onClick={() => setActiveComposer("computed")}
+                        style={{ padding: "5px 10px", fontSize: "0.76rem", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                      >
+                        <Sparkles size={13} aria-hidden="true" />
+                        + Add derived column
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={draftFields.length === 0}
+                        onClick={openAggregateComposer}
+                        style={{ padding: "5px 10px", fontSize: "0.76rem", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                      >
+                        <Sigma size={13} aria-hidden="true" />
+                        + Add aggregate
+                      </button>
+                    </div>
                     <button
                       type="button"
                       className="secondary-button"
@@ -1143,7 +1670,7 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
                       }}
                     >
                       <CheckCircle2 size={14} aria-hidden="true" />
-                      {savingModel ? "Saving & Compiling…" : "Save Virtual Model"}
+                      {savingModel ? "Saving & Compiling…" : editingPreviousId ? "Update Virtual Model" : "Save Virtual Model"}
                     </button>
                   </div>
                 )}
@@ -1288,7 +1815,7 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
                                 style={{ padding: "3px 7px", fontSize: "0.71rem", display: "inline-flex", alignItems: "center", gap: "3px" }}
                               >
                                 <Pencil size={11} aria-hidden="true" />
-                                Edit
+                                Edit / Rename
                               </button>
                               <button
                                 type="button"
@@ -1363,7 +1890,7 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
                               )}
                             </div>
                           )}
-                          <pre style={{ margin: 0, overflowX: "auto", maxHeight: "220px", lineHeight: 1.45 }}>
+                          <pre style={{ margin: 0, overflowX: "auto", maxHeight: "240px", lineHeight: 1.45 }}>
                             {JSON.stringify(
                               liveSnap.status === "ok"
                                 ? { dataVersions: liveSnap.dataVersions, data: liveSnap.data }
@@ -1377,7 +1904,7 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
 
                       <div style={{ display: "grid", gap: "4px" }}>
                         <span style={{ fontSize: "0.73rem", fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>
-                          Entity Schema ({model.fields.length} attributes)
+                          Entity Schema ({model.fields.length} columns)
                         </span>
                         <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "4px" }}>
                           {model.fields.map((field) => (
@@ -1416,10 +1943,16 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
                                       principal.{field.principalKey}
                                     </span>
                                   )}
+                                  {field.aggregate && (
+                                    <span style={{ fontSize: "0.66rem", padding: "1px 5px", borderRadius: "4px", background: "#fef3c7", color: "#92400e", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: "3px" }}>
+                                      <Sigma size={10} aria-hidden="true" />
+                                      aggregate
+                                    </span>
+                                  )}
                                   {field.computed && (
                                     <span style={{ fontSize: "0.66rem", padding: "1px 5px", borderRadius: "4px", background: "#f3e8ff", color: "#6b21a8", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: "3px" }}>
                                       <Sparkles size={10} aria-hidden="true" />
-                                      computed
+                                      derived
                                     </span>
                                   )}
                                   <span style={{ color: "var(--muted)" }}>{field.label}</span>
@@ -1434,6 +1967,11 @@ export function DomainToolsAndModelPanel({ domainId }: { domainId: DomainPackId 
                               {field.toolRef && (
                                 <span style={{ fontSize: "0.71rem", color: "var(--muted)" }}>
                                   Source: <code>{field.toolRef}</code> → <code>{field.outputPath}</code>
+                                </span>
+                              )}
+                              {field.aggregate && (
+                                <span style={{ fontSize: "0.71rem", color: "#92400e" }}>
+                                  Aggregate: <code>{formatAggregateSummary(field.aggregate)}</code>
                                 </span>
                               )}
                               {field.computed && (

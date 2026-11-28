@@ -1,5 +1,6 @@
 export const adminPaths = {
   tools: "/admin",
+  dataModels: "/admin/data-models",
   recommendations: "/admin/recommendations",
   customers: "/admin/customers",
   intents: "/admin/intents",

@@ -61,6 +61,19 @@ export type SmassComputedSpec = {
   dependsOn: string[];
 };
 
+export const smassAggregateOpSchema = z.enum(["sum", "avg", "min", "max", "count", "first", "last"]);
+export type SmassAggregateOp = z.infer<typeof smassAggregateOpSchema>;
+
+export type SmassAggregateSpec = {
+  op: SmassAggregateOp;
+  /** Array field to aggregate over (e.g. `history`). */
+  sourceField?: string;
+  /** Optional item property inside each array element (e.g. `savedCents`). */
+  itemField?: string;
+  /** Multiple scalar fields to aggregate across columns (e.g. `["cashCents", "equityCents"]`). */
+  sourceFields?: string[];
+};
+
 export type SmassRelationSpec = {
   name: string;
   targetModelId: string;
@@ -92,6 +105,8 @@ export type SmassFieldSpec = {
   principalKey?: string;
   /** Declares a derived/computed domain field from other fields on this entity. */
   computed?: SmassComputedSpec;
+  /** Declares an aggregate column over an array field (e.g. `sum(history.savedCents)`) or across multiple scalar columns. */
+  aggregate?: SmassAggregateSpec;
   label: string;
   group?: string;
   description?: string;
@@ -214,6 +229,7 @@ export type SmassModelFieldSummary = {
   enumValues?: string[];
   items?: Record<string, SmassItemFieldSpec>;
   computed?: SmassComputedSpec;
+  aggregate?: SmassAggregateSpec;
   classification: SmassClassification;
   writable: boolean;
   exposed: boolean;

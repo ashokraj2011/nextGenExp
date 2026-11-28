@@ -1,10 +1,9 @@
 import { CapabilityStudio } from "./capability-studio";
-import { DomainToolsAndModelPanel } from "./domain-tools-model";
 import { McpDiscoveryCard } from "./mcp-discovery-card";
 import { McpServerPanel } from "./mcp-server-panel";
 import "./agentic.css";
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, ChevronDown, FlaskConical, Layers, MessageSquare, Play, Plug, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, Database, FlaskConical, Layers, MessageSquare, Play, Plug, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { DOMAIN_PACKS, getDomainPack, type DomainPackId } from "../../packages/contracts/domain-packs";
 import type { RecommendationProviderDescriptor } from "../../packages/contracts/recommendation-provider";
 import type { ConnectorEffect, ConnectorKind, ConnectorTestResult, ExternalConnector } from "../../packages/contracts/connector";
@@ -777,8 +776,46 @@ export function AdminPage() {
         </div>
       </nav>
 
-      {/* 1. Core Domain-Specific Tools -> Closed Schemas -> Evolved smass Data Model -> sphoton UI Catalog */}
-      <DomainToolsAndModelPanel domainId={domainId} />
+      {/* 1. Compact bridge to dedicated smass Data Model Studio */}
+      <section
+        className="admin-card"
+        style={{
+          marginTop: "14px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: "12px",
+        }}
+      >
+        <div style={{ display: "grid", gap: "3px" }}>
+          <strong style={{ display: "inline-flex", alignItems: "center", gap: "7px", fontSize: "0.95rem" }}>
+            <Database size={16} color="var(--teal)" aria-hidden="true" />
+            <code>smass</code> Virtual Data Model Studio ({activePack.shortLabel})
+          </strong>
+          <span style={{ fontSize: "0.84rem", color: "var(--muted)" }}>
+            Drag &amp; drop tool JSON Schemas, rename columns &amp; models, build aggregates and derived columns, and test live 1× snapshots on the dedicated Data Models screen.
+          </span>
+        </div>
+        <a
+          href={`${adminPaths.dataModels}?domain=${domainId}`}
+          className="secondary-button"
+          style={{
+            textDecoration: "none",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            background: "var(--teal)",
+            color: "#fff",
+            borderColor: "var(--teal)",
+            fontWeight: 600,
+          }}
+        >
+          <ShieldCheck size={14} aria-hidden="true" />
+          Open Data Model Studio
+          <ArrowRight size={14} aria-hidden="true" />
+        </a>
+      </section>
 
       {/* 2. Wealth-specific workflows & Treatment Selector rules (only shown on Wealth domain) */}
       {domainId === "wealth" && (

@@ -179,7 +179,7 @@ export class SmassDomainRegistry {
       const group = `${model.label} (sfield)`;
       if (model.mode === "tool_backed") {
         for (const field of Object.values(model.fields)) {
-          if (field.principalKey || field.computed) continue;
+          if (field.principalKey || field.computed || field.aggregate) continue;
           if (!field.from || !field.from.includes(".")) continue;
           const dot = field.from.indexOf(".");
           const slot = field.from.slice(0, dot);
@@ -202,7 +202,7 @@ export class SmassDomainRegistry {
       } else {
         const storeModel = model as SmassStoreBackedModel;
         for (const [key, field] of Object.entries(storeModel.fields)) {
-          if (field.computed) continue;
+          if (field.computed || field.aggregate) continue;
           fields.push({
             modelId: model.id,
             toolRef: storeModel.readToolRef,
@@ -246,17 +246,18 @@ export class SmassDomainRegistry {
         for (const [key, field] of Object.entries(model.fields)) {
           const isPrincipal = Boolean(field.principalKey);
           const isComputed = Boolean(field.computed);
+          const isAggregate = Boolean(field.aggregate);
           const dot = field.from?.indexOf(".") ?? -1;
           const slot = dot >= 0 ? field.from!.slice(0, dot) : "";
           const outputPath = dot >= 0 ? field.from!.slice(dot + 1) : key;
-          const toolRef = isPrincipal || isComputed ? "" : (model.sources[slot]?.toolRef ?? "");
+          const toolRef = isPrincipal || isComputed || isAggregate ? "" : (model.sources[slot]?.toolRef ?? "");
           const inferredType = field.type ?? (toolRef && descriptors?.get(toolRef)
             ? resolveSchemaPath(descriptors.get(toolRef)!.outputs, outputPath).types[0]
             : undefined);
           fields.push({
             key,
             toolRef,
-            outputPath: isPrincipal || isComputed ? key : outputPath,
+            outputPath: isPrincipal || isComputed || isAggregate ? key : outputPath,
             label: field.label,
             ...(inferredType ? { type: inferredType } : {}),
             ...(field.format ? { format: field.format } : {}),
@@ -268,6 +269,7 @@ export class SmassDomainRegistry {
             ...(field.enumValues?.length ? { enumValues: field.enumValues } : {}),
             ...(field.items ? { items: field.items } : {}),
             ...(field.computed ? { computed: field.computed } : {}),
+            ...(field.aggregate ? { aggregate: field.aggregate } : {}),
             classification: field.classification ?? "internal",
             writable: Boolean(field.writable),
             exposed: field.exposed !== false,
@@ -278,7 +280,7 @@ export class SmassDomainRegistry {
         for (const [key, field] of Object.entries(model.fields)) {
           fields.push({
             key,
-            toolRef: field.computed ? "" : model.readToolRef,
+            toolRef: field.computed || field.aggregate ? "" : model.readToolRef,
             outputPath: key,
             label: field.label,
             type: field.type,
@@ -290,6 +292,7 @@ export class SmassDomainRegistry {
             ...(field.enumValues?.length ? { enumValues: field.enumValues } : {}),
             ...(field.items ? { items: field.items } : {}),
             ...(field.computed ? { computed: field.computed } : {}),
+            ...(field.aggregate ? { aggregate: field.aggregate } : {}),
             classification: field.classification ?? "internal",
             writable: Boolean(field.writable),
             exposed: field.exposed !== false,

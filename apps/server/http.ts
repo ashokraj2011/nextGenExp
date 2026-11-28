@@ -823,6 +823,7 @@ export async function startApp(options: Options) {
     plugins: [
       { id: "pzn-studio", label: "Self-Service PZN Studio", description: "Policies, Intents & PZN Rules", badge: "Policy", href: adminPaths.intents + "?tab=pzn" },
       { id: "ui-studio", label: "sphoton UI Studio", description: "Layouts, Composer, SurfaceBinder & Widgets", badge: "sphoton", href: adminPaths.builder },
+      { id: "data-models", label: "smass Data Model Studio", description: "Drag-and-drop virtual models, derived columns & aggregates", badge: "smass", href: adminPaths.dataModels },
       { id: "customer-360", label: "Customer 360", description: "Wealth profiles, balances, goals & NBA preview", badge: "smass", href: adminPaths.customers },
       { id: "cep-logs", label: "CEP Admin Logs", description: "Turn-level payloads, approvals & inspector", badge: "CEP", href: adminPaths.logs },
     ],

@@ -22,6 +22,7 @@ import {
   createTurnSnapshotCache,
   defineToolBackedModel,
   evaluateSmassComputedExpression,
+  smassAggregateOpSchema,
   smassClassificationSchema,
   smassFieldFormatSchema,
   smassFieldTypeSchema,
@@ -97,6 +98,22 @@ export const customVirtualModelComputedFieldSchema = z.object({
   exposed: z.boolean().default(true),
 }).strict();
 
+export const customVirtualModelAggregateFieldSchema = z.object({
+  kind: z.literal("aggregate"),
+  key: z.string().trim().regex(virtualModelFieldIdPattern, "Field key must be a valid identifier."),
+  label: z.string().trim().min(1).max(80),
+  op: smassAggregateOpSchema,
+  sourceField: z.string().trim().regex(virtualModelFieldIdPattern).optional(),
+  itemField: z.string().trim().min(1).max(80).optional(),
+  sourceFields: z.array(z.string().trim().regex(virtualModelFieldIdPattern)).min(1).max(12).optional(),
+  type: smassFieldTypeSchema.default("number"),
+  format: smassFieldFormatSchema.optional(),
+  classification: smassClassificationSchema.default("internal"),
+  exposed: z.boolean().default(true),
+}).strict().refine((data) => Boolean(data.sourceField || data.sourceFields?.length), {
+  message: "Aggregate field must target an array sourceField or one or more scalar sourceFields.",
+});
+
 export const customVirtualModelRelationSchema = z.object({
   name: z.string().trim().min(1).max(60),
   targetModelId: z.string().trim().regex(virtualModelIdPattern),
@@ -107,12 +124,19 @@ export const customVirtualModelRelationSchema = z.object({
 
 export const customVirtualModelInputSchema = z.object({
   id: z.string().trim().regex(virtualModelIdPattern, "Model ID must look like wealth.advisor_brief."),
+  previousId: z.string().trim().regex(virtualModelIdPattern).optional(),
   version: z.string().trim().regex(/^\d+\.\d+\.\d+$/).default("1.0.0"),
   label: z.string().trim().min(1).max(80),
   description: z.string().trim().max(240).optional(),
   primaryKey: z.string().trim().regex(virtualModelFieldIdPattern).optional(),
   principalKey: z.string().trim().regex(virtualModelFieldIdPattern).optional(),
-  fields: z.array(z.union([customVirtualModelMappedFieldSchema, customVirtualModelComputedFieldSchema])).min(1).max(40),
+  fields: z.array(
+    z.union([
+      customVirtualModelMappedFieldSchema,
+      customVirtualModelComputedFieldSchema,
+      customVirtualModelAggregateFieldSchema,
+    ]),
+  ).min(1).max(40),
   relations: z.array(customVirtualModelRelationSchema).max(12).optional(),
 }).strict();
 export type CustomVirtualModelInput = z.infer<typeof customVirtualModelInputSchema>;
@@ -266,6 +290,21 @@ export class SphotonCatalogService {
           primaryKey: primaryKey === field.key,
           exposed: field.exposed,
         };
+      } else if (field.kind === "aggregate") {
+        fields[field.key] = {
+          type: field.type,
+          label: field.label,
+          ...(field.format ? { format: field.format } : {}),
+          classification: field.classification,
+          aggregate: {
+            op: field.op,
+            ...(field.sourceField ? { sourceField: field.sourceField } : {}),
+            ...(field.itemField ? { itemField: field.itemField } : {}),
+            ...(field.sourceFields?.length ? { sourceFields: field.sourceFields } : {}),
+          },
+          primaryKey: primaryKey === field.key,
+          exposed: field.exposed,
+        };
       } else {
         const slot = ensureSlot(field.toolRef);
         fields[field.key] = {
@@ -321,13 +360,14 @@ export class SphotonCatalogService {
 
   saveVirtualModel(domainId: DomainPackId, input: CustomVirtualModelInput) {
     const parsed = customVirtualModelInputSchema.parse(input);
+    const { previousId, ...persistedSpec } = parsed;
     const existing = this.smass.get(parsed.id);
     const isCustomExisting = (this.customModels[domainId] ?? []).some((m) => m.id === parsed.id);
     if (existing && !isCustomExisting) {
       throw new Error(`Cannot overwrite built-in model "${parsed.id}". Choose a new virtual model ID.`);
     }
 
-    const compiled = this.compileCustomVirtualModel(domainId, parsed);
+    const compiled = this.compileCustomVirtualModel(domainId, persistedSpec);
     const descriptors = new Map(this.allToolDescriptors().map((desc) => [desc.ref, desc]));
     const issues = validateToolBackedModel(compiled, descriptors);
     if (issues.length > 0) {
@@ -346,8 +386,16 @@ export class SphotonCatalogService {
       evaluateSmassComputedExpression(field.computed.expression, sampleScope);
     }
 
+    // Support clean rename of a custom virtual model ID
+    if (previousId && previousId !== parsed.id && (this.customModels[domainId] ?? []).some((m) => m.id === previousId)) {
+      this.smass.unregister(previousId);
+    }
+
     this.smass.register(compiled);
-    const nextList = [...(this.customModels[domainId] ?? []).filter((m) => m.id !== parsed.id), parsed];
+    const nextList = [
+      ...(this.customModels[domainId] ?? []).filter((m) => m.id !== parsed.id && m.id !== previousId),
+      persistedSpec,
+    ];
     this.customModels[domainId] = nextList;
     this.saveCustomModelsFile();
     return this.domainWorkbenchView(domainId);

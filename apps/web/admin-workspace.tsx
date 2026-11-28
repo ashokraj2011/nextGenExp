@@ -10,6 +10,7 @@ import "./admin-workspace.css";
 const SIDEBAR_STORAGE_KEY = "cep.adminSidebarCollapsed";
 
 const Tools = lazy(() => import("./admin").then(({ AdminPage }) => ({ default: AdminPage })));
+const DataModelStudio = lazy(() => import("./data-model-studio").then(({ DataModelStudio }) => ({ default: DataModelStudio })));
 const PolicyStudio = lazy(() => import("./policy-studio").then(({ PolicyStudio }) => ({ default: PolicyStudio })));
 const Customer360 = lazy(() => import("./customer-360-admin").then(({ Customer360Admin }) => ({ default: Customer360Admin })));
 const Builder = lazy(() => import("./ui-builder").then(({ UiBuilder }) => ({ default: UiBuilder })));
@@ -100,6 +101,7 @@ export function AdminWorkspace() {
       <div className="workspace-page-scroll">
         <Suspense fallback={<p className="workspace-loading" role="status">Loading…</p>}>
           {path === adminPaths.tools && <Tools />}
+          {path === adminPaths.dataModels && <DataModelStudio />}
           {path === adminPaths.recommendations && <PolicyStudio initialTab="pzn" />}
           {path === adminPaths.customers && <Customer360 />}
           {path === adminPaths.intents && <PolicyStudio initialTab="intents" />}

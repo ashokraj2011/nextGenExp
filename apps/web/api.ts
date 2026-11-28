@@ -244,6 +244,19 @@ export const api = {
               classification: import("../../packages/smass").SmassClassification;
               exposed: boolean;
             }
+          | {
+              kind: "aggregate";
+              key: string;
+              label: string;
+              op: import("../../packages/smass").SmassAggregateOp;
+              sourceField?: string;
+              itemField?: string;
+              sourceFields?: string[];
+              type: import("../../packages/smass").SmassFieldType;
+              format?: import("../../packages/smass").SmassFieldFormat;
+              classification: import("../../packages/smass").SmassClassification;
+              exposed: boolean;
+            }
         >;
       }>;
       dataModel: import("../../packages/smass").SmassDataModelGraph;
@@ -264,6 +277,7 @@ export const api = {
     domainId: DomainPackId,
     input: {
       id: string;
+      previousId?: string;
       version?: string;
       label: string;
       description?: string;
@@ -287,6 +301,19 @@ export const api = {
             label: string;
             expression: string;
             dependsOn: string[];
+            type?: import("../../packages/smass").SmassFieldType;
+            format?: import("../../packages/smass").SmassFieldFormat;
+            classification?: import("../../packages/smass").SmassClassification;
+            exposed?: boolean;
+          }
+        | {
+            kind: "aggregate";
+            key: string;
+            label: string;
+            op: import("../../packages/smass").SmassAggregateOp;
+            sourceField?: string;
+            itemField?: string;
+            sourceFields?: string[];
             type?: import("../../packages/smass").SmassFieldType;
             format?: import("../../packages/smass").SmassFieldFormat;
             classification?: import("../../packages/smass").SmassClassification;

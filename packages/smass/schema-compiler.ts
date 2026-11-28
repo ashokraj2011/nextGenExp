@@ -244,6 +244,29 @@ export function validateToolBackedModel(
       }
       continue;
     }
+    if (field.aggregate) {
+      const deps = [
+        ...(field.aggregate.sourceField ? [field.aggregate.sourceField] : []),
+        ...(field.aggregate.sourceFields ?? []),
+      ];
+      if (deps.length === 0) {
+        issues.push({
+          modelId: model.id,
+          field: fieldKey,
+          message: `Aggregate field "${fieldKey}" must specify sourceField or sourceFields.`,
+        });
+      }
+      for (const dep of deps) {
+        if (!Object.prototype.hasOwnProperty.call(model.fields, dep)) {
+          issues.push({
+            modelId: model.id,
+            field: fieldKey,
+            message: `Aggregate field "${fieldKey}" depends on undeclared field "${dep}".`,
+          });
+        }
+      }
+      continue;
+    }
     const from = field.from;
     if (!from || !from.includes(".")) {
       issues.push({
@@ -326,6 +349,28 @@ export function validateDomainGraph(models: readonly SmassDomainModel[]): SmassM
           }
         }
       }
+      if (field.aggregate) {
+        const deps = [
+          ...(field.aggregate.sourceField ? [field.aggregate.sourceField] : []),
+          ...(field.aggregate.sourceFields ?? []),
+        ];
+        if (deps.length === 0) {
+          issues.push({
+            modelId: model.id,
+            field: fieldKey,
+            message: `Aggregate field "${fieldKey}" must specify sourceField or sourceFields.`,
+          });
+        }
+        for (const dep of deps) {
+          if (!Object.prototype.hasOwnProperty.call(model.fields, dep)) {
+            issues.push({
+              modelId: model.id,
+              field: fieldKey,
+              message: `Aggregate field "${fieldKey}" depends on undeclared field "${dep}".`,
+            });
+          }
+        }
+      }
     }
     if (model.lifecycle) {
       const { stateField, states, transitions } = model.lifecycle;
@@ -395,6 +440,12 @@ export function compileMermaidErDiagram(
       const notes: string[] = [];
       if (field.format) notes.push(field.format);
       if (field.computed) notes.push(`computed: ${field.computed.expression}`);
+      if (field.aggregate) {
+        const target = field.aggregate.sourceField
+          ? `${field.aggregate.sourceField}${field.aggregate.itemField ? `.${field.aggregate.itemField}` : ""}`
+          : (field.aggregate.sourceFields ?? []).join(", ");
+        notes.push(`agg: ${field.aggregate.op}(${target})`);
+      }
       if (field.enumValues?.length) notes.push(`enum: ${field.enumValues.join("|")}`);
       if (field.principalKey) notes.push(`principal.${field.principalKey}`);
       const suffix = notes.length ? ` "${notes.join(" · ")}"` : "";
@@ -444,6 +495,7 @@ export function compileDomainJsonSchema(
       if (field.foreignKey) node["x-smass-foreign-key"] = field.foreignKey;
       if (field.principalKey) node["x-smass-principal-key"] = field.principalKey;
       if (field.computed) node["x-smass-computed"] = field.computed;
+      if (field.aggregate) node["x-smass-aggregate"] = field.aggregate;
       if (field.toolRef) node["x-sfield-source"] = `${field.toolRef}#${field.outputPath}`;
       node["x-smass-classification"] = field.classification;
       node["x-smass-exposed"] = field.exposed;

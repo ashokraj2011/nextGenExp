@@ -568,3 +568,92 @@ test("CEP /api/admin/domain-models supports creating, testing live 1x snapshots,
   assert.equal(afterDelete.customModelIds.includes("wealth.advisor_brief"), false);
   assert.equal(afterDelete.models.some((m) => m.id === "wealth.advisor_brief"), false);
 });
+
+test("smass VDM supports array & multi-column aggregates, derived columns over aggregates, and renaming virtual models", async (t) => {
+  const app = await startTestPreview();
+  t.after(() => app.close());
+  const client = await testClient(app.url);
+
+  // Create a virtual model with:
+  // - renamed mapped columns (goalTargetCents <- targetCents, savingsHistory <- history, portfolioCashCents <- cashCents, equityHoldingsCents <- equityCents)
+  // - array aggregates: count(savingsHistory), last(savingsHistory.savedCents), avg(savingsHistory.savedCents)
+  // - multi-column aggregate: sum(portfolioCashCents, equityHoldingsCents)
+  // - derived column referencing an aggregate: remainingGoalGapCents = max(0, goalTargetCents - latestSavedCents)
+  const created = await client.request<{
+    customModelIds: string[];
+    dataModel: { mermaidEr: string; jsonSchema: { $defs: Record<string, Record<string, unknown>> } };
+  }>("/api/admin/domain-models?domain=wealth", {
+    id: "wealth.goal_analytics_v1",
+    label: "Goal Analytics v1",
+    principalKey: "mid",
+    primaryKey: "mid",
+    fields: [
+      { kind: "mapped", key: "goalTargetCents", label: "Home Goal Target", toolRef: "goal.progress.read@1.0.0", outputPath: "targetCents", format: "currency_cents", required: true, exposed: true },
+      { kind: "mapped", key: "savingsHistory", label: "Monthly History", toolRef: "goal.progress.read@1.0.0", outputPath: "history", format: "series", required: true, exposed: false },
+      { kind: "mapped", key: "portfolioCashCents", label: "Cash", toolRef: "portfolio.snapshot.read@1.0.0", outputPath: "cashCents", format: "currency_cents", required: true, exposed: true },
+      { kind: "mapped", key: "equityHoldingsCents", label: "Equities", toolRef: "portfolio.snapshot.read@1.0.0", outputPath: "equityCents", format: "currency_cents", required: true, exposed: true },
+      { kind: "aggregate", key: "monthsTracked", label: "Months Tracked", op: "count", sourceField: "savingsHistory", type: "integer", exposed: true },
+      { kind: "aggregate", key: "latestSavedCents", label: "Latest Saved", op: "last", sourceField: "savingsHistory", itemField: "savedCents", type: "integer", format: "currency_cents", exposed: true },
+      { kind: "aggregate", key: "avgSavedCents", label: "Average Saved", op: "avg", sourceField: "savingsHistory", itemField: "savedCents", type: "integer", format: "currency_cents", exposed: true },
+      { kind: "aggregate", key: "cashPlusEquityCents", label: "Cash + Equities", op: "sum", sourceFields: ["portfolioCashCents", "equityHoldingsCents"], type: "integer", format: "currency_cents", exposed: true },
+      { kind: "computed", key: "remainingGoalGapCents", label: "Remaining Goal Gap", expression: "max(0, goalTargetCents - latestSavedCents)", dependsOn: ["goalTargetCents", "latestSavedCents"], type: "integer", format: "currency_cents", exposed: true },
+    ],
+  });
+
+  assert.ok(created.customModelIds.includes("wealth.goal_analytics_v1"));
+  assert.match(created.dataModel.mermaidEr, /agg: last\(savingsHistory\.savedCents\)/);
+  assert.match(created.dataModel.mermaidEr, /agg: sum\(portfolioCashCents, equityHoldingsCents\)/);
+
+  // Live 1x snapshot verifies array aggregates, multi-column aggregate, and derived column over aggregate
+  const snap = await client.request<{
+    snapshot: { status: string; sourceCalls: number; sourcesSkipped: string[]; data: Record<string, unknown> };
+  }>("/api/admin/domain-models-test?domain=wealth", {
+    modelId: "wealth.goal_analytics_v1",
+    customerId: "demo-learner",
+  });
+  assert.equal(snap.snapshot.status, "ok");
+  assert.equal(snap.snapshot.sourceCalls, 2);
+  assert.ok(Number(snap.snapshot.data.monthsTracked) >= 3);
+  const target = Number(snap.snapshot.data.goalTargetCents);
+  const latestSaved = Number(snap.snapshot.data.latestSavedCents);
+  const avgSaved = Number(snap.snapshot.data.avgSavedCents);
+  const cash = Number(snap.snapshot.data.portfolioCashCents);
+  const equities = Number(snap.snapshot.data.equityHoldingsCents);
+  assert.ok(latestSaved > 0 && avgSaved > 0);
+  assert.equal(snap.snapshot.data.cashPlusEquityCents, cash + equities);
+  assert.equal(snap.snapshot.data.remainingGoalGapCents, Math.max(0, target - latestSaved));
+
+  // Projection pushdown on an aggregate column skips the unused portfolio tool!
+  const aggOnly = await client.request<{
+    snapshot: { status: string; sourceCalls: number; sourcesSkipped: string[]; data: Record<string, unknown> };
+  }>("/api/admin/domain-models-test?domain=wealth", {
+    modelId: "wealth.goal_analytics_v1",
+    customerId: "demo-learner",
+    requestedFields: ["latestSavedCents"],
+  });
+  assert.equal(aggOnly.snapshot.status, "ok");
+  assert.equal(aggOnly.snapshot.sourceCalls, 1);
+  assert.equal(aggOnly.snapshot.sourcesSkipped.length, 1);
+  assert.equal(aggOnly.snapshot.data.latestSavedCents, latestSaved);
+
+  // Rename model ID cleanly via previousId (old ID unregistered, no duplicate)
+  const renamed = await client.request<{ customModelIds: string[]; models: SmassModelSummary[] }>(
+    "/api/admin/domain-models?domain=wealth",
+    {
+      id: "wealth.goal_analytics_renamed",
+      previousId: "wealth.goal_analytics_v1",
+      label: "Goal Analytics Renamed",
+      principalKey: "mid",
+      primaryKey: "mid",
+      fields: [
+        { kind: "mapped", key: "goalTargetCents", label: "Home Goal Target", toolRef: "goal.progress.read@1.0.0", outputPath: "targetCents", format: "currency_cents", required: true, exposed: true },
+      ],
+    },
+  );
+  assert.equal(renamed.customModelIds.includes("wealth.goal_analytics_v1"), false);
+  assert.equal(renamed.customModelIds.includes("wealth.goal_analytics_renamed"), true);
+  assert.equal(renamed.models.some((m) => m.id === "wealth.goal_analytics_v1"), false);
+  assert.equal(renamed.models.some((m) => m.id === "wealth.goal_analytics_renamed"), true);
+
+  await client.request("/api/admin/domain-models-delete?domain=wealth", { modelId: "wealth.goal_analytics_renamed" });
+});

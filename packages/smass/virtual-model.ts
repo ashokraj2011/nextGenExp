@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type {
+  SmassAggregateSpec,
   SmassClassification,
   SmassDomainModel,
   SmassExecutionContext,
@@ -423,10 +424,64 @@ function expandProjectedFields(
         visit(dep);
       }
     }
+    if (spec.aggregate) {
+      if (spec.aggregate.sourceField) visit(spec.aggregate.sourceField);
+      for (const dep of spec.aggregate.sourceFields ?? []) {
+        visit(dep);
+      }
+    }
   };
 
   for (const fieldKey of requestedFields) visit(fieldKey);
   return [...included];
+}
+
+/**
+ * Deterministic aggregate evaluator for `smass` virtual models.
+ * Supports:
+ * - Array aggregation (`sourceField` + optional `itemField`, e.g. `sum(history.savedCents)`, `last(history.savedCents)`, `count(history)`)
+ * - Multi-column scalar aggregation (`sourceFields`, e.g. `sum(cashCents, equityCents, fixedIncomeCents)`, `avg(...)`, `min(...)`, `max(...)`)
+ */
+export function evaluateSmassAggregate(
+  spec: SmassAggregateSpec,
+  scope: Record<string, unknown>,
+): unknown {
+  let values: unknown[] = [];
+
+  if (spec.sourceField) {
+    const raw = scope[spec.sourceField];
+    if (Array.isArray(raw)) {
+      values = spec.itemField
+        ? raw.map((item) => readDotPath(item, spec.itemField!)).filter((v) => v !== undefined && v !== null)
+        : raw.filter((v) => v !== undefined && v !== null);
+    } else if (raw !== undefined && raw !== null) {
+      values = [raw];
+    }
+  } else if (spec.sourceFields?.length) {
+    values = spec.sourceFields
+      .map((key) => scope[key])
+      .filter((v) => v !== undefined && v !== null);
+  }
+
+  switch (spec.op) {
+    case "count":
+      return values.length;
+    case "first":
+      return values.length > 0 ? values[0] : null;
+    case "last":
+      return values.length > 0 ? values[values.length - 1] : null;
+    case "sum":
+    case "avg":
+    case "min":
+    case "max": {
+      const nums = values.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+      if (nums.length === 0) return 0;
+      if (spec.op === "sum") return nums.reduce((acc, n) => acc + n, 0);
+      if (spec.op === "avg") return nums.reduce((acc, n) => acc + n, 0) / nums.length;
+      if (spec.op === "min") return Math.min(...nums);
+      return Math.max(...nums);
+    }
+  }
 }
 
 function topologicalSortComputed(
@@ -599,7 +654,7 @@ export async function materializeVirtualSnapshot(
     const requiredSlots = new Set<string>();
     for (const key of projectedFields) {
       const spec = toolModel.fields[key];
-      if (!spec || spec.principalKey || spec.computed || !spec.from?.includes(".")) continue;
+      if (!spec || spec.principalKey || spec.computed || spec.aggregate || !spec.from?.includes(".")) continue;
       requiredSlots.add(spec.from.slice(0, spec.from.indexOf(".")));
     }
 
@@ -631,7 +686,7 @@ export async function materializeVirtualSnapshot(
     // Map canonical fields from physical payloads and principal identity
     for (const key of projectedFields) {
       const spec = toolModel.fields[key]!;
-      if (spec.computed) continue;
+      if (spec.computed || spec.aggregate) continue;
       if (spec.principalKey) {
         const fromInputs = req.inputs?.[spec.principalKey] ?? req.inputs?.[key];
         rawValues[key] = fromInputs ?? req.ctx.customerId ?? req.ctx.principalId;
@@ -655,7 +710,7 @@ export async function materializeVirtualSnapshot(
       Object.assign(dataVersions, versionExtractor("store", record));
       for (const key of projectedFields) {
         const spec = model.fields[key]!;
-        if (spec.computed) continue;
+        if (spec.computed || spec.aggregate) continue;
         if (spec.principalKey) {
           rawValues[key] = record[key] ?? req.inputs?.[spec.principalKey] ?? req.ctx.customerId ?? req.ctx.principalId;
         } else {
@@ -681,7 +736,15 @@ export async function materializeVirtualSnapshot(
     };
   }
 
-  // 3. Evaluate derived/computed fields once in topological dependency order
+  // 3a. Evaluate aggregate columns before derived expressions (so derived columns can reference aggregates)
+  for (const key of projectedFields) {
+    const spec = model.fields[key];
+    if (!spec?.aggregate) continue;
+    const aggValue = evaluateSmassAggregate(spec.aggregate, rawValues);
+    rawValues[key] = spec.type === "integer" && typeof aggValue === "number" ? Math.round(aggValue) : aggValue;
+  }
+
+  // 3b. Evaluate derived/computed fields once in topological dependency order
   for (const key of topologicalSortComputed(model, projectedFields)) {
     const spec = model.fields[key]!;
     if (!spec.computed) continue;
