@@ -1,5 +1,5 @@
 import { useId, useState, type CSSProperties } from "react";
-import { ArrowUpRight, ChevronDown, ChevronUp, SlidersHorizontal } from "lucide-react";
+import { ArrowRight, ArrowUpRight, ChevronDown, ChevronUp, Link2, SlidersHorizontal, X } from "lucide-react";
 import { formatPortfolioAmount, type PortfolioSnapshot } from "../../packages/contracts/portfolio";
 import { VerifiedProvenanceBadge } from "./verified-provenance";
 
@@ -12,6 +12,7 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
   const splitId = useId();
   const [simOpen, setSimOpen] = useState(false);
   const [showAmounts, setShowAmounts] = useState(false);
+  const [selectedSlice, setSelectedSlice] = useState<string | null>(null);
   const [deployDollars, setDeployDollars] = useState(() => Math.round((cashCents / 100) * 0.6 / 100) * 100);
   const [equitySplit, setEquitySplit] = useState(60);
 
@@ -72,7 +73,13 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
             const base = Number(percent(item.amount).toFixed(1));
             const next = Number(percent(item.simAmount).toFixed(1));
             const diff = Number((next - base).toFixed(1));
-            return <li key={item.color}>
+            const isSelected = selectedSlice === item.label;
+            return <li
+              key={item.color}
+              className={onExploreAllocation ? ("portfolio-slice-clickable" + (isSelected ? " is-selected" : "")) : undefined}
+              onClick={onExploreAllocation ? () => setSelectedSlice((cur) => (cur === item.label ? null : item.label)) : undefined}
+              title={onExploreAllocation ? `Click to drill into ${item.label} tax lots & simulator` : undefined}
+            >
               <span className={item.color} aria-hidden="true" />{item.label} <strong>{showAmounts
                 ? formatPortfolioAmount(simOpen ? item.simAmount : item.amount) : (simOpen ? next : base) + "%"}</strong>
               {simOpen && diff !== 0 && <em className={diff > 0 ? "alloc-delta-pos" : "alloc-delta-neg"}>({diff > 0 ? "+" : ""}{diff}%)</em>}
@@ -81,6 +88,46 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
         </ul>
       </div>
     </div>
+
+    {selectedSlice && onExploreAllocation && (
+      <div className="smass-drilldown-panel" role="region" aria-label={`Portfolio drill-down for ${selectedSlice}`}>
+        <div className="smass-drilldown-head">
+          <div>
+            <span className="smass-rel-kicker">
+              <Link2 size={12} aria-hidden="true" />
+              <code>smass</code> · <code>wealth.portfolio</code> <ArrowRight size={11} aria-hidden="true" /> <strong>{selectedSlice}</strong>
+            </span>
+            <h4>Drill into {selectedSlice} holdings &amp; tax-loss harvest</h4>
+          </div>
+          <button type="button" className="icon-button" aria-label="Close drill-down" onClick={() => setSelectedSlice(null)}>
+            <X size={14} aria-hidden="true" />
+          </button>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => onExploreAllocation("Show my stock holdings as a bubble chart")}
+          >
+            Tax-lot holdings (Bubble Chart) <ArrowUpRight size={13} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => onExploreAllocation("I want to sell 40% of my Apple shares")}
+          >
+            Trade &amp; Tax-Harvest Simulator <ArrowUpRight size={13} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => onExploreAllocation("I want to see drill down based on industry")}
+          >
+            Industry &amp; sector drill-down <ArrowUpRight size={13} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+    )}
 
     {allowSimulation && maxCashDollars >= 500 && (
       <div className="portfolio-sim-wrap">

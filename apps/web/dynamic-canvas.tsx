@@ -149,8 +149,8 @@ function PieChartNode({ node, onFollowUp }: { node: Extract<DynamicCanvasNode, {
             <button type="button" onClick={() => onFollowUp(`Show a detailed breakdown of ${selected.label} in my portfolio`)}>
               Drill into {selected.label} <ArrowUpRight size={12} aria-hidden="true" />
             </button>
-            <button type="button" onClick={() => onFollowUp(`Compare ${selected.label} against the rest of my portfolio side-by-side`)}>
-              Compare side-by-side
+            <button type="button" onClick={() => onFollowUp(`I want to sell 40% of my ${selected.label} position and review tax-loss harvesting`)}>
+              Trade &amp; Tax-Harvest <ArrowUpRight size={12} aria-hidden="true" />
             </button>
             <button type="button" onClick={() => onFollowUp("Show my stock holdings as a bubble chart")}>
               As Bubble Chart
@@ -274,6 +274,9 @@ function BubbleChartNode({ node, onFollowUp }: { node: Extract<DynamicCanvasNode
           <div className="dyn-drill-actions">
             <button type="button" onClick={() => onFollowUp(`Show full details for ${selected.label} in my portfolio`)}>
               Inspect {selected.label} <ArrowUpRight size={12} aria-hidden="true" />
+            </button>
+            <button type="button" onClick={() => onFollowUp(`I want to sell 40% of my ${selected.label} shares and check tax-loss harvesting`)}>
+              Trade &amp; Tax-Harvest <ArrowUpRight size={12} aria-hidden="true" />
             </button>
             <button type="button" onClick={() => onFollowUp("Show my portfolio allocation as a pie chart")}>
               View as Pie Chart

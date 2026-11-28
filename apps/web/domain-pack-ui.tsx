@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, Database, RotateCcw, ShieldAlert, TrendingUp } from "lucide-react";
+import { Activity, ChevronDown, Database, Link2, RotateCcw, ShieldAlert, TrendingUp } from "lucide-react";
 import {
   domainPackFromPath,
   domainPackPath,
@@ -10,6 +10,7 @@ import {
 import type { OpsIncidentsView } from "../../packages/contracts/ops";
 import type { SalesDealsView } from "../../packages/contracts/sales";
 import { api } from "./api";
+import { AccountDealsDrilldown, ServiceIncidentDrilldown } from "./entity-drilldown";
 
 const STORAGE_KEY = "cep-domain-pack";
 const CHANGE_EVENT = "cep-domain-change";
@@ -83,6 +84,7 @@ export function DomainLiveHud({
   const [ops, setOps] = useState<OpsIncidentsView | null>(null);
   const [sales, setSales] = useState<SalesDealsView | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [drillOpen, setDrillOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -137,15 +139,39 @@ export function DomainLiveHud({
           </div>
         </div>
         {primary && ops ? (
-          <div className="domain-hud-metrics">
-            <span><strong>{primary.id}</strong> · {primary.service}</span>
-            <span className={isResolved ? "domain-pill-ok" : "legend-badge-warn"}>
-              {primary.severity} · {primary.status.replace("_", " ").toUpperCase()}
-            </span>
-            <span>Error rate <strong>{primary.errorRatePct}%</strong></span>
-            <span>p95 <strong>{primary.p95LatencyMs}ms</strong></span>
-            <span>Open queue <strong>{ops.summary.totalOpen}</strong></span>
-          </div>
+          <>
+            <div className="domain-hud-metrics">
+              <span>
+                <strong>{primary.id}</strong> ·{" "}
+                <button
+                  type="button"
+                  className={"entity-link-pill" + (drillOpen ? " is-open" : "")}
+                  aria-expanded={drillOpen}
+                  title="Expand smass ops.service -> ops.incident drill-down & rollback lifecycle"
+                  onClick={() => setDrillOpen((v) => !v)}
+                >
+                  <Link2 size={11} aria-hidden="true" />
+                  {primary.service}
+                  <ChevronDown size={12} aria-hidden="true" />
+                </button>
+              </span>
+              <span className={isResolved ? "domain-pill-ok" : "legend-badge-warn"}>
+                {primary.severity} · {primary.status.replace("_", " ").toUpperCase()}
+              </span>
+              <span>Error rate <strong>{primary.errorRatePct}%</strong></span>
+              <span>p95 <strong>{primary.p95LatencyMs}ms</strong></span>
+              <span>Open queue <strong>{ops.summary.totalOpen}</strong></span>
+            </div>
+            {drillOpen && (
+              <ServiceIncidentDrilldown
+                serviceName={primary.service}
+                incidents={ops.incidents}
+                disabled={disabled}
+                onPrompt={onPrompt}
+                onClose={() => setDrillOpen(false)}
+              />
+            )}
+          </>
         ) : (
           <p className="domain-hud-loading">Connecting to live incident store…</p>
         )}
@@ -179,15 +205,40 @@ export function DomainLiveHud({
         </div>
       </div>
       {primaryDeal && sales ? (
-        <div className="domain-hud-metrics">
-          <span>Pipeline <strong>{usd.format(sales.summary.totalPipelineUsd)}</strong></span>
-          <span>Forecast <strong>{usd.format(sales.summary.weightedForecastUsd)}</strong></span>
-          <span><strong>{primaryDeal.id}</strong> · {primaryDeal.accountName} ({usd.format(primaryDeal.arrUsd)})</span>
-          <span className={dealApproved ? "domain-pill-ok" : "legend-badge-warn"}>
-            {primaryDeal.stage} · {primaryDeal.discountPct}% {primaryDeal.discountStatus}
-          </span>
-          <span>Prob. <strong>{primaryDeal.winProbabilityPct}%</strong></span>
-        </div>
+        <>
+          <div className="domain-hud-metrics">
+            <span>Pipeline <strong>{usd.format(sales.summary.totalPipelineUsd)}</strong></span>
+            <span>Forecast <strong>{usd.format(sales.summary.weightedForecastUsd)}</strong></span>
+            <span>
+              <strong>{primaryDeal.id}</strong> ·{" "}
+              <button
+                type="button"
+                className={"entity-link-pill" + (drillOpen ? " is-open" : "")}
+                aria-expanded={drillOpen}
+                title="Expand smass sales.account -> sales.deal aggregate pipeline & discount lifecycle"
+                onClick={() => setDrillOpen((v) => !v)}
+              >
+                <Link2 size={11} aria-hidden="true" />
+                {primaryDeal.accountName}
+                <ChevronDown size={12} aria-hidden="true" />
+              </button>{" "}
+              ({usd.format(primaryDeal.arrUsd)})
+            </span>
+            <span className={dealApproved ? "domain-pill-ok" : "legend-badge-warn"}>
+              {primaryDeal.stage} · {primaryDeal.discountPct}% {primaryDeal.discountStatus}
+            </span>
+            <span>Prob. <strong>{primaryDeal.winProbabilityPct}%</strong></span>
+          </div>
+          {drillOpen && (
+            <AccountDealsDrilldown
+              accountName={primaryDeal.accountName}
+              deals={sales.deals}
+              disabled={disabled}
+              onPrompt={onPrompt}
+              onClose={() => setDrillOpen(false)}
+            />
+          )}
+        </>
       ) : (
         <p className="domain-hud-loading">Connecting to live CRM deal store…</p>
       )}

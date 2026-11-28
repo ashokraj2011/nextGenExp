@@ -22,8 +22,11 @@ import {
 import { DynamicCanvasBlock } from "./dynamic-canvas";
 import { PortfolioSnapshotBlock } from "./portfolio-snapshot";
 import { GoalProgressDetails } from "./goal-progress";
+import { StreamingRichText } from "./live-grounding";
 import { VerifiedProvenanceBadge } from "./verified-provenance";
 import { DepositConfirmation } from "./workspace-actions";
+
+export const LiveReplyContext = createContext(false);
 
 const RuleCreationBlock = lazy(() => import("./rule-creation-block").then(({ RuleCreationBlock }) => ({ default: RuleCreationBlock })));
 
@@ -539,11 +542,12 @@ function ContentBlock({ block, form, onAction }: {
 
 function Introduction({ intro, question, partial }: { intro: string; question: string | null; partial: boolean }) {
   const { balanceComparison, completedFunding } = useContext(SurfaceActions);
+  const liveReply = useContext(LiveReplyContext);
   if (completedFunding) return null;
   const genericComparisonIntro = /^(?:(?:Hi [^,]+,|Thanks for asking, [^—]+ —)\s*)?here[’']s (?:how the terms compare|a comparison)\.$/i;
   const showIntro = Boolean(intro.trim()) && (!balanceComparison || !genericComparisonIntro.test(intro.trim()));
   return <>
-    {question ? <p className="clarification">{question}</p> : showIntro && <RichText text={intro} className="experience-intro" />}
+    {question ? <p className="clarification">{question}</p> : showIntro && <StreamingRichText text={intro} live={liveReply} className="experience-intro" />}
     {partial && <p className="partial-result">Some matching content is unavailable.</p>}
   </>;
 }

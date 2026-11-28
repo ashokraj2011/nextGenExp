@@ -14,8 +14,10 @@ import { TurnRichActions } from "../chat-rich-ux";
 import { SpeakButton } from "../composer-extras";
 import { ProfileAvatar } from "../demo-profiles";
 import { LabMark } from "../lab-mark";
+import { LiveGroundingBar } from "../live-grounding";
 import { ExpertiseTurnBanner } from "../nextgen-chat-features";
 import { ReasoningPanel } from "../reasoning-panel";
+import { LiveReplyContext } from "../surface";
 import { ConversationControls, homeGoalPrompt, timeFormat } from "./chat-context";
 
 export function StarterPrompts({ disabled, adminChat }: { disabled: boolean; adminChat: boolean }) {
@@ -198,7 +200,13 @@ export function AssistantMessage() {
             adminChat ? <>
               <span className="sr-only" role="status">{progressLabels[turn.progress]}</span>
               <ReasoningPanel status={turn.status} progress={turn.progress} history={steps} />
-            </> : !turn.previewExperience && <ReplyLoading />
+            </> : <>
+              <LiveGroundingBar steps={steps} working={true} hasPreview={Boolean(turn.previewExperience)} />
+              {!turn.previewExperience && <ReplyLoading />}
+            </>
+          )}
+          {!adminChat && arrivedLive && turn.status === "completed" && steps.length > 1 && (
+            <LiveGroundingBar steps={steps} working={false} />
           )}
           {adminChat && steps.length > 0 && turn.status === "completed" && (
             <ReasoningPanel
@@ -217,7 +225,9 @@ export function AssistantMessage() {
           {!adminChat && turn.status === "completed" && (
             <ExpertiseTurnBanner mode={expertiseMode} turn={turn} />
           )}
-          {(turn.status !== "working" || turn.previewExperience) && <MessagePrimitive.Parts components={replyParts} />}
+          <LiveReplyContext.Provider value={arrivedLive && !adminChat}>
+            {(turn.status !== "working" || turn.previewExperience) && <MessagePrimitive.Parts components={replyParts} />}
+          </LiveReplyContext.Provider>
           {!adminChat && turn.status === "working" && turn.previewExperience && <ReplyIndicator label="Checking for recommendations." />}
           {!recommendation && companion}
 
