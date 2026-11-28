@@ -96,7 +96,7 @@
 }
 
 .editorial-thread .experience-flow:not(.published-ui) {
-  > .experience-intro {
+  .experience-intro {
     padding: 0;
     background: transparent;
     border: 0;

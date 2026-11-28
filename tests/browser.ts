@@ -413,6 +413,7 @@ try {
 
   await openAdmin(page, "tools");
   await page.getByRole("heading", { name: "Tool setup", level: 1 }).waitFor();
+  await page.getByText(/MCP Server & External MCP Discovery/i).click();
   await page.getByRole("heading", { name: /sfield Governed MCP Server/i }).waitFor();
   assert.equal(await page.getByRole("switch", { name: "Treatment Selector", exact: true }).isChecked(), true);
   assert.equal(await page.getByRole("switch", { name: "CCRE glossary", exact: true }).isChecked(), true);

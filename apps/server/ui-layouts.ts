@@ -168,22 +168,6 @@ export function validateUiDesign(
         const incompatible = targets.find((target) => target.components && !target.components.includes(slot.component));
         if (incompatible) throw new ApiError(400, "ui_component_unavailable", `${incompatible.label} cannot supply ${slot.component}. Choose a supported block or change the attachment.`);
       }
-      if ((slot.kind === "block" || slot.kind === "widget") && slot.toolBinding) {
-        const expectedComponent = slot.kind === "block" ? slot.component : "PznBoundWidget";
-        if (slot.toolBinding.component !== expectedComponent) {
-          throw new ApiError(400, "ui_binding_invalid", `Tool binding component ${slot.toolBinding.component} must match slot component ${expectedComponent}.`);
-        }
-        if (bindingCatalog) {
-          const check = validateCardBinding(slot.toolBinding, bindingCatalog, {
-            sfield: sfieldAdapter,
-            registry: cepSphotonRegistry,
-            strictRequiredComponentFields: publishing && slot.kind === "block" && slot.component === "PznGoalProgress",
-          });
-          if (!check.valid) {
-            throw new ApiError(400, "ui_binding_invalid", check.issues.map((issue) => issue.message).join(" "));
-          }
-        }
-      }
       if (slot.kind === "form" && slot.writeBack !== false) {
         const field = slot.fields.find(({ defaultBinding }) => defaultBinding && !canSaveProfileBinding(defaultBinding));
         if (field) throw new ApiError(400, "ui_field_read_only", `${field.defaultBinding} is read-only. Disable saving bound fields or choose a writable field.`);
@@ -198,6 +182,22 @@ export function validateUiDesign(
         }
         if (domain !== "wealth" && targets.some(({ target }) => target.id === recordIntentId(domain, "list") || (target.id === declaration?.id && declaration.view === "list"))) {
           throw new ApiError(400, "ui_binding_unavailable", `The list view cannot supply ${key} for a single record. Attach a detail or timeline view.`);
+        }
+      }
+      if ((slot.kind === "block" || slot.kind === "widget") && slot.toolBinding) {
+        const expectedComponent = slot.kind === "block" ? slot.component : "PznBoundWidget";
+        if (slot.toolBinding.component !== expectedComponent) {
+          throw new ApiError(400, "ui_binding_invalid", `Tool binding component ${slot.toolBinding.component} must match slot component ${expectedComponent}.`);
+        }
+        if (bindingCatalog) {
+          const check = validateCardBinding(slot.toolBinding, bindingCatalog, {
+            sfield: sfieldAdapter,
+            registry: cepSphotonRegistry,
+            strictRequiredComponentFields: publishing && slot.kind === "block" && slot.component === "PznGoalProgress",
+          });
+          if (!check.valid) {
+            throw new ApiError(400, "ui_binding_invalid", check.issues.map((issue) => issue.message).join(" "));
+          }
         }
       }
     }

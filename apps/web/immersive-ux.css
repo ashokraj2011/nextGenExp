@@ -615,7 +615,9 @@
 
 .live-grounding-pills {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
   gap: 5px;
   align-items: center;
 }
@@ -623,6 +625,8 @@
 .grounding-pill {
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
+  white-space: nowrap;
   gap: 4px;
   padding: 2px 8px;
   border-radius: 999px;

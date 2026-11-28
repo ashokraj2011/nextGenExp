@@ -107,18 +107,39 @@ function arrange(
     }
     if (slot.kind === "widget") {
       if (laterStepIds.has(slot.id)) continue;
-      if (slot.toolBinding && precompiledToolBlocks && precompiledToolBlocks[toolBlockCursor]) {
-        mapped.push({ block: precompiledToolBlocks[toolBlockCursor++] });
+      const steps = wizards.get(slot.id);
+      if (steps) {
+        if (slot.toolBinding && precompiledToolBlocks && precompiledToolBlocks[toolBlockCursor]) {
+          toolBlockCursor++;
+        }
+        mapped.push({
+          block: {
+            component: "PznWidgetWizard",
+            props: {
+              wizardId: slot.id,
+              steps: steps.map((step, index) => resolveWidget(step, bindings, index < steps.length - 1)),
+            },
+          },
+        });
         continue;
       }
-      const steps = wizards.get(slot.id);
-      const block: DisplayBlock = steps
-        ? { component: "PznWidgetWizard", props: {
-          wizardId: slot.id,
-          steps: steps.map((step, index) => resolveWidget(step, bindings, index < steps.length - 1)),
-        } }
-        : { component: "PznBoundWidget", props: resolveWidget(slot, bindings) };
-      mapped.push({ block });
+      if (slot.toolBinding && precompiledToolBlocks && precompiledToolBlocks[toolBlockCursor]) {
+        const compiled = precompiledToolBlocks[toolBlockCursor++];
+        const hydrated: DisplayBlock = compiled.component === "PznBoundWidget" && bindings
+          ? {
+            component: "PznBoundWidget",
+            props: {
+              ...compiled.props,
+              ...(compiled.props.badge ? { badge: interpolateBindingTokens(compiled.props.badge, bindings) } : {}),
+              title: interpolateBindingTokens(compiled.props.title, bindings),
+              body: interpolateBindingTokens(compiled.props.body, bindings),
+            },
+          }
+          : compiled;
+        mapped.push({ block: hydrated });
+        continue;
+      }
+      mapped.push({ block: { component: "PznBoundWidget", props: resolveWidget(slot, bindings) } });
       continue;
     }
     if (slot.toolBinding && precompiledToolBlocks && precompiledToolBlocks[toolBlockCursor]) {

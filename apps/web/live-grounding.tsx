@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Loader2, Sparkles } from "lucide-react";
+import { CheckCircle2, Loader2 } from "lucide-react";
 import type { Progress } from "../../packages/contracts/api";
 import { RichText } from "./markdown";
 import "./immersive-ux.css";
@@ -53,12 +53,6 @@ export function LiveGroundingBar({
           );
         })}
       </div>
-      {working && hasPreview && (
-        <div className="hydrating-progress-note">
-          <Sparkles size={11} aria-hidden="true" />
-          <span>Card frame mounted · hydrating verified recommendations…</span>
-        </div>
-      )}
     </div>
   );
 }
