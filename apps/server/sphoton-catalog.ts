@@ -18,6 +18,7 @@ import { fixtureGoalProgressProvider, type GoalProgressProvider } from "../../pa
 import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import { findProfileById } from "../../packages/customer-profiles";
 import { readDemoBalance } from "../../packages/experience/content";
+import type { SmassDomainRegistry, SmassModelSummary } from "../../packages/smass";
 import {
   fingerprintToolContract,
   resolveJsonSchemaPath,
@@ -35,6 +36,7 @@ import {
   type SphotonFieldType,
   type SphotonFormat,
 } from "../../packages/sphoton";
+import { createCepSmassRegistry } from "./domain-models";
 import type { IntegrationTaskService } from "./integration-tasks";
 import type { OpsIncidentStore } from "./ops-store";
 import type { Runtime } from "./runtime";
@@ -68,95 +70,6 @@ export function loadOrCreateSphotonSecret(dataDir: string): string {
   }
 }
 
-const opsIncidentInputSchema: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  properties: { incidentId: { type: "string" } },
-};
-const opsIncidentOutputSchema: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    id: { type: "string" },
-    title: { type: "string" },
-    severity: { type: "string" },
-    status: { type: "string" },
-    service: { type: "string" },
-    environment: { type: "string" },
-    currentRelease: { type: "string" },
-    previousRelease: { type: "string" },
-    rollbackStatus: { type: "string" },
-    errorRatePct: { type: "number" },
-    p95LatencyMs: { type: "integer" },
-  },
-  required: ["id", "title", "severity", "status", "service"],
-};
-const opsRollbackPreviewInputSchema: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    incidentId: { type: "string" },
-    targetRelease: { type: "string" },
-    window: { type: "string" },
-  },
-};
-const opsRollbackPreviewOutputSchema: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    incidentId: { type: "string" },
-    targetRelease: { type: "string" },
-    window: { type: "string" },
-    rollbackStatus: { type: "string" },
-    estimatedRecoveryMinutes: { type: "integer" },
-  },
-  required: ["incidentId", "targetRelease", "rollbackStatus"],
-};
-
-const salesDealInputSchema: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  properties: { dealId: { type: "string" } },
-};
-const salesDealOutputSchema: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    id: { type: "string" },
-    accountName: { type: "string" },
-    title: { type: "string" },
-    stage: { type: "string" },
-    owner: { type: "string" },
-    arrCents: { type: "integer" },
-    discountPct: { type: "number" },
-    winProbability: { type: "integer" },
-    closeDate: { type: "string" },
-    discountStatus: { type: "string" },
-  },
-  required: ["id", "accountName", "stage", "arrCents"],
-};
-const salesDiscountPreviewInputSchema: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    dealId: { type: "string" },
-    discountPct: { type: "number" },
-    termMonths: { type: "integer" },
-  },
-};
-const salesDiscountPreviewOutputSchema: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    dealId: { type: "string" },
-    discountPct: { type: "number" },
-    termMonths: { type: "integer" },
-    netArrCents: { type: "integer" },
-    approvalLevel: { type: "string" },
-  },
-  required: ["dealId", "discountPct", "netArrCents"],
-};
-
 function defaultFormatsFor(type: SphotonFieldType, outputPath: string): { supported: SphotonFormat[]; def: SphotonFormat } {
   const lower = outputPath.toLowerCase();
   if ((type === "integer" || type === "number") && lower.endsWith("cents")) {
@@ -180,120 +93,15 @@ function defaultFormatsFor(type: SphotonFieldType, outputPath: string): { suppor
   return { supported: ["text"], def: "text" };
 }
 
-type DefaultFieldExposure = {
-  toolRef: string;
-  outputPath: string;
-  label: string;
-  group: string;
-  description?: string;
-  supportedFormats?: SphotonFormat[];
-  defaultFormat?: SphotonFormat;
-  legacyBindingKey?: string;
-};
-
-const DEFAULT_EXPOSURES: Record<DomainPackId, DefaultFieldExposure[]> = {
-  wealth: [
-    {
-      toolRef: `${sfieldTools.goal.id}@${toolVersion}`,
-      outputPath: "targetCents",
-      label: "Down payment target",
-      group: "Goal Progress (sfield)",
-      description: "Target home down payment amount in cents.",
-      supportedFormats: ["currency_cents", "number"],
-      defaultFormat: "currency_cents",
-      legacyBindingKey: "goal.target",
-    },
-    {
-      toolRef: `${sfieldTools.goal.id}@${toolVersion}`,
-      outputPath: "history",
-      label: "Savings history",
-      group: "Goal Progress (sfield)",
-      description: "Monthly savings progress history series.",
-      supportedFormats: ["series"],
-      defaultFormat: "series",
-    },
-    {
-      toolRef: `${sfieldTools.goal.id}@${toolVersion}`,
-      outputPath: "monthlyContributionCents",
-      label: "Current monthly savings",
-      group: "Goal Progress (sfield)",
-      description: "Current recurring monthly savings amount in cents.",
-      supportedFormats: ["currency_cents", "number"],
-      defaultFormat: "currency_cents",
-    },
-    {
-      toolRef: `${sfieldTools.portfolio.id}@${toolVersion}`,
-      outputPath: "totalCents",
-      label: "Total portfolio value",
-      group: "Portfolio Snapshot (sfield)",
-      supportedFormats: ["currency_cents", "number"],
-      defaultFormat: "currency_cents",
-      legacyBindingKey: "portfolio.total",
-    },
-    {
-      toolRef: `${sfieldTools.portfolio.id}@${toolVersion}`,
-      outputPath: "cashCents",
-      label: "Portfolio cash",
-      group: "Portfolio Snapshot (sfield)",
-      supportedFormats: ["currency_cents", "number"],
-      defaultFormat: "currency_cents",
-      legacyBindingKey: "portfolio.cash",
-    },
-    {
-      toolRef: `${sfieldTools.portfolio.id}@${toolVersion}`,
-      outputPath: "equityCents",
-      label: "Portfolio equities",
-      group: "Portfolio Snapshot (sfield)",
-      supportedFormats: ["currency_cents", "number"],
-      defaultFormat: "currency_cents",
-      legacyBindingKey: "portfolio.equities",
-    },
-    {
-      toolRef: `${sfieldTools.balances.id}@${toolVersion}`,
-      outputPath: "values.available",
-      label: "Available balance",
-      group: "Balances (sfield)",
-      supportedFormats: ["currency", "number", "text"],
-      defaultFormat: "currency",
-      legacyBindingKey: "balances.available",
-    },
-    {
-      toolRef: `${sfieldTools.balances.id}@${toolVersion}`,
-      outputPath: "values.current",
-      label: "Current balance",
-      group: "Balances (sfield)",
-      supportedFormats: ["currency", "number", "text"],
-      defaultFormat: "currency",
-      legacyBindingKey: "balances.current",
-    },
-  ],
-  it_ops: [
-    { toolRef: "ops.incident.read@1.0.0", outputPath: "id", label: "Incident ID", group: "IT Ops Incident (sfield)", legacyBindingKey: "incident.id" },
-    { toolRef: "ops.incident.read@1.0.0", outputPath: "title", label: "Incident title", group: "IT Ops Incident (sfield)", legacyBindingKey: "incident.title" },
-    { toolRef: "ops.incident.read@1.0.0", outputPath: "severity", label: "Severity", group: "IT Ops Incident (sfield)", legacyBindingKey: "incident.severity" },
-    { toolRef: "ops.incident.read@1.0.0", outputPath: "status", label: "Incident status", group: "IT Ops Incident (sfield)", legacyBindingKey: "incident.status" },
-    { toolRef: "ops.incident.read@1.0.0", outputPath: "service", label: "Affected service", group: "IT Ops Incident (sfield)", legacyBindingKey: "incident.service" },
-    { toolRef: "ops.incident.read@1.0.0", outputPath: "currentRelease", label: "Current release", group: "IT Ops Incident (sfield)", legacyBindingKey: "incident.currentRelease" },
-    { toolRef: "ops.incident.read@1.0.0", outputPath: "rollbackStatus", label: "Rollback status", group: "IT Ops Incident (sfield)", legacyBindingKey: "incident.rollbackStatus" },
-    { toolRef: "ops.incident.read@1.0.0", outputPath: "errorRatePct", label: "Edge error rate", group: "IT Ops Incident (sfield)", supportedFormats: ["percent", "number"], defaultFormat: "percent", legacyBindingKey: "incident.errorRate" },
-    { toolRef: "ops.incident.read@1.0.0", outputPath: "p95LatencyMs", label: "p95 latency (ms)", group: "IT Ops Incident (sfield)", supportedFormats: ["number"], defaultFormat: "number", legacyBindingKey: "incident.p95Latency" },
-  ],
-  sales_revops: [
-    { toolRef: "sales.deal.read@1.0.0", outputPath: "id", label: "Deal ID", group: "Sales Deal (sfield)", legacyBindingKey: "deal.id" },
-    { toolRef: "sales.deal.read@1.0.0", outputPath: "accountName", label: "Account name", group: "Sales Deal (sfield)", legacyBindingKey: "deal.accountName" },
-    { toolRef: "sales.deal.read@1.0.0", outputPath: "title", label: "Deal title", group: "Sales Deal (sfield)", legacyBindingKey: "deal.title" },
-    { toolRef: "sales.deal.read@1.0.0", outputPath: "stage", label: "Pipeline stage", group: "Sales Deal (sfield)", legacyBindingKey: "deal.stage" },
-    { toolRef: "sales.deal.read@1.0.0", outputPath: "arrCents", label: "Annual recurring revenue", group: "Sales Deal (sfield)", supportedFormats: ["currency_cents", "number"], defaultFormat: "currency_cents", legacyBindingKey: "deal.arr" },
-    { toolRef: "sales.deal.read@1.0.0", outputPath: "discountPct", label: "Requested discount", group: "Sales Deal (sfield)", supportedFormats: ["percent", "number"], defaultFormat: "percent", legacyBindingKey: "deal.discountPct" },
-    { toolRef: "sales.deal.read@1.0.0", outputPath: "winProbability", label: "Win probability", group: "Sales Deal (sfield)", supportedFormats: ["percent", "number"], defaultFormat: "percent", legacyBindingKey: "deal.winProbability" },
-    { toolRef: "sales.deal.read@1.0.0", outputPath: "closeDate", label: "Target close date", group: "Sales Deal (sfield)", supportedFormats: ["date", "text"], defaultFormat: "date", legacyBindingKey: "deal.closeDate" },
-  ],
-};
-
 type ExposureOverrideFile = Partial<Record<DomainPackId, DomainFieldExposure[]>>;
 
+/**
+ * Bridges smass (domain models) + sfield (headless tool registry & execution) -> sphoton (UI binding catalog).
+ * Zero duplicated entity schemas: store-backed and tool-backed models are projected directly from `smass`.
+ */
 export class SphotonCatalogService {
   readonly signingSecret: string;
+  readonly smass: SmassDomainRegistry;
   private readonly exposureFile: string;
   private overrides: ExposureOverrideFile = {};
   private customToolSchemas = new Map<string, SfieldToolDescriptor>();
@@ -302,6 +110,7 @@ export class SphotonCatalogService {
     tenantId: string;
     dataDir: string;
     getRuntime: () => Runtime | null;
+    smass?: SmassDomainRegistry;
     integrationService?: IntegrationTaskService;
     goalProgressProvider?: GoalProgressProvider;
     portfolioSnapshots?: PortfolioSnapshotProvider;
@@ -309,6 +118,7 @@ export class SphotonCatalogService {
     salesStore?: SalesDealStore;
   }) {
     this.signingSecret = loadOrCreateSphotonSecret(deps.dataDir);
+    this.smass = deps.smass ?? createCepSmassRegistry({ opsStore: deps.opsStore, salesStore: deps.salesStore });
     this.exposureFile = join(deps.dataDir, "sphoton-exposures.json");
     this.loadOverrides();
   }
@@ -328,9 +138,6 @@ export class SphotonCatalogService {
     writeFileSync(this.exposureFile, JSON.stringify(this.overrides, null, 2));
   }
 
-  /**
-   * Registers/updates a headless tool descriptor override (used by tests and dynamic tool registration).
-   */
   registerToolDescriptor(descriptor: SfieldToolDescriptor) {
     this.customToolSchemas.set(descriptor.ref, descriptor);
   }
@@ -379,38 +186,8 @@ export class SphotonCatalogService {
         inputs: balanceInputSchema as Record<string, unknown>,
         outputs: balanceResultSchema as Record<string, unknown>,
       },
-      {
-        ref: "ops.incident.read@1.0.0",
-        id: "ops.incident.read",
-        version: "1.0.0",
-        description: "Reads live SRE incident telemetry, release versions, and rollback state.",
-        inputs: opsIncidentInputSchema,
-        outputs: opsIncidentOutputSchema,
-      },
-      {
-        ref: "ops.incident.rollback.preview@1.0.0",
-        id: "ops.incident.rollback.preview",
-        version: "1.0.0",
-        description: "Previews rolling back a service to a target release version.",
-        inputs: opsRollbackPreviewInputSchema,
-        outputs: opsRollbackPreviewOutputSchema,
-      },
-      {
-        ref: "sales.deal.read@1.0.0",
-        id: "sales.deal.read",
-        version: "1.0.0",
-        description: "Reads CRM deal ARR, discount request, stage, and win probability.",
-        inputs: salesDealInputSchema,
-        outputs: salesDealOutputSchema,
-      },
-      {
-        ref: "sales.discount.preview@1.0.0",
-        id: "sales.discount.preview",
-        version: "1.0.0",
-        description: "Previews net ARR and approval tier for a requested discount and term.",
-        inputs: salesDiscountPreviewInputSchema,
-        outputs: salesDiscountPreviewOutputSchema,
-      },
+      // Store-backed domain models compiled automatically by smass
+      ...this.smass.describeGeneratedTools(),
     ];
   }
 
@@ -420,7 +197,6 @@ export class SphotonCatalogService {
       byRef.set(desc.ref, desc);
     }
 
-    // Pull live closed schemas from sfield registry when runtime is connected (still zero UI in sfield).
     const runtime = this.deps.getRuntime();
     const sfieldRegistry = runtime?.sfieldInstance.registry;
     if (sfieldRegistry) {
@@ -442,7 +218,6 @@ export class SphotonCatalogService {
       }
     }
 
-    // Also include published integration read contracts so domain-registered tools are discoverable offline too.
     for (const task of this.deps.integrationService?.interactiveReadContracts() ?? []) {
       const [id, version = "1.0.0"] = task.ref.split("@");
       if (!byRef.has(task.ref)) {
@@ -461,6 +236,11 @@ export class SphotonCatalogService {
       byRef.set(ref, custom);
     }
     return [...byRef.values()];
+  }
+
+  summarizeDomainModels(domainId?: DomainPackId): SmassModelSummary[] {
+    const descriptors = new Map(this.allToolDescriptors().map((desc) => [desc.ref, desc]));
+    return this.smass.summarize(domainId, descriptors);
   }
 
   sfieldAdapter(): SfieldAdapter {
@@ -504,53 +284,22 @@ export class SphotonCatalogService {
         }
         return { status: "succeeded", toolRef, output: readDemoBalance(profile.personaId, profile.syntheticMid, Date.now()) };
       }
-      if (toolRef === "ops.incident.read@1.0.0") {
-        const incident = (typeof inputs.incidentId === "string" && this.deps.opsStore?.findById(inputs.incidentId))
-          || this.deps.opsStore?.primaryIncident();
-        if (!incident) {
-          return { status: "failed", toolRef, error: { code: "INCIDENT_UNAVAILABLE", message: "No active incident found." } };
+
+      // Delegate all store-backed domain models cleanly to smass
+      const smassRead = await this.smass.executeStoreRead(toolRef, inputs, {
+        tenantId: scope.tenantId,
+        domainId: scope.domainId,
+        principalId: scope.principalId,
+        customerId: scope.customerId,
+        signal,
+      });
+      if (smassRead.found) {
+        if (!smassRead.output) {
+          return { status: "failed", toolRef, error: { code: "ENTITY_UNAVAILABLE", message: `No active record found for ${toolRef}.` } };
         }
-        return {
-          status: "succeeded",
-          toolRef,
-          output: {
-            id: incident.id,
-            title: incident.title,
-            severity: incident.severity,
-            status: incident.status,
-            service: incident.service,
-            environment: incident.environment,
-            currentRelease: incident.currentRelease,
-            previousRelease: incident.previousRelease,
-            rollbackStatus: incident.rollbackStatus,
-            errorRatePct: incident.errorRatePct,
-            p95LatencyMs: incident.p95LatencyMs,
-          },
-        };
+        return { status: "succeeded", toolRef, output: smassRead.output };
       }
-      if (toolRef === "sales.deal.read@1.0.0") {
-        const deal = (typeof inputs.dealId === "string" && this.deps.salesStore?.list().find((d) => d.id === inputs.dealId))
-          || this.deps.salesStore?.primaryDeal();
-        if (!deal) {
-          return { status: "failed", toolRef, error: { code: "DEAL_UNAVAILABLE", message: "No active deal found." } };
-        }
-        return {
-          status: "succeeded",
-          toolRef,
-          output: {
-            id: deal.id,
-            accountName: deal.accountName,
-            title: deal.title,
-            stage: deal.stage,
-            owner: deal.owner,
-            arrCents: Math.round(deal.arrUsd * 100),
-            discountPct: deal.discountPct,
-            winProbability: deal.winProbabilityPct,
-            closeDate: deal.closeDate,
-            discountStatus: deal.discountStatus,
-          },
-        };
-      }
+
       return { status: "failed", toolRef, error: { code: "TOOL_UNAVAILABLE", message: `Read tool ${toolRef} is not executable in this context.` } };
     };
 
@@ -560,42 +309,16 @@ export class SphotonCatalogService {
       scope: SphotonExecutionScope;
       signal?: AbortSignal;
     }): Promise<SfieldToolExecutionResult> => {
-      const { toolRef, inputs } = input;
-      if (toolRef === "ops.incident.rollback.preview@1.0.0") {
-        const incident = (typeof inputs.incidentId === "string" && this.deps.opsStore?.findById(inputs.incidentId))
-          || this.deps.opsStore?.primaryIncident();
-        const targetRelease = typeof inputs.targetRelease === "string" ? inputs.targetRelease : (incident?.previousRelease ?? "v2.4.0");
-        const window = typeof inputs.window === "string" ? inputs.window : "immediate";
-        return {
-          status: "succeeded",
-          toolRef,
-          output: {
-            incidentId: incident?.id ?? "INC-4012",
-            targetRelease,
-            window,
-            rollbackStatus: `Ready to roll back to ${targetRelease} (${window})`,
-            estimatedRecoveryMinutes: window === "immediate" ? 3 : 8,
-          },
-        };
-      }
-      if (toolRef === "sales.discount.preview@1.0.0") {
-        const deal = (typeof inputs.dealId === "string" && this.deps.salesStore?.list().find((d) => d.id === inputs.dealId))
-          || this.deps.salesStore?.primaryDeal();
-        const baseArrCents = Math.round((deal?.arrUsd ?? 480_000) * 100);
-        const discountPct = typeof inputs.discountPct === "number" ? inputs.discountPct : (deal?.discountPct ?? 15);
-        const termMonths = typeof inputs.termMonths === "number" ? inputs.termMonths : 12;
-        const netArrCents = Math.round(baseArrCents * (1 - discountPct / 100));
-        return {
-          status: "succeeded",
-          toolRef,
-          output: {
-            dealId: deal?.id ?? "DEAL-2041",
-            discountPct,
-            termMonths,
-            netArrCents,
-            approvalLevel: discountPct > 20 ? "VP Finance" : "Deal Desk",
-          },
-        };
+      const { toolRef, inputs, scope, signal } = input;
+      const smassAction = await this.smass.executeStoreAction(toolRef, inputs, {
+        tenantId: scope.tenantId,
+        domainId: scope.domainId,
+        principalId: scope.principalId,
+        customerId: scope.customerId,
+        signal,
+      });
+      if (smassAction.found) {
+        return { status: "succeeded", toolRef, output: smassAction.output };
       }
       return { status: "failed", toolRef, error: { code: "ACTION_UNSUPPORTED", message: `Action ${toolRef} must run through its scoped runtime handler.` } };
     };
@@ -606,12 +329,11 @@ export class SphotonCatalogService {
   catalogForDomain(domainId: DomainPackId): SphotonBindingCatalog {
     const adapter = this.sfieldAdapter();
     const descriptors = new Map(adapter.listTools().map((desc) => [desc.ref, desc]));
-    const baseExposures = DEFAULT_EXPOSURES[domainId] ?? [];
+    const projected = this.smass.projectBindingsForDomain(domainId);
     const domainOverrides = this.overrides[domainId] ?? [];
 
-    // Merge default exposures with domain owner overrides (expose new fields or hide existing ones).
     const mergedMap = new Map<string, DomainFieldExposure & { legacyBindingKey?: string }>();
-    for (const item of baseExposures) {
+    for (const item of projected.fields) {
       mergedMap.set(`${item.toolRef}::${item.outputPath}`, {
         toolRef: item.toolRef,
         outputPath: item.outputPath,
@@ -620,7 +342,7 @@ export class SphotonCatalogService {
         description: item.description,
         supportedFormats: item.supportedFormats,
         defaultFormat: item.defaultFormat,
-        exposed: true,
+        exposed: item.exposed,
         legacyBindingKey: item.legacyBindingKey,
       });
     }
@@ -660,55 +382,21 @@ export class SphotonCatalogService {
     }
 
     const actions: SphotonCatalogAction[] = [];
-    const addAction = (spec: {
-      id: string;
-      toolRef: string;
-      label: string;
-      description: string;
-      fixedInputFields: Record<string, SphotonFieldType>;
-      followUpInputFields: string[];
-      defaultUpdate: "originalCard" | "newTurn";
-    }) => {
+    for (const spec of projected.actions) {
       const desc = descriptors.get(spec.toolRef);
-      if (!desc) return;
+      if (!desc) continue;
       referencedTools.add(spec.toolRef);
       actions.push({
-        ...spec,
+        id: spec.id,
+        toolRef: spec.toolRef,
+        label: spec.label,
+        ...(spec.description ? { description: spec.description } : {}),
+        fixedInputFields: spec.fixedInputFields,
+        followUpInputFields: spec.followUpInputFields,
+        defaultUpdate: spec.defaultUpdate,
         inputSchema: desc.inputs,
         outputSchema: desc.outputs,
         contractFingerprint: fingerprintToolContract(desc.ref, desc.inputs, desc.outputs),
-      });
-    };
-
-    if (domainId === "wealth") {
-      addAction({
-        id: "add-monthly-savings",
-        toolRef: `${sfieldTools.goalScenario.id}@${toolVersion}`,
-        label: "Add $500 a month",
-        description: "Previews adding an extra monthly savings contribution and updates the goal chart in place.",
-        fixedInputFields: { extraMonthlyCents: "integer" },
-        followUpInputFields: ["startMonth"],
-        defaultUpdate: "originalCard",
-      });
-    } else if (domainId === "it_ops") {
-      addAction({
-        id: "preview-rollback",
-        toolRef: "ops.incident.rollback.preview@1.0.0",
-        label: "Preview rollback",
-        description: "Simulates rolling back to the previous healthy release and updates the incident card in place.",
-        fixedInputFields: { targetRelease: "string" },
-        followUpInputFields: ["window"],
-        defaultUpdate: "originalCard",
-      });
-    } else if (domainId === "sales_revops") {
-      addAction({
-        id: "preview-discount",
-        toolRef: "sales.discount.preview@1.0.0",
-        label: "Preview discount impact",
-        description: "Calculates net ARR and approval tier for a discount scenario and updates the deal card in place.",
-        fixedInputFields: { discountPct: "number" },
-        followUpInputFields: ["termMonths"],
-        defaultUpdate: "originalCard",
       });
     }
 

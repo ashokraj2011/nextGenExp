@@ -18,6 +18,7 @@ The guides are available in the checkout and under **Administration → Develope
 | --- | --- |
 | [Getting started](./docs/developers/getting-started.md) | Install with npm, configure the model, trace a balance comparison and reopen it with the chat harness. |
 | [Create a chat UI](./docs/developers/chat-ui.md) | Preview and publish a domain layout, bind data, use generated controls or add a new A2UI component. |
+| [smass domain models](./docs/developers/smass.md) | Define tool-backed or store-backed domain models once in `packages/smass/` to emit closed `sfield` tools and `sphoton` catalogs. |
 | [sphoton UI bindings](./docs/developers/sphoton.md) | Bind chat cards to registered `sfield` tools via `packages/sphoton/`, validate types, fingerprint approvals, and update cards in place. |
 | [sfield and tools](./docs/developers/sfield-and-tools.md) | Inspect model input, replace a data provider, register a tool and run the [standalone read example](./docs/developers/examples/read-tool.mjs). |
 | [Rules and workflows](./docs/developers/rules-and-workflows.md) | Attach a versioned workflow to a TS rule and verify Marcus’s funding preview from chat through Logs. |
@@ -48,6 +49,7 @@ Edit the Markdown under `docs/developers/` to update both versions. Vite renders
 Requires **Node 22.13+** and **npm 10+**. The standalone **`sfield` Agent SDK** monorepo is vendored under `vendor/sfield/packages/` as local npm workspaces:
 
 - `@sfield/core` — 100% headless governed runtime, closed Ajv tool contracts, HITL approvals, `GeminiProvider` / `AnthropicProvider` / `OpenAICompatibleProvider`, MCP 2026 `SFieldMcpServer` (Elicitation + Async Tasks) + `McpClient`, `PiiFirewall`, `ToolResilienceGuard`, `DelegationService`, `streamRun`, `FilesystemArtifactStore`, `VectorMemoryIndex`
+- `packages/smass` — Singularity Mass domain-modeling framework (`defineToolBackedModel`, `defineStoreBackedModel`, `SmassDomainRegistry`) compiling domain models into closed `sfield` tools and `sphoton` catalogs (`GET /api/admin/domain-models`)
 - `packages/sphoton` — Domain-agnostic Singularity Photon UI tool-binding toolkit (`SphotonComponentRegistry`, `validateCardBinding`, `compileBoundCard`, `createSurfaceBinder`, persistent HMAC-SHA256 action sealing) sitting above headless `sfield`
 - `@sfield/preset-memory` — Zero-boilerplate ephemeral preset (`preset: "memory"`) for tests & scripts
 - `@sfield/preset-local` — Zero-boilerplate durable local preset (`preset: "local"`) backed by SQLite + disk artifacts

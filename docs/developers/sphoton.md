@@ -96,4 +96,4 @@ A slot (`block` or `widget`) declares a `toolBinding`:
 
 ### 5. Multi-Domain Support
 
-Any domain (`wealth`, `it_ops`, `sales_revops`, or future packs) publishes cards through the same `packages/sphoton/` compiler using its own catalog (`ops.incident.read@1.0.0`, `sales.deal.read@1.0.0`, etc.). Cross-domain tool bindings are blocked at validation and preview time. See `tests/sphoton.test.ts` for full unit and end-to-end verification.
+Any domain (`wealth`, `it_ops`, `sales_revops`, or future packs) publishes cards through the same `packages/sphoton/` compiler using its own catalog (`ops.incident.read@1.0.0`, `sales.deal.read@1.0.0`, etc.). Cross-domain tool bindings are blocked at validation and preview time. - **App & Domains + `smass`** (`packages/smass/`, `apps/server/domain-models.ts`): Defines tool-backed models (`wealth.home_goal`, `wealth.portfolio`, `wealth.balances`) and store-backed models (`ops.incident`, `sales.deal`) once, projects them automatically into `GET /api/admin/ui-binding-catalog?domain=<domain>`, and exposes them at `GET /api/admin/domain-models?domain=<domain>`. See `docs/developers/smass.md`.

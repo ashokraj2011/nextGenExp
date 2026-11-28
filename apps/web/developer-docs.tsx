@@ -3,6 +3,7 @@ import { adminPaths } from "../../packages/contracts/admin-paths";
 import { developerGuideHref } from "./admin-navigation";
 import gettingStarted from "../../docs/developers/getting-started.md";
 import chatUi from "../../docs/developers/chat-ui.md";
+import smassDoc from "../../docs/developers/smass.md";
 import sphotonDoc from "../../docs/developers/sphoton.md";
 import runtime from "../../docs/developers/sfield-and-tools.md";
 import sfieldSdk from "../../docs/developers/sfield-sdk.md";
@@ -14,6 +15,7 @@ const guides = [
   { id: "start", label: "Getting started", html: gettingStarted, related: "Interaction map", href: adminPaths.help + "#interactions" },
   { id: "sdk", label: "sfield SDK reference", html: sfieldSdk, related: "Standalone HTML Guide", href: "/sfield-sdk.html" },
   { id: "sfield", label: "sfield and tools", html: runtime, related: "Tool setup", href: adminPaths.tools },
+  { id: "smass", label: "smass domain models", html: smassDoc, related: "UI Builder", href: adminPaths.builder },
   { id: "sphoton", label: "sphoton UI bindings", html: sphotonDoc, related: "UI Builder", href: adminPaths.builder },
   { id: "ui", label: "Create a chat UI", html: chatUi, related: "UI Builder", href: adminPaths.builder },
   { id: "workflows", label: "Rules and workflows", html: workflows, related: "Logs", href: adminPaths.logs },

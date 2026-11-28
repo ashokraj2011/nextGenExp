@@ -217,6 +217,15 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
     await createChat("admin");
     return true;
   }
+  if (id === "domain-models" && method === "GET") {
+    const domainId = authoringDomain();
+    json(res, {
+      tenantId: serverTenantId,
+      domainId,
+      models: sphotonCatalog.summarizeDomainModels(domainId),
+    });
+    return true;
+  }
   if (id === "ui-binding-catalog" && method === "GET") {
     const domainId = authoringDomain();
     json(res, sphotonCatalog.catalogForDomain(domainId));

@@ -166,6 +166,11 @@ const sdkPackages = [
     highlights: "init, validate, eval, lock status, lock approve, inspect <runId>, doctor, studio, and mcp serve (stdio).",
   },
   {
+    pkg: "packages/smass",
+    role: "Singularity Mass — Domain Model & Data Fabric",
+    highlights: "Zero UI/server imports: defineToolBackedModel() composes domain entities from existing sfield tools; defineStoreBackedModel() defines fields + DataSource once and auto-compiles closed-schema @sfield/core tools + sphoton catalog projections (GET /api/admin/domain-models).",
+  },
+  {
     pkg: "packages/sphoton",
     role: "Singularity Photon — Domain-Agnostic UI Binding Toolkit",
     highlights: "Zero CEP/domain imports, sits above headless sfield via SfieldAdapter & createSurfaceBinder(sf): pluggable SphotonComponentRegistry, card binding contracts, schema/type validation, catalog-driven AI drafts, single deterministic A2UI compilation, unavailable states, SurfaceBinder ($ref/$repeat/$input), and persistent HMAC-SHA256 action sealing.",
@@ -279,25 +284,25 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
       </ol>
 
       <div className="help-sfield-subsection">
-        <h3>Shared UI tool bindings: headless <code>sfield</code> + <code>sphoton</code></h3>
-        <p><strong>sfield</strong> stays strictly headless (tool schemas, execution, and call logs — zero UI). <strong>sphoton</strong> (<code>packages/sphoton/</code>) sits above it so every domain shares one validated compiler across draft preview, Admin chat approval, and customer chat:</p>
-        <ol className="help-sfield-flow" aria-label="How sfield, sphoton, and domains separate responsibilities" role="list">
+        <h3>3-Pillar Singularity Architecture: <code>smass</code> · <code>sfield</code> · <code>sphoton</code></h3>
+        <p><strong>smass</strong> (<code>packages/smass/</code>) defines domain models once (tool-backed or store-backed), <strong>sfield</strong> (<code>@sfield/core</code>) stays strictly headless (closed schemas, execution, approvals, call logs), and <strong>sphoton</strong> (<code>packages/sphoton/</code>) projects verified tool data into A2UI cards across draft preview, Admin chat approval, and customer chat:</p>
+        <ol className="help-sfield-flow" aria-label="How smass, sfield, sphoton, and CEP separate responsibilities" role="list">
+          <li className="help-sfield-node">
+            <span className="help-entity-icon"><Database size={18} aria-hidden="true" /></span>
+            <h3>smass (<code>packages/smass</code>)</h3>
+            <p>Defines domain entities once: <code>defineToolBackedModel</code> composes existing <code>sfield</code> tools (Wealth) and <code>defineStoreBackedModel</code> compiles fields + data sources into closed <code>sfield</code> tools (IT Ops, Sales). Exposed at <code>/api/admin/domain-models</code>.</p>
+            <ArrowRight className="help-proposal-arrow" size={22} aria-hidden="true" />
+          </li>
           <li className="help-sfield-node">
             <span className="help-entity-icon"><ShieldCheck size={18} aria-hidden="true" /></span>
             <h3>sfield (Headless Field)</h3>
-            <p>Registers tools once with closed input/output JSON Schemas, enforces scoped execution, and records immutable call logs. Knows nothing about UI.</p>
+            <p>Registers tools once with closed input/output JSON Schemas, enforces scoped execution, HITL approvals, and records immutable call logs. Knows nothing about UI or domain packs.</p>
             <ArrowRight className="help-proposal-arrow" size={22} aria-hidden="true" />
           </li>
           <li className="help-sfield-node">
             <span className="help-entity-icon"><Layers size={18} aria-hidden="true" /></span>
-            <h3>sphoton (<code>packages/sphoton</code>)</h3>
-            <p>100% domain-agnostic UI binder over headless <code>sfield</code> (<code>SfieldAdapter</code> + <code>createSurfaceBinder</code>). Uses pluggable <code>SphotonComponentRegistry</code>, validates types, compiles preview/approval/chat cards, and seals persistent HMAC action refs.</p>
-            <ArrowRight className="help-proposal-arrow" size={22} aria-hidden="true" />
-          </li>
-          <li className="help-sfield-node">
-            <span className="help-entity-icon"><Network size={18} aria-hidden="true" /></span>
-            <h3>App &amp; Domains (CEP)</h3>
-            <p>Registers A2UI components (<code>cepSphotonRegistry</code>), sets tenant/domain exposure &amp; friendly labels (<code>/api/admin/ui-binding-catalog</code>), runs UI Builder &amp; dependency-fingerprinted Admin chat approvals, renders A2UI, and logs approved revisions.</p>
+            <h3>sphoton (<code>packages/sphoton</code>) &amp; CEP</h3>
+            <p>100% domain-agnostic UI binder (<code>SphotonComponentRegistry</code> + <code>createSurfaceBinder</code>) consumes <code>smass</code> catalogs &amp; headless <code>sfield</code>, validates types, compiles preview/approval/chat A2UI cards, and seals persistent HMAC action refs.</p>
           </li>
         </ol>
       </div>
