@@ -12,9 +12,13 @@ import type { UiDesign, UiLayoutCatalog, UiLayoutRecord } from "../packages/cont
 import { cepSphotonRegistry } from "../packages/experience/sphoton-components";
 import {
   applyActionResultToBlock,
+  arbitrateExperienceSurface,
   compileBoundCard,
+  DEFAULT_SPHOTON_CHANNEL_BUDGETS,
+  DEFAULT_SPHOTON_UI_CATALOG,
   fingerprintToolContract,
   generateBoundCardDraft,
+  resolveExperienceUi,
   validateCardBinding,
   verifyActionRef,
   type SfieldAdapter,
@@ -587,4 +591,75 @@ test("sphoton integration: catalog exposure, AI binding, review dependency drift
   assert.equal(opsApproved.approval.status, "executed");
   const allLayouts = await client.request<UiLayoutCatalog>(layoutsPath);
   assert.ok(allLayouts.library.some((entry) => entry.domainId === "it_ops" && entry.design.name === opsDesign.name));
+});
+
+test("sphoton experience composer: pure domain-agnostic 5-class surface arbitration and 3-mode UI resolution with zero PZN coupling", () => {
+  const chatBudget = DEFAULT_SPHOTON_CHANNEL_BUDGETS.find((b) => b.id === "chat_turn")!;
+  const webBudget = DEFAULT_SPHOTON_CHANNEL_BUDGETS.find((b) => b.id === "web_dashboard")!;
+
+  const resolvedRuntime = resolveExperienceUi({
+    mode: "runtime_tool_selected",
+    catalog: DEFAULT_SPHOTON_UI_CATALOG,
+    budget: webBudget,
+    snapshotId: "snap_ops_v9",
+    domainId: "it_ops",
+    runtimeSuggestedUiId: "ui_comparison_matrix@1.0.0",
+    runtimeSelectorToolRef: "ops.incidents.evaluate@1.0.0",
+  });
+  assert.equal(resolvedRuntime.mode, "runtime_tool_selected");
+  assert.equal(resolvedRuntime.resolvedUiId, "ui_comparison_matrix@1.0.0");
+
+  const resolvedGen = resolveExperienceUi({
+    mode: "runtime_sphoton_generative",
+    catalog: DEFAULT_SPHOTON_UI_CATALOG,
+    budget: chatBudget,
+    snapshotId: "snap_ops_v9",
+    domainId: "it_ops",
+    defaultVisualKind: "readiness_gauge",
+  });
+  assert.equal(resolvedGen.mode, "runtime_sphoton_generative");
+  assert.ok((resolvedGen.a2uiNodes?.length ?? 0) >= 3);
+
+  // Arbitrate IT Ops tasks & recommendations sourced purely from generic sfield tools (zero PZN)
+  const chatResult = arbitrateExperienceSurface({
+    budget: chatBudget,
+    mainItemId: resolvedRuntime.resolvedUiId,
+    mainRationale: resolvedRuntime.rationale,
+    revision: 1,
+    accountVersion: 9,
+    taskCandidates: [
+      { id: "inc_rollback", title: "Approve canary rollback", sourceToolRef: "ops.incidents.read@1.0.0" },
+    ],
+    nbaCandidates: [
+      { id: "opt_autoscale", title: "Enable predictive autoscaling", sourceToolRef: "ops.capacity.advise@1.0.0", score: 0.93 },
+    ],
+    dismissedIds: new Set(),
+    followUps: ["Inspect latency graph", "Check error budget", "View pod logs", "Open postmortem"],
+    disclosures: ["Telemetry verified from production cluster snapshot."],
+  });
+  assert.equal(chatResult.placedTasks.length, 1);
+  assert.equal(chatResult.placedNba.length, 0);
+  assert.equal(chatResult.suppressed[0]?.id, "opt_autoscale");
+  assert.equal(chatResult.followUps.length, 3);
+  assert.equal(chatResult.disclosures.length, 1);
+
+  // Clearing the ops task at revision 2 auto-promotes the waiting recommendation
+  const promotedResult = arbitrateExperienceSurface({
+    budget: chatBudget,
+    mainItemId: resolvedRuntime.resolvedUiId,
+    mainRationale: resolvedRuntime.rationale,
+    revision: 2,
+    accountVersion: 10,
+    taskCandidates: [],
+    clearedTasks: [{ id: "inc_rollback", title: "Approve canary rollback" }],
+    nbaCandidates: [
+      { id: "opt_autoscale", title: "Enable predictive autoscaling", sourceToolRef: "ops.capacity.advise@1.0.0", score: 0.93 },
+    ],
+    dismissedIds: new Set(),
+    followUps: ["Inspect latency graph"],
+    disclosures: ["Telemetry verified from production cluster snapshot."],
+  });
+  assert.equal(promotedResult.placedTasks.length, 0);
+  assert.equal(promotedResult.placedNba.length, 1);
+  assert.ok(promotedResult.arbitrationLog.some((e) => e.outcome === "promoted"));
 });

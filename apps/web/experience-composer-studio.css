@@ -813,6 +813,7 @@
   border: 1px solid transparent;
 }
 .ec-ui-source-pill.mode-pinned_widget { background: #ede9fe; border-color: #c4b5fd; color: #5b21b6; }
+.ec-ui-source-pill.mode-runtime_tool_selected,
 .ec-ui-source-pill.mode-runtime_pzn_selected { background: var(--teal-pale); border-color: var(--teal-border); color: var(--teal-dark); }
 .ec-ui-source-pill.mode-runtime_sphoton_generative { background: #dbeafe; border-color: #93c5fd; color: #1d4ed8; }
 

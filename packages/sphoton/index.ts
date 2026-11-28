@@ -6,3 +6,4 @@ export * from "./validator";
 export * from "./compiler";
 export * from "./generator";
 export * from "./surface-binder";
+export * from "./experience-composer";

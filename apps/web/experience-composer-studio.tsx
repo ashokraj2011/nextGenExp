@@ -271,8 +271,8 @@ export function ExperienceComposerStudio() {
             <span className={`ec-ui-source-pill mode-${ui.mode}`}>
               {ui.mode === "pinned_widget"
                 ? `Pinned UI · ${ui.resolvedUiName}`
-                : ui.mode === "runtime_pzn_selected"
-                  ? `Runtime PZN · ${ui.resolvedUiName}`
+                : ui.mode === "runtime_tool_selected"
+                  ? `Runtime Tool · ${ui.resolvedUiName}`
                   : `Runtime sphoton A2UI`}
             </span>
             <span className="ec-snap-chip">
@@ -372,7 +372,7 @@ export function ExperienceComposerStudio() {
           <section key={task.id} className={"ec-card ec-zone-task" + (showAnatomy ? " has-anatomy" : "")}>
             <div className="ec-zone-head">
               {renderZoneTag(2, "TASK · PENDING OBLIGATION", "task")}
-              <span className="ec-rule-pill">CCRE: {task.ruleId}</span>
+              <span className="ec-rule-pill">sfield tool: {task.sourceToolRef}</span>
             </div>
             <h4>{task.title}</h4>
             <p>{task.summary}</p>
@@ -405,7 +405,10 @@ export function ExperienceComposerStudio() {
           <section key={item.id} className={"ec-card ec-zone-nba" + (showAnatomy ? " has-anatomy" : "")}>
             <div className="ec-zone-head">
               {renderZoneTag(3, "NBA · RANKED RECOMMENDATION", "nba")}
-              <span className="ec-score-pill">Rank {item.score.toFixed(2)} · {item.estimatedValue}</span>
+              <div className="ec-head-badges">
+                <span className="ec-rule-pill">sfield tool: {item.sourceToolRef}</span>
+                <span className="ec-score-pill">Rank {item.score.toFixed(2)} · {item.estimatedValue}</span>
+              </div>
             </div>
             <h4>{item.title}</h4>
             <p>{item.summary}</p>
@@ -501,7 +504,7 @@ export function ExperienceComposerStudio() {
           </a>
           <div className="ec-title-wrap">
             <span className="ec-eyebrow">
-              <Layers size={12} /> EXPERIENCE COMPOSER STUDIO (SPHOTON + PZN + SMASS + SFIELD)
+              <Layers size={12} /> SPHOTON EXPERIENCE COMPOSER (SMASS DATA · SFIELD TOOLS INCLUDING PZN)
             </span>
             <h1>Compose 5-Class Experiences Across Subject Areas &amp; Channels</h1>
           </div>
@@ -713,7 +716,7 @@ export function ExperienceComposerStudio() {
                   {(
                     [
                       ["pinned_widget", "Pinned UI"],
-                      ["runtime_pzn_selected", "Runtime PZN"],
+                      ["runtime_tool_selected", "Runtime Tool"],
                       ["runtime_sphoton_generative", "Runtime sphoton"],
                     ] as const
                   ).map(([modeId, label]) => (

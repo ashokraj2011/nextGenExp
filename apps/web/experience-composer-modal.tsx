@@ -116,7 +116,7 @@ const PRESETS: Array<{ name: string; values: Omit<ExperienceFormState, "subjectA
       nbaWorkflowId: "lending.heloc.preview",
       followUpsCsv: "Compare HELOC vs. cash-out refi, Estimate monthly draw payment, Check credit impact",
       disclosure: "Subject to credit approval and property appraisal. Equal Housing Lender.",
-      uiResolutionMode: "runtime_pzn_selected",
+      uiResolutionMode: "runtime_tool_selected",
       attachedUiId: "ui_comparison_matrix@1.0.0",
     },
   },
@@ -346,11 +346,11 @@ export function ExperienceComposerModal({
                 </button>
                 <button
                   type="button"
-                  className={"ec-ui-mode-card" + (exp.uiResolutionMode === "runtime_pzn_selected" ? " is-active" : "")}
-                  onClick={() => setExp({ ...exp, uiResolutionMode: "runtime_pzn_selected" })}
+                  className={"ec-ui-mode-card" + (exp.uiResolutionMode === "runtime_tool_selected" || exp.uiResolutionMode === "runtime_pzn_selected" ? " is-active" : "")}
+                  onClick={() => setExp({ ...exp, uiResolutionMode: "runtime_tool_selected" })}
                 >
-                  <strong>Runtime Selected (PZN TS)</strong>
-                  <span>PZN picks the best UI template dynamically per member &amp; channel at runtime.</span>
+                  <strong>Runtime Selected (sfield Tool)</strong>
+                  <span>Any bound sfield tool (PZN or domain tool) picks the best UI template at runtime.</span>
                 </button>
                 <button
                   type="button"

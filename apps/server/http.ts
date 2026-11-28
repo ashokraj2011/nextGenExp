@@ -1684,7 +1684,7 @@ export async function startApp(options: Options) {
             nbaWorkflowId: z.string().min(2).max(80),
             followUps: z.array(z.string().max(80)).max(6),
             disclosure: z.string().min(2).max(260),
-            uiResolutionMode: z.enum(["pinned_widget", "runtime_pzn_selected", "runtime_sphoton_generative"]).optional(),
+            uiResolutionMode: z.enum(["pinned_widget", "runtime_tool_selected", "runtime_pzn_selected", "runtime_sphoton_generative"]).optional(),
             attachedUiId: z.string().min(1).max(100).optional(),
           }).strict(),
         );
@@ -1701,7 +1701,7 @@ export async function startApp(options: Options) {
           z.object({
             experienceId: z.string().min(1).max(80),
             channel: channelIdSchema,
-            uiResolutionMode: z.enum(["pinned_widget", "runtime_pzn_selected", "runtime_sphoton_generative"]),
+            uiResolutionMode: z.enum(["pinned_widget", "runtime_tool_selected", "runtime_pzn_selected", "runtime_sphoton_generative"]),
             attachedUiId: z.string().min(1).max(100).optional(),
           }).strict(),
         );

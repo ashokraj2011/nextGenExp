@@ -5,26 +5,34 @@ import {
   type SmassDataModelGraph,
   type SmassExecutionContext,
 } from "../../packages/smass";
+import {
+  arbitrateExperienceSurface,
+  DEFAULT_SPHOTON_CHANNEL_BUDGETS,
+  DEFAULT_SPHOTON_UI_CATALOG,
+  resolveExperienceUi,
+  type SphotonArbitrationEntry,
+  type SphotonChannelBudget,
+  type SphotonResolvedUi,
+  type SphotonUiComponentEntry,
+  type SphotonUiPlacementClass,
+  type SphotonUiResolutionMode,
+  type SphotonVisualKind,
+} from "../../packages/sphoton";
 
 export type SubjectAreaId = string;
 export type ChannelSurfaceId = string;
-export type UiPlacementClass = "main" | "tasks" | "nba" | "actions" | "chrome";
-export type UiResolutionMode = "pinned_widget" | "runtime_pzn_selected" | "runtime_sphoton_generative";
-export type UiTemplateVisualKind =
-  | "kpi_cards"
-  | "allocation_bar"
-  | "comparison_table"
-  | "readiness_gauge"
-  | "action_checklist";
+export type UiPlacementClass = SphotonUiPlacementClass;
+export type UiResolutionMode = SphotonUiResolutionMode | "runtime_pzn_selected";
+export type UiTemplateVisualKind = SphotonVisualKind;
+export type UiCatalogEntry = SphotonUiComponentEntry;
+export type ChannelBudgetSpec = SphotonChannelBudget;
+export type ArbitrationEntry = SphotonArbitrationEntry;
 
-export type UiCatalogEntry = {
-  id: string;
-  name: string;
-  source: "ui_registry" | "widget_studio" | "pzn_catalog" | "sphoton_a2ui";
-  visualKind: UiTemplateVisualKind;
-  description: string;
-  badge: string;
-};
+function normalizeResolutionMode(mode?: UiResolutionMode): SphotonUiResolutionMode {
+  if (mode === "pinned_widget") return "pinned_widget";
+  if (mode === "runtime_sphoton_generative") return "runtime_sphoton_generative";
+  return "runtime_tool_selected";
+}
 
 export type ExternalWidgetProvider = () => Array<{
   id: string;
@@ -41,21 +49,6 @@ export type SubjectAreaMeta = {
   tagline: string;
   accentLabel: string;
   smassModelId: string;
-  custom?: boolean;
-};
-
-export type ChannelBudgetSpec = {
-  id: ChannelSurfaceId;
-  label: string;
-  shortLabel: string;
-  description: string;
-  maxMain: number;
-  maxTasks: number;
-  maxNba: number;
-  maxCompanionTotal: number; // Combined Task + NBA cap (Task outranks NBA when tight)
-  maxFollowUps: number;
-  showProvenanceRail: boolean;
-  frameMode: "chat" | "web" | "mobile" | "advisor";
   custom?: boolean;
 };
 
@@ -126,6 +119,7 @@ export type ComposerExperienceOption = {
 export type ComposedTaskItem = {
   id: string;
   uiClass: "tasks";
+  sourceToolRef: string;
   ruleId: string;
   title: string;
   summary: string;
@@ -141,6 +135,7 @@ export type ComposedTaskItem = {
 export type ComposedNbaItem = {
   id: string;
   uiClass: "nba";
+  sourceToolRef: string;
   ruleId: string;
   title: string;
   summary: string;
@@ -151,13 +146,6 @@ export type ComposedNbaItem = {
   workflowVersion: string;
   signedActionToken: string;
   snapshotId: string;
-};
-
-export type ArbitrationEntry = {
-  uiClass: UiPlacementClass;
-  outcome: "placed" | "suppressed" | "promoted" | "dismissed" | "cleared";
-  itemId: string;
-  reason: string;
 };
 
 export type ComposedActionExecution = {
@@ -197,15 +185,7 @@ export type ComposedExperienceResult = {
       highlights: Array<{ label: string; value: string; tone?: "default" | "positive" | "warn" }>;
       metrics: Array<{ label: string; cents: number }>;
       snapshotId: string;
-      uiResolution: {
-        mode: UiResolutionMode;
-        resolvedUiId: string;
-        resolvedUiName: string;
-        source: UiCatalogEntry["source"];
-        visualKind: UiTemplateVisualKind;
-        rationale: string;
-        a2uiNodes?: string[];
-      };
+      uiResolution: SphotonResolvedUi;
     };
     tasks: ComposedTaskItem[];
     nba: ComposedNbaItem[];
@@ -239,48 +219,7 @@ export type ExperienceComposerBootstrap = {
   smassGraphs: Record<string, SmassDataModelGraph>;
 };
 
-export const BUILTIN_UI_CATALOG: UiCatalogEntry[] = [
-  {
-    id: "ui_allocation_breakdown@2.0.0",
-    name: "Portfolio Allocation Breakdown",
-    source: "ui_registry",
-    visualKind: "allocation_bar",
-    description: "Proportional asset split bar + KPI strip bound to smass currency fields.",
-    badge: "UI Registry",
-  },
-  {
-    id: "ui_kpi_summary@1.0.0",
-    name: "Executive KPI Metric Card",
-    source: "ui_registry",
-    visualKind: "kpi_cards",
-    description: "Clean 3-tile tabular-numeral KPI strip with status highlights.",
-    badge: "UI Registry",
-  },
-  {
-    id: "ui_comparison_matrix@1.0.0",
-    name: "Side-by-Side Comparison Card",
-    source: "ui_registry",
-    visualKind: "comparison_table",
-    description: "Structured 2-column comparison layout for balances, liquidity, or options.",
-    badge: "UI Registry",
-  },
-  {
-    id: "ui_readiness_gauge@1.0.0",
-    name: "Goal & Readiness Progress Gauge",
-    source: "ui_registry",
-    visualKind: "readiness_gauge",
-    description: "Visual progress bar + funding/retirement milestone breakdown.",
-    badge: "UI Registry",
-  },
-  {
-    id: "ui_guided_checklist@1.0.0",
-    name: "Guided Verification Checklist",
-    source: "ui_registry",
-    visualKind: "action_checklist",
-    description: "Step-by-step guided task card for address, beneficiary, or compliance flows.",
-    badge: "UI Registry",
-  },
-];
+export const BUILTIN_UI_CATALOG: UiCatalogEntry[] = [...DEFAULT_SPHOTON_UI_CATALOG];
 
 export const SUBJECT_AREAS: SubjectAreaMeta[] = [
   {
@@ -306,60 +245,7 @@ export const SUBJECT_AREAS: SubjectAreaMeta[] = [
   },
 ];
 
-export const CHANNEL_BUDGETS: ChannelBudgetSpec[] = [
-  {
-    id: "chat_turn",
-    label: "AI Chat Turn",
-    shortLabel: "AI Chat",
-    description: "Conversational reply: 1 Main card + max 1 companion (Task outranks NBA) + 3 follow-ups + locked disclosures.",
-    maxMain: 1,
-    maxTasks: 1,
-    maxNba: 1,
-    maxCompanionTotal: 1,
-    maxFollowUps: 3,
-    showProvenanceRail: false,
-    frameMode: "chat",
-  },
-  {
-    id: "web_dashboard",
-    label: "Web Portal Dashboard",
-    shortLabel: "Web Portal",
-    description: "Full portal overview: 1 Main hero + Pending Tasks rail + 1 Ranked NBA spotlight + Compliance footer.",
-    maxMain: 1,
-    maxTasks: 3,
-    maxNba: 1,
-    maxCompanionTotal: 4,
-    maxFollowUps: 4,
-    showProvenanceRail: false,
-    frameMode: "web",
-  },
-  {
-    id: "mobile_compact",
-    label: "Mobile App (Compact)",
-    shortLabel: "Mobile App",
-    description: "Tight 375px thumb budget: 1 Main compact card + 1 highest-priority pill (Task > NBA) + 1 follow-up.",
-    maxMain: 1,
-    maxTasks: 1,
-    maxNba: 1,
-    maxCompanionTotal: 1,
-    maxFollowUps: 1,
-    showProvenanceRail: false,
-    frameMode: "mobile",
-  },
-  {
-    id: "advisor_desktop",
-    label: "Advisor Co-Pilot Workstation",
-    shortLabel: "Advisor Co-Pilot",
-    description: "High-density advisor surface: Main + All Tasks + All Ranked NBAs with scores + live smass/CCRE provenance.",
-    maxMain: 1,
-    maxTasks: 4,
-    maxNba: 3,
-    maxCompanionTotal: 7,
-    maxFollowUps: 4,
-    showProvenanceRail: true,
-    frameMode: "advisor",
-  },
-];
+export const CHANNEL_BUDGETS: ChannelBudgetSpec[] = [...DEFAULT_SPHOTON_CHANNEL_BUDGETS];
 
 function initialMembers(): Map<string, ComposerMemberRecord> {
   return new Map<string, ComposerMemberRecord>([
@@ -1052,222 +938,124 @@ export class ExperienceComposerEngine {
     const snapshotId = `snap_${member.mid}_v${member.accountVersion}_${member.balanceVersion}`;
     const dismissed = this.dismissedByMid.get(member.mid) ?? new Set<string>();
 
-    const arbitrationLog: ArbitrationEntry[] = [];
-    const suppressed: ComposedExperienceResult["suppressed"] = [];
-    const placedTasks: ComposedTaskItem[] = [];
-    const placedNba: ComposedNbaItem[] = [];
-
-    const resolveMainUi = (): ComposedExperienceResult["zones"]["main"]["uiResolution"] => {
-      const catalog = this.getUiCatalog();
-      const defaultMode: UiResolutionMode =
-        exp.uiResolutionMode ??
-        (exp.id === "wealth-portfolio-summary"
-          ? "pinned_widget"
-          : exp.id === "wealth-address-update"
-            ? "runtime_pzn_selected"
-            : "runtime_pzn_selected");
-
-      if (defaultMode === "pinned_widget") {
-        const defaultPinnedId =
-          exp.attachedUiId ??
-          (exp.mainKind === "portfolio_summary"
-            ? "ui_allocation_breakdown@2.0.0"
-            : exp.mainKind === "retirement_readiness"
-              ? "ui_readiness_gauge@1.0.0"
-              : exp.mainKind === "cashflow_overview"
-                ? "ui_comparison_matrix@1.0.0"
-                : exp.mainKind === "address_task"
-                  ? "ui_guided_checklist@1.0.0"
-                  : "ui_kpi_summary@1.0.0");
-        const entry = catalog.find((c) => c.id === defaultPinnedId) ?? catalog[0];
-        return {
-          mode: "pinned_widget",
-          resolvedUiId: entry.id,
-          resolvedUiName: entry.name,
-          source: entry.source,
-          visualKind: entry.visualKind,
-          rationale: `Design-time pinned to ${entry.badge} component "${entry.name}" (${entry.id}) bound to ${snapshotId}.`,
-        };
-      }
-
-      if (defaultMode === "runtime_sphoton_generative") {
-        const visualKind: UiTemplateVisualKind =
-          budget.frameMode === "mobile"
-            ? "kpi_cards"
-            : exp.mainKind === "retirement_readiness"
-              ? "readiness_gauge"
-              : exp.mainKind === "portfolio_summary"
-                ? "allocation_bar"
-                : "comparison_table";
-        return {
-          mode: "runtime_sphoton_generative",
-          resolvedUiId: `sphoton_a2ui_${exp.subjectArea}_${budget.frameMode}`,
-          resolvedUiName: "sphoton A2UI Synthesized Surface",
-          source: "sphoton_a2ui",
-          visualKind,
-          rationale: `Runtime-synthesized by sphoton A2UI from 4 approved primitives bound strictly to ${snapshotId} (0 unverified LLM numbers).`,
-          a2uiNodes: [
-            "SurfaceHeader(title, subtitle)",
-            visualKind === "allocation_bar"
-              ? "AllocationBar($ref:smass.metrics)"
-              : visualKind === "readiness_gauge"
-                ? "ReadinessGauge($ref:smass.metrics)"
-                : "MetricGrid($ref:smass.metrics)",
-            "HighlightBadges($ref:smass.highlights)",
-            "ImmutableDisclosure(compliance.locked)",
-          ],
-        };
-      }
-
-      // runtime_pzn_selected: PZN TS dynamically picks the optimal template for member + channel at runtime
-      const pickedId =
-        budget.frameMode === "mobile"
-          ? "ui_kpi_summary@1.0.0"
-          : exp.mainKind === "portfolio_summary"
-            ? "ui_allocation_breakdown@2.0.0"
-            : exp.mainKind === "retirement_readiness"
-              ? "ui_readiness_gauge@1.0.0"
-              : exp.mainKind === "cashflow_overview"
-                ? "ui_comparison_matrix@1.0.0"
-                : "ui_guided_checklist@1.0.0";
-      const entry = catalog.find((c) => c.id === pickedId) ?? catalog[0];
-      return {
-        mode: "runtime_pzn_selected",
-        resolvedUiId: entry.id,
-        resolvedUiName: entry.name,
-        source: "pzn_catalog",
-        visualKind: entry.visualKind,
-        rationale: `Selected at runtime by PZN TS for ${budget.shortLabel} -> "${entry.name}" (${entry.id}) bound to ${snapshotId}.`,
-      };
+    const sourceToolFor = (subject: string, slot: "tasks" | "nba"): string => {
+      if (subject === "wealth") return "pzn.treatments.decide@1.0.0";
+      if (subject === "banking") return slot === "tasks" ? "lending.obligations.read@1.0.0" : "pzn.treatments.decide@1.0.0";
+      if (subject === "retirement") return slot === "tasks" ? "retirement.rollover.check@1.0.0" : "retirement.match.advise@1.0.0";
+      return `${subject}.policy.evaluate@1.0.0`;
     };
 
-    const uiResolution = resolveMainUi();
+    const defaultMode: SphotonUiResolutionMode = normalizeResolutionMode(
+      exp.uiResolutionMode ?? (exp.id === "wealth-portfolio-summary" ? "pinned_widget" : "runtime_tool_selected"),
+    );
+    const suggestedUiId =
+      exp.mainKind === "portfolio_summary"
+        ? "ui_allocation_breakdown@2.0.0"
+        : exp.mainKind === "retirement_readiness"
+          ? "ui_readiness_gauge@1.0.0"
+          : exp.mainKind === "cashflow_overview"
+            ? "ui_comparison_matrix@1.0.0"
+            : exp.mainKind === "address_task"
+              ? "ui_guided_checklist@1.0.0"
+              : "ui_kpi_summary@1.0.0";
+    const defaultVisualKind: SphotonVisualKind =
+      exp.mainKind === "portfolio_summary"
+        ? "allocation_bar"
+        : exp.mainKind === "retirement_readiness"
+          ? "readiness_gauge"
+          : exp.mainKind === "cashflow_overview"
+            ? "comparison_table"
+            : exp.mainKind === "address_task"
+              ? "action_checklist"
+              : "kpi_cards";
 
-    // Class 1: Main is ALWAYS placed first and never displaced
-    arbitrationLog.push({
-      uiClass: "main",
-      outcome: "placed",
-      itemId: uiResolution.resolvedUiId,
-      reason: uiResolution.rationale,
+    // Delegate UI resolution cleanly to packages/sphoton
+    const uiResolution = resolveExperienceUi({
+      mode: defaultMode,
+      catalog: this.getUiCatalog(),
+      budget,
+      snapshotId,
+      domainId: exp.subjectArea,
+      pinnedUiId: exp.attachedUiId ?? suggestedUiId,
+      runtimeSuggestedUiId: suggestedUiId,
+      runtimeSelectorToolRef: sourceToolFor(exp.subjectArea, "nba"),
+      defaultVisualKind,
     });
 
-    // Class 2: Tasks (Pending Obligations) — outrank NBA when companion budget is tight
-    let companionUsed = 0;
-    if (member.taskStatus === "open") {
-      if (companionUsed < budget.maxCompanionTotal && placedTasks.length < budget.maxTasks) {
-        const t = exp.taskCandidate;
-        placedTasks.push({
-          id: t.id,
-          uiClass: "tasks",
-          ruleId: t.ruleId,
-          title: t.title,
-          summary: t.summary,
-          urgency: t.urgency,
-          ctaLabel: t.ctaLabel,
-          workflowId: t.workflowId,
-          workflowVersion: t.workflowVersion,
-          eventName: t.eventName,
-          signedActionToken: this.signToken({
-            decisionId,
-            revision,
-            mid: member.mid,
-            workflowId: t.workflowId,
-            workflowVersion: t.workflowVersion,
-            sourceClass: "tasks",
-            sourceItemId: t.id,
-          }),
-          snapshotId,
-        });
-        companionUsed += 1;
-        arbitrationLog.push({
-          uiClass: "tasks",
-          outcome: "placed",
-          itemId: t.id,
-          reason: `Shared CCRE rule "${t.ruleId}" matched -> Task "${t.title}" placed (Tasks outrank NBA).`,
-        });
-      }
-    } else {
-      arbitrationLog.push({
-        uiClass: "tasks",
-        outcome: "cleared",
-        itemId: exp.taskCandidate.id,
-        reason: `Task "${exp.taskCandidate.title}" cleared live at revision ${revision} (accountVersion ${member.accountVersion}).`,
-      });
-    }
+    // Build normalized candidate items produced by sfield tools (PZN is simply one sfield tool!)
+    const taskCandidates: ComposedTaskItem[] =
+      member.taskStatus === "open"
+        ? [
+            {
+              id: exp.taskCandidate.id,
+              uiClass: "tasks",
+              sourceToolRef: sourceToolFor(exp.subjectArea, "tasks"),
+              ruleId: exp.taskCandidate.ruleId,
+              title: exp.taskCandidate.title,
+              summary: exp.taskCandidate.summary,
+              urgency: exp.taskCandidate.urgency,
+              ctaLabel: exp.taskCandidate.ctaLabel,
+              workflowId: exp.taskCandidate.workflowId,
+              workflowVersion: exp.taskCandidate.workflowVersion,
+              eventName: exp.taskCandidate.eventName,
+              signedActionToken: this.signToken({
+                decisionId,
+                revision,
+                mid: member.mid,
+                workflowId: exp.taskCandidate.workflowId,
+                workflowVersion: exp.taskCandidate.workflowVersion,
+                sourceClass: "tasks",
+                sourceItemId: exp.taskCandidate.id,
+              }),
+              snapshotId,
+            },
+          ]
+        : [];
 
-    // Class 3: NBA — placed only if eligible, not dismissed, and within surface companion budget
-    const nba = exp.nbaCandidate;
-    if (member.nbaEligible) {
-      if (dismissed.has(nba.id)) {
-        suppressed.push({
-          uiClass: "nba",
-          id: nba.id,
-          title: nba.title,
-          reason: "Suppressed across all channels — dismissed by member in sfield memory.",
-        });
-        arbitrationLog.push({
-          uiClass: "nba",
-          outcome: "dismissed",
-          itemId: nba.id,
-          reason: `NBA "${nba.title}" suppressed because member dismissed it (synced across Chat, Web, Mobile & Advisor).`,
-        });
-      } else if (companionUsed >= budget.maxCompanionTotal || placedNba.length >= budget.maxNba) {
-        suppressed.push({
-          uiClass: "nba",
-          id: nba.id,
-          title: nba.title,
-          reason: `${budget.shortLabel} budget allows ${budget.maxCompanionTotal} companion slot — Task "${exp.taskCandidate.title}" took priority.`,
-        });
-        arbitrationLog.push({
-          uiClass: "nba",
-          outcome: "suppressed",
-          itemId: nba.id,
-          reason: `NBA "${nba.title}" (score ${nba.score}) held back on ${budget.shortLabel} because open Task consumed the ${budget.maxCompanionTotal}-slot budget.`,
-        });
-      } else {
-        placedNba.push({
-          id: nba.id,
-          uiClass: "nba",
-          ruleId: nba.ruleId,
-          title: nba.title,
-          summary: nba.summary,
-          score: nba.score,
-          estimatedValue: nba.estimatedValue,
-          ctaLabel: nba.ctaLabel,
-          workflowId: nba.workflowId,
-          workflowVersion: nba.workflowVersion,
-          signedActionToken: this.signToken({
-            decisionId,
-            revision,
-            mid: member.mid,
-            workflowId: nba.workflowId,
-            workflowVersion: nba.workflowVersion,
-            sourceClass: "nba",
-            sourceItemId: nba.id,
-          }),
-          snapshotId,
-        });
-        companionUsed += 1;
-        arbitrationLog.push({
-          uiClass: "nba",
-          outcome: member.taskStatus === "completed" && budget.maxCompanionTotal === 1 ? "promoted" : "placed",
-          itemId: nba.id,
-          reason:
-            member.taskStatus === "completed" && budget.maxCompanionTotal === 1
-              ? `Task cleared at rev ${revision} -> Composer automatically promoted waiting NBA "${nba.title}" (score ${nba.score}) into the freed ${budget.shortLabel} slot!`
-              : `PZN Ranking Model placed NBA "${nba.title}" (score ${nba.score}) within ${budget.shortLabel} budget.`,
-        });
-      }
-    }
+    const nbaCandidates: ComposedNbaItem[] = member.nbaEligible
+      ? [
+          {
+            id: exp.nbaCandidate.id,
+            uiClass: "nba",
+            sourceToolRef: sourceToolFor(exp.subjectArea, "nba"),
+            ruleId: exp.nbaCandidate.ruleId,
+            title: exp.nbaCandidate.title,
+            summary: exp.nbaCandidate.summary,
+            score: exp.nbaCandidate.score,
+            estimatedValue: exp.nbaCandidate.estimatedValue,
+            ctaLabel: exp.nbaCandidate.ctaLabel,
+            workflowId: exp.nbaCandidate.workflowId,
+            workflowVersion: exp.nbaCandidate.workflowVersion,
+            signedActionToken: this.signToken({
+              decisionId,
+              revision,
+              mid: member.mid,
+              workflowId: exp.nbaCandidate.workflowId,
+              workflowVersion: exp.nbaCandidate.workflowVersion,
+              sourceClass: "nba",
+              sourceItemId: exp.nbaCandidate.id,
+            }),
+            snapshotId,
+          },
+        ]
+      : [];
 
-    // Class 5: Chrome & Compliance — follow-ups capped by channel, disclosures NEVER dropped
-    const followUps = exp.followUps.slice(0, budget.maxFollowUps);
-    arbitrationLog.push({
-      uiClass: "chrome",
-      outcome: "placed",
-      itemId: "compliance_chrome",
-      reason: `Pinned ${exp.disclosures.length} immutable disclosure(s) & ${followUps.length}/${exp.followUps.length} follow-up chip(s) for ${budget.shortLabel}.`,
+    // Delegate 5-Class Experience Policy & Channel Budget Arbitration cleanly to packages/sphoton
+    const arbitrated = arbitrateExperienceSurface({
+      budget,
+      mainItemId: uiResolution.resolvedUiId,
+      mainRationale: uiResolution.rationale,
+      revision,
+      accountVersion: member.accountVersion,
+      taskCandidates,
+      clearedTasks: member.taskStatus === "completed" ? [{ id: exp.taskCandidate.id, title: exp.taskCandidate.title }] : [],
+      nbaCandidates,
+      dismissedIds: dismissed,
+      followUps: exp.followUps,
+      disclosures: exp.disclosures,
     });
+
+    const { placedTasks, placedNba, suppressed, followUps, disclosures, arbitrationLog } = arbitrated;
 
     const activeExecution = this.executionsByKey.get(this.keyFor(exp.id)) ?? null;
     const ledgerHash = createHmac("sha256", this.secret)
@@ -1315,7 +1103,7 @@ export class ExperienceComposerEngine {
         chrome: {
           uiClass: "chrome",
           followUps,
-          disclosures: exp.disclosures,
+          disclosures,
           sources: exp.sources,
         },
       },
