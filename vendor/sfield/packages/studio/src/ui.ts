@@ -19,6 +19,8 @@ export function renderStudioHtml(opts: {
   readOnly: boolean;
   plugins: StudioPluginTab[];
   approvalChatPath?: string;
+  backHref?: string;
+  backLabel?: string;
 }): string {
   const safeTitle = escapeHtml(opts.title);
   const bootConfig = JSON.stringify({
@@ -27,6 +29,8 @@ export function renderStudioHtml(opts: {
     readOnly: opts.readOnly,
     plugins: opts.plugins,
     approvalChatPath: opts.approvalChatPath,
+    backHref: opts.backHref,
+    backLabel: opts.backLabel,
   }).replace(/</g, "\\u003c");
 
   return `<!doctype html>
@@ -58,50 +62,85 @@ export function renderStudioHtml(opts: {
     html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; height: 100%; }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
-    .shell { display: grid; grid-template-columns: 248px 1fr; min-height: 100vh; }
-    .rail { background: var(--surface); border-right: 1px solid var(--border); padding: 18px 12px; display: flex; flex-direction: column; gap: 18px; }
-    .brand { display: flex; align-items: center; gap: 10px; padding: 6px 10px; }
-    .brand-mark { width: 28px; height: 28px; border-radius: 8px; background: linear-gradient(135deg, #4f8cff, #7c5cff); display: grid; place-items: center; font-weight: 800; color: #fff; font-size: 13px; }
-    .brand-title { font-weight: 700; font-size: 15px; letter-spacing: -0.01em; }
-    .brand-sub { font-size: 11px; color: var(--muted); }
-    .nav-group-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); padding: 0 10px 6px; font-weight: 600; }
+    .shell { display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 100vh; transition: grid-template-columns 0.18s ease; }
+    .shell.is-collapsed { grid-template-columns: 0px minmax(0, 1fr); }
+    .rail { background: var(--surface); border-right: 1px solid var(--border); padding: 16px 12px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; overflow-x: hidden; min-width: 0; }
+    .shell.is-collapsed .rail { padding: 0; border-right: 0; overflow: hidden; }
+    .brand { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 6px; }
+    .brand-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .brand-mark { width: 28px; height: 28px; flex-shrink: 0; border-radius: 8px; background: linear-gradient(135deg, #4f8cff, #7c5cff); display: grid; place-items: center; font-weight: 800; color: #fff; font-size: 13px; }
+    .brand-title { font-weight: 700; font-size: 14px; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .brand-sub { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rail-toggle {
+      display: inline-grid; place-items: center; width: 28px; height: 28px; flex-shrink: 0;
+      border-radius: 7px; border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer;
+    }
+    .rail-toggle:hover { background: var(--surface-2); border-color: var(--border); color: var(--text); }
+    .nav-group { display: flex; flex-direction: column; gap: 4px; }
+    .nav-group-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); padding: 2px 10px 4px; font-weight: 650; }
+    .nav-disclosure { border-top: 1px solid var(--border); padding-top: 10px; }
+    .nav-disclosure > summary {
+      list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between;
+      font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+      padding: 4px 10px; font-weight: 650; border-radius: 7px; user-select: none;
+    }
+    .nav-disclosure > summary::-webkit-details-marker { display: none; }
+    .nav-disclosure > summary:hover { background: var(--surface-2); color: var(--text); }
+    .nav-disclosure > summary .chev { transition: transform 0.14s ease; font-size: 11px; }
+    .nav-disclosure[open] > summary .chev { transform: rotate(90deg); }
+    .nav-disclosure > .nav { margin-top: 4px; }
     .nav { display: flex; flex-direction: column; gap: 2px; }
     .nav button, .nav a.nav-link {
-      display: flex; align-items: center; justify-content: space-between; width: 100%;
+      display: flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%;
       background: transparent; border: 1px solid transparent; color: var(--text);
-      padding: 8px 10px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 13px; text-align: left;
+      padding: 7px 10px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 13px; text-align: left;
     }
+    .nav button > span:first-child, .nav a.nav-link > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .nav button:hover, .nav a.nav-link:hover { background: var(--surface-2); text-decoration: none; }
     .nav button.active { background: var(--accent-soft); border-color: rgba(79, 140, 255, 0.35); color: #fff; font-weight: 600; }
-    .pill { font-size: 11px; padding: 2px 7px; border-radius: 999px; background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
+    .pill { display: inline-flex; align-items: center; font-size: 11px; padding: 2px 7px; border-radius: 999px; background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); white-space: nowrap; flex-shrink: 0; }
     .pill.ok { background: var(--ok-soft); color: var(--ok); border-color: rgba(46, 204, 113, 0.3); }
     .pill.warn { background: var(--warn-soft); color: var(--warn); border-color: rgba(245, 166, 35, 0.3); }
     .pill.err { background: var(--err-soft); color: var(--err); border-color: rgba(255, 92, 114, 0.3); }
     .pill.accent { background: var(--accent-soft); color: #8cb7ff; border-color: rgba(79, 140, 255, 0.35); }
-    .main { display: flex; flex-direction: column; min-width: 0; }
-    .topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 24px; border-bottom: 1px solid var(--border); background: var(--surface); gap: 12px; }
-    .topbar h1 { margin: 0; font-size: 17px; font-weight: 650; }
-    .topbar-right { display: flex; align-items: center; gap: 10px; }
-    .content { padding: 22px 24px 40px; max-width: 1280px; width: 100%; display: flex; flex-direction: column; gap: 18px; }
-    .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
-    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; }
-    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+    .main { display: flex; flex-direction: column; min-width: 0; overflow-x: hidden; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 22px; border-bottom: 1px solid var(--border); background: var(--surface); gap: 12px; min-width: 0; }
+    .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .topbar h1 { margin: 0; font-size: 16px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .topbar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    .back-link {
+      display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font-size: 12.5px; font-weight: 550; white-space: nowrap;
+    }
+    .back-link:hover { border-color: var(--accent); color: #fff; text-decoration: none; }
+    .content { padding: 20px 22px 40px; max-width: 1360px; width: 100%; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+    .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 12px; min-width: 0; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; min-width: 0; }
+    .tools-split { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(330px, 0.95fr); gap: 16px; align-items: start; min-width: 0; }
+    @media (max-width: 1060px) {
+      .grid-2, .tools-split { grid-template-columns: minmax(0, 1fr); }
+    }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 0; overflow: hidden; }
     .card h2, .card h3 { margin: 0 0 10px; font-size: 14px; font-weight: 650; }
+    .digest-code { display: inline-block; max-width: 100%; word-break: break-all; overflow-wrap: anywhere; color: #a7c5ff; }
+    .pill-wrap { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
     .kpi-label { font-size: 12px; color: var(--muted); }
     .kpi-val { font-size: 24px; font-weight: 700; margin-top: 6px; letter-spacing: -0.02em; }
     .kpi-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
     .btn {
       background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
-      padding: 7px 12px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 13px; font-weight: 500;
+      padding: 7px 12px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap;
     }
     .btn:hover:not(:disabled) { border-color: var(--accent); }
     .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
     .btn.ok { background: var(--ok-soft); border-color: rgba(46, 204, 113, 0.4); color: var(--ok); }
     .btn.err { background: var(--err-soft); border-color: rgba(255, 92, 114, 0.4); color: var(--err); }
     .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
-    th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    th, td { text-align: left; padding: 8px 9px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; white-space: nowrap; }
+    td code { word-break: break-word; }
     tr.clickable { cursor: pointer; }
     tr.clickable:hover td { background: var(--surface-2); }
     pre, code { font-family: var(--mono); font-size: 12px; }
@@ -134,29 +173,44 @@ export function renderStudioHtml(opts: {
   </style>
 </head>
 <body>
-  <div class="shell">
-    <aside class="rail">
+  <div class="shell" id="studio-shell">
+    <aside class="rail" aria-label="sfield Studio navigation">
       <div class="brand">
-        <div class="brand-mark">sf</div>
-        <div>
-          <div class="brand-title" id="studio-title">${safeTitle}</div>
-          <div class="brand-sub">@sfield/studio · Governed SDK</div>
+        <div class="brand-left">
+          <div class="brand-mark">sf</div>
+          <div style="min-width:0">
+            <div class="brand-title" id="studio-title">${safeTitle}</div>
+            <div class="brand-sub">@sfield/studio · Governed SDK</div>
+          </div>
         </div>
+        <button class="rail-toggle" id="rail-collapse-btn" type="button" title="Collapse sidebar" aria-label="Collapse sidebar">&#8249;</button>
       </div>
-      <div>
-        <div class="nav-group-label">SDK Workbench</div>
-        <nav class="nav" id="core-nav"></nav>
+      <div class="nav-group">
+        <div class="nav-group-label">Core Runtime</div>
+        <nav class="nav" id="runtime-nav"></nav>
       </div>
-      <div id="plugin-section" style="display:none">
-        <div class="nav-group-label">Host Plugins</div>
+      <div class="nav-group">
+        <div class="nav-group-label">Governance</div>
+        <nav class="nav" id="governance-nav"></nav>
+      </div>
+      <details class="nav-disclosure" id="labs-disclosure">
+        <summary><span>Developer Labs (4)</span><span class="chev">&#9656;</span></summary>
+        <nav class="nav" id="labs-nav"></nav>
+      </details>
+      <details class="nav-disclosure" id="plugin-section" style="display:none" open>
+        <summary><span>Host Apps</span><span class="chev">&#9656;</span></summary>
         <nav class="nav" id="plugin-nav"></nav>
-      </div>
+      </details>
       <div style="margin-top:auto;padding:8px 10px;font-size:11px;color:var(--muted)" id="rail-footer"></div>
     </aside>
     <div class="main">
       <header class="topbar">
-        <h1 id="page-heading">Overview</h1>
+        <div class="topbar-left">
+          <button class="rail-toggle" id="topbar-sidebar-btn" type="button" title="Toggle sidebar" aria-label="Toggle sidebar">&#9776;</button>
+          <h1 id="page-heading">Overview</h1>
+        </div>
         <div class="topbar-right">
+          <a class="back-link" id="back-link" style="display:none" href="#"></a>
           <span class="pill" id="health-pill">Loading…</span>
           <button class="btn" id="refresh-btn" type="button">Refresh</button>
         </div>
@@ -167,22 +221,47 @@ export function renderStudioHtml(opts: {
   <script>
     const BOOT = ${bootConfig};
     const API = (BOOT.basePath || "") + "/api";
-    const CORE_TABS = [
+    const RUNTIME_TABS = [
       { id: "overview", label: "Overview & Locks" },
       { id: "runs", label: "Runs & Waterfall" },
-      { id: "graphs", label: "Graphs & Time-Travel" },
-      { id: "redteam", label: "Red-Team Proofs" },
       { id: "tools", label: "Tools & Playground" },
       { id: "commands", label: "Slash Commands" },
-      { id: "mcp2026", label: "MCP 2026 Elicitation & Tasks" },
+    ];
+    const GOVERNANCE_TABS = [
       { id: "approvals", label: "HITL Approvals" },
-      { id: "evals", label: "Evals & Gate" },
-      { id: "memory", label: "Memory Explorer" },
-      { id: "pii", label: "PII Firewall Lab" },
       { id: "telemetry", label: "OTel Telemetry" },
+      { id: "pii", label: "PII Firewall Lab" },
+      { id: "evals", label: "Evals & Gate" },
+    ];
+    const LAB_TABS = [
+      { id: "graphs", label: "Graphs & Time-Travel" },
+      { id: "redteam", label: "Red-Team Proofs" },
+      { id: "mcp2026", label: "MCP 2026 Elicitation & Tasks" },
+      { id: "memory", label: "Memory Explorer" },
     ];
     let activeTab = "overview";
     let state = { overview: null, runs: [], selectedRun: null, tools: [], approvals: [], evals: [], memory: [], telemetry: null, mcp2026: null, mcpLastOut: null, graphs: null, selectedGraphRunId: null, redteam: null, commands: null, commandTenant: "pzn-local" };
+
+    (function initChrome() {
+      const shell = document.getElementById("studio-shell");
+      try {
+        if (localStorage.getItem("sfield.studioSidebarCollapsed") === "true") {
+          shell.classList.add("is-collapsed");
+        }
+      } catch {}
+      function toggleSidebar() {
+        const collapsed = shell.classList.toggle("is-collapsed");
+        try { localStorage.setItem("sfield.studioSidebarCollapsed", String(collapsed)); } catch {}
+      }
+      document.getElementById("rail-collapse-btn").onclick = toggleSidebar;
+      document.getElementById("topbar-sidebar-btn").onclick = toggleSidebar;
+      if (BOOT.backHref) {
+        const back = document.getElementById("back-link");
+        back.href = BOOT.backHref;
+        back.textContent = "← " + (BOOT.backLabel || "Back to Admin");
+        back.style.display = "inline-flex";
+      }
+    })();
 
     async function api(path, opts) {
       const res = await fetch(API + path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
@@ -199,10 +278,8 @@ export function renderStudioHtml(opts: {
       return '<span class="pill ' + (tone || "") + '">' + esc(text) + '</span>';
     }
 
-    function renderNav() {
-      const counts = state.overview ? state.overview.counts : {};
-      const coreEl = document.getElementById("core-nav");
-      coreEl.innerHTML = CORE_TABS.map((tab) => {
+    function renderTabList(el, tabs, counts) {
+      el.innerHTML = tabs.map((tab) => {
         const badge = tab.id === "approvals" && counts.pendingApprovals > 0
           ? pill(counts.pendingApprovals, "warn")
           : tab.id === "runs" && counts.runs != null ? pill(counts.runs)
@@ -210,9 +287,19 @@ export function renderStudioHtml(opts: {
           : "";
         return '<button type="button" class="' + (activeTab === tab.id ? "active" : "") + '" data-tab="' + tab.id + '"><span>' + esc(tab.label) + '</span>' + badge + '</button>';
       }).join("");
-      coreEl.querySelectorAll("button").forEach((btn) => {
+      el.querySelectorAll("button").forEach((btn) => {
         btn.onclick = () => { activeTab = btn.dataset.tab; renderNav(); void loadActiveTab(); };
       });
+    }
+
+    function renderNav() {
+      const counts = state.overview ? state.overview.counts : {};
+      renderTabList(document.getElementById("runtime-nav"), RUNTIME_TABS, counts);
+      renderTabList(document.getElementById("governance-nav"), GOVERNANCE_TABS, counts);
+      renderTabList(document.getElementById("labs-nav"), LAB_TABS, counts);
+      if (LAB_TABS.some((t) => t.id === activeTab)) {
+        document.getElementById("labs-disclosure").open = true;
+      }
 
       const pluginSec = document.getElementById("plugin-section");
       const pluginNav = document.getElementById("plugin-nav");
@@ -320,18 +407,18 @@ export function renderStudioHtml(opts: {
         '<div class="grid-2">' +
           '<div class="card stack">' +
             '<div class="row" style="justify-content:space-between"><h2>Config Digest & Governance Lock</h2>' + (lock && lock.approved ? pill("Approved", "ok") : pill("Unapproved", "warn")) + '</div>' +
-            '<div class="muted">Digest: <code>' + esc(o.configDigest || "N/A (persistence-only mode)") + '</code></div>' +
+            '<div class="muted">Digest:<br /><code class="digest-code">' + esc(o.configDigest || "N/A (persistence-only mode)") + '</code></div>' +
             (lock && lock.record ? '<div class="muted">Approver: <strong>' + esc(lock.record.approver) + '</strong> · ' + esc(lock.record.decidedAt) + (lock.record.comment ? ' · "' + esc(lock.record.comment) + '"' : '') + '</div>' : '<div class="muted">No lock approval recorded yet for the active digest.</div>') +
             (!BOOT.readOnly && o.configDigest ? '<div class="row">' +
               (BOOT.approvalChatPath ? '' : '<input id="lock-approver" placeholder="Approver name" value="studio-operator" style="max-width:180px" />') +
-              '<input id="lock-comment" placeholder="Approval note" style="flex:1" /><button class="btn primary" id="approve-lock-btn" type="button">' +
+              '<input id="lock-comment" placeholder="Approval note" style="flex:1;min-width:140px" /><button class="btn primary" id="approve-lock-btn" type="button">' +
               (BOOT.approvalChatPath ? 'Request lock approval' : 'Approve Lock') + '</button></div><div id="lock-msg"></div>' : '') +
           '</div>' +
           '<div class="card stack">' +
             '<h2>Agents & Models</h2>' +
-            '<div class="muted">Deployment: <code>' + esc(o.deployment || "unknown") + '</code> · Live runtime: ' + (o.hasRuntime ? pill("Connected", "ok") : pill("DB Inspect Only", "warn")) + '</div>' +
-            '<div class="muted">Models: ' + ((o.models && o.models.length) ? o.models.map((m) => pill(m, "accent")).join(" ") : '<em>none</em>') + '</div>' +
-            '<div class="muted">Agents: ' + ((o.agents && o.agents.length) ? o.agents.map((a) => pill(a)).join(" ") : '<em>none</em>') + '</div>' +
+            '<div class="muted pill-wrap"><span>Deployment:</span> <code>' + esc(o.deployment || "unknown") + '</code> <span>· Live runtime:</span> ' + (o.hasRuntime ? pill("Connected", "ok") : pill("DB Inspect Only", "warn")) + '</div>' +
+            '<div class="muted pill-wrap"><span>Models:</span> ' + ((o.models && o.models.length) ? o.models.map((m) => pill(m, "accent")).join("") : '<em>none</em>') + '</div>' +
+            '<div class="muted pill-wrap"><span>Agents:</span> ' + ((o.agents && o.agents.length) ? o.agents.map((a) => pill(a)).join("") : '<em>none</em>') + '</div>' +
           '</div>' +
         '</div>';
 
@@ -377,9 +464,9 @@ export function renderStudioHtml(opts: {
       }).join("");
       root.innerHTML =
         '<div class="card">' +
-          '<h2>Persisted Runs (' + state.runs.length + ')</h2>' +
+          '<h2>Persisted Runs (' + state.runs.length + ') <span class="muted" style="font-weight:400;font-size:12px">· Click any row to inspect execution waterfall</span></h2>' +
           (state.runs.length
-            ? '<table><thead><tr><th>Run ID</th><th>State</th><th>Agent</th><th>Principal & Identifiers</th><th>Usage</th><th>Created</th></tr></thead><tbody>' + rows + '</tbody></table>'
+            ? '<div class="table-wrap"><table><thead><tr><th>Run ID</th><th>State</th><th>Agent</th><th>Principal & Identifiers</th><th>Usage</th><th>Created</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
             : '<div class="empty">No runs recorded in persistence yet. Try invoking a tool in <strong>Tools &amp; Playground</strong>.</div>') +
         '</div>' +
         '<div id="run-detail"></div>';
@@ -388,6 +475,7 @@ export function renderStudioHtml(opts: {
         tr.onclick = async () => {
           const detail = document.getElementById("run-detail");
           detail.innerHTML = '<div class="card">Loading run trace…</div>';
+          detail.scrollIntoView({ behavior: "smooth", block: "nearest" });
           try {
             const d = await api("/runs/" + encodeURIComponent(tr.dataset.run));
             const wfItems = []
@@ -440,11 +528,11 @@ export function renderStudioHtml(opts: {
       ).join("");
       const opts = state.tools.map((t) => '<option value="' + esc(t.ref) + '">' + esc(t.ref) + ' (' + esc(t.policy.effect) + ')</option>').join("");
       root.innerHTML =
-        '<div class="grid-2">' +
+        '<div class="tools-split">' +
           '<div class="card">' +
             '<h2>Registered Tools (' + state.tools.length + ')</h2>' +
             (state.tools.length
-              ? '<table><thead><tr><th>Tool Ref</th><th>Effect</th><th>Class</th><th>Description</th></tr></thead><tbody>' + rows + '</tbody></table>'
+              ? '<div class="table-wrap"><table><thead><tr><th>Tool Ref</th><th>Effect</th><th>Class</th><th>Description</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
               : '<div class="empty">No live runtime tools registered (start Studio with a live SField runtime).</div>') +
           '</div>' +
           '<div class="card stack">' +
@@ -499,7 +587,7 @@ export function renderStudioHtml(opts: {
       }).join("");
       root.innerHTML = '<div class="card"><h2>Approvals (' + state.approvals.length + ')</h2>' +
         (state.approvals.length
-          ? '<table><thead><tr><th>ID</th><th>Status</th><th>Action</th><th>SHA-256 Digest</th><th>Decision</th></tr></thead><tbody>' + rows + '</tbody></table>'
+          ? '<div class="table-wrap"><table><thead><tr><th>ID</th><th>Status</th><th>Action</th><th>SHA-256 Digest</th><th>Decision</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
           : '<div class="empty">No approval records found.</div>') +
         '</div>';
       root.querySelectorAll("button[data-decide]").forEach((btn) => {
@@ -521,7 +609,7 @@ export function renderStudioHtml(opts: {
       }).join("");
       root.innerHTML = '<div class="card"><h2>Persisted Eval Reports (' + state.evals.length + ')</h2>' +
         (state.evals.length
-          ? '<table><thead><tr><th>Suite</th><th>Pass Rate</th><th>Verified</th><th>Digest</th><th>Created</th></tr></thead><tbody>' + rows + '</tbody></table>'
+          ? '<div class="table-wrap"><table><thead><tr><th>Suite</th><th>Pass Rate</th><th>Verified</th><th>Digest</th><th>Created</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
           : '<div class="empty">No eval reports persisted yet. Run <code>sfield eval</code> to record one.</div>') +
         '</div>';
     }
@@ -540,7 +628,7 @@ export function renderStudioHtml(opts: {
           '<button class="btn primary" id="mem-add-btn" type="button">Save</button></div></div>' : '') +
         '<div class="card"><h2>Stored Memories (' + state.memory.length + ')</h2>' +
         (state.memory.length
-          ? '<table><thead><tr><th>Kind</th><th>Content</th><th>Scope</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>'
+          ? '<div class="table-wrap"><table><thead><tr><th>Kind</th><th>Content</th><th>Scope</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
           : '<div class="empty">No memory entries stored.</div>') +
         '</div>';
       const addBtn = document.getElementById("mem-add-btn");
@@ -598,7 +686,7 @@ export function renderStudioHtml(opts: {
         '<div class="card stack">' +
           '<div class="row" style="justify-content:space-between"><h2>Recent GenAI Spans (' + (t.spans ? t.spans.length : 0) + ')</h2><a class="btn" href="' + esc(API + "/telemetry/otlp") + '" target="_blank">Export OTLP JSON</a></div>' +
           (t.spans && t.spans.length
-            ? '<table><thead><tr><th>Span</th><th>Status</th><th>Trace</th><th>Attributes</th></tr></thead><tbody>' + rows + '</tbody></table>'
+            ? '<div class="table-wrap"><table><thead><tr><th>Span</th><th>Status</th><th>Trace</th><th>Attributes</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
             : '<div class="empty">No telemetry spans recorded yet. Attach an <code>OtelTelemetrySink</code> to capture live spans.</div>') +
         '</div>';
     }
@@ -666,7 +754,7 @@ export function renderStudioHtml(opts: {
         '<div class="card stack">' +
           '<h2>Async Tasks Tray (' + (m.tasks ? m.tasks.length : 0) + ')</h2>' +
           (m.tasks && m.tasks.length
-            ? '<table><thead><tr><th>Task ID</th><th>Tool</th><th>Status</th><th>Message</th><th>Actions</th></tr></thead><tbody>' + taskRows + '</tbody></table>'
+            ? '<div class="table-wrap"><table><thead><tr><th>Task ID</th><th>Tool</th><th>Status</th><th>Message</th><th>Actions</th></tr></thead><tbody>' + taskRows + '</tbody></table></div>'
             : '<div class="empty">No MCP 2026 async tasks yet.</div>') +
         '</div>';
 
@@ -901,7 +989,7 @@ export function renderStudioHtml(opts: {
         '<div class="card stack">' +
           '<h2>Effective Commands for <code>' + esc(c.tenantId) + '</code> (' + (c.commands ? c.commands.length : 0) + ')</h2>' +
           (c.commands && c.commands.length
-            ? '<table><thead><tr><th>Command</th><th>Label &amp; Hint</th><th>Action / Domain</th><th>Status</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>'
+            ? '<div class="table-wrap"><table><thead><tr><th>Command</th><th>Label &amp; Hint</th><th>Action / Domain</th><th>Status</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
             : '<div class="empty">No slash commands configured for this tenant.</div>') +
         '</div>';
 

@@ -52,6 +52,10 @@ export interface StudioOptions {
   readOnly?: boolean;
   /** Host chat route that can open a prepared lock approval by ID. */
   approvalChatPath?: string;
+  /** Optional host-admin back link rendered in the topbar. */
+  backHref?: string;
+  /** Optional label for the host-admin back link. */
+  backLabel?: string;
 }
 
 export interface StudioServerOptions extends StudioOptions {

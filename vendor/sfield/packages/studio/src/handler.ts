@@ -135,7 +135,15 @@ export function createStudioHandler(options: StudioOptions): (req: IncomingMessa
   const plugins = options.plugins ?? [];
   const pii = options.piiFirewall ?? createPiiFirewall();
   const mcpStore = options.mcpExtensionStore ?? new McpExtensionStore();
-  const html = renderStudioHtml({ title, basePath, readOnly, plugins, approvalChatPath: options.approvalChatPath });
+  const html = renderStudioHtml({
+    title,
+    basePath,
+    readOnly,
+    plugins,
+    approvalChatPath: options.approvalChatPath,
+    backHref: options.backHref,
+    backLabel: options.backLabel,
+  });
 
   const studioDemoTool: McpExtraTool = {
     descriptor: {

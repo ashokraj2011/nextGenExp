@@ -818,12 +818,13 @@ export async function startApp(options: Options) {
     title: "sfield Studio · CEP",
     basePath: "/admin/sfield-studio",
     approvalChatPath: adminPaths.chat,
+    backHref: adminPaths.tools,
+    backLabel: "Back to CEP Admin",
     plugins: [
-      { id: "pzn-studio", label: "Self-Service PZN Studio", description: "Treatment Selector & CCRE rule authoring", badge: "CEP", href: "/recommendations" },
-      { id: "customer-360", label: "Customer 360 Admin", description: "Wealth profiles, balances, goals & NBA preview", badge: "Wealth", href: adminPaths.customers },
-      { id: "ui-builder", label: "UI Builder & Widgets", description: "Bind custom A2UI layouts & Copilot widgets", badge: "A2UI", href: adminPaths.builder },
-      { id: "integrations", label: "Integrations Workspace", description: "Task contracts, connectors & MCP discovery", badge: "MCP", href: "/integrations" },
-      { id: "cep-logs", label: "CEP Admin Logs", description: "Turn-level payloads, TS decisions & inspector", badge: "CEP", href: adminPaths.logs },
+      { id: "pzn-studio", label: "Self-Service PZN Studio", description: "Policies, Intents & PZN Rules", badge: "Policy", href: adminPaths.intents + "?tab=pzn" },
+      { id: "ui-studio", label: "sphoton UI Studio", description: "Layouts, Composer, SurfaceBinder & Widgets", badge: "sphoton", href: adminPaths.builder },
+      { id: "customer-360", label: "Customer 360", description: "Wealth profiles, balances, goals & NBA preview", badge: "smass", href: adminPaths.customers },
+      { id: "cep-logs", label: "CEP Admin Logs", description: "Turn-level payloads, approvals & inspector", badge: "CEP", href: adminPaths.logs },
     ],
   });
   let vite: ViteDevServer | undefined;
