@@ -155,4 +155,26 @@ test("HTTP /api/experience-composer/* composes Retirement 401(k) across channels
   assert.equal(chData.composed.zones.nba.length, 0);
   assert.equal(chData.composed.zones.chrome.followUps.length, 0);
   assert.equal(chData.composed.zones.chrome.disclosures.length, 1); // Disclosures stay immutable!
+
+  // Test UI Binding & Runtime Resolution modes (Pinned UI Registry/Widget Studio vs Runtime PZN vs Runtime sphoton A2UI)
+  const bootRes = await fetch(`${server.url}/api/experience-composer/bootstrap`);
+  const boot = (await bootRes.json()) as { uiCatalog: Array<{ id: string; source: string }> };
+  assert.ok(boot.uiCatalog.some((c) => c.source === "ui_registry"));
+  assert.ok(boot.uiCatalog.some((c) => c.source === "widget_studio"));
+
+  const sphotonRes = await fetch(`${server.url}/api/experience-composer/ui-binding`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      experienceId: "wealth-portfolio-summary",
+      channel: "chat_turn",
+      uiResolutionMode: "runtime_sphoton_generative",
+    }),
+  });
+  assert.equal(sphotonRes.status, 200);
+  const sphotonData = (await sphotonRes.json()) as {
+    composed: { zones: { main: { uiResolution: { mode: string; a2uiNodes?: string[] } } } };
+  };
+  assert.equal(sphotonData.composed.zones.main.uiResolution.mode, "runtime_sphoton_generative");
+  assert.ok((sphotonData.composed.zones.main.uiResolution.a2uiNodes?.length ?? 0) >= 3);
 });

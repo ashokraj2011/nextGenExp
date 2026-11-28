@@ -9,6 +9,31 @@ import {
 export type SubjectAreaId = string;
 export type ChannelSurfaceId = string;
 export type UiPlacementClass = "main" | "tasks" | "nba" | "actions" | "chrome";
+export type UiResolutionMode = "pinned_widget" | "runtime_pzn_selected" | "runtime_sphoton_generative";
+export type UiTemplateVisualKind =
+  | "kpi_cards"
+  | "allocation_bar"
+  | "comparison_table"
+  | "readiness_gauge"
+  | "action_checklist";
+
+export type UiCatalogEntry = {
+  id: string;
+  name: string;
+  source: "ui_registry" | "widget_studio" | "pzn_catalog" | "sphoton_a2ui";
+  visualKind: UiTemplateVisualKind;
+  description: string;
+  badge: string;
+};
+
+export type ExternalWidgetProvider = () => Array<{
+  id: string;
+  name: string;
+  kind: string;
+  title: string;
+  body: string;
+  availableForConsumption?: boolean;
+}>;
 
 export type SubjectAreaMeta = {
   id: SubjectAreaId;
@@ -59,6 +84,8 @@ export type ComposerExperienceOption = {
   label: string;
   userPrompt: string;
   custom?: boolean;
+  uiResolutionMode?: UiResolutionMode;
+  attachedUiId?: string;
   mainTitle: string;
   mainSubtitle: string;
   mainKind: "portfolio_summary" | "address_task" | "cashflow_overview" | "retirement_readiness";
@@ -170,6 +197,15 @@ export type ComposedExperienceResult = {
       highlights: Array<{ label: string; value: string; tone?: "default" | "positive" | "warn" }>;
       metrics: Array<{ label: string; cents: number }>;
       snapshotId: string;
+      uiResolution: {
+        mode: UiResolutionMode;
+        resolvedUiId: string;
+        resolvedUiName: string;
+        source: UiCatalogEntry["source"];
+        visualKind: UiTemplateVisualKind;
+        rationale: string;
+        a2uiNodes?: string[];
+      };
     };
     tasks: ComposedTaskItem[];
     nba: ComposedNbaItem[];
@@ -195,10 +231,56 @@ export type ComposedExperienceResult = {
 export type ExperienceComposerBootstrap = {
   subjectAreas: SubjectAreaMeta[];
   channels: ChannelBudgetSpec[];
-  experiences: Array<Pick<ComposerExperienceOption, "id" | "subjectArea" | "mid" | "label" | "userPrompt" | "custom">>;
+  experiences: Array<
+    Pick<ComposerExperienceOption, "id" | "subjectArea" | "mid" | "label" | "userPrompt" | "custom" | "uiResolutionMode" | "attachedUiId">
+  >;
   members: ComposerMemberRecord[];
+  uiCatalog: UiCatalogEntry[];
   smassGraphs: Record<string, SmassDataModelGraph>;
 };
+
+export const BUILTIN_UI_CATALOG: UiCatalogEntry[] = [
+  {
+    id: "ui_allocation_breakdown@2.0.0",
+    name: "Portfolio Allocation Breakdown",
+    source: "ui_registry",
+    visualKind: "allocation_bar",
+    description: "Proportional asset split bar + KPI strip bound to smass currency fields.",
+    badge: "UI Registry",
+  },
+  {
+    id: "ui_kpi_summary@1.0.0",
+    name: "Executive KPI Metric Card",
+    source: "ui_registry",
+    visualKind: "kpi_cards",
+    description: "Clean 3-tile tabular-numeral KPI strip with status highlights.",
+    badge: "UI Registry",
+  },
+  {
+    id: "ui_comparison_matrix@1.0.0",
+    name: "Side-by-Side Comparison Card",
+    source: "ui_registry",
+    visualKind: "comparison_table",
+    description: "Structured 2-column comparison layout for balances, liquidity, or options.",
+    badge: "UI Registry",
+  },
+  {
+    id: "ui_readiness_gauge@1.0.0",
+    name: "Goal & Readiness Progress Gauge",
+    source: "ui_registry",
+    visualKind: "readiness_gauge",
+    description: "Visual progress bar + funding/retirement milestone breakdown.",
+    badge: "UI Registry",
+  },
+  {
+    id: "ui_guided_checklist@1.0.0",
+    name: "Guided Verification Checklist",
+    source: "ui_registry",
+    visualKind: "action_checklist",
+    description: "Step-by-step guided task card for address, beneficiary, or compliance flows.",
+    badge: "UI Registry",
+  },
+];
 
 export const SUBJECT_AREAS: SubjectAreaMeta[] = [
   {
@@ -562,6 +644,7 @@ const EXPERIENCES: ComposerExperienceOption[] = [
 
 export class ExperienceComposerEngine {
   private readonly secret: Buffer;
+  private readonly externalWidgets?: ExternalWidgetProvider;
   private subjectAreas: SubjectAreaMeta[] = SUBJECT_AREAS.map((s) => ({ ...s }));
   private channels: ChannelBudgetSpec[] = CHANNEL_BUDGETS.map((c) => ({ ...c }));
   private experiences: ComposerExperienceOption[] = EXPERIENCES.map((e) => ({ ...e }));
@@ -571,13 +654,47 @@ export class ExperienceComposerEngine {
   private revisionsByKey = new Map<string, number>();
   private registries: Record<string, SmassDomainRegistry>;
 
-  constructor(secretSeed?: string) {
+  constructor(secretSeed?: string, externalWidgets?: ExternalWidgetProvider) {
     this.secret = Buffer.from(secretSeed ?? randomBytes(32).toString("hex"), "utf8");
+    this.externalWidgets = externalWidgets;
     this.registries = {
       wealth: this.buildRegistry("wealth", "wealth_customer_360", "Wealth Customer 360"),
       banking: this.buildRegistry("banking", "banking_account_360", "Banking Account 360"),
       retirement: this.buildRegistry("retirement", "retirement_plan_360", "Retirement Plan 360"),
     };
+  }
+
+  private mapWidgetKindToVisual(kind: string): UiTemplateVisualKind {
+    if (kind === "comparison") return "comparison_table";
+    if (kind === "goal" || kind === "calculator") return "readiness_gauge";
+    if (kind === "checklist") return "action_checklist";
+    return "kpi_cards";
+  }
+
+  getUiCatalog(): UiCatalogEntry[] {
+    const widgetItems: UiCatalogEntry[] = (this.externalWidgets?.() ?? [])
+      .filter((w) => w.availableForConsumption !== false)
+      .map((w) => ({
+        id: w.id,
+        name: w.name || w.title,
+        source: "widget_studio",
+        visualKind: this.mapWidgetKindToVisual(w.kind),
+        description: w.body || `Published Widget Studio component (${w.kind}).`,
+        badge: "Widget Studio",
+      }));
+    return [...BUILTIN_UI_CATALOG, ...widgetItems];
+  }
+
+  updateUiBinding(input: {
+    experienceId: string;
+    uiResolutionMode: UiResolutionMode;
+    attachedUiId?: string;
+  }): ComposerExperienceOption {
+    const exp = this.experiences.find((e) => e.id === input.experienceId);
+    if (!exp) throw new Error(`Unknown experience "${input.experienceId}".`);
+    exp.uiResolutionMode = input.uiResolutionMode;
+    exp.attachedUiId = input.uiResolutionMode === "pinned_widget" ? input.attachedUiId : undefined;
+    return exp;
   }
 
   private slugify(raw: string, fallback: string): string {
@@ -683,15 +800,18 @@ export class ExperienceComposerEngine {
     return {
       subjectAreas: this.subjectAreas.map((s) => ({ ...s })),
       channels: this.channels.map((c) => ({ ...c })),
-      experiences: this.experiences.map(({ id, subjectArea, mid, label, userPrompt, custom }) => ({
+      experiences: this.experiences.map(({ id, subjectArea, mid, label, userPrompt, custom, uiResolutionMode, attachedUiId }) => ({
         id,
         subjectArea,
         mid,
         label,
         userPrompt,
         custom,
+        uiResolutionMode,
+        attachedUiId,
       })),
       members: [...this.members.values()].map((m) => ({ ...m })),
+      uiCatalog: this.getUiCatalog(),
       smassGraphs,
     };
   }
@@ -785,6 +905,8 @@ export class ExperienceComposerEngine {
     nbaWorkflowId: string;
     followUps: string[];
     disclosure: string;
+    uiResolutionMode?: UiResolutionMode;
+    attachedUiId?: string;
   }): ComposerExperienceOption {
     const area = this.subjectAreas.find((s) => s.id === input.subjectArea);
     if (!area) throw new Error(`Unknown subject area "${input.subjectArea}".`);
@@ -828,6 +950,8 @@ export class ExperienceComposerEngine {
       label: input.label.trim(),
       userPrompt: input.userPrompt.trim() || `Show ${input.mainTitle.trim()}`,
       custom: true,
+      uiResolutionMode: input.uiResolutionMode ?? "runtime_pzn_selected",
+      attachedUiId: input.uiResolutionMode === "pinned_widget" ? input.attachedUiId : undefined,
       mainTitle: input.mainTitle.trim(),
       mainSubtitle: input.mainSubtitle?.trim() || `Live verified snapshot bound from smass ${area.smassModelId}@1.0.0.`,
       mainKind: "portfolio_summary",
@@ -933,12 +1057,98 @@ export class ExperienceComposerEngine {
     const placedTasks: ComposedTaskItem[] = [];
     const placedNba: ComposedNbaItem[] = [];
 
+    const resolveMainUi = (): ComposedExperienceResult["zones"]["main"]["uiResolution"] => {
+      const catalog = this.getUiCatalog();
+      const defaultMode: UiResolutionMode =
+        exp.uiResolutionMode ??
+        (exp.id === "wealth-portfolio-summary"
+          ? "pinned_widget"
+          : exp.id === "wealth-address-update"
+            ? "runtime_pzn_selected"
+            : "runtime_pzn_selected");
+
+      if (defaultMode === "pinned_widget") {
+        const defaultPinnedId =
+          exp.attachedUiId ??
+          (exp.mainKind === "portfolio_summary"
+            ? "ui_allocation_breakdown@2.0.0"
+            : exp.mainKind === "retirement_readiness"
+              ? "ui_readiness_gauge@1.0.0"
+              : exp.mainKind === "cashflow_overview"
+                ? "ui_comparison_matrix@1.0.0"
+                : exp.mainKind === "address_task"
+                  ? "ui_guided_checklist@1.0.0"
+                  : "ui_kpi_summary@1.0.0");
+        const entry = catalog.find((c) => c.id === defaultPinnedId) ?? catalog[0];
+        return {
+          mode: "pinned_widget",
+          resolvedUiId: entry.id,
+          resolvedUiName: entry.name,
+          source: entry.source,
+          visualKind: entry.visualKind,
+          rationale: `Design-time pinned to ${entry.badge} component "${entry.name}" (${entry.id}) bound to ${snapshotId}.`,
+        };
+      }
+
+      if (defaultMode === "runtime_sphoton_generative") {
+        const visualKind: UiTemplateVisualKind =
+          budget.frameMode === "mobile"
+            ? "kpi_cards"
+            : exp.mainKind === "retirement_readiness"
+              ? "readiness_gauge"
+              : exp.mainKind === "portfolio_summary"
+                ? "allocation_bar"
+                : "comparison_table";
+        return {
+          mode: "runtime_sphoton_generative",
+          resolvedUiId: `sphoton_a2ui_${exp.subjectArea}_${budget.frameMode}`,
+          resolvedUiName: "sphoton A2UI Synthesized Surface",
+          source: "sphoton_a2ui",
+          visualKind,
+          rationale: `Runtime-synthesized by sphoton A2UI from 4 approved primitives bound strictly to ${snapshotId} (0 unverified LLM numbers).`,
+          a2uiNodes: [
+            "SurfaceHeader(title, subtitle)",
+            visualKind === "allocation_bar"
+              ? "AllocationBar($ref:smass.metrics)"
+              : visualKind === "readiness_gauge"
+                ? "ReadinessGauge($ref:smass.metrics)"
+                : "MetricGrid($ref:smass.metrics)",
+            "HighlightBadges($ref:smass.highlights)",
+            "ImmutableDisclosure(compliance.locked)",
+          ],
+        };
+      }
+
+      // runtime_pzn_selected: PZN TS dynamically picks the optimal template for member + channel at runtime
+      const pickedId =
+        budget.frameMode === "mobile"
+          ? "ui_kpi_summary@1.0.0"
+          : exp.mainKind === "portfolio_summary"
+            ? "ui_allocation_breakdown@2.0.0"
+            : exp.mainKind === "retirement_readiness"
+              ? "ui_readiness_gauge@1.0.0"
+              : exp.mainKind === "cashflow_overview"
+                ? "ui_comparison_matrix@1.0.0"
+                : "ui_guided_checklist@1.0.0";
+      const entry = catalog.find((c) => c.id === pickedId) ?? catalog[0];
+      return {
+        mode: "runtime_pzn_selected",
+        resolvedUiId: entry.id,
+        resolvedUiName: entry.name,
+        source: "pzn_catalog",
+        visualKind: entry.visualKind,
+        rationale: `Selected at runtime by PZN TS for ${budget.shortLabel} -> "${entry.name}" (${entry.id}) bound to ${snapshotId}.`,
+      };
+    };
+
+    const uiResolution = resolveMainUi();
+
     // Class 1: Main is ALWAYS placed first and never displaced
     arbitrationLog.push({
       uiClass: "main",
       outcome: "placed",
-      itemId: exp.id,
-      reason: `Main experience "${exp.mainTitle}" locked at priority #1 from single smass snapshot ${snapshotId}.`,
+      itemId: uiResolution.resolvedUiId,
+      reason: uiResolution.rationale,
     });
 
     // Class 2: Tasks (Pending Obligations) — outrank NBA when companion budget is tight
@@ -1093,6 +1303,7 @@ export class ExperienceComposerEngine {
             { label: member.tertiaryMetricLabel, cents: member.tertiaryMetricCents },
           ],
           snapshotId,
+          uiResolution,
         },
         tasks: placedTasks,
         nba: placedNba,

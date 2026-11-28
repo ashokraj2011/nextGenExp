@@ -5,6 +5,7 @@ import type {
   ComposedExperienceResult,
   ExperienceComposerBootstrap,
   SubjectAreaId,
+  UiResolutionMode,
 } from "../server/experience-composer";
 
 export type CreateModalTab = "experience" | "subject" | "channel";
@@ -48,6 +49,8 @@ type ExperienceFormState = {
   nbaWorkflowId: string;
   followUpsCsv: string;
   disclosure: string;
+  uiResolutionMode: UiResolutionMode;
+  attachedUiId: string;
 };
 
 const PRESETS: Array<{ name: string; values: Omit<ExperienceFormState, "subjectArea"> }> = [
@@ -80,6 +83,8 @@ const PRESETS: Array<{ name: string; values: Omit<ExperienceFormState, "subjectA
       nbaWorkflowId: "tax.harvest.preview",
       followUpsCsv: "Check wash-sale window, Compare peer ETFs, Estimate net tax impact",
       disclosure: "Tax estimates are illustrative and do not constitute tax advice.",
+      uiResolutionMode: "pinned_widget",
+      attachedUiId: "ui_allocation_breakdown@2.0.0",
     },
   },
   {
@@ -111,6 +116,8 @@ const PRESETS: Array<{ name: string; values: Omit<ExperienceFormState, "subjectA
       nbaWorkflowId: "lending.heloc.preview",
       followUpsCsv: "Compare HELOC vs. cash-out refi, Estimate monthly draw payment, Check credit impact",
       disclosure: "Subject to credit approval and property appraisal. Equal Housing Lender.",
+      uiResolutionMode: "runtime_pzn_selected",
+      attachedUiId: "ui_comparison_matrix@1.0.0",
     },
   },
 ];
@@ -202,6 +209,8 @@ export function ExperienceComposerModal({
         nbaWorkflowId: exp.nbaWorkflowId,
         followUps: exp.followUpsCsv.split(",").map((s) => s.trim()).filter(Boolean),
         disclosure: exp.disclosure,
+        uiResolutionMode: exp.uiResolutionMode,
+        ...(exp.uiResolutionMode === "pinned_widget" ? { attachedUiId: exp.attachedUiId } : {}),
       });
       onCreated({
         composed: data.composed,
@@ -317,6 +326,53 @@ export function ExperienceComposerModal({
                   {p.name}
                 </button>
               ))}
+            </div>
+
+            <div className="ec-form-section is-ui-binding">
+              <div className="ec-control-head">
+                <h4>UI Binding &amp; Resolution (Where Does the Card UI Come From?)</h4>
+                <a href="/admin/widgets" target="_blank" rel="noreferrer" className="ec-inline-add">
+                  Open Widget Studio ↗
+                </a>
+              </div>
+              <div className="ec-ui-mode-row" role="radiogroup" aria-label="UI resolution mode">
+                <button
+                  type="button"
+                  className={"ec-ui-mode-card" + (exp.uiResolutionMode === "pinned_widget" ? " is-active" : "")}
+                  onClick={() => setExp({ ...exp, uiResolutionMode: "pinned_widget" })}
+                >
+                  <strong>Attach Published UI</strong>
+                  <span>Pin a versioned UI Registry template or Widget Studio widget at design time.</span>
+                </button>
+                <button
+                  type="button"
+                  className={"ec-ui-mode-card" + (exp.uiResolutionMode === "runtime_pzn_selected" ? " is-active" : "")}
+                  onClick={() => setExp({ ...exp, uiResolutionMode: "runtime_pzn_selected" })}
+                >
+                  <strong>Runtime Selected (PZN TS)</strong>
+                  <span>PZN picks the best UI template dynamically per member &amp; channel at runtime.</span>
+                </button>
+                <button
+                  type="button"
+                  className={"ec-ui-mode-card" + (exp.uiResolutionMode === "runtime_sphoton_generative" ? " is-active" : "")}
+                  onClick={() => setExp({ ...exp, uiResolutionMode: "runtime_sphoton_generative" })}
+                >
+                  <strong>Runtime Generative (sphoton)</strong>
+                  <span>Synthesizes A2UI primitives on the fly, locked to verified smass fields.</span>
+                </button>
+              </div>
+              {exp.uiResolutionMode === "pinned_widget" && (
+                <label>
+                  Attached UI Template / Widget (from UI Registry &amp; Widget Studio)
+                  <select value={exp.attachedUiId} onChange={(e) => setExp({ ...exp, attachedUiId: e.target.value })}>
+                    {bootstrap?.uiCatalog.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        [{item.badge}] {item.name} — {item.description}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
 
             <div className="ec-form-section">

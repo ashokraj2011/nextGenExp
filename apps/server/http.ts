@@ -258,7 +258,9 @@ export async function startApp(options: Options) {
   const widgetLibrary = widgetLibraries.wealth;
   const selfServicePzn = new SelfServicePznStore(options.dataDir);
   const pznDecisionPlane = new PznDecisionPlane();
-  const experienceComposer = new ExperienceComposerEngine();
+  const experienceComposer = new ExperienceComposerEngine(undefined, () =>
+    widgetLibraries.wealth.list("default-workspace", Date.now()),
+  );
   const integrationTasks = new IntegrationTaskStore(options.dataDir);
   const profileStore = new CustomerProfileStore(options.dataDir);
   setActiveCustomerProfileStore(profileStore);
@@ -1682,6 +1684,8 @@ export async function startApp(options: Options) {
             nbaWorkflowId: z.string().min(2).max(80),
             followUps: z.array(z.string().max(80)).max(6),
             disclosure: z.string().min(2).max(260),
+            uiResolutionMode: z.enum(["pinned_widget", "runtime_pzn_selected", "runtime_sphoton_generative"]).optional(),
+            attachedUiId: z.string().min(1).max(100).optional(),
           }).strict(),
         );
         const created = experienceComposer.createExperience(input);
@@ -1690,6 +1694,20 @@ export async function startApp(options: Options) {
           channel: input.channel ?? "chat_turn",
         });
         return json(res, { experience: created, composed, bootstrap: experienceComposer.getBootstrap() }, 201);
+      }
+      if (id === "ui-binding" && !operation && method === "POST") {
+        const input = await body(
+          req,
+          z.object({
+            experienceId: z.string().min(1).max(80),
+            channel: channelIdSchema,
+            uiResolutionMode: z.enum(["pinned_widget", "runtime_pzn_selected", "runtime_sphoton_generative"]),
+            attachedUiId: z.string().min(1).max(100).optional(),
+          }).strict(),
+        );
+        experienceComposer.updateUiBinding(input);
+        const composed = await experienceComposer.compose({ experienceId: input.experienceId, channel: input.channel });
+        return json(res, { composed, bootstrap: experienceComposer.getBootstrap() });
       }
       if (id === "create-channel" && !operation && method === "POST") {
         const input = await body(

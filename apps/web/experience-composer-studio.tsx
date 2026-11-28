@@ -26,6 +26,7 @@ import type {
   ComposedExperienceResult,
   ExperienceComposerBootstrap,
   SubjectAreaId,
+  UiResolutionMode,
 } from "../server/experience-composer";
 import { ExperienceComposerModal, type CreateModalTab } from "./experience-composer-modal";
 import { ThemeToggle } from "./theme";
@@ -186,6 +187,36 @@ export function ExperienceComposerStudio() {
     }
   };
 
+  const updateUiBinding = async (nextMode: UiResolutionMode, nextAttachedUiId?: string) => {
+    if (!composed) return;
+    setBusy(true);
+    setBanner(null);
+    try {
+      const data = await apiJson<{ composed: ComposedExperienceResult; bootstrap: ExperienceComposerBootstrap }>(
+        "/api/experience-composer/ui-binding",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            experienceId: composed.experienceId,
+            channel: composed.channel,
+            uiResolutionMode: nextMode,
+            ...(nextMode === "pinned_widget" && nextAttachedUiId ? { attachedUiId: nextAttachedUiId } : {}),
+          }),
+        },
+      );
+      setBootstrap(data.bootstrap);
+      setComposed(data.composed);
+      setBanner({
+        kind: "info",
+        text: data.composed.zones.main.uiResolution.rationale,
+      });
+    } catch (err) {
+      setBanner({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const resetAll = async () => {
     setBusy(true);
     setBanner(null);
@@ -220,24 +251,108 @@ export function ExperienceComposerStudio() {
   const renderMainZone = () => {
     if (!composed) return null;
     const { main } = composed.zones;
+    const ui = main.uiResolution;
+    const totalCents = Math.max(
+      1,
+      main.metrics.slice(1).reduce((acc, m) => acc + Math.max(0, m.cents), 0) || main.metrics[0]?.cents || 1,
+    );
+    const segA = Math.min(100, Math.round(((main.metrics[1]?.cents ?? 0) / totalCents) * 100));
+    const segB = Math.max(0, 100 - segA);
+    const gaugePct =
+      main.metrics[0]?.cents && main.metrics[1]?.cents
+        ? Math.min(96, Math.max(24, Math.round((main.metrics[1].cents / Math.max(1, main.metrics[0].cents)) * 100 + 62)))
+        : 78;
+
     return (
       <section className={"ec-card ec-zone-main" + (showAnatomy ? " has-anatomy" : "")}>
         <div className="ec-zone-head">
           {renderZoneTag(1, "MAIN · PRIMARY EXPERIENCE", "main")}
-          <span className="ec-snap-chip">
-            <ShieldCheck size={12} /> smass {composed.dataVersions.balanceVersion} · 1x read
-          </span>
+          <div className="ec-head-badges">
+            <span className={`ec-ui-source-pill mode-${ui.mode}`}>
+              {ui.mode === "pinned_widget"
+                ? `Pinned UI · ${ui.resolvedUiName}`
+                : ui.mode === "runtime_pzn_selected"
+                  ? `Runtime PZN · ${ui.resolvedUiName}`
+                  : `Runtime sphoton A2UI`}
+            </span>
+            <span className="ec-snap-chip">
+              <ShieldCheck size={12} /> smass {composed.dataVersions.balanceVersion} · 1x read
+            </span>
+          </div>
         </div>
         <h3 className="ec-main-title">{main.title}</h3>
         <p className="ec-main-sub">{main.subtitle}</p>
-        <div className="ec-metric-grid">
-          {main.metrics.map((metric) => (
-            <div key={metric.label} className="ec-metric-tile">
-              <span>{metric.label}</span>
-              <strong>{formatCents(metric.cents)}</strong>
+
+        {ui.mode === "runtime_sphoton_generative" && ui.a2uiNodes && (
+          <div className="ec-a2ui-ribbon" aria-label="sphoton synthesized A2UI tree">
+            <strong>sphoton A2UI Tree:</strong>
+            {ui.a2uiNodes.map((node) => (
+              <code key={node}>{node}</code>
+            ))}
+          </div>
+        )}
+
+        {ui.visualKind === "allocation_bar" && (
+          <div className="ec-visual-alloc">
+            <div className="ec-alloc-bar" aria-label="Proportional allocation bar">
+              <span className="ec-alloc-seg-a" style={{ width: `${Math.max(12, segA)}%` }} />
+              <span className="ec-alloc-seg-b" style={{ width: `${Math.max(12, segB)}%` }} />
             </div>
-          ))}
-        </div>
+            <div className="ec-alloc-legend">
+              <span><i className="dot-a" /> {main.metrics[1]?.label}: <strong>{formatCents(main.metrics[1]?.cents ?? 0)}</strong> ({segA}%)</span>
+              <span><i className="dot-b" /> {main.metrics[2]?.label}: <strong>{formatCents(main.metrics[2]?.cents ?? 0)}</strong> ({segB}%)</span>
+              <span>Total: <strong>{formatCents(main.metrics[0]?.cents ?? 0)}</strong></span>
+            </div>
+          </div>
+        )}
+
+        {ui.visualKind === "comparison_table" && (
+          <div className="ec-visual-compare">
+            {main.metrics.slice(0, 2).map((metric, idx) => (
+              <div key={metric.label} className="ec-compare-col">
+                <span className="ec-compare-kicker">{idx === 0 ? "Current Position" : "Committed / Activity"}</span>
+                <strong>{formatCents(metric.cents)}</strong>
+                <p>{metric.label}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {ui.visualKind === "readiness_gauge" && (
+          <div className="ec-visual-gauge">
+            <div className="ec-gauge-head">
+              <span>{main.metrics[0]?.label}: <strong>{formatCents(main.metrics[0]?.cents ?? 0)}</strong></span>
+              <span className="ec-score-pill">{gaugePct}% On Track</span>
+            </div>
+            <div className="ec-gauge-track">
+              <div className="ec-gauge-fill" style={{ width: `${gaugePct}%` }} />
+            </div>
+            <div className="ec-gauge-sub">
+              <span>{main.metrics[1]?.label}: <strong>{formatCents(main.metrics[1]?.cents ?? 0)}</strong></span>
+              <span>{main.metrics[2]?.label}: <strong>{formatCents(main.metrics[2]?.cents ?? 0)}</strong></span>
+            </div>
+          </div>
+        )}
+
+        {ui.visualKind === "action_checklist" && (
+          <ul className="ec-visual-checklist">
+            <li><CheckCircle2 size={14} /> Identity &amp; MID verified via <code>smass</code> snapshot ({composed.dataVersions.balanceVersion})</li>
+            <li><CheckCircle2 size={14} /> {main.highlights[0]?.label}: <strong>{main.highlights[0]?.value}</strong></li>
+            <li><CheckCircle2 size={14} /> {main.highlights[1]?.label}: <strong>{main.highlights[1]?.value}</strong></li>
+          </ul>
+        )}
+
+        {(ui.visualKind === "kpi_cards" || ui.visualKind === "allocation_bar") && (
+          <div className="ec-metric-grid">
+            {main.metrics.map((metric) => (
+              <div key={metric.label} className="ec-metric-tile">
+                <span>{metric.label}</span>
+                <strong>{formatCents(metric.cents)}</strong>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="ec-highlight-row">
           {main.highlights.map((item) => (
             <div key={item.label} className={`ec-highlight-chip tone-${item.tone ?? "default"}`}>
@@ -586,8 +701,53 @@ export function ExperienceComposerStudio() {
             )}
           </section>
 
-          {/* Right Rail: 5-Class Budget & Live Arbitration Log */}
+          {/* Right Rail: UI Resolution Picker + 5-Class Budget & Live Arbitration Log */}
           <aside className="ec-inspector-rail">
+            {composed && (
+              <section className="ec-inspector-panel">
+                <div className="ec-control-head">
+                  <h3>UI Attachment &amp; Runtime Mode</h3>
+                  <a href="/admin/widgets" className="ec-inline-add">Widget Studio ↗</a>
+                </div>
+                <div className="ec-mode-pills">
+                  {(
+                    [
+                      ["pinned_widget", "Pinned UI"],
+                      ["runtime_pzn_selected", "Runtime PZN"],
+                      ["runtime_sphoton_generative", "Runtime sphoton"],
+                    ] as const
+                  ).map(([modeId, label]) => (
+                    <button
+                      key={modeId}
+                      type="button"
+                      disabled={busy}
+                      className={"ec-mode-pill" + (composed.zones.main.uiResolution.mode === modeId ? " is-active" : "")}
+                      onClick={() => void updateUiBinding(modeId, composed.zones.main.uiResolution.resolvedUiId)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {composed.zones.main.uiResolution.mode === "pinned_widget" && (
+                  <label className="ec-attach-select-label">
+                    Attached Component (UI Registry + Widget Studio)
+                    <select
+                      disabled={busy}
+                      value={composed.zones.main.uiResolution.resolvedUiId}
+                      onChange={(e) => void updateUiBinding("pinned_widget", e.target.value)}
+                    >
+                      {bootstrap?.uiCatalog.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          [{item.badge}] {item.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <p className="ec-budget-note">{composed.zones.main.uiResolution.rationale}</p>
+              </section>
+            )}
+
             <section className="ec-inspector-panel">
               <h3>5-Class Surface Budget</h3>
               <div className="ec-budget-list">
