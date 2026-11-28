@@ -191,12 +191,21 @@ export function resolveSchemaPath(schema: Record<string, unknown> | undefined, p
 } {
   if (!schema || typeof schema !== "object") return { found: false, types: [] };
   let current: Record<string, unknown> | undefined = schema;
-  for (const segment of path.split(".").filter(Boolean)) {
+  for (const rawSegment of path.split(".").filter(Boolean)) {
+    const arrayMatch = rawSegment.match(/^(.+?)\[(?:-?\d+)?\]$/);
+    const segment = arrayMatch ? arrayMatch[1]! : rawSegment;
     const props = current?.properties as Record<string, Record<string, unknown>> | undefined;
     if (!props || !Object.prototype.hasOwnProperty.call(props, segment)) {
       return { found: false, types: [] };
     }
     current = props[segment];
+    if (arrayMatch) {
+      const items = current?.items as Record<string, unknown> | undefined;
+      if (!items || typeof items !== "object") {
+        return { found: false, types: [] };
+      }
+      current = items;
+    }
   }
   const raw = current?.type;
   const list = Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [];
@@ -230,8 +239,27 @@ export function validateToolBackedModel(
       });
     }
   }
+  if (model.unnest) {
+    const unnestSource = model.sources[model.unnest.slot];
+    if (!unnestSource) {
+      issues.push({
+        modelId: model.id,
+        message: `Unnest references unknown source slot "${model.unnest.slot}".`,
+      });
+    } else {
+      const desc = descriptors.get(unnestSource.toolRef);
+      if (desc && !resolveSchemaPath(desc.outputs, model.unnest.path).found) {
+        issues.push({
+          modelId: model.id,
+          toolRef: unnestSource.toolRef,
+          message: `Unnest path "${model.unnest.path}" does not exist on ${unnestSource.toolRef} output schema.`,
+        });
+      }
+    }
+  }
   for (const [fieldKey, field] of Object.entries(model.fields)) {
     if (field.principalKey) continue;
+    if (model.unnest?.indexField && fieldKey === model.unnest.indexField) continue;
     if (field.computed) {
       for (const dep of field.computed.dependsOn) {
         if (!Object.prototype.hasOwnProperty.call(model.fields, dep)) {
@@ -511,6 +539,7 @@ export function compileDomainJsonSchema(
       ...(required.length ? { required } : {}),
       "x-smass-mode": entity.mode,
       ...(entity.primaryKey ? { "x-smass-primary-key": entity.primaryKey } : {}),
+      ...(entity.unnest ? { "x-smass-unnest": entity.unnest } : {}),
       "x-smass-tools": entity.toolRefs,
       ...(entity.relations.length ? { "x-smass-relations": entity.relations } : {}),
       ...(entity.lifecycle ? { "x-smass-lifecycle": entity.lifecycle } : {}),

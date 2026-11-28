@@ -154,6 +154,17 @@ export type SmassDataSource<TRecord = Record<string, unknown>> = {
   update?: (id: string, patch: Record<string, unknown>, ctx: SmassExecutionContext) => Promise<TRecord | null> | TRecord | null;
 };
 
+export type SmassUnnestSpec = {
+  /** Source slot name in `sources` containing the nested array (1:N) or nested object (1:1). */
+  slot: string;
+  /** Dot-path inside that source payload to unnest (e.g. `history` or `values`). */
+  path: string;
+  /** Optional parent model ID this normalized child entity belongs to. */
+  parentModelId?: string;
+  /** Optional surrogate row-index column key added to every unnested row (e.g. `rowIndex`). */
+  indexField?: string;
+};
+
 /**
  * Mode 1: Tool-backed domain model (Brownfield / Federated).
  * Composes a canonical domain entity directly from tools already registered in sfield.
@@ -167,6 +178,8 @@ export type SmassToolBackedModel = {
   description?: string;
   primaryKey?: string;
   sources: Record<string, { toolRef: string; description?: string }>;
+  /** When set, normalizes a nested JSON array (1:N) or nested object (1:1) into relational child rows. */
+  unnest?: SmassUnnestSpec;
   fields: Record<string, SmassFieldSpec>;
   relations?: SmassRelationSpec[];
   lifecycle?: SmassLifecycleSpec;
@@ -243,6 +256,7 @@ export type SmassModelSummary = {
   description?: string;
   mode: "tool_backed" | "store_backed";
   primaryKey?: string;
+  unnest?: SmassUnnestSpec;
   toolRefs: string[];
   fields: SmassModelFieldSummary[];
   relations: SmassRelationSpec[];

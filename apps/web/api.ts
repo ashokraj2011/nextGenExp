@@ -221,6 +221,20 @@ export const api = {
         description?: string;
         primaryKey?: string;
         principalKey?: string;
+        unnest?: {
+          toolRef: string;
+          path: string;
+          parentModelId?: string;
+          parentJoinField?: string;
+          indexField?: string;
+        };
+        relations?: Array<{
+          name: string;
+          targetModelId: string;
+          cardinality: import("../../packages/smass").SmassRelationCardinality;
+          localField: string;
+          foreignField: string;
+        }>;
         fields: Array<
           | {
               kind: "mapped";
@@ -283,6 +297,20 @@ export const api = {
       description?: string;
       primaryKey?: string;
       principalKey?: string;
+      unnest?: {
+        toolRef: string;
+        path: string;
+        parentModelId?: string;
+        parentJoinField?: string;
+        indexField?: string;
+      };
+      relations?: Array<{
+        name: string;
+        targetModelId: string;
+        cardinality: import("../../packages/smass").SmassRelationCardinality;
+        localField: string;
+        foreignField: string;
+      }>;
       fields: Array<
         | {
             kind: "mapped";

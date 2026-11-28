@@ -79,11 +79,15 @@ export const customVirtualModelMappedFieldSchema = z.object({
   key: z.string().trim().regex(virtualModelFieldIdPattern, "Field key must be a valid identifier (letters, digits, underscore)."),
   label: z.string().trim().min(1).max(80),
   toolRef: toolRefSchema,
-  outputPath: z.string().trim().min(1).max(120),
+  outputPath: z.string().trim().min(1).max(160),
   format: smassFieldFormatSchema.optional(),
   classification: smassClassificationSchema.default("internal"),
   required: z.boolean().default(false),
   exposed: z.boolean().default(true),
+  foreignKey: z.object({
+    modelId: z.string().trim().regex(virtualModelIdPattern),
+    field: z.string().trim().regex(virtualModelFieldIdPattern),
+  }).strict().optional(),
 }).strict();
 
 export const customVirtualModelComputedFieldSchema = z.object({
@@ -122,6 +126,14 @@ export const customVirtualModelRelationSchema = z.object({
   foreignField: z.string().trim().regex(virtualModelFieldIdPattern),
 }).strict();
 
+export const customVirtualModelUnnestSchema = z.object({
+  toolRef: toolRefSchema,
+  path: z.string().trim().min(1).max(120),
+  parentModelId: z.string().trim().regex(virtualModelIdPattern).optional(),
+  parentJoinField: z.string().trim().regex(virtualModelFieldIdPattern).optional(),
+  indexField: z.string().trim().regex(virtualModelFieldIdPattern).optional(),
+}).strict();
+
 export const customVirtualModelInputSchema = z.object({
   id: z.string().trim().regex(virtualModelIdPattern, "Model ID must look like wealth.advisor_brief."),
   previousId: z.string().trim().regex(virtualModelIdPattern).optional(),
@@ -130,6 +142,7 @@ export const customVirtualModelInputSchema = z.object({
   description: z.string().trim().max(240).optional(),
   primaryKey: z.string().trim().regex(virtualModelFieldIdPattern).optional(),
   principalKey: z.string().trim().regex(virtualModelFieldIdPattern).optional(),
+  unnest: customVirtualModelUnnestSchema.optional(),
   fields: z.array(
     z.union([
       customVirtualModelMappedFieldSchema,
@@ -262,17 +275,31 @@ export class SphotonCatalogService {
     };
 
     const fields: Record<string, SmassFieldSpec> = {};
-    const primaryKey = spec.primaryKey ?? spec.principalKey ?? spec.fields[0]?.key;
+    const primaryKey = spec.primaryKey ?? (spec.unnest?.indexField ? spec.unnest.indexField : undefined) ?? spec.principalKey ?? spec.fields[0]?.key;
+
+    if (spec.unnest?.indexField && !spec.fields.some((f) => f.key === spec.unnest!.indexField)) {
+      fields[spec.unnest.indexField] = {
+        type: "integer",
+        primaryKey: primaryKey === spec.unnest.indexField,
+        label: "Row index",
+        required: true,
+        classification: "internal",
+        exposed: true,
+      };
+    }
 
     if (spec.principalKey && !spec.fields.some((f) => f.key === spec.principalKey)) {
       fields[spec.principalKey] = {
         type: "string",
         principalKey: spec.principalKey,
         primaryKey: primaryKey === spec.principalKey,
+        ...(spec.unnest?.parentModelId
+          ? { foreignKey: { modelId: spec.unnest.parentModelId, field: spec.unnest.parentJoinField ?? spec.principalKey } }
+          : {}),
         label: spec.principalKey === "mid" ? "Member ID (MID)" : spec.principalKey,
         required: true,
         classification: "internal",
-        exposed: false,
+        exposed: Boolean(spec.unnest?.parentModelId),
       };
     }
 
@@ -311,6 +338,7 @@ export class SphotonCatalogService {
           from: `${slot}.${field.outputPath}`,
           label: field.label,
           ...(field.format ? { format: field.format } : {}),
+          ...(field.foreignKey ? { foreignKey: field.foreignKey } : {}),
           classification: field.classification,
           required: field.required || primaryKey === field.key,
           primaryKey: primaryKey === field.key,
@@ -318,6 +346,15 @@ export class SphotonCatalogService {
         };
       }
     }
+
+    const compiledUnnest = spec.unnest
+      ? {
+          slot: ensureSlot(spec.unnest.toolRef),
+          path: spec.unnest.path,
+          ...(spec.unnest.parentModelId ? { parentModelId: spec.unnest.parentModelId } : {}),
+          ...(spec.unnest.indexField ? { indexField: spec.unnest.indexField } : {}),
+        }
+      : undefined;
 
     const relations: SmassRelationSpec[] | undefined = spec.relations?.length ? [...spec.relations] : undefined;
 
@@ -329,6 +366,7 @@ export class SphotonCatalogService {
       ...(spec.description ? { description: spec.description } : {}),
       ...(primaryKey ? { primaryKey } : {}),
       sources,
+      ...(compiledUnnest ? { unnest: compiledUnnest } : {}),
       fields,
       ...(relations ? { relations } : {}),
     });

@@ -247,17 +247,18 @@ export class SmassDomainRegistry {
           const isPrincipal = Boolean(field.principalKey);
           const isComputed = Boolean(field.computed);
           const isAggregate = Boolean(field.aggregate);
+          const isUnnestIndex = Boolean(model.unnest?.indexField && key === model.unnest.indexField);
           const dot = field.from?.indexOf(".") ?? -1;
           const slot = dot >= 0 ? field.from!.slice(0, dot) : "";
           const outputPath = dot >= 0 ? field.from!.slice(dot + 1) : key;
-          const toolRef = isPrincipal || isComputed || isAggregate ? "" : (model.sources[slot]?.toolRef ?? "");
+          const toolRef = isPrincipal || isComputed || isAggregate || isUnnestIndex ? "" : (model.sources[slot]?.toolRef ?? "");
           const inferredType = field.type ?? (toolRef && descriptors?.get(toolRef)
             ? resolveSchemaPath(descriptors.get(toolRef)!.outputs, outputPath).types[0]
             : undefined);
           fields.push({
             key,
             toolRef,
-            outputPath: isPrincipal || isComputed || isAggregate ? key : outputPath,
+            outputPath: isPrincipal || isComputed || isAggregate || isUnnestIndex ? key : outputPath,
             label: field.label,
             ...(inferredType ? { type: inferredType } : {}),
             ...(field.format ? { format: field.format } : {}),
@@ -310,6 +311,7 @@ export class SmassDomainRegistry {
         ...(model.description ? { description: model.description } : {}),
         mode: model.mode,
         ...(model.primaryKey ? { primaryKey: model.primaryKey } : {}),
+        ...(model.mode === "tool_backed" && model.unnest ? { unnest: model.unnest } : {}),
         toolRefs: [...toolRefs],
         fields,
         relations: [...(model.relations ?? [])],

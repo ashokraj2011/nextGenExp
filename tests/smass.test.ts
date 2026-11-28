@@ -657,3 +657,112 @@ test("smass VDM supports array & multi-column aggregates, derived columns over a
 
   await client.request("/api/admin/domain-models-delete?domain=wealth", { modelId: "wealth.goal_analytics_renamed" });
 });
+
+test("smass VDM handles hierarchical JSON via both Flatten (nested objects + array indexing) and Relational Normalization (1:N unnest rows)", async (t) => {
+  const app = await startTestPreview();
+  t.after(() => app.close());
+  const client = await testClient(app.url);
+
+  // 1. Option A: Flatten array-indexed paths (`values[0].displayValue`, `history[-1].*`) into flat scalar columns
+  const flatModel = await client.request<{
+    customModelIds: string[];
+    catalog: { fields: Array<{ toolRef: string; outputPath: string; label: string }> };
+  }>("/api/admin/domain-models?domain=wealth", {
+    id: "wealth.flat_hierarchy",
+    label: "Flattened Summary",
+    principalKey: "mid",
+    primaryKey: "mid",
+    fields: [
+      { kind: "mapped", key: "firstBalanceMetric", label: "First Balance Metric", toolRef: "demo.balance.read@1.0.0", outputPath: "values[0].metricKey", required: true, exposed: true },
+      { kind: "mapped", key: "firstBalanceValue", label: "First Balance Value", toolRef: "demo.balance.read@1.0.0", outputPath: "values[0].displayValue", required: true, exposed: true },
+      { kind: "mapped", key: "latestMonth", label: "Latest Month", toolRef: "goal.progress.read@1.0.0", outputPath: "history[-1].month", required: true, exposed: true },
+      { kind: "mapped", key: "latestSavedCents", label: "Latest Saved", toolRef: "goal.progress.read@1.0.0", outputPath: "history[-1].savedCents", format: "currency_cents", required: true, exposed: true },
+    ],
+  });
+  assert.ok(flatModel.customModelIds.includes("wealth.flat_hierarchy"));
+  // Flattened array-indexed fields are immediately bindable in sphoton UI catalog
+  assert.ok(flatModel.catalog.fields.some((f) => f.toolRef === "goal.progress.read@1.0.0" && f.outputPath === "history[-1].savedCents"));
+
+  const flatSnap = await client.request<{
+    snapshot: { status: string; data: Record<string, unknown> };
+  }>("/api/admin/domain-models-test?domain=wealth", {
+    modelId: "wealth.flat_hierarchy",
+    customerId: "demo-learner",
+  });
+  assert.equal(flatSnap.snapshot.status, "ok");
+  assert.ok(typeof flatSnap.snapshot.data.firstBalanceMetric === "string" && flatSnap.snapshot.data.firstBalanceMetric.length > 0);
+  assert.ok(typeof flatSnap.snapshot.data.firstBalanceValue === "string" && flatSnap.snapshot.data.firstBalanceValue.length > 0);
+  assert.ok(typeof flatSnap.snapshot.data.latestMonth === "string" && /\d{4}-\d{2}/.test(flatSnap.snapshot.data.latestMonth));
+  assert.ok(Number(flatSnap.snapshot.data.latestSavedCents) > 0);
+
+  // Also verify nested object flattening directly in smass VDM (`profile.address.city`, `profile.tier`)
+  const nestedObjModel = defineToolBackedModel({
+    id: "crm.customer_flat",
+    version: "1.0.0",
+    domain: "crm",
+    label: "Flattened Customer",
+    primaryKey: "mid",
+    sources: { crm: { toolRef: "crm.profile.read@1.0.0" } },
+    fields: {
+      mid: { type: "string", principalKey: "mid", primaryKey: true, label: "MID", required: true },
+      city: { type: "string", from: "crm.profile.address.city", label: "City", required: true },
+      tier: { type: "string", from: "crm.profile.tier", label: "Tier", required: true },
+    },
+  });
+  const nestedReg = createSmassRegistry([nestedObjModel]);
+  const nestedSnap = await nestedReg.materializeSnapshot({
+    modelId: "crm.customer_flat",
+    ctx: { tenantId: "t1", domainId: "crm", principalId: "MID-1" },
+    executeTool: async () => ({ profile: { tier: "Private", address: { city: "Seattle", zip: "98101" } }, version: 7 }),
+  });
+  assert.equal(nestedSnap.status, "ok");
+  assert.equal(nestedSnap.data.city, "Seattle");
+  assert.equal(nestedSnap.data.tier, "Private");
+
+  // 2. Option B: Normalize nested 1:N array (`history[]`) into a relational child entity with PK, FK, ER relation & per-row derived column
+  const childModel = await client.request<{
+    customModelIds: string[];
+    dataModel: { mermaidEr: string; jsonSchema: { $defs: Record<string, Record<string, unknown>> } };
+  }>("/api/admin/domain-models?domain=wealth", {
+    id: "wealth.goal_history_items",
+    label: "Goal History Records",
+    primaryKey: "rowIndex",
+    principalKey: "mid",
+    unnest: {
+      toolRef: "goal.progress.read@1.0.0",
+      path: "history",
+      parentModelId: "wealth.home_goal",
+      parentJoinField: "customerId",
+      indexField: "rowIndex",
+    },
+    fields: [
+      { kind: "mapped", key: "month", label: "Month", toolRef: "goal.progress.read@1.0.0", outputPath: "history[].month", format: "month", required: true, exposed: true },
+      { kind: "mapped", key: "savedCents", label: "Saved (cents)", toolRef: "goal.progress.read@1.0.0", outputPath: "history[].savedCents", format: "currency_cents", required: true, exposed: true },
+      { kind: "computed", key: "savedDollars", label: "Saved (USD)", expression: "savedCents / 100", dependsOn: ["savedCents"], type: "number", exposed: true },
+    ],
+    relations: [
+      { name: "belongs_to_home_goal", targetModelId: "wealth.home_goal", cardinality: "many_to_one", localField: "mid", foreignField: "customerId" },
+    ],
+  });
+
+  assert.ok(childModel.customModelIds.includes("wealth.goal_history_items"));
+  assert.match(childModel.dataModel.mermaidEr, /WEALTH_GOAL_HISTORY_ITEMS \}o--\|\| WEALTH_HOME_GOAL : "belongs_to_home_goal"/);
+  assert.ok(childModel.dataModel.jsonSchema.$defs["wealth.goal_history_items"]?.["x-smass-unnest"]);
+
+  const relSnap = await client.request<{
+    snapshot: { status: string; rowCount?: number; rows?: Array<Record<string, unknown>> };
+  }>("/api/admin/domain-models-test?domain=wealth", {
+    modelId: "wealth.goal_history_items",
+    customerId: "demo-learner",
+  });
+  assert.equal(relSnap.snapshot.status, "ok");
+  assert.ok((relSnap.snapshot.rowCount ?? 0) >= 3);
+  assert.ok(Array.isArray(relSnap.snapshot.rows) && relSnap.snapshot.rows.length === relSnap.snapshot.rowCount);
+  const firstRow = relSnap.snapshot.rows[0]!;
+  assert.equal(firstRow.rowIndex, 0);
+  assert.equal(firstRow.mid, "demo-learner");
+  assert.equal(firstRow.savedDollars, Number(firstRow.savedCents) / 100);
+
+  await client.request("/api/admin/domain-models-delete?domain=wealth", { modelId: "wealth.flat_hierarchy" });
+  await client.request("/api/admin/domain-models-delete?domain=wealth", { modelId: "wealth.goal_history_items" });
+});

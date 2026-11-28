@@ -15,9 +15,11 @@ import {
   Pencil,
   Play,
   Plus,
+  Rows3,
   ShieldCheck,
   Sigma,
   Sparkles,
+  Split,
   Trash2,
   Wrench,
   X,
@@ -198,12 +200,34 @@ export function DomainToolsAndModelPanel({
   const [savingModel, setSavingModel] = useState(false);
   const activeDragRef = useRef<DragPayload | null>(null);
 
-  // Derived (computed) column composer state
-  const [activeComposer, setActiveComposer] = useState<"none" | "computed" | "aggregate">("none");
+  // Derived (computed), Aggregate, Relation & Relational Normalization composer state
+  const [activeComposer, setActiveComposer] = useState<"none" | "computed" | "aggregate" | "normalize" | "relation">("none");
   const [compKey, setCompKey] = useState("");
   const [compLabel, setCompLabel] = useState("");
   const [compExpr, setCompExpr] = useState("");
   const [compType, setCompType] = useState<SmassFieldType>("integer");
+
+  // Relational normalization (extract nested array/object into 1:N or 1:1 child entity)
+  const [normToolRef, setNormToolRef] = useState("");
+  const [normPath, setNormPath] = useState("");
+  const [normKind, setNormKind] = useState<"array" | "object">("array");
+  const [normChildLabel, setNormChildLabel] = useState("");
+  const [normChildId, setNormChildId] = useState("");
+  const [normParentModelId, setNormParentModelId] = useState("");
+  const [normParentJoinField, setNormParentJoinField] = useState("mid");
+  const [normRelationName, setNormRelationName] = useState("");
+  const [normSubfields, setNormSubfields] = useState<Array<{ subPath: string; key: string; label: string; type: string; selected: boolean }>>([]);
+  const [normalizing, setNormalizing] = useState(false);
+
+  // Explicit relation editor for current Virtual Builder draft
+  const [draftRelations, setDraftRelations] = useState<
+    Array<{ name: string; targetModelId: string; cardinality: SmassRelationCardinality; localField: string; foreignField: string }>
+  >([]);
+  const [relName, setRelName] = useState("belongs_to");
+  const [relTargetModelId, setRelTargetModelId] = useState("");
+  const [relCardinality, setRelCardinality] = useState<SmassRelationCardinality>("many_to_one");
+  const [relLocalField, setRelLocalField] = useState("mid");
+  const [relForeignField, setRelForeignField] = useState("customerId");
 
   // Aggregate column composer state
   const [aggMode, setAggMode] = useState<"array" | "columns">("array");
@@ -240,6 +264,7 @@ export function DomainToolsAndModelPanel({
     setCopied(false);
     setEditingPreviousId(null);
     setDraftFields([]);
+    setDraftRelations([]);
     setDraftLabel(`${pack.shortLabel} Virtual View`);
     setDraftId(slugifyModelId(domainId, `${pack.shortLabel} Virtual View`));
     setIdManuallyEdited(false);
@@ -282,6 +307,161 @@ export function DomainToolsAndModelPanel({
     }
     return map;
   }, [data?.tools]);
+
+  // Map nested object fields (e.g. `demo.balance.read@1.0.0::values`) to their leaf sub-fields (e.g. `available`, `current`)
+  const objectChildSubfields = useMemo(() => {
+    const map = new Map<string, Array<{ subPath: string; fullPath: string; type: string }>>();
+    for (const tool of data?.tools ?? []) {
+      const objectPaths = tool.outputFields.filter((f) => f.type === "object" && !f.path.includes("[]"));
+      for (const parent of objectPaths) {
+        const prefix = `${parent.path}.`;
+        const children = tool.outputFields
+          .filter((f) => f.path.startsWith(prefix) && !f.path.includes("[]") && f.type !== "object")
+          .map((f) => ({ subPath: f.path.slice(prefix.length), fullPath: f.path, type: f.type }));
+        if (children.length > 0) {
+          map.set(`${tool.toolRef}::${parent.path}`, children);
+        }
+      }
+    }
+    return map;
+  }, [data?.tools]);
+
+  function flattenHierarchicalField(toolRef: string, path: string, kind: "array" | "object", removeParentKey?: string) {
+    setError("");
+    if (removeParentKey) {
+      setDraftFields((prev) => prev.filter((f) => f.key !== removeParentKey));
+    }
+    if (kind === "object") {
+      const leaves = objectChildSubfields.get(`${toolRef}::${path}`) ?? [];
+      if (leaves.length === 0) {
+        setError(`No nested leaf properties found under "${path}".`);
+        return;
+      }
+      addFieldsToDraft(
+        leaves.map((leaf) => ({
+          toolRef,
+          outputPath: leaf.fullPath,
+          type: leaf.type,
+          label: `${prettifyFieldLabel(path)} ${prettifyFieldLabel(leaf.subPath)}`,
+        })),
+      );
+      setNotice(`Flattened ${leaves.length} nested object fields from ${path} into flat scalar columns.`);
+    } else {
+      const subs = arrayItemSubfields.get(`${toolRef}::${path}`) ?? [];
+      if (subs.length === 0) {
+        setError(`No item properties found inside array "${path}".`);
+        return;
+      }
+      addFieldsToDraft(
+        subs.map((sub) => ({
+          toolRef,
+          outputPath: `${path}[-1].${sub.subPath}`,
+          type: sub.type,
+          label: `Latest ${prettifyFieldLabel(sub.subPath)}`,
+        })),
+      );
+      setNotice(`Flattened latest element (${path}[-1].*) into ${subs.length} scalar columns for flat UI/rule bindings.`);
+    }
+  }
+
+  function openNormalizeComposer(toolRef: string, path: string, kind: "array" | "object") {
+    setError("");
+    const subs =
+      kind === "array"
+        ? (arrayItemSubfields.get(`${toolRef}::${path}`) ?? []).map((s) => ({
+            subPath: s.subPath,
+            key: sanitizeFieldKey(s.subPath),
+            label: prettifyFieldLabel(s.subPath),
+            type: s.type,
+            selected: true,
+          }))
+        : (objectChildSubfields.get(`${toolRef}::${path}`) ?? []).map((s) => ({
+            subPath: s.subPath,
+            key: sanitizeFieldKey(s.subPath),
+            label: prettifyFieldLabel(s.subPath),
+            type: s.type,
+            selected: true,
+          }));
+    const leafSlug = sanitizeFieldKey(path);
+    const parentCandidate =
+      (editingPreviousId ?? (data?.models.find((m) => m.toolRefs.includes(toolRef))?.id)) ??
+      data?.models[0]?.id ??
+      "";
+    const parentModel = data?.models.find((m) => m.id === parentCandidate);
+    setNormToolRef(toolRef);
+    setNormPath(path);
+    setNormKind(kind);
+    setNormChildLabel(`${prettifyFieldLabel(path)} ${kind === "array" ? "Records" : "Details"}`);
+    setNormChildId(`${domainId}.${leafSlug}_${kind === "array" ? "items" : "details"}`);
+    setNormParentModelId(parentCandidate);
+    setNormParentJoinField(parentModel?.primaryKey ?? (domainId === "wealth" ? "customerId" : "id"));
+    setNormRelationName(`belongs_to_${(parentCandidate.split(".").at(-1) ?? "parent").replace(/[^a-z0-9_]/gi, "_")}`);
+    setNormSubfields(subs);
+    setViewMode("builder");
+    setActiveComposer("normalize");
+  }
+
+  async function createRelationalChildModel() {
+    const selected = normSubfields.filter((s) => s.selected);
+    if (selected.length === 0) {
+      setError("Select at least one nested property to include in the normalized child entity.");
+      return;
+    }
+    setNormalizing(true);
+    setError("");
+    setNotice("");
+    try {
+      const joinKey = draftPrincipalKey.trim() || (domainId === "wealth" ? "mid" : "");
+      const next = await api.saveDomainModel(domainId, {
+        id: normChildId.trim(),
+        version: "1.0.0",
+        label: normChildLabel.trim(),
+        description: `Normalized ${normKind === "array" ? "1:N" : "1:1"} relational child entity unnested from ${normToolRef} → ${normPath}${normKind === "array" ? "[]" : ""}.`,
+        primaryKey: normKind === "array" ? "rowIndex" : (joinKey || selected[0]!.key),
+        ...(joinKey ? { principalKey: joinKey } : {}),
+        unnest: {
+          toolRef: normToolRef,
+          path: normPath,
+          ...(normParentModelId ? { parentModelId: normParentModelId, parentJoinField: normParentJoinField } : {}),
+          ...(normKind === "array" ? { indexField: "rowIndex" } : {}),
+        },
+        fields: selected.map((sub) => ({
+          kind: "mapped" as const,
+          key: sanitizeFieldKey(sub.key),
+          label: sub.label.trim() || prettifyFieldLabel(sub.subPath),
+          toolRef: normToolRef,
+          outputPath: normKind === "array" ? `${normPath}[].${sub.subPath}` : `${normPath}.${sub.subPath}`,
+          format: inferFormat(sub.subPath, sub.type),
+          classification: /email|ssn|phone|address|name/i.test(sub.subPath) ? ("pii" as const) : ("internal" as const),
+          required: false,
+          exposed: true,
+        })),
+        ...(normParentModelId && joinKey
+          ? {
+              relations: [
+                {
+                  name: normRelationName.trim() || "belongs_to_parent",
+                  targetModelId: normParentModelId,
+                  cardinality: normKind === "array" ? ("many_to_one" as const) : ("one_to_one" as const),
+                  localField: joinKey,
+                  foreignField: normParentJoinField,
+                },
+              ],
+            }
+          : {}),
+      });
+      setData(next);
+      setActiveComposer("none");
+      setViewMode("entities");
+      setNotice(
+        `Normalized ${normPath}${normKind === "array" ? "[]" : ""} into relational child model "${normChildLabel.trim()}" (${normChildId.trim()}) — added to Mermaid ER, Draft 2020-12 JSON Schema & live 1× unnest runtime.`,
+      );
+    } catch (err) {
+      setError(toolSetupErrorMessage(err));
+    } finally {
+      setNormalizing(false);
+    }
+  }
 
   const arrayDraftFields = useMemo(
     () => draftFields.filter((f): f is DraftMappedField => f.kind === "mapped" && f.type === "array"),
@@ -594,6 +774,7 @@ export function DomainToolsAndModelPanel({
         label: draftLabel.trim(),
         ...(draftDescription.trim() ? { description: draftDescription.trim() } : {}),
         ...(draftPrincipalKey.trim() ? { principalKey: draftPrincipalKey.trim(), primaryKey: draftPrincipalKey.trim() } : {}),
+        ...(draftRelations.length ? { relations: draftRelations } : {}),
         fields: draftFields.map((f) => {
           if (f.kind === "computed") {
             return {
@@ -665,6 +846,7 @@ export function DomainToolsAndModelPanel({
     setIdManuallyEdited(true);
     setDraftDescription(found.description ?? "");
     setDraftPrincipalKey(found.principalKey ?? "");
+    setDraftRelations(found.relations ?? []);
     setDraftFields(
       found.fields.map((f, idx) => {
         if (f.kind === "computed") {
@@ -719,6 +901,7 @@ export function DomainToolsAndModelPanel({
   function startFreshVirtualModel() {
     setEditingPreviousId(null);
     setDraftFields([]);
+    setDraftRelations([]);
     setDraftLabel(`${pack.shortLabel} Virtual View`);
     setDraftId(slugifyModelId(domainId, `${pack.shortLabel} Virtual View`));
     setIdManuallyEdited(false);
@@ -954,7 +1137,15 @@ export function DomainToolsAndModelPanel({
                           const key = `${tool.toolRef}::${field.path}`;
                           const isBusy = busyKey === key;
                           const inDraft = droppedSourceKeys.has(key);
-                          const subFields = field.type === "array" ? arrayItemSubfields.get(key) ?? [] : [];
+                          const arrSubs = field.type === "array" ? arrayItemSubfields.get(key) ?? [] : [];
+                          const objSubs = field.type === "object" ? objectChildSubfields.get(key) ?? [] : [];
+                          const isHierarchicalArray = arrSubs.length > 0;
+                          const isHierarchicalObject = objSubs.length > 0;
+                          const subPreview = isHierarchicalArray
+                            ? arrSubs.map((s) => s.subPath).join(", ")
+                            : isHierarchicalObject
+                              ? objSubs.map((s) => s.subPath).join(", ")
+                              : "";
                           return (
                             <li
                               key={field.path}
@@ -985,11 +1176,35 @@ export function DomainToolsAndModelPanel({
                                 <GripVertical size={13} color="#64748b" aria-hidden="true" />
                                 <code>{field.path}</code>
                                 <span style={{ fontSize: "0.71rem", color: "var(--muted)" }}>
-                                  ({field.type}{subFields.length ? ` · ${subFields.map((s) => s.subPath).join(", ")}` : ""})
+                                  ({field.type}{subPreview ? ` · ${subPreview}` : ""})
                                 </span>
                                 {field.exposed && <strong style={{ fontSize: "0.75rem" }}>→ {field.label}</strong>}
                               </span>
-                              <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", flexShrink: 0, flexWrap: "wrap" }}>
+                                {(isHierarchicalArray || isHierarchicalObject) && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="secondary-button"
+                                      title={isHierarchicalObject ? "Flatten nested object keys into scalar columns" : "Flatten latest array element properties into scalar columns"}
+                                      onClick={() => flattenHierarchicalField(tool.toolRef, field.path, isHierarchicalArray ? "array" : "object")}
+                                      style={{ padding: "3px 7px", fontSize: "0.7rem", display: "inline-flex", alignItems: "center", gap: "3px", color: "#0369a1", borderColor: "#bae6fd" }}
+                                    >
+                                      <Rows3 size={11} aria-hidden="true" />
+                                      Flatten
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="secondary-button"
+                                      title={isHierarchicalArray ? "Normalize nested array into a 1:N relational child model" : "Normalize nested object into a 1:1 relational child model"}
+                                      onClick={() => openNormalizeComposer(tool.toolRef, field.path, isHierarchicalArray ? "array" : "object")}
+                                      style={{ padding: "3px 7px", fontSize: "0.7rem", display: "inline-flex", alignItems: "center", gap: "3px", color: "#4338ca", borderColor: "#c7d2fe" }}
+                                    >
+                                      <Split size={11} aria-hidden="true" />
+                                      {isHierarchicalArray ? "1:N Table" : "1:1 Entity"}
+                                    </button>
+                                  </>
+                                )}
                                 <button
                                   type="button"
                                   className="secondary-button"
@@ -1315,6 +1530,41 @@ export function DomainToolsAndModelPanel({
                                         renamed from {field.outputPath}
                                       </span>
                                     )}
+                                    {(field.type === "array" || field.type === "object") &&
+                                      ((arrayItemSubfields.get(`${field.toolRef}::${field.outputPath}`)?.length ?? 0) > 0 ||
+                                        (objectChildSubfields.get(`${field.toolRef}::${field.outputPath}`)?.length ?? 0) > 0) && (
+                                        <>
+                                          <button
+                                            type="button"
+                                            className="secondary-button"
+                                            onClick={() =>
+                                              flattenHierarchicalField(
+                                                field.toolRef,
+                                                field.outputPath,
+                                                field.type === "array" ? "array" : "object",
+                                                field.key,
+                                              )
+                                            }
+                                            style={{ padding: "1px 6px", fontSize: "0.68rem", color: "#0369a1", borderColor: "#bae6fd" }}
+                                          >
+                                            Flatten into columns
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="secondary-button"
+                                            onClick={() =>
+                                              openNormalizeComposer(
+                                                field.toolRef,
+                                                field.outputPath,
+                                                field.type === "array" ? "array" : "object",
+                                              )
+                                            }
+                                            style={{ padding: "1px 6px", fontSize: "0.68rem", color: "#4338ca", borderColor: "#c7d2fe" }}
+                                          >
+                                            Extract {field.type === "array" ? "1:N Table" : "1:1 Entity"}
+                                          </button>
+                                        </>
+                                      )}
                                   </span>
                                 ) : field.kind === "aggregate" ? (
                                   <span style={{ color: "#92400e", display: "inline-flex", alignItems: "center", gap: "5px" }}>
@@ -1627,6 +1877,271 @@ export function DomainToolsAndModelPanel({
                   </div>
                 )}
 
+                {/* Relational Normalization Extractor (Hierarchical JSON -> 1:N / 1:1 Child Entity) */}
+                {activeComposer === "normalize" && (
+                  <div
+                    style={{
+                      border: "1px solid #a5b4fc",
+                      borderRadius: "8px",
+                      padding: "10px",
+                      background: "#eef2ff",
+                      display: "grid",
+                      gap: "8px",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                      <strong style={{ fontSize: "0.82rem", color: "#3730a3", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                        <Split size={14} aria-hidden="true" />
+                        Normalize Hierarchical JSON → Relational {normKind === "array" ? "1:N Child Table" : "1:1 Child Entity"}
+                      </strong>
+                      <button type="button" className="secondary-button" style={{ padding: "2px 6px", fontSize: "0.71rem" }} onClick={() => setActiveComposer("none")}>
+                        Cancel
+                      </button>
+                    </div>
+                    <p style={{ margin: 0, fontSize: "0.74rem", color: "#4338ca" }}>
+                      Unnests <code>{normToolRef} → {normPath}{normKind === "array" ? "[]" : ""}</code> into a first-class relational <code>smass</code> entity linked via FK to its parent.
+                    </p>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
+                      <label style={{ display: "grid", gap: "2px", fontSize: "0.72rem", fontWeight: 600, color: "#312e81" }}>
+                        Child entity name
+                        <input
+                          type="text"
+                          value={normChildLabel}
+                          onChange={(e) => setNormChildLabel(e.target.value)}
+                          style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #a5b4fc", fontSize: "0.78rem" }}
+                        />
+                      </label>
+                      <label style={{ display: "grid", gap: "2px", fontSize: "0.72rem", fontWeight: 600, color: "#312e81" }}>
+                        Child entity ID
+                        <input
+                          type="text"
+                          value={normChildId}
+                          onChange={(e) => setNormChildId(e.target.value)}
+                          style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #a5b4fc", fontFamily: "monospace", fontSize: "0.78rem" }}
+                        />
+                      </label>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "6px" }}>
+                      <label style={{ display: "grid", gap: "2px", fontSize: "0.72rem", fontWeight: 600, color: "#312e81" }}>
+                        Parent entity (FK target)
+                        <select
+                          value={normParentModelId}
+                          onChange={(e) => {
+                            const nextParent = e.target.value;
+                            setNormParentModelId(nextParent);
+                            const pm = entities.find((m) => m.id === nextParent);
+                            if (pm?.primaryKey) setNormParentJoinField(pm.primaryKey);
+                          }}
+                          style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #a5b4fc", fontSize: "0.76rem" }}
+                        >
+                          <option value="">(standalone unnested table)</option>
+                          {entities.map((m) => (
+                            <option key={m.id} value={m.id}>{m.id}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label style={{ display: "grid", gap: "2px", fontSize: "0.72rem", fontWeight: 600, color: "#312e81" }}>
+                        Parent PK field
+                        <input
+                          type="text"
+                          value={normParentJoinField}
+                          onChange={(e) => setNormParentJoinField(e.target.value)}
+                          style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #a5b4fc", fontFamily: "monospace", fontSize: "0.76rem" }}
+                        />
+                      </label>
+                      <label style={{ display: "grid", gap: "2px", fontSize: "0.72rem", fontWeight: 600, color: "#312e81" }}>
+                        Relation name
+                        <input
+                          type="text"
+                          value={normRelationName}
+                          onChange={(e) => setNormRelationName(e.target.value)}
+                          style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #a5b4fc", fontFamily: "monospace", fontSize: "0.76rem" }}
+                        />
+                      </label>
+                    </div>
+                    <div style={{ display: "grid", gap: "4px" }}>
+                      <span style={{ fontSize: "0.71rem", fontWeight: 700, color: "#312e81" }}>
+                        Child table columns (renameable):
+                      </span>
+                      {normSubfields.map((sub, idx) => (
+                        <div key={sub.subPath} style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr auto", gap: "6px", alignItems: "center", fontSize: "0.75rem" }}>
+                          <input
+                            type="checkbox"
+                            checked={sub.selected}
+                            onChange={(e) => {
+                              const selected = e.target.checked;
+                              setNormSubfields((prev) => prev.map((s, i) => (i === idx ? { ...s, selected } : s)));
+                            }}
+                          />
+                          <input
+                            type="text"
+                            value={sub.key}
+                            onChange={(e) => {
+                              const key = e.target.value;
+                              setNormSubfields((prev) => prev.map((s, i) => (i === idx ? { ...s, key } : s)));
+                            }}
+                            style={{ padding: "3px 6px", borderRadius: "5px", border: "1px solid #c7d2fe", fontFamily: "monospace", fontSize: "0.75rem" }}
+                          />
+                          <input
+                            type="text"
+                            value={sub.label}
+                            onChange={(e) => {
+                              const label = e.target.value;
+                              setNormSubfields((prev) => prev.map((s, i) => (i === idx ? { ...s, label } : s)));
+                            }}
+                            style={{ padding: "3px 6px", borderRadius: "5px", border: "1px solid #c7d2fe", fontSize: "0.75rem" }}
+                          />
+                          <code style={{ fontSize: "0.7rem", color: "#4338ca" }}>{sub.type}</code>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
+                      <span style={{ fontSize: "0.71rem", color: "#4338ca" }}>
+                        {normKind === "array" ? "Adds surrogate PK (rowIndex) + FK to parent." : "Links 1:1 to parent via principal FK."}
+                      </span>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={normalizing}
+                        onClick={() => void createRelationalChildModel()}
+                        style={{ padding: "5px 12px", fontSize: "0.77rem", background: "#4338ca", color: "#fff", borderColor: "#4338ca", fontWeight: 600 }}
+                      >
+                        {normalizing ? "Creating…" : "Create Relational Entity"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Manual Relation Composer */}
+                {activeComposer === "relation" && (
+                  <div
+                    style={{
+                      border: "1px solid #c7d2fe",
+                      borderRadius: "8px",
+                      padding: "10px",
+                      background: "#f5f7ff",
+                      display: "grid",
+                      gap: "8px",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <strong style={{ fontSize: "0.8rem", color: "#3730a3", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                        <Link2 size={13} aria-hidden="true" />
+                        Add Entity Relationship
+                      </strong>
+                      <button type="button" className="secondary-button" style={{ padding: "2px 6px", fontSize: "0.71rem" }} onClick={() => setActiveComposer("none")}>
+                        Cancel
+                      </button>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 90px", gap: "6px" }}>
+                      <input
+                        type="text"
+                        value={relName}
+                        onChange={(e) => setRelName(e.target.value)}
+                        placeholder="Relation name (e.g. belongs_to_customer)"
+                        style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #c7d2fe", fontFamily: "monospace", fontSize: "0.76rem" }}
+                      />
+                      <select
+                        aria-label="Target entity"
+                        value={relTargetModelId}
+                        onChange={(e) => {
+                          const target = e.target.value;
+                          setRelTargetModelId(target);
+                          const tm = entities.find((m) => m.id === target);
+                          if (tm?.primaryKey) setRelForeignField(tm.primaryKey);
+                        }}
+                        style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #c7d2fe", fontSize: "0.76rem" }}
+                      >
+                        <option value="">Select target model…</option>
+                        {entities.map((m) => (
+                          <option key={m.id} value={m.id}>{m.id}</option>
+                        ))}
+                      </select>
+                      <select
+                        aria-label="Cardinality"
+                        value={relCardinality}
+                        onChange={(e) => setRelCardinality(e.target.value as SmassRelationCardinality)}
+                        style={{ padding: "5px 6px", borderRadius: "6px", border: "1px solid #c7d2fe", fontSize: "0.74rem" }}
+                      >
+                        <option value="many_to_one">N : 1</option>
+                        <option value="one_to_many">1 : N</option>
+                        <option value="one_to_one">1 : 1</option>
+                        <option value="many_to_many">N : M</option>
+                      </select>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "6px", alignItems: "center" }}>
+                      <input
+                        type="text"
+                        value={relLocalField}
+                        onChange={(e) => setRelLocalField(e.target.value)}
+                        placeholder="Local field (e.g. mid)"
+                        style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #c7d2fe", fontFamily: "monospace", fontSize: "0.76rem" }}
+                      />
+                      <input
+                        type="text"
+                        value={relForeignField}
+                        onChange={(e) => setRelForeignField(e.target.value)}
+                        placeholder="Target field (e.g. customerId)"
+                        style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #c7d2fe", fontFamily: "monospace", fontSize: "0.76rem" }}
+                      />
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => {
+                          if (!relTargetModelId || !relName.trim()) {
+                            setError("Choose a target entity and relation name.");
+                            return;
+                          }
+                          setDraftRelations((prev) => [
+                            ...prev,
+                            {
+                              name: relName.trim(),
+                              targetModelId: relTargetModelId,
+                              cardinality: relCardinality,
+                              localField: relLocalField.trim() || "mid",
+                              foreignField: relForeignField.trim() || "id",
+                            },
+                          ]);
+                          setActiveComposer("none");
+                        }}
+                        style={{ padding: "5px 10px", fontSize: "0.75rem", background: "#4338ca", color: "#fff", borderColor: "#4338ca", fontWeight: 600 }}
+                      >
+                        Add relation
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {draftRelations.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "5px", alignItems: "center", fontSize: "0.73rem" }}>
+                    <strong style={{ color: "#3730a3" }}>Relations:</strong>
+                    {draftRelations.map((r, idx) => (
+                      <span
+                        key={`${r.name}-${r.targetModelId}-${idx}`}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          padding: "2px 7px",
+                          borderRadius: "999px",
+                          background: "#e0e7ff",
+                          color: "#3730a3",
+                        }}
+                      >
+                        {cardinalityLabel(r.cardinality)} {r.name} → <code>{r.targetModelId}</code> ({r.localField}={r.foreignField})
+                        <button
+                          type="button"
+                          onClick={() => setDraftRelations((prev) => prev.filter((_, i) => i !== idx))}
+                          style={{ background: "transparent", border: "none", color: "#3730a3", cursor: "pointer", padding: 0, display: "inline-flex" }}
+                          aria-label={`Remove relation ${r.name}`}
+                        >
+                          <X size={11} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
                 {/* Builder Footer Actions */}
                 {activeComposer === "none" && (
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
@@ -1650,6 +2165,21 @@ export function DomainToolsAndModelPanel({
                       >
                         <Sigma size={13} aria-hidden="true" />
                         + Add aggregate
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={draftFields.length === 0}
+                        onClick={() => {
+                          setRelTargetModelId(entities[0]?.id ?? "");
+                          setRelForeignField(entities[0]?.primaryKey ?? "id");
+                          setRelLocalField(draftPrincipalKey || draftFields[0]?.key || "mid");
+                          setActiveComposer("relation");
+                        }}
+                        style={{ padding: "5px 10px", fontSize: "0.76rem", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                      >
+                        <Link2 size={13} aria-hidden="true" />
+                        + Add relation
                       </button>
                     </div>
                     <button
@@ -1762,6 +2292,24 @@ export function DomainToolsAndModelPanel({
                               }}
                             >
                               Virtual VDM
+                            </span>
+                          )}
+                          {model.unnest && (
+                            <span
+                              style={{
+                                fontSize: "0.68rem",
+                                padding: "2px 7px",
+                                borderRadius: "999px",
+                                background: "#e0e7ff",
+                                color: "#3730a3",
+                                fontWeight: 700,
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "3px",
+                              }}
+                            >
+                              <Split size={10} aria-hidden="true" />
+                              Normalized ({model.unnest.path})
                             </span>
                           )}
                           {model.primaryKey && (
@@ -1890,10 +2438,41 @@ export function DomainToolsAndModelPanel({
                               )}
                             </div>
                           )}
+                          {liveSnap.status === "ok" && liveSnap.rows && liveSnap.rows.length > 0 && (
+                            <div style={{ overflowX: "auto", border: "1px solid #334155", borderRadius: "6px" }}>
+                              <div style={{ padding: "4px 8px", background: "#1e293b", color: "#a5b4fc", fontSize: "0.7rem", fontWeight: 700 }}>
+                                Normalized Relational Table ({liveSnap.rows.length} row{liveSnap.rows.length === 1 ? "" : "s"})
+                              </div>
+                              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.72rem" }}>
+                                <thead>
+                                  <tr style={{ background: "#1e293b", color: "#cbd5e1", textAlign: "left" }}>
+                                    {Object.keys(liveSnap.rows[0]!).map((col) => (
+                                      <th key={col} style={{ padding: "4px 8px", borderBottom: "1px solid #334155", fontFamily: "monospace" }}>
+                                        {col}
+                                      </th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {liveSnap.rows.map((row, rIdx) => (
+                                    <tr key={rIdx} style={{ borderBottom: "1px solid #1e293b" }}>
+                                      {Object.keys(liveSnap.rows![0]!).map((col) => (
+                                        <td key={col} style={{ padding: "4px 8px", fontFamily: "monospace", color: "#e2e8f0" }}>
+                                          {typeof row[col] === "object" && row[col] !== null ? JSON.stringify(row[col]) : String(row[col] ?? "")}
+                                        </td>
+                                      ))}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
                           <pre style={{ margin: 0, overflowX: "auto", maxHeight: "240px", lineHeight: 1.45 }}>
                             {JSON.stringify(
                               liveSnap.status === "ok"
-                                ? { dataVersions: liveSnap.dataVersions, data: liveSnap.data }
+                                ? liveSnap.rows
+                                  ? { rowCount: liveSnap.rowCount, dataVersions: liveSnap.dataVersions, rows: liveSnap.rows }
+                                  : { dataVersions: liveSnap.dataVersions, data: liveSnap.data }
                                 : { requiredVersions: liveSnap.requiredVersions, observedVersions: liveSnap.observedVersions },
                               null,
                               2,

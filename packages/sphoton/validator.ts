@@ -75,12 +75,24 @@ export function resolveJsonSchemaPath(schema: Record<string, unknown> | undefine
   for (const segment of segments) {
     if (!current || typeof current !== "object") return { found: false, types: [] };
     const props = current.properties as Record<string, Record<string, unknown>> | undefined;
+    const bracketMatch = segment.match(/^(.+?)\[(?:-?\d+)?\]$/);
+    if (bracketMatch) {
+      const prop = bracketMatch[1]!;
+      if (!props || !Object.prototype.hasOwnProperty.call(props, prop)) {
+        return { found: false, types: [] };
+      }
+      const arrNode = props[prop];
+      const arrItems = arrNode?.items as Record<string, unknown> | undefined;
+      if (!arrItems || typeof arrItems !== "object") return { found: false, types: [] };
+      current = arrItems;
+      continue;
+    }
     if (props && Object.prototype.hasOwnProperty.call(props, segment)) {
       current = props[segment];
       continue;
     }
     const items = current.items as Record<string, unknown> | undefined;
-    if (/^\d+$/.test(segment) && items && typeof items === "object") {
+    if (/^-?\d+$/.test(segment) && items && typeof items === "object") {
       current = items;
       continue;
     }

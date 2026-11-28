@@ -55,6 +55,9 @@ export type SmassVirtualSnapshotOk = {
   principalId: string;
   materializedAt: string;
   data: Record<string, unknown>;
+  /** Populated when the model uses `unnest` to normalize a 1:N nested JSON array (or 1:1 nested object) into relational rows. */
+  rows?: Record<string, unknown>[];
+  rowCount?: number;
   dataVersions: Record<string, string | number>;
   /** Logical fields requested (after expanding computed dependencies). */
   projectedFields: string[];
@@ -172,11 +175,42 @@ function sortObjectKeys(value: unknown): unknown {
 function readDotPath(obj: unknown, dotPath: string): unknown {
   if (!obj || typeof obj !== "object") return undefined;
   let cursor: unknown = obj;
-  for (const segment of dotPath.split(".")) {
+  for (const rawSegment of dotPath.split(".").filter(Boolean)) {
     if (!cursor || typeof cursor !== "object") return undefined;
-    cursor = (cursor as Record<string, unknown>)[segment];
+    const idxMatch = rawSegment.match(/^(.+?)\[(-?\d+)\]$/);
+    if (idxMatch) {
+      const prop = idxMatch[1]!;
+      const index = Number(idxMatch[2]);
+      const arr = (cursor as Record<string, unknown>)[prop];
+      if (!Array.isArray(arr)) return undefined;
+      const resolvedIdx = index < 0 ? arr.length + index : index;
+      cursor = resolvedIdx >= 0 && resolvedIdx < arr.length ? arr[resolvedIdx] : undefined;
+    } else {
+      cursor = (cursor as Record<string, unknown>)[rawSegment];
+    }
   }
   return cursor;
+}
+
+/**
+ * Recursively flattens a nested JSON record into a single-level key/value map
+ * (useful for flat UI bindings, rule engines, and tabular exports).
+ */
+export function flattenNestedRecord(
+  record: Record<string, unknown>,
+  separator = "_",
+  prefix = "",
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    const nextKey = prefix ? `${prefix}${separator}${key}` : key;
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      Object.assign(out, flattenNestedRecord(value as Record<string, unknown>, separator, nextKey));
+    } else {
+      out[nextKey] = value;
+    }
+  }
+  return out;
 }
 
 function defaultExtractVersions(slot: string, payload: Record<string, unknown>): Record<string, string | number> {
@@ -569,6 +603,26 @@ function validateMaterializedFields(
   return issues;
 }
 
+function projectRow(
+  model: SmassDomainModel,
+  row: Record<string, unknown>,
+  outputKeys: readonly string[],
+  redactSet: ReadonlySet<SmassClassification>,
+  redactedCollector: Set<string>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of outputKeys) {
+    if (!(key in row)) continue;
+    const cls = model.fields[key]?.classification ?? "internal";
+    if (redactSet.has(cls)) {
+      redactedCollector.add(key);
+      continue;
+    }
+    out[key] = row[key];
+  }
+  return out;
+}
+
 function applyProjectionAndRedaction(
   model: SmassDomainModel,
   baseSnapshot: SmassVirtualSnapshotOk,
@@ -578,24 +632,18 @@ function applyProjectionAndRedaction(
 ): SmassVirtualSnapshotOk {
   const outputKeys = requestedFields && requestedFields.length > 0 ? requestedFields : baseSnapshot.projectedFields;
   const redactSet = new Set(redactClassifications ?? []);
-  const data: Record<string, unknown> = {};
-  const redactedFields: string[] = [];
-
-  for (const key of outputKeys) {
-    if (!(key in baseSnapshot.data)) continue;
-    const cls = model.fields[key]?.classification ?? "internal";
-    if (redactSet.has(cls)) {
-      redactedFields.push(key);
-      continue;
-    }
-    data[key] = baseSnapshot.data[key];
-  }
+  const redactedSet = new Set<string>();
+  const data = projectRow(model, baseSnapshot.data, outputKeys, redactSet, redactedSet);
+  const rows = baseSnapshot.rows
+    ? baseSnapshot.rows.map((r) => projectRow(model, r, outputKeys, redactSet, redactedSet))
+    : undefined;
 
   return {
     ...baseSnapshot,
     data,
+    ...(rows ? { rows, rowCount: rows.length } : {}),
     ...(cacheHit ? { sourcesQueried: [], sourceCalls: 0, cacheHit: true } : {}),
-    redactedFields,
+    redactedFields: [...redactedSet],
   };
 }
 
@@ -650,8 +698,9 @@ export async function materializeVirtualSnapshot(
       throw new Error(`Cannot materialize tool_backed model "${model.id}" without an executeTool callback.`);
     }
 
-    // Projection pushdown: find minimal set of source slots needed by projected fields
+    // Projection pushdown: find minimal set of source slots needed by projected fields (+ unnest source if any)
     const requiredSlots = new Set<string>();
+    if (toolModel.unnest) requiredSlots.add(toolModel.unnest.slot);
     for (const key of projectedFields) {
       const spec = toolModel.fields[key];
       if (!spec || spec.principalKey || spec.computed || spec.aggregate || !spec.from?.includes(".")) continue;
@@ -682,6 +731,114 @@ export async function materializeVirtualSnapshot(
         }
       }),
     );
+
+    // Relational unnesting mode: normalize a 1:N nested JSON array (or 1:1 nested object) into typed child rows
+    if (toolModel.unnest) {
+      if (req.minVersions && !satisfiesMinVersions(dataVersions, req.minVersions)) {
+        return {
+          status: "stale_version_retry",
+          modelId: model.id,
+          modelVersion: model.version,
+          domain: model.domain,
+          principalId: req.ctx.principalId,
+          requiredVersions: { ...req.minVersions },
+          observedVersions: { ...dataVersions },
+          sourcesQueried,
+          sourceCalls,
+          message: `Observed versions (${JSON.stringify(dataVersions)}) lag behind required minVersions (${JSON.stringify(req.minVersions)}).`,
+        };
+      }
+
+      const { slot: unnestSlot, path: unnestPath, indexField } = toolModel.unnest;
+      const unnestRoot = slotPayloads.get(unnestSlot);
+      const rawTarget = unnestRoot ? readDotPath(unnestRoot, unnestPath) : undefined;
+      const items: unknown[] = Array.isArray(rawTarget)
+        ? rawTarget
+        : rawTarget && typeof rawTarget === "object"
+          ? [rawTarget]
+          : [];
+
+      const computedOrder = topologicalSortComputed(model, projectedFields);
+      const arrayPrefix = `${unnestPath}[].`;
+      const objectPrefix = `${unnestPath}.`;
+      const rows: Record<string, unknown>[] = [];
+
+      for (let idx = 0; idx < items.length; idx++) {
+        const item = items[idx];
+        const row: Record<string, unknown> = {};
+
+        for (const key of projectedFields) {
+          const spec = toolModel.fields[key]!;
+          if (spec.computed || spec.aggregate) continue;
+          if (indexField && key === indexField) {
+            row[key] = idx;
+            continue;
+          }
+          if (spec.principalKey) {
+            const fromInputs = req.inputs?.[spec.principalKey] ?? req.inputs?.[key];
+            row[key] = fromInputs ?? req.ctx.customerId ?? req.ctx.principalId;
+            continue;
+          }
+          if (!spec.from?.includes(".")) continue;
+          const dot = spec.from.indexOf(".");
+          const slot = spec.from.slice(0, dot);
+          const outputPath = spec.from.slice(dot + 1);
+          if (slot === unnestSlot && outputPath.startsWith(arrayPrefix)) {
+            row[key] = readDotPath(item, outputPath.slice(arrayPrefix.length));
+          } else if (slot === unnestSlot && outputPath.startsWith(objectPrefix)) {
+            row[key] = readDotPath(item, outputPath.slice(objectPrefix.length));
+          } else if (slot === unnestSlot && outputPath === unnestPath) {
+            row[key] = item;
+          } else {
+            const payload = slotPayloads.get(slot);
+            if (payload) row[key] = readDotPath(payload, outputPath);
+          }
+        }
+
+        for (const key of projectedFields) {
+          const spec = toolModel.fields[key];
+          if (!spec?.aggregate) continue;
+          const aggValue = evaluateSmassAggregate(spec.aggregate, row);
+          row[key] = spec.type === "integer" && typeof aggValue === "number" ? Math.round(aggValue) : aggValue;
+        }
+        for (const key of computedOrder) {
+          const spec = toolModel.fields[key]!;
+          if (!spec.computed) continue;
+          const computedValue = evaluateSmassComputedExpression(spec.computed.expression, row);
+          row[key] = spec.type === "integer" ? Math.round(computedValue) : computedValue;
+        }
+
+        const rowIssues = validateMaterializedFields(model, projectedFields, row);
+        if (rowIssues.length > 0) {
+          throw new SmassSnapshotValidationError(model.id, rowIssues);
+        }
+        rows.push(row);
+      }
+
+      const baseSnapshot: SmassVirtualSnapshotOk = {
+        status: "ok",
+        snapshotId: computeSnapshotId(model.id, req.ctx.principalId, dataVersions, { rows }),
+        modelId: model.id,
+        modelVersion: model.version,
+        domain: model.domain,
+        principalId: req.ctx.principalId,
+        materializedAt: new Date().toISOString(),
+        data: rows[0] ?? {},
+        rows,
+        rowCount: rows.length,
+        dataVersions,
+        projectedFields,
+        sourcesQueried,
+        sourcesSkipped,
+        sourceCalls,
+        cacheHit: false,
+        redactedFields: [],
+      };
+      if (req.cache) {
+        req.cache.set(model.id, req.ctx, req.inputs, baseSnapshot);
+      }
+      return applyProjectionAndRedaction(model, baseSnapshot, req.requestedFields, req.redactClassifications, false);
+    }
 
     // Map canonical fields from physical payloads and principal identity
     for (const key of projectedFields) {
