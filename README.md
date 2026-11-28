@@ -48,8 +48,8 @@ Edit the Markdown under `docs/developers/` to update both versions. Vite renders
 
 Requires **Node 22.13+** and **npm 10+**. The standalone **`sfield` Agent SDK** monorepo is vendored under `vendor/sfield/packages/` as local npm workspaces:
 
-- `@sfield/core` — 100% headless governed runtime, closed Ajv tool contracts, HITL approvals, `GeminiProvider` / `AnthropicProvider` / `OpenAICompatibleProvider`, MCP 2026 `SFieldMcpServer` (Elicitation + Async Tasks) + `McpClient`, `PiiFirewall`, `ToolResilienceGuard`, `DelegationService`, `streamRun`, `FilesystemArtifactStore`, `VectorMemoryIndex`
-- `packages/smass` — Singularity Mass domain-modeling framework (`defineToolBackedModel`, `defineStoreBackedModel`, `SmassDomainRegistry`) compiling domain models into closed `sfield` tools and `sphoton` catalogs (`GET /api/admin/domain-models`)
+- `@sfield/core` — 100% headless governed runtime, closed Ajv tool contracts, `TurnContextHydrator` (`sf.context.hydrateTurn` — Principal, tenant/domain flow overrides, `ChatHarness` history, `ConversationCompactor` summaries & declarative resource gating), HITL approvals, `GeminiProvider` / `AnthropicProvider` / `OpenAICompatibleProvider`, MCP 2026 `SFieldMcpServer` (Elicitation + Async Tasks) + `McpClient`, `PiiFirewall`, `ToolResilienceGuard`, `DelegationService`, `GraphService`, `SlashCommandService`, `streamRun`, `FilesystemArtifactStore`, `VectorMemoryIndex`
+- `packages/smass` — Singularity Mass relational domain-modeling framework (`defineToolBackedModel`, `defineStoreBackedModel`, `SmassDomainRegistry`) modeling entities, PK/FK/`principalKey` joins, directed relationships, enums, nested item schemas, computed fields, and lifecycles; compiles store models into closed `sfield` tools, projects `sphoton` catalogs, and exports canonical ER graphs, Mermaid ER diagrams & Draft 2020-12 JSON Schema (`GET /api/admin/domain-models`)
 - `packages/sphoton` — Domain-agnostic Singularity Photon UI tool-binding toolkit (`SphotonComponentRegistry`, `validateCardBinding`, `compileBoundCard`, `createSurfaceBinder`, persistent HMAC-SHA256 action sealing) sitting above headless `sfield`
 - `@sfield/preset-memory` — Zero-boilerplate ephemeral preset (`preset: "memory"`) for tests & scripts
 - `@sfield/preset-local` — Zero-boilerplate durable local preset (`preset: "local"`) backed by SQLite + disk artifacts
@@ -163,10 +163,10 @@ In `/integrations`, the **Customer chat** settings on a read task map the record
 | `/` and `/chat` | Customer chat with pinned sections, an account summary, personalized pending actions and saved threads. |
 | `/planning` | Customer planning overview & topic launcher. |
 | `/login` | Demo profile selector (**Alice Morgan**, **Jordan Lee**, **Marcus Reed**). |
-| `/admin` | **Tool Setup**, Treatment Selector overrides, CCRE rule builder, **Recommendation Providers (`sfield`)**, **External REST & MCP Connector Registry** (`Invoke via sfield`), and Capability Studio. |
+| `/admin` | **Domain-Specific Tool Setup** (`Wealth` \| `IT Ops` \| `RevOps`): live **Tools → Closed Schema → Canonical `smass` Data Model** workbench (Entity Model, Mermaid ER, Draft 2020-12 JSON Schema, 1-click field evolution), domain-scoped **Recommendation Providers** & **External REST/MCP Connectors**, Wealth workflows & CCRE rules, Chat routing flows, and MCP Server/Discovery. |
 | `/admin/customers` | **Customer 360** CRUD + **IT Ops Incidents** CRUD + **Sales RevOps Deals** CRUD. |
 | `/admin/intents` | Choose a workspace to see its intents, published content, and recommendation sources. Wealth also has editors for customer intents, content, and NBA rules. Choose **Tenant tools** for Action Flows, Workflows, and Knowledge Base. |
-| `/admin/ui` | **UI Builder** (drag-and-drop multi-namespace `customer.*` / `incident.*` / `deal.*` / `custom.*` bindings + starter templates), **Widget Studio**, and live **`sf.surfaces` SurfaceBinder Lab** (`/admin/ui?view=surfaces`). |
+| `/admin/ui` | **UI Builder** (drag-and-drop multi-namespace `customer.*` / `incident.*` / `deal.*` / `custom.*` bindings + starter templates), **Widget Studio**, and live **`sphoton` SurfaceBinder Lab** (`/admin/ui?view=surfaces`). |
 | `/admin/logs` | **Chat calls**, **Pending actions**, **Approvals (HITL)** (`?source=approvals`), **Write audit (sfield)** (`?source=write_audit`), and **Engagement analytics** (`?source=analytics`). |
 | `/admin/inspector` | Deep turn decision trace, verified Experience IR, and `sfield` run inspection. |
 | `/admin/sfield-studio` | Embedded **`@sfield/studio`** governance workbench (Runs, Principal/Tool Playground, HITL Approvals, Locks, Evals, Memory, PII Lab, OTel & Host Plugins). |
@@ -180,7 +180,7 @@ In `/integrations`, the **Customer chat** settings on a read task map the record
 # Full TypeScript check (including vendor/sfield) + Vite production build
 npm run build
 
-# Full unit & integration test suite (154 tests covering sfield, SurfaceBinder, MCP 2026 Elicitation/Tasks, Studio, optional RecommendationProviderRegistry, verifiers, empathy & C360 notes, compaction, folders, SSE, CCRE, recovery)
+# Full unit & integration test suite (174 tests covering sfield, TurnContextHydrator, smass relational models, sphoton, SurfaceBinder, MCP 2026 Elicitation/Tasks, Studio, optional RecommendationProviderRegistry, verifiers, empathy & C360 notes, compaction, folders, SSE, CCRE, recovery)
 npm test
 
 # Targeted host test suite
@@ -199,6 +199,8 @@ npm run chat:harness
 
 - **`apps/server/`** — HTTP/SSE server (`http.ts`), `sfield` runtime & host-governed tools (`runtime.ts`), Unified Semantic Capability Router (`semantic-router.ts`), Experience orchestrator (`service.ts`), Emotional & Life-Event Personalizer (`response-personalizer.ts`), Dynamic UI & 4-stage Harness (`dynamic-ui-generator.ts`, `dynamic-ui-harness.ts`), and persisted domain stores (`trade-store.ts`, `goal-store.ts`, `approval-store.ts`, `connector-store.ts`, `action-flow-store.ts`, `ops-store.ts`, `sales-store.ts`, `write-audit.ts`).
 - **`apps/web/`** — React + assistant-ui Chat (`main.tsx`, `thread-list.tsx`, `context-health-pill.tsx`), A2UI v1.0 renderer (`surface.tsx`), Dynamic Canvas & Stock Trade/Tax-Harvest UI (`dynamic-canvas.tsx`, `trade-ticket.tsx`), Advisory Reasoning (`reasoning-panel.tsx`), Admin Control Plane (`admin.tsx`, `admin-diagnostics.tsx`, `experience-registry-admin.tsx`, `action-flows-panel.tsx`, `ui-builder.tsx`, `customer-360-admin.tsx`), and Architecture Docs (`help.tsx`, `help-architecture.tsx`, `help-sfield.tsx`, `help-tool-interactions.tsx`).
+- **`packages/smass/`** — Singularity Mass domain-modeling framework (`contracts.ts`, `schema-compiler.ts`, `registry.ts`) for tool-backed & store-backed entities, PK/FK/`principalKey` joins, relationships, lifecycles, Mermaid ER & Draft 2020-12 JSON Schema exports.
+- **`packages/sphoton/`** — Domain-agnostic Singularity Photon UI tool-binding & compilation toolkit (`contracts.ts`, `registry.ts`, `validator.ts`, `compiler.ts`, `surface-binder.ts`, `draft-generator.ts`, `fingerprint.ts`).
 - **`packages/contracts/`** — Shared Zod schemas & TypeScript contracts (`empathy.ts`, `capabilities-catalog.ts`, `trading.ts`, `approval.ts`, `connector.ts`, `action-flow.ts`, `domain-packs.ts`, `ui-layout.ts`, `data-bindings.ts`, `recommendation-provider.ts`).
 - **`packages/experience/`** — Host verifiers (`verify.ts`), deterministic A2UI v1.0 compiler (`compile.ts`), UI Builder layout applicator (`ui-layout.ts`), and dynamic prompt compiler (`prompt-compiler.ts`).
 - **`packages/recommendations/`** — Pluggable `RecommendationProvider` arbitrator and adapters (TS + CCRE, Customer 360 NBA, IT Ops Runbooks, Sales Deal Desk, External REST/MCP).

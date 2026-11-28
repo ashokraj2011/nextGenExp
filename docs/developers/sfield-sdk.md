@@ -10,7 +10,7 @@
 
 | Package | Role | Key exports |
 | --- | --- | --- |
-| `@sfield/core` | Core runtime & enterprise primitives | `SField`, `defineTool`, `SurfaceBinderService` (`sf.surfaces`), `AnthropicProvider`, `GeminiProvider`, `OpenAICompatibleProvider`, `SFieldMcpServer` (MCP 2026), `McpClient`, `createMcpProxyTools`, `createPiiFirewallHook`, `createToolResilienceGuard`, `DelegationService`, `streamRun`, `FilesystemArtifactStore`, `VectorMemoryIndex` |
+| `@sfield/core` | 100% headless core runtime & enterprise primitives | `SField`, `defineTool`, `TurnContextHydrator` (`sf.context.hydrateTurn`), `ChatHarness` (`sf.chat`), `ConversationCompactor` (`sf.compactor`), `GraphService` (`sf.graphs`), `SlashCommandService` (`sf.commands`), `AnthropicProvider`, `GeminiProvider`, `OpenAICompatibleProvider`, `SFieldMcpServer` (MCP 2026), `McpClient`, `createMcpProxyTools`, `createPiiFirewallHook`, `createToolResilienceGuard`, `DelegationService`, `streamRun`, `FilesystemArtifactStore`, `VectorMemoryIndex` |
 | `@sfield/preset-memory` | Zero-boilerplate ephemeral preset | `preset: "memory"` (`EphemeralPersistence`, `InMemoryArtifactStore`, `createDevAuthorizer`) |
 | `@sfield/preset-local` | Zero-boilerplate durable local preset | `preset: "local"` (`SqlitePersistence`, `FilesystemArtifactStore`, `createDevAuthorizer`) |
 | `@sfield/store-sqlite` | Single-node durable store | `sqlitePersistence`, `SqlitePersistence`, `SqliteMemoryRepository` (over built-in `node:sqlite`) |
@@ -49,15 +49,27 @@ await sf.close();
 
 ---
 
-### Headless `sfield` + `sphoton` Data-to-UI Binding (`packages/sphoton`)
+### Turn Context Hydration (`sf.context.hydrateTurn`)
 
-`@sfield/core` is strictly **headless** — it owns tool registration, closed Ajv schemas, execution scopes, HITL approvals, and call logs, with zero UI code. UI data binding lives in the sibling **`sphoton`** toolkit (`packages/sphoton/`), which consumes `sfield` through `SfieldAdapter` and `createSurfaceBinder(sf, { signingSecret })`:
+Instead of hand-wiring per-turn flow gating, principal normalization, chat history loading, and domain-store checks in host middleware, `@sfield/core` exposes a built-in **`TurnContextHydrator`** on `sf.context`:
+
+- **`sf.context.registerFlows(flows)` & `sf.context.setFlowOverrides(tenantId, scope, rules)`** — manage tenant defaults and domain-level overrides (domain overrides can narrow/disable a flow, never escalate a tenant-disabled flow, and `operatorOnly` flows are excluded for non-operators).
+- **`sf.context.hydrateTurn({ principal, domainId, flows, chatScope, conversationId, resources })`** — in one headless call: normalizes `Principal`, resolves active flows (`allows(flowId)`), loads recent `sf.chat` messages and persisted `sf.compactor` rolling summaries, and declaratively unlocks capability-gated host resources (`requiredFlows`, `anyFlow`, `allowedDomains`, `requireOperator`, `requiredRoles`) alongside a `deniedResources` audit trail.
+
+---
+
+### Headless `sfield` + `smass` Domain Models + `sphoton` UI Binding
+
+`@sfield/core` is strictly **headless** — it owns tool registration, closed Ajv schemas, turn context hydration, execution scopes, HITL approvals, and call logs, with zero UI or domain ER code. Two sibling packages layer cleanly above it:
+
+- **`smass` (`packages/smass/`, see `docs/developers/smass.md`)** — represents relational domain data models (tool-backed & store-backed entities, PK/FK/`principalKey` joins, directed relationships, enums, nested item schemas, computed fields, lifecycles), compiles store models into closed `@sfield/core` tools, and exports canonical Mermaid ER diagrams & Draft 2020-12 JSON Schema `$defs` (`GET /api/admin/domain-models`).
+- **`sphoton` (`packages/sphoton/`, see `docs/developers/sphoton.md`)** — consumes `sfield` through `SfieldAdapter` and `createSurfaceBinder(sf, { signingSecret })`:
 
 1. **`validateCardBinding` & `compileBoundCard`** — validates card bindings against closed `sfield` schemas and a pluggable `SphotonComponentRegistry`, reuses verified turn results (`reuseVerifiedTurnResult`), renders approved unavailable states, and seals persistent HMAC-SHA256 action references.
 2. **`createSurfaceBinder(sf).inspectSchemas()`** — auto-discovers bindable output/input paths from registered `sfield` tool JSON Schemas.
 3. **`createSurfaceBinder(sf).stitch(...)` & `dispatchAction(...)`** — executes read sources via `ExecutionScope`, resolves `$ref` / `$repeat` / `$input`, and verifies HMAC-SHA256 seals and `Principal` match (blocking tampering & cross-principal replay).
 
-CEP exposes `sphoton` at `GET/POST /api/admin/ui-binding-catalog` and `/api/surfaces/*` (`apps/server/routes/collaboration.ts`).
+CEP exposes `smass` at `GET /api/admin/domain-models` and `sphoton` at `GET/POST /api/admin/ui-binding-catalog` and `/api/surfaces/*` (`apps/server/routes/admin-studio.ts`, `apps/server/routes/collaboration.ts`).
 
 ---
 

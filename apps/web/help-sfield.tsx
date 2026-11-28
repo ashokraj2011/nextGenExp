@@ -123,7 +123,7 @@ const sdkPackages = [
   {
     pkg: "@sfield/core",
     role: "Headless Governed Agent Kernel",
-    highlights: "100% UI-free SField runtime: closed Ajv tool contracts, defineGraph / sf.graphs (parallel fan-out, interrupts, Time-Travel), HITL approvals, Anthropic / Gemini / OpenAI-compatible providers, MCP 2026 SFieldMcpServer (Elicitation + Async Tasks) + McpClient, PiiFirewall, ToolResilienceGuard, DelegationService, streamRun, FilesystemArtifactStore & VectorMemoryIndex.",
+    highlights: "100% UI-free SField runtime: closed Ajv tool contracts, TurnContextHydrator (sf.context.hydrateTurn — Principal, tenant/domain flow overrides, ChatHarness history, ConversationCompactor summaries & declarative resource gating), defineGraph / sf.graphs (parallel fan-out, interrupts, Time-Travel), HITL approvals, Anthropic / Gemini / OpenAI-compatible providers, MCP 2026 SFieldMcpServer (Elicitation + Async Tasks) + McpClient, PiiFirewall, ToolResilienceGuard, DelegationService, SlashCommandService, streamRun, FilesystemArtifactStore & VectorMemoryIndex.",
   },
   {
     pkg: "@sfield/preset-memory",
@@ -167,8 +167,8 @@ const sdkPackages = [
   },
   {
     pkg: "packages/smass",
-    role: "Singularity Mass — Domain Model & Data Fabric",
-    highlights: "Zero UI/server imports: defineToolBackedModel() composes domain entities from existing sfield tools; defineStoreBackedModel() defines fields + DataSource once and auto-compiles closed-schema @sfield/core tools + sphoton catalog projections (GET /api/admin/domain-models).",
+    role: "Singularity Mass — Canonical Domain Data Model & Data Fabric",
+    highlights: "Zero UI/server imports: represents full relational domain data models (tool-backed & store-backed entities, PK/FK/principalKey joins, directed relations, enums, nested item schemas, computed fields, and lifecycles); auto-compiles closed-schema @sfield/core tools, projects sphoton catalogs, and exports Mermaid ER diagrams & Draft 2020-12 JSON Schema (GET /api/admin/domain-models).",
   },
   {
     pkg: "packages/sphoton",

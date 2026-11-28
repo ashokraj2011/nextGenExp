@@ -4,7 +4,7 @@ sfield runs inside the app server. The host opens model sessions and tool runs, 
 
 ### Follow a model request
 
-The app first chooses a flow from those enabled for the tenant, domain and audience. For the account-help flow, `apps/server/service.ts` then builds a `PznContextRoutingInput`. It includes the current message, recent turns, supported intents, a topic snapshot, optional member scores and customer signals. A follow-up can include a hint derived by the host, such as `summaryFollowUpIntentId`. Logs distinguish the model proposal from the verified route.
+On each incoming chat message (`POST /api/conversations/:id/turns`), the server persists a durable `working` turn in `app.sqlite` (recovered via `reconcile()` after restarts), returns `202 Accepted` with an SSE `eventsUrl`, and calls `sf.context.hydrateTurn(...)` (`TurnContextHydrator` in `@sfield/core`) to resolve the `Principal`, active tenant/domain routing flows, persisted `ConversationCompactor` summary, and capability-gated domain stores in one step. For the account-help flow, `apps/server/service.ts` then builds a `PznContextRoutingInput` containing the current message, recent turns, supported intents, a topic snapshot, optional member scores and customer signals. A follow-up can include a hint derived by the host, such as `summaryFollowUpIntentId`. Logs distinguish the model proposal from the verified route.
 
 `compileRouterInstructions` and `compileComposerInstructions` in `packages/experience/prompt-compiler.ts` supply the agent instructions. `Runtime.model` in `apps/server/runtime.ts` opens an sfield session and sends a JSON-encoded envelope. Inspect the field definitions in `packages/contracts/model-inputs.ts`. The router has an empty tool list. The host obtains topics and scores before invoking it. The composer receives verified intent and eligible candidates and can request the registered balance read. The host verifies the result before compiling cards.
 
@@ -99,6 +99,7 @@ UI data binding, pluggable component schema validation (`SphotonComponentRegistr
 
 Beyond CEP-specific tools, the `sfield` SDK (`vendor/sfield/packages/*`) ships standalone enterprise packages and primitives usable in any TypeScript/Node 22 host:
 
+- **Turn Context Hydrator (`sf.context.hydrateTurn`)** — centralizes `Principal` normalization, tenant/domain flow override resolution (`registerFlows` / `setFlowOverrides`), `ChatHarness` transcript & `ConversationCompactor` rolling-summary hydration, and declarative resource/store gating (`requiredFlows`, `anyFlow`, `allowedDomains`, `requireOperator`) with a `deniedResources` audit trail.
 - **Native Model Providers (`@sfield/core`)** — `AnthropicProvider`, `GeminiProvider` (Google Gemini v1beta SSE streaming, function calls, and `responseSchema`), and `OpenAICompatibleProvider`.
 - **PII Egress Firewall (`createPiiFirewall` / `createPiiFirewallHook`)** — tokenizes SSN, email, phone, card, account IDs, known names, and custom rules in `beforeModelDispatch` and rehydrates locally via `firewall.rehydrateRunOutput(runId, output)`.
 - **Tool Resilience (`createToolResilienceGuard`)** — per-key `TokenBucketRateLimiter` (`RATE_LIMITED`) and 3-state `CircuitBreaker` (`CIRCUIT_OPEN` → `half_open` → `closed`).
@@ -113,7 +114,7 @@ Beyond CEP-specific tools, the `sfield` SDK (`vendor/sfield/packages/*`) ships s
 - **Standalone CLI (`@sfield/cli`)** — run `npm run sfield -- init | validate | eval | lock status | lock approve | inspect <runId> | doctor | studio | mcp serve` to scaffold, diagnose, validate configs, run eval gates, manage lock approvals, inspect persisted runs, launch `@sfield/studio`, or run a stdio MCP server.
 - **Governance Workbench (`@sfield/studio`)** — standalone or embeddable zero-framework workbench (`createStudioHandler`, `startStudioServer`), mounted in CEP at `/admin/sfield-studio` with Host Plugins.
 - **Pluggable `RecommendationProviderRegistry`** — Treatment Selector (`treatments.eligible@1.0.0`, categorized as `recommendation_provider`) is registered as one optional `RecommendationProvider` alongside `customer360_nba`, `ops_runbook`, `sales_deal_desk`, and external REST/MCP connectors. `startApp({ recommendationProviders })` supports custom providers or `[]` (zero-TS mode).
-- **CI & Publishing Pipelines** — `.github/workflows/ci.yml` verifies build, 154 tests, and Playwright suites; `.github/workflows/release.yml` publishes all 9 `@sfield/*` packages to npm or GitHub Packages.
+- **CI & Publishing Pipelines** — `.github/workflows/ci.yml` verifies build, 174 tests, and Playwright suites; `.github/workflows/release.yml` publishes all 9 `@sfield/*` packages to npm or GitHub Packages.
 
 ### Connect an existing service
 

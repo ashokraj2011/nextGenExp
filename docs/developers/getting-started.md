@@ -4,7 +4,7 @@ Use a balance comparison to see how a customer message becomes a screen. You can
 
 ### Start a local checkout
 
-Use Node.js 22.13 or later and npm 10 or later. The repository includes the standalone **`sfield` Agent SDK** (all 8 `@sfield/*` packages) as npm workspaces. Run these commands from the repository root after signing in with the Copilot CLI, the default model provider.
+Use Node.js 22.13 or later and npm 10 or later. The repository includes the standalone **`sfield` Agent SDK** (all 9 `@sfield/*` packages) alongside **`smass`** (`packages/smass/`) for domain data models and **`sphoton`** (`packages/sphoton/`) for UI tool bindings. Run these commands from the repository root after signing in with the Copilot CLI, the default model provider.
 
 ```sh
 npm ci
@@ -30,6 +30,8 @@ For **Google Gemini**, **OpenAI**, or an **office LLM gateway**, configure **Mod
 
 | Task | Start here in the checkout | See the result |
 | --- | --- | --- |
+| Define or evolve domain data models (`smass`) | `packages/smass/` and `apps/server/domain-models.ts` | Tool setup (`/admin`) → Entity Model, Mermaid ER & JSON Schema |
+| Bind chat UI cards to registered tools (`sphoton`) | `packages/sphoton/` and `apps/server/sphoton-catalog.ts` | UI Builder (`/admin/ui`) and `GET /api/admin/ui-binding-catalog` |
 | Change how a verified result looks | `packages/contracts/ui-layout.ts` and `apps/web/ui-builder.tsx` | UI Builder → Try a chat turn |
 | Add a new kind of card or control | `packages/contracts/surface.ts` and `apps/web/surface.tsx` | The chat reply and its Inspector entry |
 | Change what the model sees | `packages/experience/prompt-compiler.ts` and `packages/contracts/model-inputs.ts` | The model request in Logs |

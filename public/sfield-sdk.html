@@ -424,6 +424,14 @@
           <p><code>runEvalSuite</code> persists signed <code>EvalReportRecord</code> evidence into <code>sf.lock.evalReports()</code>; <code>evaluateReleaseGate</code> and <code>sfield lock approve</code> gate <code>deployment: "service"</code> rollouts.</p>
         </article>
         <article class="card">
+          <h3>Turn Context Hydrator <span class="pill">sf.context.hydrateTurn</span></h3>
+          <p>Centralizes <code>Principal</code> normalization, tenant/domain flow override resolution (<code>registerFlows</code> / <code>setFlowOverrides</code>), <code>ChatHarness</code> history &amp; <code>ConversationCompactor</code> summaries, and declarative capability-gated resource access with a <code>deniedResources</code> audit trail.</p>
+        </article>
+        <article class="card">
+          <h3>Sibling <code>smass</code> Domain Data Models <span class="pill">packages/smass</span></h3>
+          <p>Represents relational domain data models (<code>defineToolBackedModel</code> &amp; <code>defineStoreBackedModel</code>, PK/FK/<code>principalKey</code> joins, directed relations, enums, nested items, computed fields, lifecycles), compiling closed <code>sfield</code> tools, Mermaid ER diagrams, and Draft 2020-12 JSON Schema.</p>
+        </article>
+        <article class="card">
           <h3>Sibling <code>sphoton</code> UI Binder <span class="pill">packages/sphoton</span></h3>
           <p>Keeps <code>sfield</code> 100% UI-free while layering domain-agnostic card bindings (<code>SphotonComponentRegistry</code>), <code>createSurfaceBinder(sf)</code> (<code>$ref</code> / <code>$repeat</code> / <code>$input</code>), and persistent <strong>HMAC-SHA256 sealed actions</strong> cleanly above it.</p>
         </article>
