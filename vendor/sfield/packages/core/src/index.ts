@@ -96,6 +96,18 @@ export {
   type CompactorTurnInput,
   type RollingThreadSummary,
 } from "./context/compactor.js";
+export {
+  TurnContextHydrator,
+  type DeniedResourceAudit,
+  type FlowOverrideRule,
+  type GatedResourceMap,
+  type GatedResourceSpec,
+  type HydratedFlowDescriptor,
+  type HydratedTurnContext,
+  type HydrateTurnInput,
+  type TurnContextHydratorDeps,
+  type UnlockedResources,
+} from "./context/turn-hydrator.js";
 export { ModelGateway, type DispatchResult } from "./gateway/gateway.js";
 export { AnthropicProvider, ANTHROPIC_API_VERSION, ANTHROPIC_DEFAULT_BASE_URL } from "./gateway/providers/anthropic.js";
 export { GeminiProvider, GEMINI_DEFAULT_BASE_URL } from "./gateway/providers/gemini.js";

@@ -492,29 +492,53 @@ export class ExperienceService {
     const flowCatalog = initial.flowCatalog ?? this.store.routingFlows(this.store.conversation(initial.scope.conversationId, initial.scope.principalId), tenantTools);
     if (!initial.flowCatalog) this.store.update(id, (row) => { row.flowCatalog = flowCatalog; });
     const capabilities = flowCatalog.flows;
-    const allows = (id: CepCapabilityId) => capabilities.some((flow) => flow.id === id);
+    const runtime = this.runtime;
+    const turnPrincipal = principalFor(initial.scope.principalId, initial.scope);
+    const hydrated = runtime
+      ? await runtime.sfieldInstance.context.hydrateTurn({
+          principal: turnPrincipal,
+          domainId: domain,
+          isOperator: tenantTools,
+          flows: capabilities,
+          conversationId: initial.scope.conversationId,
+          resources: this.dynamicUi
+            ? {
+                opsStore: { value: this.dynamicUi.opsStore, requiredFlows: ["ops_incident"] },
+                salesStore: { value: this.dynamicUi.salesStore, requiredFlows: ["sales_deal_desk"] },
+                tradeStore: { value: this.dynamicUi.tradeStore, anyFlow: ["stock_holdings", "stock_trade"] },
+                connectorStore: { value: this.dynamicUi.connectorStore, requiredFlows: ["external_connector"] },
+                approvalStore: { value: this.dynamicUi.approvalStore, anyFlow: ["hitl_approvals", "external_connector", "stock_trade"] },
+                workflowEngine: { value: this.dynamicUi.workflowEngine, requiredFlows: ["external_connector"] },
+                actionFlowStore: { value: this.dynamicUi.actionFlowStore, requiredFlows: ["external_connector"] },
+                knowledgeBase: { value: this.dynamicUi.knowledgeBase, requiredFlows: ["verified_experience"], requireOperator: true },
+              }
+            : undefined,
+        })
+      : undefined;
+    const allows = (flowId: CepCapabilityId) => hydrated ? hydrated.allows(flowId) : capabilities.some((flow) => flow.id === flowId);
     const accountHelp = allows("verified_experience");
     const priorAccountView = domain === "wealth" && this.store.previousCompletedTurn(initial.scope.conversationId, initial.ordinal)?.retirementAccounts;
     const accountRequest = accountHelp && domain === "wealth" && retirementAccountRequest(initial.public.message, Boolean(priorAccountView));
-    const domainTools = this.dynamicUi && {
-      ...this.dynamicUi,
-      opsStore: allows("ops_incident") ? this.dynamicUi.opsStore : undefined,
-      salesStore: allows("sales_deal_desk") ? this.dynamicUi.salesStore : undefined,
-      tradeStore: allows("stock_holdings") || allows("stock_trade") ? this.dynamicUi.tradeStore : undefined,
-      connectorStore: allows("external_connector") ? this.dynamicUi.connectorStore : undefined,
-      approvalStore: allows("hitl_approvals") || allows("external_connector") || allows("stock_trade") ? this.dynamicUi.approvalStore : undefined,
-      workflowEngine: allows("external_connector") ? this.dynamicUi.workflowEngine : undefined,
-      actionFlowStore: allows("external_connector") ? this.dynamicUi.actionFlowStore : undefined,
-      knowledgeBase: tenantTools && accountHelp ? this.dynamicUi.knowledgeBase : undefined,
-    };
-    const goalTurn = accountHelp && domain === "wealth" && !accountRequest && !workspaceContext && !initial.workflow && this.runtime?.experiences.shouldHandle(initial);
-    const deadline = initial.public.createdAt + (goalTurn ? this.runtime!.goalBudget.activeSeconds * 1_000 : TURN_DEADLINE);
+    const domainTools = this.dynamicUi && (hydrated
+      ? { ...this.dynamicUi, ...hydrated.resources }
+      : {
+          ...this.dynamicUi,
+          opsStore: allows("ops_incident") ? this.dynamicUi.opsStore : undefined,
+          salesStore: allows("sales_deal_desk") ? this.dynamicUi.salesStore : undefined,
+          tradeStore: allows("stock_holdings") || allows("stock_trade") ? this.dynamicUi.tradeStore : undefined,
+          connectorStore: allows("external_connector") ? this.dynamicUi.connectorStore : undefined,
+          approvalStore: allows("hitl_approvals") || allows("external_connector") || allows("stock_trade") ? this.dynamicUi.approvalStore : undefined,
+          workflowEngine: allows("external_connector") ? this.dynamicUi.workflowEngine : undefined,
+          actionFlowStore: allows("external_connector") ? this.dynamicUi.actionFlowStore : undefined,
+          knowledgeBase: tenantTools && accountHelp ? this.dynamicUi.knowledgeBase : undefined,
+        });
+    const goalTurn = accountHelp && domain === "wealth" && !accountRequest && !workspaceContext && !initial.workflow && runtime?.experiences.shouldHandle(initial);
+    const deadline = initial.public.createdAt + (goalTurn ? runtime!.goalBudget.activeSeconds * 1_000 : TURN_DEADLINE);
     const remains = deadline - this.now();
     if (remains <= 0) {
       this.store.finish(id, { type: "failed", code: recovering ? "restarted" : "turn_timeout" }, this.now());
       return;
     }
-    const runtime = this.runtime;
     if (!runtime) {
       this.store.finish(id, { type: "failed", code: "gateway_unavailable" }, this.now());
       return;
@@ -591,7 +615,7 @@ export class ExperienceService {
         this.store.progress(id, "planning", this.now());
         const conversation = this.store.conversation(initial.scope.conversationId, initial.scope.principalId);
         const recent = await this.history.recent(conversation, initial.ordinal);
-        const result = await runtime.experiences.respond(current(), principalFor(initial.scope.principalId, initial.scope), recent, signal);
+        const result = await runtime.experiences.respond(current(), hydrated?.principal ?? turnPrincipal, recent, signal);
         if (result) {
           this.store.update(id, (row) => {
             row.public.actionMode = "verified_experience";

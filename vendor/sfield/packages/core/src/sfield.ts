@@ -16,6 +16,14 @@ import type { DefineToolInput, ToolDefinition } from "./types/tool.js";
 import { ConfigErrors, SFieldError } from "./errors.js";
 import { ChatHarness } from "./chat/harness.js";
 import { ConversationCompactor } from "./context/compactor.js";
+import {
+  TurnContextHydrator,
+  type FlowOverrideRule,
+  type GatedResourceMap,
+  type HydratedFlowDescriptor,
+  type HydratedTurnContext,
+  type HydrateTurnInput,
+} from "./context/turn-hydrator.js";
 import { AgenticHarness } from "./runtime/agentic-harness.js";
 import { loadConfigDocument, loadConfigFile, type LoadedDocument } from "./config/load.js";
 import { compileConfig, GENERIC_PARAMS, PROVIDER_PARAMS, shorthandIdentity, type CompileContext } from "./config/compile.js";
@@ -111,6 +119,7 @@ export class SField {
   private closed = false;
   readonly chat: ChatHarness;
   readonly compactor: ConversationCompactor;
+  private readonly turnHydrator: TurnContextHydrator;
   readonly harness: AgenticHarness;
   readonly delegation: DelegationService;
   readonly graphs: GraphService;
@@ -118,6 +127,11 @@ export class SField {
   private constructor(readonly i: Internals) {
     this.chat = new ChatHarness(i.persistence);
     this.compactor = new ConversationCompactor(i.memory);
+    this.turnHydrator = new TurnContextHydrator({
+      chat: this.chat,
+      compactor: this.compactor,
+      resolvePrincipal: (p) => i.runs.resolvePrincipal(p),
+    });
     this.harness = new AgenticHarness({
       persistence: i.persistence,
       resolvePrincipal: (p) => i.runs.resolvePrincipal(p),
@@ -388,6 +402,23 @@ export class SField {
       if (!rec || rec.tenantId !== principal.tenantId) throw new SFieldError("NOT_FOUND", `context ${input.contextId} not found`);
       return rec;
     },
+    /** Registers baseline routing flows managed by sfield's TurnContextHydrator. */
+    registerFlows: (flows: readonly HydratedFlowDescriptor[]) => {
+      this.turnHydrator.registerFlows(flows);
+      return this.context;
+    },
+    /** Sets tenant-wide ("tenant") or domain-specific overrides for registered routing flows. */
+    setFlowOverrides: (tenantId: string, scope: "tenant" | string, rules: Record<string, FlowOverrideRule>) => {
+      this.turnHydrator.setFlowOverrides(tenantId, scope, rules);
+      return this.context;
+    },
+    /** Resolves effective routing flows for a tenant, domain, and operator role. */
+    resolveFlows: (input: { tenantId: string; domainId: string; isOperator: boolean }): HydratedFlowDescriptor[] =>
+      this.turnHydrator.resolveFlows(input),
+    /** Hydrates Principal, flow scope, durable chat history, rolling summary, and capability-gated resources in one call. */
+    hydrateTurn: <TResources extends GatedResourceMap = Record<string, never>>(
+      input: HydrateTurnInput<TResources>,
+    ): Promise<HydratedTurnContext<TResources>> => this.turnHydrator.hydrateTurn(input),
   };
 
   /** Attachments enter through the host (§11.3): an opaque id plus digest, media type, size, and classification. */
