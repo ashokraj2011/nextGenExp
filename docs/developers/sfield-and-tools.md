@@ -89,14 +89,13 @@ const mcp = sf.createMcpServer({
 
 Every `tools/call` runs inside a real `sfield` `ExecutionScope` (`executions.open` / `executions.resume`), preserving `Authorizer` policy checks, Ajv closed schema validation, HITL approval suspension (`APPROVAL_REQUIRED` → `status: "pending_approval"` with `approvalId` + `callId`), **MCP 2026 Elicitation** (`elicitation/create` → `status: "input_required"` → `elicitation/respond`), **MCP 2026 Async Tasks** (`tasks/get`, `tasks/result`, `tasks/cancel` with tenant isolation), stateless **`server/discover`**, and `sfield.sqlite` audit receipts (`sfieldRunId`). CEP wires `POST /api/mcp` onto `runtime.createMcpServer(...)` in `apps/server/cep-mcp-server.ts`, exposing `cep.empathy.assess@1.0.0`, published `int.*` Integration Tasks, and `cep.knowledge.search@1.0.0`.
 
-### Deterministic Data-to-UI Stitching (`sf.surfaces`) & Blind Pass-Through
+### Headless `sfield` vs. `sphoton` UI Binding (`packages/sphoton/`)
 
-`@sfield/core` includes **`SurfaceBinderService`** (`vendor/sfield/packages/core/src/ui/surface-binder.ts`), attached directly to `sf.surfaces`. Instead of writing custom per-screen data-to-UI glue in the host server, `sfield` executes read sources, resolves declarative `$ref` / `$repeat` / `$input` bindings (with formatters like `usd_cents`, `percent`, `date` and optional `strictSchemaValidation: true`), and seals every action button with **HMAC-SHA256** bound to `{ tenantId, subjectId, surfaceId, actionId, toolRef, preset, resolvedInputs, inputSlots }`.
+`sfield` *(Singularity Field)* is a **headless** tool and agent runtime: it owns tool registration, closed Ajv input/output JSON Schemas, scoped execution, approvals, and immutable call logs — not UI components or layouts.
 
-CEP mounts three thin blind pass-through routes in `apps/server/routes/collaboration.ts`:
-- `GET /api/surfaces/schemas` → `runtime.sfieldInstance.surfaces.inspectSchemas()`
-- `POST /api/surfaces/stitch` → `runtime.sfieldInstance.surfaces.stitch(...)`
-- `POST /api/surfaces/action` → `runtime.sfieldInstance.surfaces.dispatchAction(...)` (verifies HMAC seal & `Principal`, rejects tampered inputs or cross-principal replay, and handles `succeeded`, `pending_approval`, `input_required`, `denied`, `failed`)
+UI data binding, component schema validation, AI draft binding, deterministic A2UI compilation, and persistent HMAC-SHA256 signed action references live in **`sphoton`** (`packages/sphoton/`), which talks to `sfield` strictly through a narrow `SfieldAdapter` (`apps/server/sphoton-catalog.ts`). See `docs/developers/sphoton.md` for the full 3-layer diagram (`sfield` → `sphoton` → App/Domains) and `/api/admin/ui-binding-catalog`.
+
+CEP also retains the experimental `/api/surfaces/*` pass-through routes in `apps/server/routes/collaboration.ts` for **SurfaceBinder Lab** (`sf.surfaces`).
 
 ### Core `@sfield/*` SDK workspace packages & primitives
 

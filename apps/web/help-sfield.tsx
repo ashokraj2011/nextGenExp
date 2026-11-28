@@ -83,11 +83,18 @@ const executionLanes = [
     guarantee: "Authorizer + Ajv schemas + HITL approvals + MCP 2026 Elicitation (input_required) & Async Tasks + sfieldRunId audit",
   },
   {
-    lane: "Blind Surface Stitch & Sealed Actions",
+    lane: "sphoton UI Tool Bindings",
+    preset: "read_only / host-scoped actions",
+    caller: "packages/sphoton (/api/admin/ui-binding-catalog · UI Builder · Chat)",
+    allowed: "Domain-exposed sfield tool fields & actions validated against closed schemas",
+    guarantee: "Headless sfield stays UI-free; sphoton enforces type safety, SHA-256 review dependency fingerprints, verified-read reuse, unavailable states & persistent HMAC action refs",
+  },
+  {
+    lane: "Legacy SurfaceBinder Lab",
     preset: "read_only (stitch) / supervised (action)",
     caller: "sf.surfaces (/api/surfaces/schemas · stitch · action)",
-    allowed: "Declarative $ref / $repeat / $input UI templates bound to registered sfield tools",
-    guarantee: "Closed schema path validation + HMAC-SHA256 principal-bound action seals (blocks tampering & cross-principal replay)",
+    allowed: "Experimental $ref / $repeat / $input pass-through templates",
+    guarantee: "Closed schema path validation + HMAC-SHA256 principal-bound action seals",
   },
 ];
 
@@ -157,6 +164,11 @@ const sdkPackages = [
     pkg: "@sfield/cli",
     role: "Standalone CLI (sfield)",
     highlights: "init, validate, eval, lock status, lock approve, inspect <runId>, doctor, studio, and mcp serve (stdio).",
+  },
+  {
+    pkg: "packages/sphoton",
+    role: "Singularity Photon — UI Tool-Binding Toolkit",
+    highlights: "Sits above headless sfield via SfieldAdapter: owns card binding contracts, component/tool schema validation, catalog-driven AI draft generation, single deterministic A2UI compilation (preview + approval + live chat), unavailable states, and persistent HMAC-SHA256 action references.",
   },
 ];
 
@@ -265,6 +277,30 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
           </div>
         </li>
       </ol>
+
+      <div className="help-sfield-subsection">
+        <h3>Shared UI tool bindings: headless <code>sfield</code> + <code>sphoton</code></h3>
+        <p><strong>sfield</strong> stays strictly headless (tool schemas, execution, and call logs — zero UI). <strong>sphoton</strong> (<code>packages/sphoton/</code>) sits above it so every domain shares one validated compiler across draft preview, Admin chat approval, and customer chat:</p>
+        <ol className="help-sfield-flow" aria-label="How sfield, sphoton, and domains separate responsibilities" role="list">
+          <li className="help-sfield-node">
+            <span className="help-entity-icon"><ShieldCheck size={18} aria-hidden="true" /></span>
+            <h3>sfield (Headless Field)</h3>
+            <p>Registers tools once with closed input/output JSON Schemas, enforces scoped execution, and records immutable call logs. Knows nothing about UI.</p>
+            <ArrowRight className="help-proposal-arrow" size={22} aria-hidden="true" />
+          </li>
+          <li className="help-sfield-node">
+            <span className="help-entity-icon"><Layers size={18} aria-hidden="true" /></span>
+            <h3>sphoton (<code>packages/sphoton</code>)</h3>
+            <p>Consumes <code>sfield</code> via <code>SfieldAdapter</code>. Validates bindings &amp; types, generates AI drafts from the exposed catalog, compiles A2UI (reusing verified reads or rendering unavailable states), and seals persistent HMAC action refs.</p>
+            <ArrowRight className="help-proposal-arrow" size={22} aria-hidden="true" />
+          </li>
+          <li className="help-sfield-node">
+            <span className="help-entity-icon"><Network size={18} aria-hidden="true" /></span>
+            <h3>App &amp; Domains (CEP)</h3>
+            <p>Controls tenant/domain exposure &amp; friendly labels (<code>/api/admin/ui-binding-catalog</code>), runs UI Builder &amp; dependency-fingerprinted Admin chat approvals, renders A2UI in chat, and displays approved design revisions in Logs.</p>
+          </li>
+        </ol>
+      </div>
 
       <div className="help-sfield-subsection">
         <h3>Core sfield architecture pillars</h3>

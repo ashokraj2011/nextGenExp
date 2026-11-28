@@ -93,14 +93,17 @@ Ask **“Build a savings calculator for $300 a month for 8 years.”**, **“Sho
 - **Contextual Personalization**: `Store.finish` runs `applyPersonalization` (`apps/server/response-personalizer.ts`) using the customer's first name and `turn.emotionalState` so replies open naturally and empathetically instead of generic copy.
 - **Unconnected Source Guard**: If a requested chart needs records and has no connected source, chat pauses with clickable clarification choices instead of fabricating numbers. Publish a recurring design from **UI Builder** when domain owners want to manage it.
 
-### Stitch UI directly from `sfield` tools (`sf.surfaces` & `/api/surfaces/*`)
+### Stitch UI from `sfield` tools with `sphoton` (`packages/sphoton/`)
 
-For screens or widgets that bind directly to registered `sfield` tools without custom server glue, `@sfield/core` provides **`SurfaceBinderService`** (`sf.surfaces`), exposed in CEP as three blind pass-through routes (`apps/server/routes/collaboration.ts`):
+To keep **`sfield`** completely headless (tools, closed schemas, execution, and call logs — zero UI), CEP uses **`sphoton`** (`packages/sphoton/`) for shared tool-bound chat cards across **Wealth**, **IT Ops**, and **Sales RevOps**:
 
-- `GET /api/surfaces/schemas` — returns auto-discovered bindable output/input paths from every registered `sfield` tool's closed JSON Schema.
-- `POST /api/surfaces/stitch` — executes the declared read `sources` via `sfield`, resolves `$ref` (including `principal.identifiers.*`), `$repeat` (`$item` / `$index`), and deterministic formatters (`usd_cents`, `percent`, `date`), and returns a stitched surface with **HMAC-SHA256 sealed actions**.
-- `POST /api/surfaces/action` — blindly forwards a clicked sealed action plus user `formInputs` back to `sf.surfaces.dispatchAction(...)`, which verifies the principal-bound seal, merges only declared `$input` slots, and handles `succeeded`, `pending_approval` (HITL), or `input_required` (MCP Elicitation).
-- Try it interactively in **Administration → UI Builder → SurfaceBinder Lab** (`/admin/ui?view=surfaces`).
+- **`GET /api/admin/ui-binding-catalog?domain=<domain>`** — filters registered `sfield` tools by the caller's tenant and domain, returning versioned `toolRef`s, output paths, types, domain-owned friendly labels (for example, `goal.progress.read@1.0.0 → targetCents` as **Down payment target**), supported formats, and allowed actions. Both the UI Builder field picker and AI draft generation (`POST /api/admin/ui-layout-generate`) consume this same catalog.
+- **Validation & dependency-fingerprinted approval** — `validateCardBinding` validates `toolBinding` slots against component destination schemas, closed `sfield` schemas, and the domain's allowlist. Publishing records SHA-256 tool-contract fingerprints (`dependencyRevision` in `apps/server/publication-reviews.ts`); if a tool schema or domain exposure changes during Admin chat review, approval is blocked until a revised design is submitted.
+- **Single deterministic compiler & Logs** — `compileBoundCard` (`packages/sphoton/compiler.ts`) compiles draft preview, approval preview, and live customer chat identically, reusing verified turn results (`reuseVerifiedTurnResult`), rendering approved unavailable states on missing required fields, and emitting persistent HMAC-SHA256 signed action references. **Administration → Logs** displays the approved design revision, bound tool versions, and full `sfield` inputs/outputs for originating and follow-up turns. See `docs/developers/sphoton.md` and `tests/sphoton.test.ts`.
+
+### Legacy `sf.surfaces` Lab (`/api/surfaces/*`)
+
+For low-level pass-through testing against `@sfield/core`’s `SurfaceBinderService`, CEP also exposes `/api/surfaces/schemas`, `/api/surfaces/stitch`, and `/api/surfaces/action` (`apps/server/routes/collaboration.ts`), accessible in **Administration → UI Builder → SurfaceBinder Lab** (`/admin/ui?view=surfaces`). Production chat card bindings use **`sphoton`** (`packages/sphoton/`) so `sfield` remains UI-agnostic.
 
 ### Add a new component type in code
 

@@ -13,7 +13,7 @@ const participants = [
   },
   {
     name: "CEP app server", shortName: "App server", Icon: Network,
-    description: "Resolves the flows allowed in this chat, selects a flow, checks model results and builds the UI.",
+    description: "Resolves the flows allowed in this chat, selects a flow, checks model results, and compiles bound A2UI cards via sphoton.",
   },
   {
     name: "sfield", shortName: "sfield", Icon: ShieldCheck,
@@ -54,7 +54,7 @@ const exchanges: SequenceExchange[] = [
   { path: [data, host], label: "Approved copy, disclosures & allowed components", reply: true, evidence: "content", example: cases.content },
   { path: [host, sfield, model], label: "Customer’s request and eligible candidates", evidence: "composer", example: cases.composer, handoff: handoffs.composer },
   { path: [model, sfield, host], label: "Return the proposed layout", reply: true, evidence: "composer", example: cases.composer },
-  { path: [host, host], label: "Build the A2UI surface", self: "Apply the published layout and bind its data", evidence: "surface", example: cases.compileUi },
+  { path: [host, host], label: "Build the A2UI surface", self: "Apply the published layout and bind verified tool data via sphoton", evidence: "surface", example: cases.compileUi },
   { path: [host, chat], label: "Send the finished surface to chat", reply: true, evidence: "surface", example: cases.surface },
   { path: [chat, host], label: "Start the next turn from a button", evidence: "clicks", example: cases.followUp },
 ];
