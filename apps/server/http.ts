@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { domainPackIds, type DomainPackId } from "../../packages/contracts/domain-packs";
 import { createPinnedCardSchema, type PinnedLiveCard } from "../../packages/contracts/pinned-cards";
 import { inferPinnedCardToolRefs, refreshPinnedCardLive } from "./pinned-cards-live";
+import { PznDecisionPlane } from "./pzn-decision-plane";
 import { runSketchToUi, sketchToUiRequestSchema } from "./sketch-to-ui";
 import { createStudioHandler } from "@sfield/studio";
 import { handleAdminStudioRoutes, isExperienceRegistryEndpoint } from "./routes/admin-studio";
@@ -255,6 +256,7 @@ export async function startApp(options: Options) {
   };
   const widgetLibrary = widgetLibraries.wealth;
   const selfServicePzn = new SelfServicePznStore(options.dataDir);
+  const pznDecisionPlane = new PznDecisionPlane();
   const integrationTasks = new IntegrationTaskStore(options.dataDir);
   const profileStore = new CustomerProfileStore(options.dataDir);
   setActiveCustomerProfileStore(profileStore);
@@ -1611,6 +1613,68 @@ export async function startApp(options: Options) {
         ...(turn.agentRunId && { agentic: runtime?.decisionTrace(turn) }),
         ...turn.trace,
       });
+    }
+    if (resource === "pzn-demo") {
+      if (id === "state" && !operation && method === "GET") {
+        return json(res, pznDecisionPlane.getState());
+      }
+      if (id === "decide" && !operation && method === "POST") {
+        const input = await body(
+          req,
+          z.object({
+            mid: z.string().min(1).max(64),
+            context: z.enum(["balance", "portsum", "address-update", "pending-actions"]),
+            trigger: z.string().min(1).max(64).optional(),
+          }).strict(),
+        );
+        const decision = await pznDecisionPlane.evaluateDecision(input);
+        return json(res, { decision, state: pznDecisionPlane.getState() }, 201);
+      }
+      if (id === "execute" && !operation && method === "POST") {
+        const input = await body(
+          req,
+          z.object({
+            decisionId: z.string().min(1).max(120),
+            mid: z.string().min(1).max(64),
+            signedActionToken: z.string().min(1).max(2048),
+          }).strict(),
+        );
+        const result = await pznDecisionPlane.executeSignedAction(input);
+        if (!result.ok) throw new ApiError(result.status, "pzn_action_rejected", result.error);
+        return json(res, { decision: result.decision, execution: result.execution, state: pznDecisionPlane.getState() });
+      }
+      if (id === "confirm-funding" && !operation && method === "POST") {
+        const input = await body(
+          req,
+          z.object({
+            decisionId: z.string().min(1).max(120),
+            mid: z.string().min(1).max(64),
+            simulateStaleVersion: z.boolean().optional(),
+          }).strict(),
+        );
+        const result = await pznDecisionPlane.confirmFundingAndRefresh(input);
+        if (!result.ok) throw new ApiError(result.status, "pzn_refresh_failed", result.error);
+        return json(res, { ...result, state: pznDecisionPlane.getState() });
+      }
+      if (id === "rule" && !operation && method === "POST") {
+        const input = await body(
+          req,
+          z.object({
+            ruleId: z.string().min(1).max(64),
+            enabled: z.boolean().optional(),
+            value: z.union([z.string(), z.number()]).optional(),
+          }).strict(),
+        );
+        const result = pznDecisionPlane.updateSharedRule(input.ruleId, {
+          ...(input.enabled !== undefined && { enabled: input.enabled }),
+          ...(input.value !== undefined && { value: input.value }),
+        });
+        if (!result.ok) throw new ApiError(400, "smass_rule_validation_failed", result.error);
+        return json(res, { rule: result.rule, state: pznDecisionPlane.getState() });
+      }
+      if (id === "reset" && !operation && method === "POST") {
+        return json(res, { state: pznDecisionPlane.reset() });
+      }
     }
     throw new ApiError(404, "not_found", "This route is unavailable.");
   }

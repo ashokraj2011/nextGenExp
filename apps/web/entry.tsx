@@ -51,6 +51,9 @@ if (location.pathname === "/embed") {
 } else if (location.pathname === "/recommendations") {
   document.title = "Recommendations Workspace";
   void import("./recommendation-workspace").then(({ RecommendationWorkspace }) => createRoot(document.getElementById("root")!).render(<><RecommendationWorkspace /><PublicationReviewNotice /></>));
+} else if (location.pathname === "/pzn-architecture") {
+  document.title = "PZN Agentic Decision Plane · smass & sfield";
+  void import("./pzn-architecture-demo").then(({ PznArchitectureDemo }) => createRoot(document.getElementById("root")!).render(<PznArchitectureDemo />));
 } else if (location.pathname === "/advisor") {
   document.title = "Advisor Co-Pilot & Shared Card Room";
   void import("./advisor-workspace").then(({ AdvisorWorkspace }) => createRoot(document.getElementById("root")!).render(<AdvisorWorkspace />));
