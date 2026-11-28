@@ -5,10 +5,10 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { MessagePrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import {
-  ArrowUpRight, BookOpenText, Check, ChevronLeft, ChevronRight, Columns2, GraduationCap, House, ListChecks, MapPin,
+  ArrowUpRight, BookOpenText, Check, ChevronLeft, ChevronRight, Columns2, GraduationCap, House, Layers, ListChecks, MapPin,
   PanelRightOpen, Pin, RotateCcw, Sparkles, ThumbsDown, ThumbsUp, X,
 } from "lucide-react";
-import { progressLabels, type NextBestActionCard, type TurnView } from "../../../packages/contracts/api";
+import { progressLabels, type NextBestActionCard, type SurfaceArbitrationTrace, type TurnView } from "../../../packages/contracts/api";
 import { api } from "../api";
 import { TurnRichActions } from "../chat-rich-ux";
 import { SpeakButton } from "../composer-extras";
@@ -213,12 +213,14 @@ export function UserMessage() {
   );
 }
 
-export function NbaCompanionCard({ nba, personaId, disabled, onRunPrompt, onPreviewFunding }: {
+export function NbaCompanionCard({ nba, personaId, disabled, arbitratedBySphoton, onRunPrompt, onPreviewFunding, onDismissed }: {
   nba: NextBestActionCard;
   personaId?: string;
   disabled: boolean;
+  arbitratedBySphoton?: boolean;
   onRunPrompt: (prompt: string) => void;
   onPreviewFunding: () => void;
+  onDismissed?: (nbaId: string) => void;
 }) {
   const [dismissed, setDismissed] = useState(false);
   const [dismissing, setDismissing] = useState(false);
@@ -226,7 +228,7 @@ export function NbaCompanionCard({ nba, personaId, disabled, onRunPrompt, onPrev
   if (dismissed) {
     return (
       <p className="nba-dismissed-note" role="status">
-        Dismissed — we&rsquo;ll prioritize other recommendations next time.
+        Dismissed via sphoton surface policy — we&rsquo;ll auto-promote the next eligible recommendation on your next turn.
       </p>
     );
   }
@@ -237,8 +239,10 @@ export function NbaCompanionCard({ nba, personaId, disabled, onRunPrompt, onPrev
     try {
       await api.dismissNba(personaId, nba.id);
       setDismissed(true);
+      onDismissed?.(nba.id);
     } catch {
       setDismissed(true);
+      onDismissed?.(nba.id);
     } finally {
       setDismissing(false);
     }
@@ -248,6 +252,11 @@ export function NbaCompanionCard({ nba, personaId, disabled, onRunPrompt, onPrev
     <section className="content-card nba-companion-card" aria-label="Next best action">
       <div className="nba-companion-top">
         <span className="nba-companion-kicker"><Sparkles size={13} aria-hidden="true" />{nba.kicker}</span>
+        {arbitratedBySphoton && (
+          <span className="nba-sphoton-tag" title="Placed by sphoton 5-class chat_turn surface budget">
+            <Layers size={11} aria-hidden="true" /> sphoton · NBA
+          </span>
+        )}
       </div>
       <h3>{nba.title}</h3>
       <p className="content-body">{nba.body}</p>
@@ -268,6 +277,50 @@ export function NbaCompanionCard({ nba, personaId, disabled, onRunPrompt, onPrev
           Not now
         </button>
       </div>
+    </section>
+  );
+}
+
+function SurfaceArbitrationDrawer({ trace, dismissedNbaId }: {
+  trace: SurfaceArbitrationTrace;
+  dismissedNbaId?: string;
+}) {
+  const effectiveEntries = dismissedNbaId
+    ? [
+        ...trace.arbitrationLog,
+        {
+          uiClass: "nba",
+          outcome: "dismissed",
+          itemId: dismissedNbaId,
+          reason: "Dismissed by customer in live chat — suppressed across channels; next eligible NBA will promote on next turn.",
+        },
+      ]
+    : trace.arbitrationLog;
+  return (
+    <section className="sphoton-arb-drawer" aria-label="sphoton 5-class surface arbitration">
+      <header className="sphoton-arb-head">
+        <strong><Layers size={13} aria-hidden="true" /> sphoton Surface Policy</strong>
+        <span>
+          Channel <code>{trace.channelId}</code> · max {trace.maxCompanionTotal} companion (Tasks &gt; NBA)
+        </span>
+      </header>
+      <ul className="sphoton-arb-list">
+        {effectiveEntries.map((entry, idx) => (
+          <li key={`${entry.uiClass}-${entry.itemId}-${idx}`} className="sphoton-arb-row">
+            <span className={`sphoton-arb-class is-${entry.uiClass}`}>{entry.uiClass.toUpperCase()}</span>
+            <span className={`sphoton-arb-outcome is-${entry.outcome}`}>{entry.outcome}</span>
+            <span className="sphoton-arb-reason">
+              <code>{entry.itemId}</code> — {entry.reason}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {trace.suppressed.length > 0 && (
+        <div className="sphoton-arb-suppressed">
+          <strong>Held by budget ({trace.suppressed.length}):</strong>{" "}
+          {trace.suppressed.map((s) => `${s.title} (${s.reason})`).join(" · ")}
+        </div>
+      )}
     </section>
   );
 }
@@ -311,6 +364,8 @@ export function AssistantMessage() {
   } = useContext(ConversationControls);
   const element = useRef<HTMLDivElement>(null);
   const [arrivedLive] = useState(turn?.status === "working");
+  const [arbOpen, setArbOpen] = useState(false);
+  const [dismissedNbaId, setDismissedNbaId] = useState<string>();
   const turnId = turn?.id;
   const latestId = latest?.id;
   const replyReady = Boolean(turn && (turn.status !== "working" || turn.previewExperience));
@@ -323,13 +378,17 @@ export function AssistantMessage() {
   const experience = turn.experience;
   const steps = progressHistory[turn.id] ?? [turn.progress];
   const recommendation = experience?.blocks.some((block) => block.component === "PznContentCard" && block.props.recommendation);
+  const arb = turn.surfaceArbitration;
+  const effectivePlacedNba = arb ? Math.max(0, arb.placedNba - (dismissedNbaId ? 1 : 0)) : 0;
   const companion = !adminChat && turn.status === "completed" && turn.nextBestAction && (
     <NbaCompanionCard
       nba={turn.nextBestAction}
       personaId={activeProfile?.personaId}
       disabled={pending}
+      arbitratedBySphoton={Boolean(arb)}
       onRunPrompt={runPrompt}
       onPreviewFunding={previewFunding}
+      onDismissed={(id) => setDismissedNbaId(id)}
     />
   );
 
@@ -367,6 +426,7 @@ export function AssistantMessage() {
               customerLookup={turn.customerLookup}
               emotionalState={turn.emotionalState}
               providerArbitration={turn.providerArbitration}
+              surfaceArbitration={turn.surfaceArbitration}
               piiRedaction={turn.piiRedaction}
             />
           )}
@@ -416,6 +476,21 @@ export function AssistantMessage() {
                     })()}
                   </>
                 )}
+                {arb && (
+                  <button
+                    type="button"
+                    className={"reply-canvas-btn sphoton-arb-pill" + (arbOpen ? " is-active" : "")}
+                    aria-expanded={arbOpen}
+                    title="Inspect sphoton 5-class surface arbitration (Main > Tasks > NBA)"
+                    onClick={() => setArbOpen((open) => !open)}
+                  >
+                    <Layers size={12} aria-hidden="true" />
+                    sphoton · 1 Main
+                    {arb.placedTasks > 0 ? ` · ${arb.placedTasks} Task` : ""}
+                    {effectivePlacedNba > 0 ? ` · ${effectivePlacedNba} NBA` : ""}
+                    {dismissedNbaId ? " · NBA dismissed" : arb.suppressed.length > 0 ? ` · ${arb.suppressed.length} held` : ""}
+                  </button>
+                )}
                 <TurnRichActions
                   turn={turn}
                   pending={pending}
@@ -435,6 +510,7 @@ export function AssistantMessage() {
               </div>
             </footer>
           )}
+          {arb && arbOpen && <SurfaceArbitrationDrawer trace={arb} dismissedNbaId={dismissedNbaId} />}
         </div>
       </div>
     </MessagePrimitive.Root>

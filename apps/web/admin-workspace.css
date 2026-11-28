@@ -1,16 +1,105 @@
+.administration-layout {
+  transition: grid-template-columns 0.18s ease;
+}
+.administration-layout > .workspace {
+  min-width: 0;
+  overflow-x: hidden;
+}
+.administration-layout.is-sidebar-collapsed {
+  grid-template-columns: 60px minmax(0, 1fr);
+}
 .administration-sidebar {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 16px 13px;
+  gap: 12px;
+  padding: 14px 12px;
   min-width: 0;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   border-right: 1px solid var(--line);
   background: #fbfcfd;
 }
-.administration-sidebar > .rail-home { align-self: start; }
+.admin-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+.administration-sidebar .rail-home {
+  min-width: 0;
+  flex: 1;
+}
+.admin-sidebar-toggle,
+.admin-topbar-sidebar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+.admin-sidebar-toggle:hover,
+.admin-topbar-sidebar-btn:hover {
+  background: #eef3f7;
+  color: var(--ink);
+  border-color: var(--line);
+}
+.administration-layout.is-sidebar-collapsed .administration-sidebar {
+  padding: 14px 8px;
+  align-items: center;
+}
+.administration-layout.is-sidebar-collapsed .admin-sidebar-head {
+  justify-content: center;
+}
+.administration-layout.is-sidebar-collapsed .rail-home {
+  justify-content: center;
+  padding: 2px;
+  flex: 0 0 auto;
+}
+.administration-layout.is-sidebar-collapsed .rail-label {
+  display: none;
+}
+.administration-layout.is-sidebar-collapsed .admin-navigation {
+  width: 100%;
+  justify-items: center;
+}
+.administration-layout.is-sidebar-collapsed .rail-link {
+  width: 40px;
+  height: 36px;
+  padding: 0;
+  justify-content: center;
+}
+.admin-nav-section-title {
+  margin: 12px 10px 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.administration-layout.is-sidebar-collapsed .admin-nav-section-title {
+  font-size: 0;
+  height: 1px;
+  width: 28px;
+  margin: 8px auto;
+  background: var(--line);
+  overflow: hidden;
+}
 .administration-sidebar .admin-navigation { display: grid; gap: 3px; }
-.administration-topbar { background: #fff; }
+.administration-topbar {
+  background: #fff;
+  padding: 0 20px;
+  min-width: 0;
+}
+.administration-topbar .workspace-back {
+  white-space: nowrap;
+}
 .admin-diagnostics { display: grid; align-content: start; gap: 13px; }
 .admin-diagnostics .admin-heading { margin-bottom: 4px; }
 .log-sources { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -1560,3 +1649,72 @@
 }
 .flow-request-list { margin: 12px 0; padding: 12px 16px; border-left: 3px solid var(--teal); background: var(--teal-pale); }
 .flow-request-list ol { display: flex; flex-wrap: wrap; gap: 6px 28px; margin: 8px 0 0; padding-inline-start: 20px; }
+
+
+/* Unified Policy Studio (/admin/intents & /admin/recommendations) */
+.policy-studio-shell {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.policy-studio-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 12px 24px;
+  background: var(--white);
+  border-bottom: 1px solid var(--line);
+}
+.policy-studio-bar-copy {
+  display: grid;
+  gap: 2px;
+}
+.policy-studio-eyebrow {
+  font-size: 0.67rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--teal-dark);
+}
+.policy-studio-bar-copy strong {
+  font-size: 0.96rem;
+  font-weight: 680;
+  color: var(--ink);
+}
+.policy-studio-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+.policy-studio-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.79rem;
+  font-weight: 620;
+  white-space: nowrap;
+}
+.policy-studio-tab:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.7);
+}
+.policy-studio-tab.is-active {
+  background: var(--white);
+  color: var(--teal-dark);
+  border-color: var(--teal-border);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  font-weight: 680;
+}

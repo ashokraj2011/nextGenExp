@@ -85,7 +85,7 @@ async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-export function PznArchitectureDemo() {
+export function PznArchitectureDemo({ embedded = false }: { embedded?: boolean }) {
   const [state, setState] = useState<PznDecisionPlaneState | null>(null);
   const [activeDecision, setActiveDecision] = useState<PznDecisionRecord | null>(null);
   const [selectedScenarioId, setSelectedScenarioId] = useState<string>("marcus-address");
@@ -239,33 +239,54 @@ export function PznArchitectureDemo() {
   const latestWorkflow = activeDecision?.workflowExecutions.at(-1);
 
   return (
-    <div className="pzn-arch-page">
-      <header className="pzn-arch-topbar">
-        <div className="pzn-arch-topbar-left">
-          <a href="/" className="pzn-arch-back">
-            <ArrowLeft size={15} aria-hidden="true" />
-            Back to Chat
-          </a>
-          <div className="pzn-arch-title-group">
+    <div className={"pzn-arch-page" + (embedded ? " is-embedded" : "")}>
+      {embedded ? (
+        <div className="pzn-arch-embedded-bar">
+          <div>
             <span className="pzn-arch-eyebrow">
               <Sparkles size={12} aria-hidden="true" />
-              LIVE ARCHITECTURE SHOWCASE
+              SFIELD PLUGGABLE TOOL · pzn.treatments.decide@1.0.0
             </span>
-            <h1>PZN Agentic Decision Plane — Powered by smass &amp; sfield</h1>
+            <h2>PZN Decision Plane Sandbox</h2>
+          </div>
+          <div className="pzn-arch-topbar-right">
+            <a href="/pzn-architecture" className="pzn-arch-back">
+              Full page
+            </a>
+            <button type="button" className="pzn-arch-btn-secondary" disabled={busy} onClick={() => void resetAll()}>
+              <RotateCcw size={14} aria-hidden="true" />
+              Reset Demo
+            </button>
           </div>
         </div>
-        <div className="pzn-arch-topbar-right">
-          <a href="/experience-composer" className="pzn-arch-back">
-            <Layers size={14} aria-hidden="true" />
-            Experience Composer
-          </a>
-          <button type="button" className="pzn-arch-btn-secondary" disabled={busy} onClick={() => void resetAll()}>
-            <RotateCcw size={14} aria-hidden="true" />
-            Reset Demo
-          </button>
-          <ThemeToggle compact />
-        </div>
-      </header>
+      ) : (
+        <header className="pzn-arch-topbar">
+          <div className="pzn-arch-topbar-left">
+            <a href="/" className="pzn-arch-back">
+              <ArrowLeft size={15} aria-hidden="true" />
+              Back to Chat
+            </a>
+            <div className="pzn-arch-title-group">
+              <span className="pzn-arch-eyebrow">
+                <Sparkles size={12} aria-hidden="true" />
+                LIVE ARCHITECTURE SHOWCASE
+              </span>
+              <h1>PZN Agentic Decision Plane — Powered by smass &amp; sfield</h1>
+            </div>
+          </div>
+          <div className="pzn-arch-topbar-right">
+            <a href="/experience-composer" className="pzn-arch-back">
+              <Layers size={14} aria-hidden="true" />
+              Experience Composer
+            </a>
+            <button type="button" className="pzn-arch-btn-secondary" disabled={busy} onClick={() => void resetAll()}>
+              <RotateCcw size={14} aria-hidden="true" />
+              Reset Demo
+            </button>
+            <ThemeToggle compact />
+          </div>
+        </header>
+      )}
 
       <main className="pzn-arch-main">
         {/* Executive Value Strip */}

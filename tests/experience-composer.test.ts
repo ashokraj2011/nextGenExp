@@ -36,6 +36,15 @@ test("ExperienceComposerEngine arbitrates 5 UI classes across subject areas and 
   assert.equal(mobileView.zones.tasks.length, 1);
   assert.equal(mobileView.zones.nba.length, 0);
   assert.equal(mobileView.zones.chrome.followUps.length, 1);
+  assert.equal(mobileView.zones.chrome.sources[0]?.version, "chk_28");
+  assert.ok(mobileView.zones.main.highlights.some((h) => h.value.includes("Expiring in 48h")));
+
+  // Completing Maya's Banking rate-lock Task refreshes Main highlight text and smass source version (chk_28 -> chk_29)
+  const mayaRev2 = await engine.completeTaskEvent({ experienceId: "banking-cashflow-summary", channel: "mobile_compact" });
+  assert.equal(mayaRev2.revision, 2);
+  assert.equal(mayaRev2.dataVersions.balanceVersion, "chk_29");
+  assert.equal(mayaRev2.zones.chrome.sources[0]?.version, "chk_29");
+  assert.ok(mayaRev2.zones.main.highlights.some((h) => h.value.includes("Rate Lock Signed")));
 
   // 4. Signed sfield action execution works & forged tokens are rejected
   const validToken = chatView.zones.tasks[0]!.signedActionToken;

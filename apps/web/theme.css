@@ -928,3 +928,38 @@
   border-color: #54421a;
   color: #f3cd7a;
 }
+
+
+/* Collapsible Admin Sidebar, UI Studio Header, Policy Studio & sphoton Live Arbitration (Dark Mode) */
+:root[data-theme="dark"] .admin-sidebar-toggle:hover,
+:root[data-theme="dark"] .admin-topbar-sidebar-btn:hover {
+  background: #1d2620;
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+:root[data-theme="dark"] .ui-studio-view-tabs,
+:root[data-theme="dark"] .policy-studio-tabs {
+  background: #111713;
+  border-color: var(--line);
+}
+:root[data-theme="dark"] .ui-studio-view-tab.is-active,
+:root[data-theme="dark"] .policy-studio-tab.is-active {
+  background: #1d2720;
+  color: var(--teal-dark);
+  border-color: var(--teal-border);
+}
+:root[data-theme="dark"] .ui-studio-tenant-pill,
+:root[data-theme="dark"] .ui-studio-domain-select,
+:root[data-theme="dark"] .ui-layout-picker {
+  background: #161c18 !important;
+  border-color: var(--line-strong) !important;
+  color: var(--ink) !important;
+}
+:root[data-theme="dark"] .sphoton-arb-drawer {
+  background: #161c18;
+  border-color: var(--line);
+}
+:root[data-theme="dark"] .sphoton-arb-row {
+  background: #101512;
+  border-color: var(--line);
+}

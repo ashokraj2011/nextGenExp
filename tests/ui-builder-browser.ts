@@ -13,7 +13,7 @@ try {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.goto(app.url + "/admin");
-  await page.getByRole("link", { name: "UI Builder", exact: true }).click();
+  await page.getByRole("link", { name: "sphoton UI Studio", exact: true }).click();
   await page.getByRole("heading", { level: 1, name: "UI Studio" }).waitFor();
   const preview = page.getByRole("region", { name: "Layout preview" });
   await preview.getByRole("heading", { name: "Understand your balances" }).waitFor();

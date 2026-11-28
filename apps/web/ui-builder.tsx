@@ -1103,49 +1103,152 @@ function UiWorkspace({ initial, customers }: {
   return (
     <main className="ui-builder-width ui-builder-main ui-studio-simple">
       <header className="ui-studio-topbar">
-        <div className="ui-studio-topbar-left">
-          <h1>UI Studio</h1>
-          {view === "widgets" && <span className="design-scope">{initial.tenantId} / {getDomainPack(domainId).label}</span>}
-          {view === "editor" && (
-            <div className="ui-layout-picker-row">
-              <label className="design-scope">{initial.tenantId} <span aria-hidden="true">/</span>
-                <select aria-label="Design domain" disabled={busy || Boolean(record)} value={domainId}
+        <div className="ui-studio-header-primary">
+          <div className="ui-studio-title-group">
+            <h1>UI Studio</h1>
+            <span className="ui-studio-tenant-pill">{initial.tenantId}</span>
+            {view === "widgets" && (
+              <span className="ui-studio-domain-pill">{getDomainPack(domainId).label}</span>
+            )}
+            {view === "editor" && (
+              <div className="ui-layout-picker-row">
+                <select
+                  className="ui-studio-domain-select"
+                  aria-label="Design domain"
+                  disabled={busy || Boolean(record)}
+                  value={domainId}
                   onChange={(event) => {
                     const next = event.target.value as DomainPackId;
                     setNewDomain(next);
-                    edit({ ...activeDesign, recordIntent: undefined, targets: activeDesign.targets.filter((target) => layoutTargetDomain(target) === next),
-                      ...(activeDesign.experience && next !== "wealth" && { experience: { ...activeDesign.experience, audience: "operator" } }) });
-                  }}>
+                    edit({
+                      ...activeDesign,
+                      recordIntent: undefined,
+                      targets: activeDesign.targets.filter((target) => layoutTargetDomain(target) === next),
+                      ...(activeDesign.experience && next !== "wealth" && { experience: { ...activeDesign.experience, audience: "operator" } }),
+                    });
+                  }}
+                >
                   {initial.domains.map((id) => <option key={id} value={id}>{getDomainPack(id).label}</option>)}
                 </select>
-              </label>
-              <select
-                className="ui-layout-picker"
-                aria-label="Select layout"
-                value={selected}
-                disabled={busy}
-                onChange={(e) => select(e.target.value)}
+                <select
+                  className="ui-layout-picker"
+                  aria-label="Select layout"
+                  value={selected}
+                  disabled={busy}
+                  onChange={(e) => select(e.target.value)}
+                >
+                  {edits.new && (
+                    <option value="new">{edits.new.name.trim() || "Untitled layout"} (Unsaved)</option>
+                  )}
+                  {records.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.draft.name} · {statusOf(item, edits[item.id] ?? item.draft)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          {view === "editor" && (
+            <div className="ui-studio-publish-group">
+              <span className={"ui-layout-status" + (record?.published ? " is-published" : "")}>
+                {record?.published && <Check size={12} aria-hidden="true" />}
+                {record ? statusOf(record, activeDesign) : "Draft"}
+              </span>
+              <button
+                type="button"
+                className="ui-button ui-button-outline ui-compact-btn"
+                disabled={busy || !activeDesign.name.trim() || !dirty || Boolean(experience && !validExperience)}
+                onClick={() => void save("draft")}
               >
-                {edits.new && (
-                  <option value="new">{edits.new.name.trim() || "Untitled layout"} (Unsaved)</option>
-                )}
-                {records.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.draft.name} · {statusOf(item, edits[item.id] ?? item.draft)}
-                  </option>
-                ))}
-              </select>
+                Save draft
+              </button>
+              <button
+                type="button"
+                className="ui-button ui-button-primary ui-compact-btn"
+                disabled={busy || !publishAllowed || !activeDesign.name.trim() || Boolean(record?.published && statusOf(record, activeDesign) === "Published")}
+                onClick={() => void save("publish")}
+              >
+                Publish
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="ui-studio-header-secondary">
+          <div className="ui-studio-view-tabs" role="group" aria-label="sphoton UI Studio tools">
+            {initial.domains.length > 0 && (
+              <button
+                type="button"
+                aria-pressed={view === "editor"}
+                className={"ui-studio-view-tab" + (view === "editor" ? " is-active" : "")}
+                onClick={() => setView("editor")}
+              >
+                <LayoutGrid size={13} aria-hidden="true" />
+                Editor
+              </button>
+            )}
+            <button
+              type="button"
+              aria-pressed={view === "composer"}
+              className={"ui-studio-view-tab" + (view === "composer" ? " is-active" : "")}
+              title="5-Class Experience Composer"
+              onClick={() => setView("composer")}
+            >
+              <Sparkles size={13} aria-hidden="true" />
+              Composer
+            </button>
+            <button
+              type="button"
+              aria-pressed={view === "surfaces"}
+              className={"ui-studio-view-tab" + (view === "surfaces" ? " is-active" : "")}
+              title="SurfaceBinder Lab"
+              onClick={() => setView("surfaces")}
+            >
+              <Database size={13} aria-hidden="true" />
+              SurfaceBinder
+            </button>
+            <button
+              type="button"
+              aria-pressed={view === "designs"}
+              className={"ui-studio-view-tab" + (view === "designs" ? " is-active" : "")}
+              onClick={() => setView("designs")}
+            >
+              Design library
+            </button>
+            {initial.domains.length > 0 && (
+              <button
+                type="button"
+                aria-pressed={view === "widgets"}
+                className={"ui-studio-view-tab" + (view === "widgets" ? " is-active" : "")}
+                title="Widget Library"
+                onClick={() => setView("widgets")}
+              >
+                <LayoutTemplate size={13} aria-hidden="true" />
+                Widgets ({widgets.length})
+              </button>
+            )}
+          </div>
+
+          {view === "editor" && (
+            <div className="ui-studio-create-actions">
               <button
                 type="button"
                 className="ui-button ui-button-outline ui-compact-btn"
                 disabled={busy || records.length >= maxLayouts}
                 onClick={newLayout}
               >
-                <Plus size={14} aria-hidden="true" /> New
+                <Plus size={13} aria-hidden="true" /> New
               </button>
-              <button type="button" className="ui-button ui-button-outline ui-compact-btn"
-                disabled={busy || records.length >= maxLayouts || !tools.length} onClick={newInteractive}>
-                <Plus size={14} aria-hidden="true" /> New experience
+              <button
+                type="button"
+                className="ui-button ui-button-outline ui-compact-btn"
+                disabled={busy || records.length >= maxLayouts || !tools.length}
+                title="New interactive experience"
+                onClick={newInteractive}
+              >
+                <Plus size={13} aria-hidden="true" /> Experience
               </button>
               <div className="ui-popover-wrap">
                 <button
@@ -1177,53 +1280,6 @@ function UiWorkspace({ initial, customers }: {
                 )}
               </div>
             </div>
-          )}
-        </div>
-
-        <div className="ui-studio-topbar-right">
-          <button type="button" className="ui-button ui-button-plain ui-compact-btn" aria-pressed={view === "composer"}
-            onClick={() => setView(view === "composer" && initial.domains.length ? "editor" : "composer")}>
-            <Sparkles size={14} aria-hidden="true" />
-            {view === "composer" ? "Back to Studio" : "Experience Composer"}
-          </button>
-          <button type="button" className="ui-button ui-button-plain ui-compact-btn" aria-pressed={view === "surfaces"}
-            onClick={() => setView(view === "surfaces" && initial.domains.length ? "editor" : "surfaces")}>
-            <Sparkles size={14} aria-hidden="true" />
-            {view === "surfaces" ? "Back to Studio" : "SurfaceBinder Lab"}
-          </button>
-          <button type="button" className="ui-button ui-button-plain ui-compact-btn" aria-pressed={view === "designs"}
-            onClick={() => setView(view === "designs" && initial.domains.length ? "editor" : "designs")}>Design library</button>
-          {initial.domains.length > 0 && <button
-            type="button"
-            className="ui-button ui-button-plain ui-compact-btn"
-            onClick={() => setView(view === "widgets" ? (initial.domains.length ? "editor" : "designs") : "widgets")}
-          >
-            <LayoutTemplate size={14} aria-hidden="true" />
-            {view === "widgets" ? "Back to Studio" : `Widget Library (${widgets.length})`}
-          </button>}
-          {view === "editor" && (
-            <>
-              <span className={"ui-layout-status" + (record?.published ? " is-published" : "")}>
-                {record?.published && <Check size={12} aria-hidden="true" />}
-                {record ? statusOf(record, activeDesign) : "Draft"}
-              </span>
-              <button
-                type="button"
-                className="ui-button ui-button-outline ui-compact-btn"
-                disabled={busy || !activeDesign.name.trim() || !dirty || Boolean(experience && !validExperience)}
-                onClick={() => void save("draft")}
-              >
-                Save draft
-              </button>
-              <button
-                type="button"
-                className="ui-button ui-button-primary ui-compact-btn"
-                disabled={busy || !publishAllowed || !activeDesign.name.trim() || Boolean(record?.published && statusOf(record, activeDesign) === "Published")}
-                onClick={() => void save("publish")}
-              >
-                Publish
-              </button>
-            </>
           )}
         </div>
       </header>

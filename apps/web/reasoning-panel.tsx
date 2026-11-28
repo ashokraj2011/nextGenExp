@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { CheckCircle2, ChevronDown, ChevronUp, Eye, Layers, Loader2, Lock, MinusCircle, ShieldAlert, ShieldCheck, Sparkles, UserCheck } from "lucide-react";
 import {
-  progressLabels, type ActionMode, type CustomerLookupSummary, type Progress, type ProviderArbitrationTrace, type SemanticRouteTrace, type TurnStatus,
+  progressLabels, type ActionMode, type CustomerLookupSummary, type Progress, type ProviderArbitrationTrace, type SemanticRouteTrace, type SurfaceArbitrationTrace, type TurnStatus,
 } from "../../packages/contracts/api";
 import type { PiiRedactionTrace } from "../../packages/contracts/pii-firewall";
 import type { DisplayExperience } from "../../packages/contracts/surface";
@@ -79,7 +79,7 @@ function verifiedFactsFor(experience?: DisplayExperience): string[] {
   return facts;
 }
 
-export function ReasoningPanel({ status, progress, history, experience, actionMode, semanticRoute, customerLookup, emotionalState, providerArbitration, piiRedaction }: {
+export function ReasoningPanel({ status, progress, history, experience, actionMode, semanticRoute, customerLookup, emotionalState, providerArbitration, surfaceArbitration, piiRedaction }: {
   status: TurnStatus;
   progress: Progress;
   history: Progress[];
@@ -89,6 +89,7 @@ export function ReasoningPanel({ status, progress, history, experience, actionMo
   customerLookup?: CustomerLookupSummary;
   emotionalState?: import("../../packages/contracts/empathy").EmotionalAssessment;
   providerArbitration?: ProviderArbitrationTrace;
+  surfaceArbitration?: SurfaceArbitrationTrace;
   piiRedaction?: PiiRedactionTrace;
 }) {
   const [expanded, setExpanded] = useState(status === "working");
@@ -98,7 +99,7 @@ export function ReasoningPanel({ status, progress, history, experience, actionMo
   const open = isWorking ? true : expanded;
   const verifiedFacts = !isWorking ? verifiedFactsFor(experience) : [];
   const modeInfo = actionMode ? actionModeMeta[actionMode] : undefined;
-  const totalChecks = steps.length + (verifiedFacts.length > 0 ? 1 : 0) + (customerLookup ? 1 : 0) + (emotionalState ? 1 : 0) + (providerArbitration ? 1 : 0) + (semanticRoute ? 1 : 0) + (piiRedaction ? 1 : 0);
+  const totalChecks = steps.length + (verifiedFacts.length > 0 ? 1 : 0) + (customerLookup ? 1 : 0) + (emotionalState ? 1 : 0) + (providerArbitration ? 1 : 0) + (surfaceArbitration ? 1 : 0) + (semanticRoute ? 1 : 0) + (piiRedaction ? 1 : 0);
 
   return (
     <div className={"reasoning-panel" + (isWorking ? " reasoning-panel-live" : "")}>
@@ -251,6 +252,20 @@ export function ReasoningPanel({ status, progress, history, experience, actionMo
                         : ` · skipped`}
                     </span>
                   ))}
+                </span>
+              </span>
+            </li>
+          )}
+          {surfaceArbitration && !isWorking && (
+            <li className="reasoning-step-done">
+              <Layers size={14} className="reasoning-check" aria-hidden="true" />
+              <span className="reasoning-step-copy">
+                <strong>
+                  sphoton Surface Policy · <code>{surfaceArbitration.channelId}</code> (max {surfaceArbitration.maxCompanionTotal} companion)
+                </strong>
+                <span>
+                  1 Main · {surfaceArbitration.placedTasks} Task · {surfaceArbitration.placedNba} NBA
+                  {surfaceArbitration.suppressed.length > 0 ? ` · ${surfaceArbitration.suppressed.length} held by budget` : ""}
                 </span>
               </span>
             </li>

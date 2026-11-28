@@ -1100,7 +1100,7 @@ export class ExperienceComposerEngine {
             sourceToolRef: sourceToolFor(exp.subjectArea, "nba"),
             ruleId: exp.nbaCandidate.ruleId,
             title: exp.nbaCandidate.title,
-            summary: exp.nbaCandidate.summary,
+            summary: exp.nbaCandidate.summary.replace(/\b[a-z]{3}_\d+\b/g, member.balanceVersion),
             score: exp.nbaCandidate.score,
             estimatedValue: exp.nbaCandidate.estimatedValue,
             ctaLabel: exp.nbaCandidate.ctaLabel,
@@ -1137,6 +1137,31 @@ export class ExperienceComposerEngine {
 
     const { placedTasks, placedNba, suppressed, followUps, disclosures, arbitrationLog } = arbitrated;
 
+    const liveHighlights = exp.mainHighlights.map((item) => {
+      if (member.taskStatus !== "completed") return { ...item };
+      if (exp.id === "banking-cashflow-summary" && item.label === "Mortgage Application") {
+        return { label: item.label, value: "Rate Lock Signed (6.125% APR)", tone: "positive" as const };
+      }
+      if (exp.id === "wealth-address-update" && item.label === "Current Status") {
+        return { label: item.label, value: "Account Funded & Active", tone: "positive" as const };
+      }
+      if (exp.id === "wealth-portfolio-summary" && item.label === "Drift vs. Target") {
+        return { label: "Beneficiary", value: "Primary Designated", tone: "positive" as const };
+      }
+      if (exp.id === "retirement-readiness" && item.label === "Vesting Status") {
+        return { label: "Rollover Election", value: "Confirmed ($38.5k)", tone: "positive" as const };
+      }
+      if (item.label === "Open Task") {
+        return { label: "Task Status", value: "Completed", tone: "positive" as const };
+      }
+      return { ...item };
+    });
+
+    const liveSources = exp.sources.map((src) => ({
+      title: src.title,
+      version: /^[a-z]{3}_\d+$/.test(src.version) ? member.balanceVersion : src.version,
+    }));
+
     const activeExecution = this.executionsByKey.get(this.keyFor(exp.id)) ?? null;
     const ledgerHash = createHmac("sha256", this.secret)
       .update(JSON.stringify({ decisionId, revision, channel: budget.id, snapshotId, tasks: placedTasks.length, nba: placedNba.length }))
@@ -1164,7 +1189,7 @@ export class ExperienceComposerEngine {
           kind: exp.mainKind,
           title: exp.mainTitle,
           subtitle: exp.mainSubtitle,
-          highlights: exp.mainHighlights,
+          highlights: liveHighlights,
           metrics: [
             { label: member.primaryMetricLabel, cents: member.primaryMetricCents },
             { label: member.secondaryMetricLabel, cents: member.secondaryMetricCents },
@@ -1184,7 +1209,7 @@ export class ExperienceComposerEngine {
           uiClass: "chrome",
           followUps,
           disclosures,
-          sources: exp.sources,
+          sources: liveSources,
         },
       },
       suppressed,

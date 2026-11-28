@@ -667,3 +667,24 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+
+.pzn-arch-page.is-embedded {
+  min-height: 0;
+}
+.pzn-arch-embedded-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 24px 0;
+  max-width: 1360px;
+  margin: 0 auto;
+}
+.pzn-arch-embedded-bar h2 {
+  margin: 2px 0 0;
+  font-size: 1.15rem;
+  font-weight: 680;
+  color: var(--ink);
+}

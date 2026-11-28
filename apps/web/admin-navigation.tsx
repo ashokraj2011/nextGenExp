@@ -1,4 +1,4 @@
-import { Activity, Blocks, Cpu, BookOpenText, Briefcase, Code2, FileText, GitBranch, Landmark, Layers, MessageSquare, Plug, PanelsTopLeft, Settings2, TerminalSquare, UsersRound } from "lucide-react";
+import { Activity, Blocks, Cpu, BookOpenText, Briefcase, Code2, FileText, GitBranch, Landmark, MessageSquare, Plug, PanelsTopLeft, Settings2, TerminalSquare, UsersRound } from "lucide-react";
 import { adminPaths, approvalChatHref } from "../../packages/contracts/admin-paths";
 
 export const developerGuideHref = (guide = "start") => adminPaths.help + "?guide=" + encodeURIComponent(guide);
@@ -13,9 +13,8 @@ export function diagnosticHref(path: typeof adminPaths.logs | typeof adminPaths.
 const destinations = [
   { label: "Tool setup", path: adminPaths.tools, Icon: Settings2 },
   { label: "Model gateway", path: adminPaths.gateway, Icon: Cpu },
-  { label: "Recommendations", path: adminPaths.recommendations, Icon: Layers },
   { label: "Customer 360", path: adminPaths.customers, Icon: UsersRound },
-  { label: "Intents & Catalog", path: adminPaths.intents, Icon: GitBranch },
+  { label: "Policies & Rules", path: adminPaths.intents, Icon: GitBranch },
   { label: "sphoton UI Studio", path: adminPaths.builder, Icon: PanelsTopLeft },
   { label: "Embed SDK", path: adminPaths.embed, Icon: Blocks },
   { label: "Logs", path: adminPaths.logs, Icon: FileText },
@@ -31,24 +30,32 @@ const workspaceDestinations = [
   { label: "Wealth (/wealth)", path: "/wealth", Icon: Landmark },
   { label: "IT Ops (/it-ops)", path: "/it-ops", Icon: Activity },
   { label: "RevOps (/revops)", path: "/revops", Icon: Briefcase },
-  { label: "Recommendations (/recommendations)", path: "/recommendations", Icon: Layers },
   { label: "Integrations (/integrations)", path: "/integrations", Icon: Plug },
 ] as const;
 
-export function AdminNavigation({ thread }: { thread?: string }) {
+export function AdminNavigation({ thread, collapsed = false }: { thread?: string; collapsed?: boolean }) {
   const current = location.pathname === adminPaths.help && new URLSearchParams(location.search).get("guide")
-    ? developerGuideHref() : location.pathname;
+    ? developerGuideHref()
+    : location.pathname === adminPaths.recommendations
+      ? adminPaths.intents
+      : location.pathname;
   return <nav className="admin-navigation" aria-label="Administration">
     {destinations.map(({ label, path, Icon }) => <a key={path} className="rail-link"
       href={path === adminPaths.logs || path === adminPaths.inspector ? diagnosticHref(path, thread) : path}
-      aria-current={current === path ? "page" : undefined}>
-      <Icon size={17} aria-hidden="true" />{label}
+      aria-current={current === path ? "page" : undefined}
+      aria-label={collapsed ? label : undefined}
+      title={collapsed ? label : undefined}>
+      <Icon size={17} aria-hidden="true" />
+      <span className="rail-label">{label}</span>
     </a>)}
-    <div style={{ margin: "12px 10px 4px", fontSize: "0.68rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)" }}>
+    <div className="admin-nav-section-title" aria-hidden={collapsed || undefined}>
       Workspaces
     </div>
-    {workspaceDestinations.map(({ label, path, Icon }) => <a key={path} className="rail-link" href={path}>
-      <Icon size={16} aria-hidden="true" />{label}
+    {workspaceDestinations.map(({ label, path, Icon }) => <a key={path} className="rail-link" href={path}
+      aria-label={collapsed ? label : undefined}
+      title={collapsed ? label : undefined}>
+      <Icon size={16} aria-hidden="true" />
+      <span className="rail-label">{label}</span>
     </a>)}
   </nav>;
 }
