@@ -4,6 +4,7 @@ import {
   GripVertical, LayoutGrid, LayoutTemplate, List, Plus, SlidersHorizontal, Sparkles, Trash2, Type, X,
 } from "lucide-react";
 import { dataDictionary, type DataBindingKey } from "../../packages/contracts/data-bindings";
+import type { SphotonBindingCatalog } from "../../packages/sphoton/contracts";
 import { defaultExtraMonthlyCents } from "../../packages/contracts/goal-progress";
 import type { Customer360AdminRecord } from "../../packages/contracts/customer-360";
 import {
@@ -406,7 +407,7 @@ function NamedIntentEditor({ domain, value, attach }: {
 
 function SlotAccordion({
   slot, domainId, index, count, expanded, onToggle, change, move, remove, widgets,
-  onDragStart, onDragOver, onDrop, onDragEnd, isDragging, isDragOver, customOptions,
+  onDragStart, onDragOver, onDrop, onDragEnd, isDragging, isDragOver, customOptions, bindingCatalog,
 }: {
   slot: LayoutSlot; domainId: DomainPackId; index: number; count: number; widgets: ReadonlyMap<string, WidgetSlot>;
   expanded: boolean;
@@ -421,6 +422,7 @@ function SlotAccordion({
   isDragging: boolean;
   isDragOver: boolean;
   customOptions: CustomBindingOption[];
+  bindingCatalog?: SphotonBindingCatalog;
 }) {
   const id = useId();
   const label = slot.kind === "block" ? componentLabel(slot.component)
@@ -498,10 +500,40 @@ function SlotAccordion({
       {expanded && slot.kind === "block" && slot.component === "PznGoalProgress" && (
         <div className="ui-slot-fields">
           <label className="ui-checkbox">
-            <input type="checkbox" checked={slot.extraMonthlyCents !== undefined}
-              onChange={(event) => change({ ...slot, extraMonthlyCents: event.target.checked ? defaultExtraMonthlyCents : undefined })} />
+            <input type="checkbox" checked={slot.extraMonthlyCents !== undefined || Boolean(slot.toolBinding?.actions?.length)}
+              onChange={(event) => {
+                if (event.target.checked) {
+                  change({
+                    ...slot,
+                    extraMonthlyCents: defaultExtraMonthlyCents,
+                    toolBinding: {
+                      component: "PznGoalProgress",
+                      sources: { goal: { toolRef: "goal.progress.read@1.0.0", read: "reuseVerifiedTurnResult" } },
+                      bindings: [
+                        { field: "goal.targetCents", from: "goal.data.targetCents", format: "currency_cents", required: true },
+                        { field: "goal.history", from: "goal.data.history", format: "series", required: true },
+                      ],
+                      actions: [{
+                        id: "add-monthly-savings",
+                        label: "Add $500 a month",
+                        toolRef: "goal.savings.preview@1.0.0",
+                        fixedInputs: { extraMonthlyCents: defaultExtraMonthlyCents },
+                        followUpInputs: ["startMonth"],
+                        update: "originalCard",
+                      }],
+                    },
+                  });
+                } else {
+                  change({ ...slot, extraMonthlyCents: undefined, toolBinding: undefined });
+                }
+              }} />
             Offer Add $500 a month
           </label>
+          {bindingCatalog && bindingCatalog.fields.some((f) => f.toolRef === "goal.progress.read@1.0.0") && (
+            <small className="ui-slot-hint">
+              sphoton catalog: {bindingCatalog.fields.filter((f) => f.toolRef === "goal.progress.read@1.0.0").map((f) => `${f.label} (${f.outputPath})`).join(" · ")}
+            </small>
+          )}
         </div>
       )}
 
@@ -804,6 +836,7 @@ function UiWorkspace({ initial, customers }: {
   const [library, setLibrary] = useState(initial.library);
   const [newDomain, setNewDomain] = useState<DomainPackId>(scopedDomain ?? initial.domains[0] ?? "wealth");
   const [widgets, setWidgets] = useState<SavedWidget[]>([]);
+  const [bindingCatalog, setBindingCatalog] = useState<SphotonBindingCatalog>();
   const [records, setRecords] = useState(initial.layouts);
   const [selected, setSelected] = useState(initialRecord?.id ?? "new");
   const [edits, setEdits] = useState<Partial<Record<string, UiDesign>>>(() => {
@@ -854,6 +887,9 @@ function UiWorkspace({ initial, customers }: {
     void api.widgets(domainId).then((result) => {
       if (active) setWidgets(result.widgets);
     }, (reason) => { if (active) setError(toolSetupErrorMessage(reason)); });
+    void api.uiBindingCatalog(domainId).then((catalog) => {
+      if (active) setBindingCatalog(catalog);
+    }, () => { /* optional catalog fetch */ });
     return () => { active = false; };
   }, [domainId, initial.domains]);
   useEffect(() => {
@@ -1469,6 +1505,7 @@ function UiWorkspace({ initial, customers }: {
                       expanded={expandedSlotId === slot.id}
                       onToggle={() => setExpandedSlotId((curr) => (curr === slot.id ? null : slot.id))}
                       domainId={domainId} customOptions={domainId === "wealth" ? customBindingOptions : []}
+                      bindingCatalog={bindingCatalog}
                       isDragging={dragIndex === index}
                       isDragOver={dropTargetIndex === index}
                       onDragStart={(e) => {

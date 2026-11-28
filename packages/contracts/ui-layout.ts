@@ -6,6 +6,7 @@ import { dataBindingKeySchema } from "./data-bindings";
 import { contentComponentCatalog } from "./domain";
 import type { RoutingIntentId } from "./routing-intents";
 import { extraMonthlyCentsSchema } from "./goal-progress";
+import { sphotonCardBindingSchema } from "../sphoton/contracts";
 
 export const layoutComponents = [
   ...contentComponentCatalog,
@@ -133,10 +134,20 @@ export const resolvedBoundWidgetSchema = z.object({
 export type ResolvedBoundWidgetProps = z.infer<typeof resolvedBoundWidgetSchema>;
 
 export const layoutSlotSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("block"), id: slotId, component: z.enum(ids), extraMonthlyCents: extraMonthlyCentsSchema.optional() }).strict(),
+  z.object({
+    kind: z.literal("block"),
+    id: slotId,
+    component: z.enum(ids),
+    extraMonthlyCents: extraMonthlyCentsSchema.optional(),
+    toolBinding: sphotonCardBindingSchema.optional(),
+  }).strict(),
   layoutTextSchema.extend({ kind: z.literal("text"), id: slotId }),
   layoutFormSchema.extend({ kind: z.literal("form"), id: slotId }),
-  layoutBoundWidgetSchema.extend({ kind: z.literal("widget"), id: slotId }),
+  layoutBoundWidgetSchema.extend({
+    kind: z.literal("widget"),
+    id: slotId,
+    toolBinding: sphotonCardBindingSchema.optional(),
+  }),
 ]).refine((slot) => slot.kind !== "block" || slot.component === "PznGoalProgress" || slot.extraMonthlyCents === undefined,
   { message: "Extra monthly savings requires a goal progress block." });
 export type LayoutSlot = z.infer<typeof layoutSlotSchema>;
@@ -209,7 +220,13 @@ export type UiLayoutCatalog = {
   tenantId: string; domains: readonly DomainPackId[]; layouts: UiLayoutRecord[]; library: LibraryDesign[];
   targets: UiTargetOption[]; experienceTools?: UiExperienceTool[];
 };
-export type AppliedUiLayout = { id: string; revision: number; name: string; target: UiTarget };
+export type AppliedUiLayout = {
+  id: string;
+  revision: number;
+  name: string;
+  target: UiTarget;
+  toolContracts?: Record<string, string>;
+};
 
 const recordId = z.string().regex(/^ui_[a-f0-9]{32}$/);
 const revision = z.number().int().positive();

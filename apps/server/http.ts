@@ -10,6 +10,7 @@ import { flowOverridesSchema, flowScopeSchema, type FlowScope } from "../../pack
 import { recordIntentOption, layoutTargetDomain, uiDesignSchema, uiLayoutChangeSchema } from "../../packages/contracts/ui-layout";
 import { widgetGenerateRequestSchema, widgetLibraryChangeSchema } from "../../packages/contracts/widget";
 import { previewUiLayout, uiTargetOptions, validateUiDesign } from "./ui-layouts";
+import { SphotonCatalogService } from "./sphoton-catalog";
 import { Customer360Service } from "./customer-360";
 import { dataBindingKeySchema } from "../../packages/contracts/data-bindings";
 import { customer360ProfileInputSchema, type Customer360AdminRecord } from "../../packages/contracts/customer-360";
@@ -445,6 +446,16 @@ export async function startApp(options: Options) {
   tradeStore.reconcilePendingJobs(makeTradeSettler("system-reconcile"));
 
   const integrationService = new IntegrationTaskService(integrationTasks, approvalStore, () => runtime);
+  const sphotonCatalog = new SphotonCatalogService({
+    tenantId: serverTenantId,
+    dataDir: options.dataDir,
+    getRuntime: () => runtime,
+    integrationService,
+    goalProgressProvider,
+    portfolioSnapshots,
+    opsStore,
+    salesStore,
+  });
   const goalStore = new CustomerGoalStore(tenantDataDirectory(options.dataDir));
   workflowEngine.setIntegrationService(integrationService);
   const gatewayView = () => gatewayConfig.view(options.gateway, Boolean(options.onGatewayActivated), options.launchGatewaySource);
@@ -461,7 +472,7 @@ export async function startApp(options: Options) {
     approvalStore,
     {
       ...studioPublicationPlans({ store, registry, widgetLibraries, experienceRegistry, integrationService, integrationTasks, workflowEngine,
-        actionFlowStore, connectorStore, knowledgeBase, uxEvolution, verticalFactory, now }),
+        actionFlowStore, connectorStore, knowledgeBase, uxEvolution, verticalFactory, sphotonCatalog, now }),
       "gateway-activate"(candidate) {
         const { id } = z.object({ id: z.string().length(64) }).strict().parse(candidate);
         const state = gatewayConfig.read();
@@ -964,7 +975,7 @@ export async function startApp(options: Options) {
       || (resource === "proactive" && id === "trigger");
     if (internalApi) {
       const actor = requireOperator();
-      const domainAdmin = resource === "admin" && (isExperienceRegistryEndpoint(id) || ["routing-flows", "ui-layouts", "ui-layout-preview", "ui-layout-test", "ui-layout-generate", "widgets", "widget-generate",
+      const domainAdmin = resource === "admin" && (isExperienceRegistryEndpoint(id) || ["routing-flows", "ui-layouts", "ui-binding-catalog", "ui-layout-preview", "ui-layout-test", "ui-layout-generate", "widgets", "widget-generate",
         "customers", "bootstrap", "conversations", "logs", "inspector", "tools", "ccre-rules", "treatment-preview", "treatment-runs"].includes(id));
       const domainApproval = resource === "approvals" && id !== "policy";
       const domainApi = domainAdmin || domainApproval || ["debug", "ops", "ops-incidents", "sales", "sales-deals"].includes(resource);
@@ -1136,7 +1147,7 @@ export async function startApp(options: Options) {
       profileStore, customer360, publicationReviews, widgetLibrary, widgetLibraries,
       omnichannelStore, evalRunner, uxEvolution, tradeStore, approvalStore, connectorStore,
       workflowEngine, writeAudit, mcpExposure, integrationService, knowledgeBase, scheduledJobs,
-      verticalFactory, piiFirewall, now, json, body, requireOperator, requireChatDomain,
+      verticalFactory, piiFirewall, sphotonCatalog, now, json, body, requireOperator, requireChatDomain,
       authoringDomain, createChat, listAdminCustomers, buildExperienceRegistryView,
     })) return;
     if (resource === "goals") {

@@ -1,4 +1,6 @@
 import type { AppliedUiLayout, UiDesign, UiLayoutCatalog, UiLayoutChange, UiLayoutRecord } from "../../packages/contracts/ui-layout";
+import type { DomainPackId } from "../../packages/contracts/domain-packs";
+import type { SphotonBindingCatalog } from "../../packages/sphoton/contracts";
 import type { SavedWidget, WidgetDraft, WidgetLibraryChange } from "../../packages/contracts/widget";
 import type { IncidentDecisionInput, IncidentRecord, IncidentUpsertInput, OpsIncidentsView } from "../../packages/contracts/ops";
 import type { DealDecisionInput, DealRecord, DealUpsertInput, SalesDealsView } from "../../packages/contracts/sales";
@@ -168,6 +170,8 @@ export const api = {
     "/api/admin/customer-events", { personaId, eventId, type: "account.first_deposit.completed" },
   ),
   uiLayouts: () => request<UiLayoutCatalog>("/api/admin/ui-layouts"),
+  uiBindingCatalog: (domainId: DomainPackId) =>
+    request<SphotonBindingCatalog>("/api/admin/ui-binding-catalog?domain=" + domainId),
   testUiLayout: (domain: Conversation["domainId"], design: UiDesign, message: string, personaId?: string) =>
     request<TurnAccepted & { layoutId: string }>("/api/admin/ui-layout-test?domain=" + domain, { design, message, personaId }),
   saveUiLayout: (change: UiLayoutChange) => request<Reviewable<UiLayoutRecord>>("/api/admin/ui-layouts", change),

@@ -124,12 +124,25 @@ async function routeReadPayloads(
   return call ? registryPayload(inspection, call) : null;
 }
 
-async function goalScenarioPayload(sf: SField, inspection: Inspection, turn: TurnRecord) {
+async function goalScenarioPayload(sf: SField, store: Store, inspection: Inspection, turn: TurnRecord) {
   if (!turn.goalScenarioScopeId || !turn.goalScenario) return;
   const call = (await sf.persistence.listCalls(turn.goalScenarioScopeId)).find((entry) => (
     entry.toolRef === `${sfieldTools.goalScenario.id}@${toolVersion}` && entry.proposedArguments.turnRef === turn.public.id
   ));
-  return call && { sourceTurnId: turn.goalScenario.sourceTurnId, call: registryPayload(inspection, call) };
+  if (!call) return;
+  const sourceLayout = store.turn(turn.goalScenario.sourceTurnId)?.trace.uiLayout;
+  return {
+    sourceTurnId: turn.goalScenario.sourceTurnId,
+    ...(sourceLayout ? {
+      design: {
+        id: sourceLayout.id,
+        revision: sourceLayout.revision,
+        name: sourceLayout.name,
+        ...(sourceLayout.toolContracts ? { toolContracts: sourceLayout.toolContracts } : {}),
+      },
+    } : {}),
+    call: registryPayload(inspection, call),
+  };
 }
 
 async function discoveryPayloads(sf: SField, inspection: Inspection, turn: TurnRecord): Promise<Pick<TurnPayloads, "catalogLookup" | "topicScores">> {
@@ -351,7 +364,7 @@ export async function readTurnPayloads(sf: SField, store: Store, inspection: Ins
     scopedToolPayload(sf, inspection, turn, turn.customerTask),
     routeReadPayloads(sf, inspection, turn, turn.retirementScopeId, "retirementAccounts"),
     scopedToolPayload(sf, inspection, turn, { sfieldRunId: turn.public.interactiveExperience?.sfieldRunId, sfieldCallId: turn.interactiveCallId }),
-    goalScenarioPayload(sf, inspection, turn),
+    goalScenarioPayload(sf, store, inspection, turn),
   ]);
   const sourceId = turn.workflow?.sourceExperienceId ?? (turn.agentLaunch && "capability" in turn.agentLaunch ? turn.agentLaunch.sourceExperienceId : undefined);
   const source = sourceId && store.experience(sourceId, turn.scope.principalId).turn;
@@ -373,6 +386,14 @@ export async function readTurnPayloads(sf: SField, store: Store, inspection: Ins
         toolRef: interactiveAction(turn.interactive).taskRef, inputs, source, ...(sourceTurnId && { sourceTurnId }) }),
       state: inspection.payload({ ...turn.public.interactiveExperience, ...(watch && { state: watch.state, observedValue: watch.value, updatedAt: watch.updatedAt }) }),
       call: interactiveCall,
+    };
+  }
+  if (turn.trace.uiLayout) {
+    payloads.appliedDesign = {
+      id: turn.trace.uiLayout.id,
+      revision: turn.trace.uiLayout.revision,
+      name: turn.trace.uiLayout.name,
+      ...(turn.trace.uiLayout.toolContracts ? { toolContracts: turn.trace.uiLayout.toolContracts } : {}),
     };
   }
   if (goalScenario) payloads.goalScenario = goalScenario;

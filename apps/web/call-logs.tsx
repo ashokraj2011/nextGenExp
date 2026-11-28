@@ -267,8 +267,23 @@ function TurnPayloadLog({ turn }: { turn: TurnView }) {
         <JsonBlock title="Saved record and run state" value={payloads.interactiveExperience.state} />
       </section>}
       {payloads.customerLookup && <ReadToolStage title="Customer record lookup" stage={payloads.customerLookup} />}
+      {payloads.appliedDesign && <section aria-label="Approved design revision">
+        <h3>Approved design</h3>
+        <p>
+          <strong>{payloads.appliedDesign.name}</strong> · Revision <code>{payloads.appliedDesign.revision}</code>{" "}
+          (<code>{payloads.appliedDesign.id}</code>)
+        </p>
+        {payloads.appliedDesign.toolContracts && Object.keys(payloads.appliedDesign.toolContracts).length > 0 && (
+          <p>Bound tools: {Object.keys(payloads.appliedDesign.toolContracts).map((ref) => <code key={ref} style={{ marginRight: "6px" }}>{ref}</code>)}</p>
+        )}
+      </section>}
       {payloads.goalScenario && <section aria-label="Savings scenario">
         <h3>Savings scenario</h3>
+        {payloads.goalScenario.design && (
+          <p>
+            Approved design: <strong>{payloads.goalScenario.design.name}</strong> · Revision <code>{payloads.goalScenario.design.revision}</code>
+          </p>
+        )}
         <p><a href={diagnosticHref(adminPaths.logs, turn.conversationId, payloads.goalScenario.sourceTurnId)}>Open the original goal turn</a></p>
         <ReadToolStage title="sfield savings projection" stage={payloads.goalScenario.call} expanded />
       </section>}

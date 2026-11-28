@@ -62,6 +62,7 @@ import { addCcreRule, previewTreatmentSelector, toolSetupTag, toolSetupView, val
 import type { TradeStore } from "../trade-store";
 import { generateBoundUiLayoutWithLlm } from "../ui-layout-generator";
 import { previewUiLayout, recordViewOptions, uiTargetOptions, validateUiDesign } from "../ui-layouts";
+import { domainFieldExposureSchema, type SphotonCatalogService } from "../sphoton-catalog";
 import type { UxEvolutionStore } from "../ux-evolution";
 import type { VerticalPackStore } from "../vertical-factory";
 import type { WidgetLibraryStore } from "../widget-library";
@@ -166,6 +167,7 @@ export interface AdminStudioRouteDeps {
   scheduledJobs: ScheduledJobStore;
   verticalFactory: VerticalPackStore;
   piiFirewall: PiiFirewallStore;
+  sphotonCatalog: SphotonCatalogService;
   now: () => number;
   json: (res: ServerResponse, data: unknown, status?: number) => void;
   body: <S extends z.ZodTypeAny>(req: IncomingMessage, schema: S, limit?: number) => Promise<z.output<S>>;
@@ -184,7 +186,7 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
     goalProgressProvider, recommendationRegistry, opsStore, salesStore, profileStore, customer360, publicationReviews,
     widgetLibrary, widgetLibraries, omnichannelStore, evalRunner, uxEvolution, tradeStore,
     approvalStore, connectorStore, workflowEngine, writeAudit, mcpExposure, integrationService,
-    knowledgeBase, scheduledJobs, verticalFactory, piiFirewall, now, json, body,
+    knowledgeBase, scheduledJobs, verticalFactory, piiFirewall, sphotonCatalog, now, json, body,
     requireOperator, requireChatDomain, authoringDomain, createChat, listAdminCustomers,
     buildExperienceRegistryView,
   } = deps;
@@ -213,6 +215,22 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
   }
   if (id === "conversations" && method === "POST") {
     await createChat("admin");
+    return true;
+  }
+  if (id === "ui-binding-catalog" && method === "GET") {
+    const domainId = authoringDomain();
+    json(res, sphotonCatalog.catalogForDomain(domainId));
+    return true;
+  }
+  if (id === "ui-binding-catalog" && method === "POST") {
+    const domainId = authoringDomain();
+    const exposure = await body(req, domainFieldExposureSchema, 8 * 1024);
+    const descriptor = sphotonCatalog.sfieldAdapter().describeTool(exposure.toolRef);
+    if (!descriptor) {
+      throw new ApiError(400, "tool_unregistered", `Tool ${exposure.toolRef} is not registered in sfield.`);
+    }
+    sphotonCatalog.setFieldExposure(domainId, exposure);
+    json(res, sphotonCatalog.catalogForDomain(domainId));
     return true;
   }
   if (id === "ui-layouts" && method === "GET") {
@@ -258,7 +276,14 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
     const design = "design" in previewBody ? previewBody.design : previewBody;
     const personaId = "design" in previewBody ? previewBody.personaId : undefined;
     const domainId = authoringDomain();
-    validateUiDesign(design, uiTargetOptions(registry, principalId), false, domainId);
+    validateUiDesign(
+      design,
+      uiTargetOptions(registry, principalId),
+      false,
+      domainId,
+      sphotonCatalog.catalogForDomain(domainId),
+      sphotonCatalog.sfieldAdapter(),
+    );
     json(res, await previewUiLayout(design, personaId, {
       domainId,
       portfolioProvider: portfolioSnapshots,
@@ -267,6 +292,7 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
       salesStore: domainId === "sales_revops" ? salesStore : undefined,
       incident: domainId === "it_ops" ? opsStore.primaryIncident() : undefined,
       deal: domainId === "sales_revops" ? salesStore.primaryDeal() : undefined,
+      sphotonCatalog,
     }));
     return true;
   }
@@ -277,7 +303,14 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
       message: z.string().trim().min(1).max(1600),
       personaId: z.string().regex(idPattern).optional(),
     }).strict(), 32 * 1024);
-    validateUiDesign(design, uiTargetOptions(registry, principalId), true, domainId);
+    validateUiDesign(
+      design,
+      uiTargetOptions(registry, principalId),
+      true,
+      domainId,
+      sphotonCatalog.catalogForDomain(domainId),
+      sphotonCatalog.sfieldAdapter(),
+    );
     if (design.experience) validateInteractiveExperience(design.experience, domainId, experienceTool);
     const draft = { id: makeId("ui"), revision: 1, design };
     const actor = requireOperator();
@@ -293,6 +326,7 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
     const { prompt } = await body(req, z.object({ prompt: z.string().trim().min(4).max(800) }).strict(), 8 * 1024);
     const validTargets = uiTargetOptions(registry, principalId).filter(({ target }) => layoutTargetDomain(target) === domainId);
     const customKeys = domainId === "wealth" ? [...new Set(profileStore.list().flatMap((p) => (p.customAttributes ?? []).map((a) => `custom.${a.key}`)))] : [];
+    const bindingCatalog = sphotonCatalog.catalogForDomain(domainId);
     const generated = await generateBoundUiLayoutWithLlm({
       prompt,
       gateway,
@@ -300,8 +334,9 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
       domainId,
       validTargets,
       customAttributeKeys: customKeys,
+      bindingCatalog,
     });
-    validateUiDesign(generated.design, validTargets, false, domainId);
+    validateUiDesign(generated.design, validTargets, false, domainId, bindingCatalog, sphotonCatalog.sfieldAdapter());
     json(res, generated);
     return true;
   }

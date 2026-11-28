@@ -11,6 +11,11 @@ import {
   type UiDesign,
   type UiTargetOption,
 } from "../../packages/contracts/ui-layout";
+import {
+  sphotonCardBindingSchema,
+  type SphotonBindingCatalog,
+  type SphotonCardBinding,
+} from "../../packages/sphoton";
 import { callConfiguredLlmJson } from "./dynamic-ui-generator";
 import type { GatewaySettings } from "./gateway";
 import { slotBindingKeys, validateUiDesign } from "./ui-layouts";
@@ -19,6 +24,7 @@ export interface GeneratedBoundUiLayout {
   design: UiDesign;
   generatedBy: "copilot_llm" | "synthesizer";
   boundKeys: string[];
+  boundToolFields?: string[];
   summary: string;
 }
 
@@ -38,6 +44,28 @@ function safeBinding(raw: unknown): DataBindingKey | undefined {
 
 function extractBoundKeys(design: UiDesign) {
   return [...new Set(design.slots.flatMap(slotBindingKeys))];
+}
+
+function extractBoundToolFields(design: UiDesign): string[] {
+  const fields: string[] = [];
+  for (const slot of design.slots) {
+    if ((slot.kind === "block" || slot.kind === "widget") && slot.toolBinding) {
+      for (const binding of slot.toolBinding.bindings) {
+        const [slotName, ...rest] = binding.from.split(".data.");
+        const source = slot.toolBinding.sources[slotName];
+        if (source && rest.length) {
+          fields.push(`${source.toolRef}:${rest.join(".data.")}`);
+        }
+      }
+    }
+  }
+  return [...new Set(fields)];
+}
+
+function parseOptionalToolBinding(raw: unknown): SphotonCardBinding | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const parsed = sphotonCardBindingSchema.safeParse(raw);
+  return parsed.success ? parsed.data : undefined;
 }
 
 function sanitizeCandidateDesign(
@@ -84,6 +112,7 @@ function sanitizeCandidateDesign(
         });
       }
       const progressBinding = safeBinding(s.progressBinding);
+      const toolBinding = parseOptionalToolBinding(s.toolBinding);
       slots.push({
         kind: "widget",
         id: uniqueId(s.id, "widget", idx),
@@ -96,6 +125,7 @@ function sanitizeCandidateDesign(
         ...(progressBinding ? { progressBinding } : {}),
         ...(typeof s.ctaLabel === "string" && s.ctaLabel.trim() ? { ctaLabel: s.ctaLabel.trim().slice(0, 48) } : {}),
         ...(typeof s.ctaPrompt === "string" && s.ctaPrompt.trim() ? { ctaPrompt: s.ctaPrompt.trim().slice(0, 200) } : {}),
+        ...(toolBinding ? { toolBinding } : {}),
       });
     } else if (s.kind === "form") {
       const rawFields = Array.isArray(s.fields) ? s.fields : [];
@@ -132,10 +162,12 @@ function sanitizeCandidateDesign(
         });
       }
     } else if (s.kind === "block" && typeof s.component === "string" && validComponents.has(s.component)) {
+      const toolBinding = parseOptionalToolBinding(s.toolBinding);
       slots.push({
         kind: "block",
         id: uniqueId(s.id, "block", idx),
         component: s.component as LayoutComponent,
+        ...(toolBinding ? { toolBinding } : {}),
       });
     } else if (s.kind === "text") {
       const heading = typeof s.heading === "string" ? s.heading.trim().slice(0, 90) : "";
@@ -338,11 +370,23 @@ function synthesizeBoundLayoutFromPrompt(prompt: string, domainId: DomainPackId,
   };
 }
 
-function buildLayoutSystemPrompt(domainId: DomainPackId, fields: (typeof dataDictionary)[number][], validTargets: UiTargetOption[], customKeys: string[]): string {
+function buildLayoutSystemPrompt(
+  domainId: DomainPackId,
+  fields: (typeof dataDictionary)[number][],
+  validTargets: UiTargetOption[],
+  customKeys: string[],
+  bindingCatalog?: SphotonBindingCatalog,
+): string {
   const dictLines = fields.map((d) => `- ${d.key} (${d.group}, ${d.kind}): ${d.label}`);
   if (customKeys.length > 0) {
     for (const key of customKeys) dictLines.push(`- ${key} (Custom Customer 360 Attribute, text)`);
   }
+  const sphotonLines = (bindingCatalog?.fields ?? []).map((f) =>
+    `- ${f.toolRef} -> ${f.outputPath} (${f.type}, label: "${f.label}", formats: ${f.supportedFormats.join(",")})`,
+  );
+  const sphotonActions = (bindingCatalog?.actions ?? []).map((a) =>
+    `- ${a.toolRef} (id: ${a.id}, label: "${a.label}", update: ${a.defaultUpdate}, fixedInputs: ${Object.keys(a.fixedInputFields).join(",") || "none"}, followUp: ${a.followUpInputFields.join(",") || "none"})`,
+  );
   const intentIds = validTargets.filter(({ target }) => target.kind === "intent");
   const componentIds = [...new Set(validTargets.flatMap(({ components }) => components ?? []))];
   const writeBack = domainId === "wealth";
@@ -351,7 +395,7 @@ function buildLayoutSystemPrompt(domainId: DomainPackId, fields: (typeof dataDic
   return [
     `Design a data-bound UI for the ${getDomainPack(domainId).label} workspace. Use only this workspace's listed fields and targets.`,
     "CRITICAL RULES:",
-    "1. NEVER invent hardcoded customer balances, error rates, or ARR figures when a live Data Dictionary binding exists. Always set `binding` / `progressBinding` / `defaultBinding` to exact keys from the Data Dictionary below, and use `{{key}}` tokens inside `title`, `body`, `badge`, `subtext`, and `progressLabel`.",
+    "1. NEVER invent hardcoded customer balances, error rates, or ARR figures when a live Data Dictionary or sfield tool binding exists. Always set `binding` / `progressBinding` / `defaultBinding` to exact keys from the Data Dictionary below, or attach a valid `toolBinding` using exposed sfield tool fields.",
     writeBack
       ? "2. If the user asks for editing, use a form with writeBack true and editable profile bindings."
       : "2. Use read-only bindings and set writeBack to false on forms. Attach widgets that use record fields to a detail or timeline intent.",
@@ -361,6 +405,8 @@ function buildLayoutSystemPrompt(domainId: DomainPackId, fields: (typeof dataDic
     "",
     "AVAILABLE DATA DICTIONARY KEYS (exact strings):",
     ...dictLines,
+    ...(sphotonLines.length > 0 ? ["", "EXPOSED SFIELD TOOL FIELDS (sphoton catalog):", ...sphotonLines] : []),
+    ...(sphotonActions.length > 0 ? ["", "EXPOSED SFIELD ACTIONS (sphoton catalog):", ...sphotonActions] : []),
     "",
     `AVAILABLE INTENT TARGETS (optional): ${intentIds.map(({ target, label }) => `${target.id} (${label})`).join(", ")}`,
     "",
@@ -408,9 +454,10 @@ export async function generateBoundUiLayoutWithLlm(input: {
   domainId: DomainPackId;
   validTargets: UiTargetOption[];
   customAttributeKeys?: string[];
+  bindingCatalog?: SphotonBindingCatalog;
   signal?: AbortSignal;
 }): Promise<GeneratedBoundUiLayout> {
-  const { prompt, gateway, dataDir, domainId, validTargets } = input;
+  const { prompt, gateway, dataDir, domainId, validTargets, bindingCatalog } = input;
   const customKeys = domainId === "wealth" ? input.customAttributeKeys ?? [] : [];
   const fields = dataDictionary.filter(({ key }) => bindingDomain(key) === domainId);
   const allowedKeys = new Set<string>([...fields.map(({ key }) => key), ...customKeys]);
@@ -421,18 +468,20 @@ export async function generateBoundUiLayoutWithLlm(input: {
     const timer = setTimeout(() => controller.abort(), 16_000);
     timer.unref();
     try {
-      const systemPrompt = buildLayoutSystemPrompt(domainId, fields, validTargets, customKeys);
+      const systemPrompt = buildLayoutSystemPrompt(domainId, fields, validTargets, customKeys, bindingCatalog);
       const raw = await callConfiguredLlmJson(gateway, dataDir, systemPrompt, prompt, controller.signal);
       const design = sanitizeCandidateDesign(raw, prompt, validTargets);
       if (design) {
-        validateUiDesign(design, validTargets, false, domainId);
+        validateUiDesign(design, validTargets, false, domainId, bindingCatalog);
         const boundKeys = extractBoundKeys(design);
-        if (boundKeys.length > 0 && boundKeys.every((key) => allowedKeys.has(key))) {
+        const boundToolFields = extractBoundToolFields(design);
+        if ((boundKeys.length > 0 || boundToolFields.length > 0) && boundKeys.every((key) => allowedKeys.has(key))) {
           return {
             design,
             generatedBy: "copilot_llm",
             boundKeys,
-            summary: `Generated "${design.name}" via Copilot with ${design.slots.length} slot(s) and ${boundKeys.length} live data binding(s).`,
+            ...(boundToolFields.length > 0 ? { boundToolFields } : {}),
+            summary: `Generated "${design.name}" via Copilot with ${design.slots.length} slot(s) and ${boundKeys.length + boundToolFields.length} live data binding(s).`,
           };
         }
       }
@@ -445,11 +494,73 @@ export async function generateBoundUiLayoutWithLlm(input: {
   }
 
   const design = synthesizeBoundLayoutFromPrompt(prompt, domainId, validTargets);
+  // Attach matching sphoton toolBinding when the prompt targets an exposed catalog field (e.g. newly exposed domain fields or goal progress).
+  if (bindingCatalog && bindingCatalog.fields.length > 0) {
+    const lower = prompt.toLowerCase();
+    const matchedCatalogField = bindingCatalog.fields.find((f) =>
+      !f.legacyBindingKey && (lower.includes(f.label.toLowerCase()) || lower.includes(f.outputPath.toLowerCase())),
+    );
+    const goalSlot = design.slots.find((slot) => slot.kind === "block" && slot.component === "PznGoalProgress");
+    const hasGoalFields = bindingCatalog.fields.some((f) => f.toolRef === "goal.progress.read@1.0.0" && f.outputPath === "targetCents")
+      && bindingCatalog.fields.some((f) => f.toolRef === "goal.progress.read@1.0.0" && f.outputPath === "history");
+    if (goalSlot && goalSlot.kind === "block" && hasGoalFields) {
+      const savingsAction = bindingCatalog.actions.find((a) => a.toolRef === "goal.savings.preview@1.0.0");
+      const extraGoalBinding = matchedCatalogField && matchedCatalogField.toolRef === "goal.progress.read@1.0.0"
+        && matchedCatalogField.outputPath !== "targetCents" && matchedCatalogField.outputPath !== "history"
+        ? [{
+          field: `goal.${matchedCatalogField.outputPath}`,
+          from: `goal.data.${matchedCatalogField.outputPath}`,
+          ...(matchedCatalogField.defaultFormat ? { format: matchedCatalogField.defaultFormat } : {}),
+          required: false,
+        }]
+        : [];
+      goalSlot.toolBinding = {
+        component: "PznGoalProgress",
+        sources: { goal: { toolRef: "goal.progress.read@1.0.0", read: "reuseVerifiedTurnResult" } },
+        bindings: [
+          { field: "goal.targetCents", from: "goal.data.targetCents", format: "currency_cents", required: true },
+          { field: "goal.history", from: "goal.data.history", format: "series", required: true },
+          ...extraGoalBinding,
+        ],
+        ...(savingsAction ? {
+          actions: [{
+            id: "add-monthly-savings",
+            label: "Add $500 a month",
+            toolRef: savingsAction.toolRef,
+            fixedInputs: { extraMonthlyCents: 50_000 },
+            followUpInputs: ["startMonth"],
+            update: "originalCard",
+          }],
+        } : {}),
+      };
+    } else {
+      const firstWidget = design.slots.find((slot) => slot.kind === "widget");
+      if (matchedCatalogField && firstWidget && firstWidget.kind === "widget") {
+        firstWidget.toolBinding = {
+          component: "PznBoundWidget",
+          sources: {
+            primary: { toolRef: matchedCatalogField.toolRef, read: "reuseVerifiedTurnResult" },
+          },
+          bindings: [
+            {
+              field: "metric_1",
+              from: `primary.data.${matchedCatalogField.outputPath}`,
+              ...(matchedCatalogField.defaultFormat ? { format: matchedCatalogField.defaultFormat } : {}),
+              label: matchedCatalogField.label,
+              required: true,
+            },
+          ],
+        };
+      }
+    }
+  }
   const boundKeys = extractBoundKeys(design);
+  const boundToolFields = extractBoundToolFields(design);
   return {
     design,
     generatedBy: "synthesizer",
     boundKeys,
-    summary: `Generated "${design.name}" with ${design.slots.length} slot(s) and ${boundKeys.length} live data binding(s).`,
+    ...(boundToolFields.length > 0 ? { boundToolFields } : {}),
+    summary: `Generated "${design.name}" with ${design.slots.length} slot(s) and ${boundKeys.length + boundToolFields.length} live data binding(s).`,
   };
 }

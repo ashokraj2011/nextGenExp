@@ -137,7 +137,12 @@ export type TurnPayloads = {
   retirementAccounts?: RegistryToolPayloads;
   portfolio: RegistryToolPayloads | null;
   goal: RegistryToolPayloads | null;
-  goalScenario?: { sourceTurnId: string; call: RegistryToolPayloads };
+  appliedDesign?: { id: string; revision: number; name: string; toolContracts?: Record<string, string> };
+  goalScenario?: {
+    sourceTurnId: string;
+    design?: { id: string; revision: number; name: string; toolContracts?: Record<string, string> };
+    call: RegistryToolPayloads;
+  };
   composer: ModelStagePayloads | null;
   workflow: WorkflowPayloads | null;
   sourceDecision?: { turnId: string; message: string; treatment: TreatmentPayloads };

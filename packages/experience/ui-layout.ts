@@ -7,7 +7,19 @@ import {
 } from "../contracts/ui-layout";
 import { buildSurface, makeId, type CompiledExperience, type IssuedAction } from "./compile";
 
-type SlotBlock = { block: DisplayBlock; index?: number; extraMonthlyCents?: number };
+type SlotBlock = { block: DisplayBlock; index?: number; extraMonthlyCents?: number; actionLabel?: string };
+
+function resolveToolBindingExtraMonthlyCents(slot: UiDesign["slots"][number]): { extraMonthlyCents?: number; label?: string } {
+  if (slot.kind !== "block") return {};
+  if (slot.extraMonthlyCents !== undefined) return { extraMonthlyCents: slot.extraMonthlyCents };
+  const savingsAction = slot.toolBinding?.actions?.find((action) =>
+    action.toolRef.startsWith("goal.savings.preview@") && typeof action.fixedInputs?.extraMonthlyCents === "number");
+  if (!savingsAction) return {};
+  return {
+    extraMonthlyCents: Number(savingsAction.fixedInputs?.extraMonthlyCents),
+    label: savingsAction.label,
+  };
+}
 
 function resolveWidget(slot: WidgetSlot, bindings?: DataBindingValues, linking = false): ResolvedBoundWidgetProps {
   const progressEntry = slot.progressBinding ? bindings?.[slot.progressBinding] : undefined;
@@ -35,9 +47,15 @@ function resolveWidget(slot: WidgetSlot, bindings?: DataBindingValues, linking =
   };
 }
 
-function arrange(design: UiDesign, original: DisplayBlock[], bindings?: DataBindingValues) {
+function arrange(
+  design: UiDesign,
+  original: DisplayBlock[],
+  bindings?: DataBindingValues,
+  precompiledToolBlocks?: DisplayBlock[],
+) {
   const positions = new Set<number>();
   const mapped: SlotBlock[] = [];
+  let toolBlockCursor = 0;
   const widgets = layoutWidgets(design.slots);
   const destinationIds = new Set([...widgets.values()].map(({ nextWidgetId }) => nextWidgetId));
   const wizards = new Map<string, WidgetSlot[]>();
@@ -89,6 +107,10 @@ function arrange(design: UiDesign, original: DisplayBlock[], bindings?: DataBind
     }
     if (slot.kind === "widget") {
       if (laterStepIds.has(slot.id)) continue;
+      if (slot.toolBinding && precompiledToolBlocks && precompiledToolBlocks[toolBlockCursor]) {
+        mapped.push({ block: precompiledToolBlocks[toolBlockCursor++] });
+        continue;
+      }
       const steps = wizards.get(slot.id);
       const block: DisplayBlock = steps
         ? { component: "PznWidgetWizard", props: {
@@ -99,9 +121,19 @@ function arrange(design: UiDesign, original: DisplayBlock[], bindings?: DataBind
       mapped.push({ block });
       continue;
     }
+    if (slot.toolBinding && precompiledToolBlocks && precompiledToolBlocks[toolBlockCursor]) {
+      const savings = resolveToolBindingExtraMonthlyCents(slot);
+      mapped.push({
+        block: precompiledToolBlocks[toolBlockCursor++],
+        extraMonthlyCents: savings.extraMonthlyCents,
+        actionLabel: savings.label,
+      });
+      continue;
+    }
     const index = original.findIndex((block, i) => block.component === slot.component && !positions.has(i));
     if (index >= 0) {
-      mapped.push({ block: original[index], index, extraMonthlyCents: slot.extraMonthlyCents });
+      const savings = resolveToolBindingExtraMonthlyCents(slot);
+      mapped.push({ block: original[index], index, extraMonthlyCents: savings.extraMonthlyCents, actionLabel: savings.label });
       positions.add(index);
     }
   }
@@ -110,7 +142,7 @@ function arrange(design: UiDesign, original: DisplayBlock[], bindings?: DataBind
 
 function issueSavingsOptions(mapped: SlotBlock[], preview = false) {
   const issued: IssuedAction[] = [];
-  const blocks = mapped.map(({ block, extraMonthlyCents }, index): DisplayBlock => {
+  const blocks = mapped.map(({ block, extraMonthlyCents, actionLabel }, index): DisplayBlock => {
     if (block.component !== "PznGoalProgress" || !extraMonthlyCents) return block;
     const { goal } = block.props;
     if (goal.monthlyContributionCents === undefined || goal.history.at(-1)!.savedCents >= goal.targetCents) return block;
@@ -119,7 +151,7 @@ function issueSavingsOptions(mapped: SlotBlock[], preview = false) {
     if (!preview) {
       issued.push({
         actionId, componentId: "block_" + (index + 1), followUpId: "goal_savings_scenario",
-        label: "Add " + amount + " a month", userMessage: "What if I add " + amount + " a month?",
+        label: actionLabel ?? ("Add " + amount + " a month"), userMessage: "What if I add " + amount + " a month?",
         inline: true, goalScenario: true,
       });
     }
@@ -133,11 +165,29 @@ function fields(display: DisplayExperience, layout: UiDesign["layout"]) {
   return { status, outcome, intro, question, partial, expiresAt, layout, theme: "evergreen" as const };
 }
 
+function collectToolRefs(design: UiDesign): Record<string, string> | undefined {
+  const refs: Record<string, string> = {};
+  for (const slot of design.slots) {
+    if ((slot.kind === "block" || slot.kind === "widget") && slot.toolBinding) {
+      for (const source of Object.values(slot.toolBinding.sources)) {
+        const [, version = "1.0.0"] = source.toolRef.split("@");
+        refs[source.toolRef] = version;
+      }
+      for (const action of slot.toolBinding.actions ?? []) {
+        const [, version = "1.0.0"] = action.toolRef.split("@");
+        refs[action.toolRef] = version;
+      }
+    }
+  }
+  return Object.keys(refs).length > 0 ? refs : undefined;
+}
+
 export function applyPublishedUi(
   result: CompiledExperience,
   publications: UiPublication[],
   targets: UiTarget[],
   bindings?: DataBindingValues,
+  toolContractsByPublication?: ReadonlyMap<string, Record<string, string>>,
 ) {
   const { display, issued } = result;
   if (!display.blocks.length) return;
@@ -157,15 +207,27 @@ export function applyPublishedUi(
     )));
     const adjusted = issued.map((action) => ({ ...action, componentId: componentIds.get(action.componentId) ?? action.componentId }));
     const savings = issueSavingsOptions(mapped);
+    const toolContracts = toolContractsByPublication?.get(id) ?? collectToolRefs(design);
     return {
       result: buildSurface(fields(display, design.layout), savings.blocks, [...adjusted, ...savings.issued], display),
-      attachment: { id, revision, name: design.name, target } satisfies AppliedUiLayout,
+      attachment: {
+        id,
+        revision,
+        name: design.name,
+        target,
+        ...(toolContracts ? { toolContracts } : {}),
+      } satisfies AppliedUiLayout,
     };
   }
 }
 
-export function compileUiLayoutPreview(design: UiDesign, samples: DisplayBlock[], bindings?: DataBindingValues): DisplayExperience {
-  const { mapped } = arrange(design, samples, bindings);
+export function compileUiLayoutPreview(
+  design: UiDesign,
+  samples: DisplayBlock[],
+  bindings?: DataBindingValues,
+  precompiledToolBlocks?: DisplayBlock[],
+): DisplayExperience {
+  const { mapped } = arrange(design, samples, bindings, precompiledToolBlocks);
   return buildSurface({
     status: "ready", outcome: "ready", intro: "Here’s what I found.",
     question: null, partial: false, expiresAt: 0, layout: design.layout, theme: "evergreen",

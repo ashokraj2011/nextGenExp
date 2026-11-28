@@ -22,7 +22,8 @@ import type { KnowledgeBaseStore } from "./knowledge-base";
 import type { PublicationContext, PublicationPlan, PublicationPlans } from "./publication-reviews";
 import { ApiError, type Store } from "./store";
 import { validateToolSetup } from "./tool-setup";
-import { uiTargetOptions, validateUiDesign } from "./ui-layouts";
+import { collectDesignToolDependencies, uiTargetOptions, validateUiDesign } from "./ui-layouts";
+import type { SphotonCatalogService } from "./sphoton-catalog";
 import { verticalPackDraftSchema, type VerticalPackStore } from "./vertical-factory";
 import type { WidgetLibraryStore } from "./widget-library";
 import type { WorkflowEngine } from "./workflow-engine";
@@ -57,20 +58,28 @@ export function studioPublicationPlans(deps: {
   knowledgeBase: KnowledgeBaseStore;
   uxEvolution: UxEvolutionStore;
   verticalFactory: VerticalPackStore;
+  sphotonCatalog?: SphotonCatalogService;
   now: () => number;
 }): PublicationPlans {
   const { store, registry, widgetLibraries, experienceRegistry, integrationService, integrationTasks, workflowEngine,
-    actionFlowStore, connectorStore, knowledgeBase, uxEvolution, verticalFactory, now } = deps;
+    actionFlowStore, connectorStore, knowledgeBase, uxEvolution, verticalFactory, sphotonCatalog, now } = deps;
   return {
     "ui-layouts"(candidate, context) {
       const input = uiLayoutChangeSchema.parse(candidate);
       const scope = domain(context);
       const { principalId, operator } = context;
       if (input.operation === "draft") throw new ApiError(400, "publication_invalid", "Save drafts in UI Builder.");
+      const catalog = sphotonCatalog?.catalogForDomain(scope);
+      const sfieldAdapter = sphotonCatalog?.sfieldAdapter();
+      let dependencies: ReturnType<typeof collectDesignToolDependencies> | undefined;
       if (input.operation === "publish") {
-        validateUiDesign(input.design, uiTargetOptions(registry, principalId), true, scope);
+        validateUiDesign(input.design, uiTargetOptions(registry, principalId), true, scope, catalog, sfieldAdapter);
         if (input.design.experience) {
           validateInteractiveExperience(input.design.experience, scope, (ref) => integrationService.interactiveReadContract(ref));
+        }
+        if (catalog) {
+          const collected = collectDesignToolDependencies(input.design, catalog, sfieldAdapter);
+          if (Object.keys(collected.toolContracts).length > 0) dependencies = collected;
         }
       }
       const previous = "id" in input ? store.listUiLayouts(principalId, operator).find(({ id }) => id === input.id) : undefined;
@@ -78,13 +87,24 @@ export function studioPublicationPlans(deps: {
       const preview = store.changeUiLayout(principalId, operator, [scope], change, now(), true);
       const name = preview.draft.name;
       const publishing = input.operation === "publish";
+      const contractDetails = dependencies
+        ? Object.entries(dependencies.toolContracts).map(([toolRef, hash]) => ({
+          label: `Tool contract · ${toolRef}`,
+          value: hash.slice(0, 12),
+        }))
+        : [];
       const review = plan(previous?.id ?? name, `${publishing ? "Publish" : "Unpublish"} ${name}`, previous, () =>
         store.changeUiLayout(principalId, operator, [scope], change, now()),
       `${publishing ? "Published" : "Unpublished"} ${name}.`, [
         { label: "Active revision", value: previous?.published ? String(previous.published.revision) : "First publication" },
         { label: "Proposed revision", value: String(preview.revision) },
+        ...contractDetails,
       ]);
-      return { ...review, preview: publishing ? preview.draft : previous?.published?.design };
+      return {
+        ...review,
+        ...(dependencies ? { dependencies } : {}),
+        preview: publishing ? preview.draft : previous?.published?.design,
+      };
     },
     widgets(candidate, context) {
       const input = widgetLibraryChangeSchema.parse(candidate);

@@ -21,9 +21,16 @@ import { conversationalTextAllowed } from "../../packages/experience/chat-policy
 import { contentCatalog, readDemoBalance } from "../../packages/experience/content";
 import { findEffectiveContentById, getEffectiveContentEntries } from "../../packages/experience-registry/registry";
 import { compileUiLayoutPreview } from "../../packages/experience/ui-layout";
+import {
+  compileBoundCard,
+  validateCardBinding,
+  type SfieldAdapter,
+  type SphotonBindingCatalog,
+} from "../../packages/sphoton";
 import { fixtureGoalProgressProvider, type GoalProgressProvider } from "../../packages/goal-progress";
 import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import type { CapabilityRegistry } from "./capability-registry";
+import type { SphotonCatalogService } from "./sphoton-catalog";
 import { ApiError } from "./store";
 
 const capabilityBlocks: Record<ComponentKind, LayoutComponent[]> = {
@@ -90,7 +97,38 @@ export function slotBindingKeys(slot: UiDesign["slots"][number]) {
   return keys;
 }
 
-export function validateUiDesign(design: UiDesign, options: UiTargetOption[], publishing: boolean, domain?: DomainPackId) {
+export function collectDesignToolDependencies(
+  design: UiDesign,
+  catalog: SphotonBindingCatalog,
+  sfield?: SfieldAdapter,
+) {
+  const toolContracts: Record<string, string> = {};
+  const allowedFieldIds = new Set<string>();
+  const allowedActionIds = new Set<string>();
+  for (const slot of design.slots) {
+    if ((slot.kind === "block" || slot.kind === "widget") && slot.toolBinding) {
+      const checked = validateCardBinding(slot.toolBinding, catalog, { sfield });
+      Object.assign(toolContracts, checked.dependencies.toolContracts);
+      for (const id of checked.dependencies.allowedFieldIds) allowedFieldIds.add(id);
+      for (const id of checked.dependencies.allowedActionIds) allowedActionIds.add(id);
+    }
+  }
+  return {
+    domainId: catalog.domainId,
+    toolContracts,
+    allowedFieldIds: [...allowedFieldIds].sort(),
+    allowedActionIds: [...allowedActionIds].sort(),
+  };
+}
+
+export function validateUiDesign(
+  design: UiDesign,
+  options: UiTargetOption[],
+  publishing: boolean,
+  domain?: DomainPackId,
+  bindingCatalog?: SphotonBindingCatalog,
+  sfieldAdapter?: SfieldAdapter,
+) {
   if (design.experience) {
     if (design.recordIntent || design.targets.length || design.slots.length) {
       throw new ApiError(400, "interactive_layout_mixed", "Use a separate design for tool-driven chat actions and layout attachments.");
@@ -128,6 +166,21 @@ export function validateUiDesign(design: UiDesign, options: UiTargetOption[], pu
       if (slot.kind === "block") {
         const incompatible = targets.find((target) => target.components && !target.components.includes(slot.component));
         if (incompatible) throw new ApiError(400, "ui_component_unavailable", `${incompatible.label} cannot supply ${slot.component}. Choose a supported block or change the attachment.`);
+      }
+      if ((slot.kind === "block" || slot.kind === "widget") && slot.toolBinding) {
+        const expectedComponent = slot.kind === "block" ? slot.component : "PznBoundWidget";
+        if (slot.toolBinding.component !== expectedComponent) {
+          throw new ApiError(400, "ui_binding_invalid", `Tool binding component ${slot.toolBinding.component} must match slot component ${expectedComponent}.`);
+        }
+        if (bindingCatalog) {
+          const check = validateCardBinding(slot.toolBinding, bindingCatalog, {
+            sfield: sfieldAdapter,
+            strictRequiredComponentFields: publishing && slot.kind === "block" && slot.component === "PznGoalProgress",
+          });
+          if (!check.valid) {
+            throw new ApiError(400, "ui_binding_invalid", check.issues.map((issue) => issue.message).join(" "));
+          }
+        }
       }
       if (slot.kind === "form" && slot.writeBack !== false) {
         const field = slot.fields.find(({ defaultBinding }) => defaultBinding && !canSaveProfileBinding(defaultBinding));
@@ -186,9 +239,58 @@ function sampleDetails(item: string | ReturnType<typeof content>) {
 export async function previewUiLayout(
   design: UiDesign,
   requestedPersonaId?: string,
-  extraContext?: { domainId?: DomainPackId; incident?: IncidentRecord; deal?: DealRecord; opsStore?: OpsIncidentStore; salesStore?: SalesDealStore;
-    portfolioProvider?: PortfolioSnapshotProvider; goalProvider?: GoalProgressProvider },
+  extraContext?: {
+    domainId?: DomainPackId; incident?: IncidentRecord; deal?: DealRecord; opsStore?: OpsIncidentStore; salesStore?: SalesDealStore;
+    portfolioProvider?: PortfolioSnapshotProvider; goalProvider?: GoalProgressProvider; sphotonCatalog?: SphotonCatalogService;
+  },
 ) {
+  const compileToolBindings = async (
+    baseBlocks: DisplayBlock[],
+    domainId: DomainPackId,
+    customerId?: string,
+    verifiedTurnResults?: Record<string, unknown>,
+  ): Promise<DisplayBlock[]> => {
+    const sphoton = extraContext?.sphotonCatalog;
+    if (!sphoton || !design.slots.some((slot) => (slot.kind === "block" || slot.kind === "widget") && slot.toolBinding)) {
+      return baseBlocks;
+    }
+    const catalog = sphoton.catalogForDomain(domainId);
+    const sfield = sphoton.sfieldAdapter();
+    const out: DisplayBlock[] = [];
+    for (const slot of design.slots) {
+      if ((slot.kind === "block" || slot.kind === "widget") && slot.toolBinding) {
+        const base = slot.kind === "block" ? baseBlocks.find((b) => b.component === slot.component) : undefined;
+        const compiled = await compileBoundCard({
+          card: slot.toolBinding,
+          catalog,
+          sfield,
+          verifiedTurnResults,
+          baseBlock: base,
+          design: {
+            id: "preview",
+            revision: 1,
+            name: design.name,
+            title: slot.kind === "widget" ? slot.title : undefined,
+            badge: slot.kind === "widget" ? slot.badge : undefined,
+            body: slot.kind === "widget" ? slot.body : undefined,
+          },
+          scope: {
+            tenantId: catalog.tenantId,
+            domainId,
+            principalId: "preview",
+            customerId,
+            mode: "draft_preview",
+          },
+          signingSecret: sphoton.signingSecret,
+        });
+        out.push(compiled.block);
+      } else if (slot.kind === "block") {
+        const match = baseBlocks.find((b) => b.component === slot.component);
+        if (match) out.push(match);
+      }
+    }
+    return out;
+  };
   if (extraContext?.domainId && extraContext.domainId !== "wealth") {
     const domain = extraContext.domainId;
     const list = design.recordIntent?.view === "list" || design.targets.some(({ id }) => id === recordIntentId(domain, "list"));
@@ -196,6 +298,11 @@ export async function previewUiLayout(
     const record = extraContext.incident ?? extraContext.deal;
     const prompt = list ? "Show records" : (timeline ? "Show timeline for " : "Show ") + (record?.id ?? "");
     const { canvas } = synthesizeDynamicCanvas(prompt, undefined, extraContext.opsStore, extraContext.salesStore, recordCapabilities[domain]);
+    const hasToolBindings = design.slots.some((slot) => (slot.kind === "block" || slot.kind === "widget") && slot.toolBinding);
+    if (hasToolBindings && extraContext.sphotonCatalog) {
+      const boundBlocks = await compileToolBindings([{ component: "PznDynamicCanvas", props: canvas }], domain);
+      return compileUiLayoutPreview(design, boundBlocks, list ? undefined : resolveMultiDomainBindings(undefined, extraContext), boundBlocks);
+    }
     return compileUiLayoutPreview(design, [{ component: "PznDynamicCanvas", props: canvas }], list ? undefined : resolveMultiDomainBindings(undefined, extraContext));
   }
   const activeProfile = requestedPersonaId ? findProfileById(requestedPersonaId) : listAllProfiles()[0];
@@ -263,14 +370,24 @@ export async function previewUiLayout(
     } },
     PznRuleCreation: { component: "PznRuleCreation", props: { scenarioId: profiles.defaultScenarioId, personaId } },
   };
+  const sampleBlocks = design.slots.flatMap((slot) => {
+    if (slot.kind !== "block") return [];
+    const sample = samples[slot.component];
+    if (!sample) throw new ApiError(422, "preview_data_unavailable", `This customer has no data for ${slot.component}.`);
+    return [sample];
+  });
+  const hasToolBindings = design.slots.some((slot) => (slot.kind === "block" || slot.kind === "widget") && slot.toolBinding);
+  const precompiledToolBlocks = hasToolBindings && extraContext?.sphotonCatalog
+    ? await compileToolBindings(sampleBlocks, "wealth", personaId, {
+      ...(goal ? { "goal.progress.read@1.0.0": goal } : {}),
+      ...(portfolio ? { "portfolio.snapshot.read@1.0.0": portfolio } : {}),
+      "demo.balance.read@1.0.0": balance,
+    })
+    : undefined;
   return compileUiLayoutPreview(
     design,
-    design.slots.flatMap((slot) => {
-      if (slot.kind !== "block") return [];
-      const sample = samples[slot.component];
-      if (!sample) throw new ApiError(422, "preview_data_unavailable", `This customer has no data for ${slot.component}.`);
-      return [sample];
-    }),
+    sampleBlocks,
     bindings,
+    precompiledToolBlocks,
   );
 }

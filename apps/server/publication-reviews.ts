@@ -11,6 +11,7 @@ export type PublicationPlan = {
   recordId: string;
   title: string;
   current: unknown;
+  dependencies?: unknown;
   preview?: unknown;
   details?: ApprovalRecord["details"];
   apply: (approver: string) => PublicationResult | Promise<PublicationResult>;
@@ -24,6 +25,7 @@ const payloadSchema = z.object({
   candidate: z.unknown(),
   preview: z.unknown().optional(),
   baseRevision: z.string().length(64),
+  dependencyRevision: z.string().length(64).optional(),
 }).strict();
 
 function revision(value: unknown) {
@@ -63,6 +65,7 @@ export class PublicationReviews {
       scope: context.scope,
       principalId: context.principalId,
       baseRevision: revision(plan.current),
+      ...(plan.dependencies !== undefined && { dependencyRevision: revision(plan.dependencies) }),
     };
     const pending = this.approvals.pending().find((record) =>
       record.targetKind === "publication" && record.action === action && record.requester === context.operator
@@ -89,11 +92,14 @@ export class PublicationReviews {
     if (!this.mayReview(operator, record)) {
       throw new ApiError(404, "approval_not_found", "This publication request is unavailable.");
     }
-    const { scope, principalId, candidate, baseRevision } = payloadSchema.parse(record.payload);
+    const { scope, principalId, candidate, baseRevision, dependencyRevision } = payloadSchema.parse(record.payload);
     this.enforceEvalGate("publishing this change");
     const plan = this.prepare(record.action, candidate, { scope, principalId, operator: record.requester });
     if (revision(plan.current) !== baseRevision) {
       throw new ApiError(409, "publication_changed", "The current revision changed. Submit a new review from the latest revision.");
+    }
+    if (dependencyRevision !== undefined && revision(plan.dependencies) !== dependencyRevision) {
+      throw new ApiError(409, "publication_dependency_changed", "A tool contract or domain binding dependency changed during review. Submit the revised design for approval.");
     }
     return plan;
   }
