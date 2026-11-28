@@ -1,0 +1,113 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { ExperienceComposerEngine } from "../apps/server/experience-composer";
+import { startTestPreview } from "./preview";
+
+test("ExperienceComposerEngine arbitrates 5 UI classes across subject areas and channel budgets, promotes NBA after task completion, and syncs dismissals", async () => {
+  const engine = new ExperienceComposerEngine("composer-test-secret");
+  const bootstrap = engine.getBootstrap();
+  assert.equal(bootstrap.subjectAreas.length, 3);
+  assert.equal(bootstrap.channels.length, 4);
+  assert.equal(bootstrap.experiences.length, 4);
+
+  // 1. On AI Chat Turn (companion budget = 1), Task outranks NBA for Wealth Portfolio Summary
+  const chatView = await engine.compose({ experienceId: "wealth-portfolio-summary", channel: "chat_turn" });
+  assert.equal(chatView.dataAggCalls, 1);
+  assert.equal(chatView.zones.main.uiClass, "main");
+  assert.equal(chatView.zones.tasks.length, 1);
+  assert.equal(chatView.zones.nba.length, 0);
+  assert.equal(chatView.suppressed.length, 1);
+  assert.equal(chatView.suppressed[0]?.id, "nba_invest_excess_cash");
+  assert.equal(chatView.zones.chrome.followUps.length, 3);
+  assert.equal(chatView.zones.chrome.disclosures.length, 1);
+
+  // 2. On Web Portal Dashboard (companion budget = 4), BOTH Task and NBA render simultaneously from the SAME smass snapshot
+  const webView = await engine.compose({ experienceId: "wealth-portfolio-summary", channel: "web_dashboard" });
+  assert.equal(webView.zones.tasks.length, 1);
+  assert.equal(webView.zones.nba.length, 1);
+  assert.equal(webView.zones.nba[0]?.snapshotId, webView.snapshotId);
+
+  // 3. On Mobile Compact, follow-ups clamp to 1 and Task outranks NBA
+  const mobileView = await engine.compose({ experienceId: "banking-cashflow-summary", channel: "mobile_compact" });
+  assert.equal(mobileView.subjectArea, "banking");
+  assert.equal(mobileView.zones.tasks.length, 1);
+  assert.equal(mobileView.zones.nba.length, 0);
+  assert.equal(mobileView.zones.chrome.followUps.length, 1);
+
+  // 4. Signed sfield action execution works & forged tokens are rejected
+  const validToken = chatView.zones.tasks[0]!.signedActionToken;
+  const forged = await engine.executeAction({
+    experienceId: "wealth-portfolio-summary",
+    channel: "chat_turn",
+    signedActionToken: validToken.slice(0, -4) + "ZZZZ",
+  });
+  assert.equal(forged.ok, false);
+  assert.equal(forged.status, 403);
+
+  const executed = await engine.executeAction({
+    experienceId: "wealth-portfolio-summary",
+    channel: "chat_turn",
+    signedActionToken: validToken,
+  });
+  assert.equal(executed.ok, true);
+  assert.equal(executed.execution.steps.length, 3);
+
+  // 5. Completing the Task emits revision 2, clears the Task live, and PROMOTES the waiting NBA into the freed AI Chat slot!
+  const afterComplete = await engine.completeTaskEvent({
+    experienceId: "wealth-portfolio-summary",
+    channel: "chat_turn",
+  });
+  assert.equal(afterComplete.revision, 2);
+  assert.equal(afterComplete.zones.tasks.length, 0);
+  assert.equal(afterComplete.zones.nba.length, 1);
+  assert.equal(afterComplete.zones.nba[0]?.id, "nba_invest_excess_cash");
+  assert.ok(afterComplete.arbitrationLog.some((entry) => entry.outcome === "promoted"));
+
+  // 6. Dismissing the NBA suppresses it across EVERY channel (AI Chat, Web Portal, Mobile, Advisor)
+  const afterDismiss = await engine.dismissNba({
+    experienceId: "wealth-portfolio-summary",
+    channel: "chat_turn",
+    nbaId: "nba_invest_excess_cash",
+  });
+  assert.equal(afterDismiss.zones.nba.length, 0);
+  const advisorAfterDismiss = await engine.compose({
+    experienceId: "wealth-portfolio-summary",
+    channel: "advisor_desktop",
+  });
+  assert.equal(advisorAfterDismiss.zones.nba.length, 0);
+  assert.ok(advisorAfterDismiss.suppressed.some((s) => s.id === "nba_invest_excess_cash"));
+});
+
+test("HTTP /api/experience-composer/* composes Retirement 401(k) across channels and executes workflows", async (t) => {
+  const server = await startTestPreview();
+  t.after(() => server.close());
+
+  const composeRes = await fetch(`${server.url}/api/experience-composer/compose`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ experienceId: "retirement-readiness", channel: "advisor_desktop" }),
+  });
+  assert.equal(composeRes.status, 200);
+  const data = (await composeRes.json()) as {
+    composed: {
+      subjectArea: string;
+      zones: { tasks: Array<{ signedActionToken: string }>; nba: Array<{ id: string }> };
+    };
+  };
+  assert.equal(data.composed.subjectArea, "retirement");
+  assert.equal(data.composed.zones.tasks.length, 1);
+  assert.equal(data.composed.zones.nba[0]?.id, "nba_capture_employer_match");
+
+  const completeRes = await fetch(`${server.url}/api/experience-composer/complete-task`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ experienceId: "retirement-readiness", channel: "mobile_compact" }),
+  });
+  assert.equal(completeRes.status, 200);
+  const refreshed = (await completeRes.json()) as {
+    composed: { revision: number; zones: { tasks: unknown[]; nba: Array<{ id: string }> } };
+  };
+  assert.equal(refreshed.composed.revision, 2);
+  assert.equal(refreshed.composed.zones.tasks.length, 0);
+  assert.equal(refreshed.composed.zones.nba[0]?.id, "nba_capture_employer_match");
+});

@@ -220,7 +220,31 @@ flowchart TB
 
 ---
 
-## 6. Try It Live in This Workspace
+## 6. 5-Class UI Taxonomy & Experience Composer (`sphoton`) Across Subject Areas & Channels
 
-- **Interactive Showcase UI:** Open `/pzn-architecture` on the running server (`http://127.0.0.1:4180/pzn-architecture`) to run both Alice and Marcus end-to-end, toggle the shared `first_deposit` rule across contexts, inspect the `smass` schema & single-snapshot trace, execute the signed `sfield` 3-step workflow, test tamper rejection, and emit `funding.confirmed` to watch `revision: 2` clear the reminder live.
-- **Implementation:** `apps/server/pzn-decision-plane.ts` (backend engine), `apps/web/pzn-architecture-demo.tsx` (interactive UI), and `tests/pzn-decision-plane.test.ts` (automated test suite).
+To prevent channel teams and AI agents from reinventing ad-hoc layouts — or letting marketing NBAs crowd out a customer's primary task — every rendered surface is assembled by an **Experience Composer (`sphoton`)** from **five governed UI placement classes**:
+
+| # | UI Class | What Belongs Here | Owner | Arbitration Rule |
+| :--- | :--- | :--- | :--- | :--- |
+| **1** | **Main (Primary Experience)** | Directly fulfills user intent (*Portfolio Summary*, *Checking Liquidity*, *401(k) Readiness*, *Address Update*). | Channel / Experience Registry (`smass` facts) | **Non-negotiable #1.** Never displaced by Tasks or NBAs. |
+| **2** | **Tasks (Pending Obligations)** | Required or urgent account-health actions (*Unfunded Account*, *Missing Beneficiary*, *Mortgage Rate-Lock E-Sign*, *Rollover Election*). | PZN Shared Policy (CCRE) | **Outranks NBA** when companion budget is tight; clears live at `revision: 2` on domain confirmation. |
+| **3** | **NBA (Next Best Action)** | Ranked proactive opportunities (*"\$12.5k Idle Cash"*, *"High-Yield Auto-Sweep"*, *"+\$3,600/yr Employer Match"*). | PZN Treatment Selector + Ranking Model | Placed within channel budget; **auto-promotes** into a freed slot once an open Task completes; dismissals sync across all channels via `sfield` memory. |
+| **4** | **Actions / Workflows** | Interactive, HMAC-signed multi-step flows launched from Main, Tasks, or NBAs. | `sfield` Workflows | Deterministic 3-step tool execution linked to `decisionId`. |
+| **5** | **Supporting Chrome & Compliance** | Contextual follow-up chips, verified citations, and mandatory regulatory disclosures. | Experience Composer (`sphoton`) + Compliance | Follow-ups clamp per channel; disclosures are **immutable** and cannot be removed by LLMs. |
+
+### Channel-Adaptive Surface Budgets (Same `smass` Snapshot, Tailored Layout)
+
+| Channel Surface | Main | Tasks Cap | NBA Cap | Combined Companion Cap | Follow-Ups |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **AI Chat Turn** | 1 | 1 | 1 | **1** *(Task outranks NBA)* | 3 |
+| **Web Portal Dashboard** | 1 | 3 | 1 | **4** *(Task + NBA side-by-side)* | 4 |
+| **Mobile App (Compact 375px)** | 1 | 1 | 1 | **1** *(Task outranks NBA)* | 1 |
+| **Advisor Co-Pilot Workstation** | 1 | 4 | 3 | **7** *(Full provenance + scores)* | 4 |
+
+---
+
+## 7. Try Both Live in This Workspace
+
+- **Experience Composer Studio (Multi-Subject & Multi-Channel):** Open `/experience-composer` (`http://127.0.0.1:4180/experience-composer`) to switch across **Wealth Advisory**, **Banking & Lending**, and **Retirement & Benefits** and across **AI Chat**, **Web Portal**, **Mobile App**, and **Advisor Co-Pilot**, toggle the **Zone Anatomy Overlay**, execute signed `sfield` workflows, complete an open Task to watch the waiting NBA auto-promote live at `revision: 2`, and test cross-channel dismissal sync.
+- **PZN Decision Plane Trace Showcase:** Open `/pzn-architecture` (`http://127.0.0.1:4180/pzn-architecture`) to inspect the Alice & Marcus CCRE/Data Agg/Resolver/Ranking payloads and `smass` invalid-enum guard.
+- **Implementation:** `apps/server/experience-composer.ts`, `apps/server/pzn-decision-plane.ts`, `apps/web/experience-composer-studio.tsx`, `apps/web/pzn-architecture-demo.tsx`, `tests/experience-composer.test.ts`, and `tests/pzn-decision-plane.test.ts`.

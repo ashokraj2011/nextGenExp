@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { domainPackIds, type DomainPackId } from "../../packages/contracts/domain-packs";
 import { createPinnedCardSchema, type PinnedLiveCard } from "../../packages/contracts/pinned-cards";
 import { inferPinnedCardToolRefs, refreshPinnedCardLive } from "./pinned-cards-live";
+import { ExperienceComposerEngine } from "./experience-composer";
 import { PznDecisionPlane } from "./pzn-decision-plane";
 import { runSketchToUi, sketchToUiRequestSchema } from "./sketch-to-ui";
 import { createStudioHandler } from "@sfield/studio";
@@ -257,6 +258,7 @@ export async function startApp(options: Options) {
   const widgetLibrary = widgetLibraries.wealth;
   const selfServicePzn = new SelfServicePznStore(options.dataDir);
   const pznDecisionPlane = new PznDecisionPlane();
+  const experienceComposer = new ExperienceComposerEngine();
   const integrationTasks = new IntegrationTaskStore(options.dataDir);
   const profileStore = new CustomerProfileStore(options.dataDir);
   setActiveCustomerProfileStore(profileStore);
@@ -1613,6 +1615,69 @@ export async function startApp(options: Options) {
         ...(turn.agentRunId && { agentic: runtime?.decisionTrace(turn) }),
         ...turn.trace,
       });
+    }
+    if (resource === "experience-composer") {
+      if (id === "bootstrap" && !operation && method === "GET") {
+        return json(res, experienceComposer.getBootstrap());
+      }
+      if (id === "compose" && !operation && method === "POST") {
+        const input = await body(
+          req,
+          z.object({
+            experienceId: z.string().min(1).max(80),
+            channel: z.enum(["chat_turn", "web_dashboard", "mobile_compact", "advisor_desktop"]),
+          }).strict(),
+        );
+        const composed = await experienceComposer.compose(input);
+        return json(res, { composed, bootstrap: experienceComposer.getBootstrap() });
+      }
+      if (id === "execute" && !operation && method === "POST") {
+        const input = await body(
+          req,
+          z.object({
+            experienceId: z.string().min(1).max(80),
+            channel: z.enum(["chat_turn", "web_dashboard", "mobile_compact", "advisor_desktop"]),
+            signedActionToken: z.string().min(1).max(2048),
+          }).strict(),
+        );
+        const result = await experienceComposer.executeAction(input);
+        if (!result.ok) throw new ApiError(result.status, "composer_action_rejected", result.error);
+        return json(res, { composed: result.composed, execution: result.execution, bootstrap: experienceComposer.getBootstrap() });
+      }
+      if (id === "complete-task" && !operation && method === "POST") {
+        const input = await body(
+          req,
+          z.object({
+            experienceId: z.string().min(1).max(80),
+            channel: z.enum(["chat_turn", "web_dashboard", "mobile_compact", "advisor_desktop"]),
+          }).strict(),
+        );
+        const composed = await experienceComposer.completeTaskEvent(input);
+        return json(res, { composed, bootstrap: experienceComposer.getBootstrap() });
+      }
+      if (id === "dismiss-nba" && !operation && method === "POST") {
+        const input = await body(
+          req,
+          z.object({
+            experienceId: z.string().min(1).max(80),
+            channel: z.enum(["chat_turn", "web_dashboard", "mobile_compact", "advisor_desktop"]),
+            nbaId: z.string().min(1).max(80),
+          }).strict(),
+        );
+        const composed = await experienceComposer.dismissNba(input);
+        return json(res, { composed, bootstrap: experienceComposer.getBootstrap() });
+      }
+      if (id === "reset" && !operation && method === "POST") {
+        const input = await body(
+          req,
+          z.object({
+            experienceId: z.string().min(1).max(80).optional(),
+            channel: z.enum(["chat_turn", "web_dashboard", "mobile_compact", "advisor_desktop"]).optional(),
+          }).strict(),
+        );
+        const composed = await experienceComposer.reset(input.experienceId, input.channel);
+        return json(res, { composed, bootstrap: experienceComposer.getBootstrap() });
+      }
     }
     if (resource === "pzn-demo") {
       if (id === "state" && !operation && method === "GET") {

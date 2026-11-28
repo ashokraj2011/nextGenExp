@@ -255,6 +255,10 @@ export function PznArchitectureDemo() {
           </div>
         </div>
         <div className="pzn-arch-topbar-right">
+          <a href="/experience-composer" className="pzn-arch-back">
+            <Layers size={14} aria-hidden="true" />
+            Experience Composer
+          </a>
           <button type="button" className="pzn-arch-btn-secondary" disabled={busy} onClick={() => void resetAll()}>
             <RotateCcw size={14} aria-hidden="true" />
             Reset Demo

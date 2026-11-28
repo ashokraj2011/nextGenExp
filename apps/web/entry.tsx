@@ -51,6 +51,9 @@ if (location.pathname === "/embed") {
 } else if (location.pathname === "/recommendations") {
   document.title = "Recommendations Workspace";
   void import("./recommendation-workspace").then(({ RecommendationWorkspace }) => createRoot(document.getElementById("root")!).render(<><RecommendationWorkspace /><PublicationReviewNotice /></>));
+} else if (location.pathname === "/experience-composer") {
+  document.title = "Experience Composer Studio · sphoton + PZN + smass + sfield";
+  void import("./experience-composer-studio").then(({ ExperienceComposerStudio }) => createRoot(document.getElementById("root")!).render(<ExperienceComposerStudio />));
 } else if (location.pathname === "/pzn-architecture") {
   document.title = "PZN Agentic Decision Plane · smass & sfield";
   void import("./pzn-architecture-demo").then(({ PznArchitectureDemo }) => createRoot(document.getElementById("root")!).render(<PznArchitectureDemo />));
