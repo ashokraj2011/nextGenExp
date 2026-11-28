@@ -33,7 +33,7 @@ import {
   routingOutputSchema, compositionOutputSchema, turnInputSchema, contextResultSchema, propensityInputSchema,
   propensityResultSchema, treatmentInputSchema, treatmentResultSchema, treatmentDecisionResultSchema, glossaryInputSchema, glossaryResultSchema,
   portfolioInputSchema, portfolioResultSchema, balanceInputSchema, balanceResultSchema,
-  goalProgressInputSchema, goalProgressResultSchema,
+  goalProgressInputSchema, goalProgressResultSchema, goalSavingsInputSchema, goalSavingsResultSchema,
   treatmentRecommendationsResultSchema, fundingAgentResultSchema, fundingOptionsResultSchema,
   fundingStatusResultSchema, fundingPreviewInputSchema, fundingPreviewResultSchema,
 } from "../../packages/contracts/model-schemas";
@@ -214,6 +214,7 @@ export const helpContracts = [
         description: "The tool returns the down payment target and monthly savings for the demo customer, in date order. Amounts use whole cents.",
         files: [
           jsonFile("goal-progress.tool.json", { input: goalProgressInputSchema, output: goalProgressResultSchema }),
+          jsonFile("goal-savings-preview.tool.json", { input: goalSavingsInputSchema, output: goalSavingsResultSchema }),
           { name: "goal-progress.ts", source: goalSource },
           { name: "goal-progress-provider.ts", source: goalProviderSource },
         ],

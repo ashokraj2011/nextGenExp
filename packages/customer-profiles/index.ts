@@ -312,6 +312,7 @@ export class CustomerProfileStore {
         goalId: "home_down_payment",
         currency: "USD",
         targetCents: base.targetCents,
+        monthlyContributionCents: rawGoalProgress.monthlyContributionCents,
         history: base.history,
       };
     }
@@ -320,6 +321,7 @@ export class CustomerProfileStore {
       goalId: "home_down_payment",
       currency: "USD",
       targetCents: profile.homeGoalTargetCents,
+      monthlyContributionCents: rawGoalProgress.monthlyContributionCents,
       history: synthesizeGoalHistory(profile.homeGoalSavedCents),
     };
   }

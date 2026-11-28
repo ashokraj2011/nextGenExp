@@ -268,8 +268,11 @@ try {
   await page.getByRole("link", { name: "Design in UI Builder", exact: true }).click();
   await page.getByRole("button", { name: "Remove Home down payment", exact: true }).waitFor();
   await preview.getByRole("heading", { name: "Home down payment", exact: true }).waitFor();
+  await page.getByRole("button", { name: /^Goal progress/ }).click();
+  await page.getByRole("checkbox", { name: "Offer Add $500 a month", exact: true }).check();
+  await preview.getByRole("button", { name: "Add $500 a month", exact: true }).waitFor();
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await approvePublicationInChat(page);
+  await approvePublicationInChat(page, "Home down payment");
   await page.reload();
   await openAdmin(page, "intents");
   await page.getByRole("tab", { name: /Content Catalog/ }).click();
@@ -278,6 +281,26 @@ try {
   await page.getByRole("link", { name: "Open in UI Builder", exact: true }).click();
   await page.getByRole("button", { name: "Remove Home down payment", exact: true }).waitFor();
   assert.equal(await page.getByLabel("Layout name").inputValue(), "Home down payment layout");
+
+  const alice = await browser.newPage({ viewport: { width: 1150, height: 840 }, reducedMotion: "reduce" });
+  await alice.goto(app.url + "/login");
+  await alice.getByRole("button", { name: "Sign in as Alice Morgan", exact: true }).click();
+  const question = alice.getByRole("textbox", { name: "Your question" });
+  await question.fill("Show my home-buying goal and savings progress.");
+  await question.press("Enter");
+  const card = alice.getByRole("region", { name: "Home down payment", exact: true });
+  const canvas = card.getByRole("img", { name: /^Down payment savings/ });
+  await canvas.evaluate((element) => element.setAttribute("data-original-canvas", ""));
+  await card.getByRole("button", { name: "Add $500 a month", exact: true }).click();
+  await card.getByRole("img", { name: /^Savings with an extra \$500/ }).waitFor();
+  await question.fill("What if I start in March?");
+  await question.press("Enter");
+  await card.getByRole("img", { name: /a month starting March \d{4}/ }).waitFor();
+  assert.equal(await card.locator("canvas[data-original-canvas]").count(), 1);
+  assert.equal(await card.count(), 1);
+  await alice.reload();
+  await card.getByRole("img", { name: /a month starting March \d{4}/ }).waitFor();
+  await alice.close();
 
   assert.deepEqual(pageErrors, []);
   console.log("UI builder preview, publishing, intent routing, Inspector, Widget Studio, interactive actions, linked widgets, workspace catalogs, content attachments, and responsive layout passed.");

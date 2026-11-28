@@ -7,7 +7,8 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
-import type { TurnAccepted } from "../packages/contracts/api";
+import type { ConversationView, TurnAccepted } from "../packages/contracts/api";
+import { firstGoalContributionMonth, goalMonthAt, goalMonthIndex } from "../packages/contracts/goal-progress";
 import type { TurnPayloads } from "../packages/contracts/inspector";
 import { decodeChatInput } from "../packages/contracts/inspector";
 import type { DisplayExperience } from "../packages/contracts/surface";
@@ -204,6 +205,70 @@ test("a content layout arranges the verified goal and only applies to replies sh
   const excluded = await client.ask(empty.id, prompt);
   assert.equal(excluded.trace.uiLayout, undefined);
   assert.equal(excluded.turn.experience?.outcome, "eligible_empty");
+});
+
+test("Alice’s approved savings button and start month update the original goal without changing her savings", async (t) => {
+  const app = await startTestPreview();
+  t.after(() => app.close());
+  const client = await testClient(app.url);
+  const chat = await client.conversation();
+  const prompt = "Show my home-buying goal and savings progress.";
+  const design: UiDesign = {
+    name: "Home savings what-if", description: "Show the down payment goal and a monthly savings preview.", layout: "stack",
+    targets: [{ kind: "content", id: "home_down_payment_progress" }],
+    slots: [{ kind: "block", id: "goal", component: "PznGoalProgress", extraMonthlyCents: 50_000 }],
+  };
+  const { approval } = await client.request<PublicationReview>(settingsPath, { operation: "publish", design }, 202);
+  const before = (await client.ask(chat.id, prompt)).turn.experience?.blocks[0];
+  assert.ok(before?.component === "PznGoalProgress" && !before.props.savingsOption);
+  await client.request("/api/approvals/" + approval.id + "/decide", { decision: "approve" });
+
+  const { turn: original } = await client.ask(chat.id, prompt);
+  const block = original.experience?.blocks[0];
+  assert.ok(original.experience && block?.component === "PznGoalProgress" && block.props.savingsOption);
+  const first = goalMonthIndex(firstGoalContributionMonth(block.props.goal, original.createdAt));
+  const actionPath = "/api/experiences/" + original.experience.experienceId + "/actions";
+  const action = {
+    surfaceId: original.experience.experienceId, name: "request_follow_up", sourceComponentId: "block_1",
+    timestamp: new Date().toISOString(), context: { actionId: block.props.savingsOption.actionId },
+  };
+  const click = (context: Record<string, unknown>, status: number) => client.request<TurnAccepted>(actionPath, {
+    envelope: { version: "1.0", action: { ...action, context } }, clientRequestId: randomUUID(),
+  }, status);
+  await click({ ...action.context, extraMonthlyCents: 100_000 }, 400);
+  const { turn: immediate } = await client.wait(await click(action.context, 202));
+  assert.equal(immediate.goalScenario?.sourceTurnId, original.id);
+  assert.equal(immediate.goalScenario?.projection.projectedTargetMonth, goalMonthAt(first + 9));
+  assert.equal(immediate.goalScenario?.projection.currentTargetMonth, goalMonthAt(first + 11));
+  assert.deepEqual(immediate.experience?.blocks, []);
+
+  const { turn: delayed } = await client.ask(chat.id, "What if I start in March?");
+  const projection = delayed.goalScenario?.projection;
+  assert.ok(projection);
+  const marchOffset = (12 + 2 - first % 12) % 12;
+  const monthsToTarget = marchOffset + Math.ceil((24_000 - marchOffset * 2_000) / 2_500);
+  assert.equal(delayed.goalScenario?.sourceTurnId, original.id);
+  assert.equal(projection.startMonth, goalMonthAt(first + marchOffset));
+  assert.equal(projection.projectedTargetMonth, goalMonthAt(first + monthsToTarget - 1));
+  assert.equal(projection.points.find(({ month }) => month === projection.startMonth)?.projectedCents,
+    2_600_000 + (marchOffset + 1) * 200_000 + 50_000);
+  const logs = await client.request<TurnPayloads>("/api/debug/payloads/" + delayed.id);
+  assert.equal(logs.goalScenario?.call.tool, "goal.savings.preview@1.0.0");
+  assert.deepEqual(logs.goalScenario?.call.registryInput.data, {
+    turnRef: delayed.id, sourceTurnId: original.id, startMonth: projection.startMonth, extraMonthlyCents: 50_000,
+  });
+  assert.deepEqual(logs.goalScenario?.call.result?.data, projection);
+  const reopened = await client.request<ConversationView>("/api/conversations/" + chat.id);
+  assert.deepEqual(reopened.turns.at(-1)?.goalScenario, delayed.goalScenario);
+  assert.deepEqual(reopened.turns.find(({ id }) => id === original.id)?.experience, original.experience);
+
+  const branch = await client.request<ConversationView>("/api/conversations/" + chat.id + "/fork", { turnId: delayed.id }, 201);
+  const forkedSource = branch.turns.find((turn) => turn.experience?.blocks.some((block) => block.component === "PznGoalProgress" && block.props.savingsOption));
+  assert.ok(forkedSource && forkedSource.id !== original.id);
+  assert.equal(branch.turns.at(-1)?.goalScenario?.sourceTurnId, forkedSource.id);
+  const next = await client.ask(branch.id, "What if I start in April?");
+  assert.match(next.turn.goalScenario?.projection.startMonth ?? "", /-04$/);
+  assert.equal(next.turn.goalScenario?.sourceTurnId, forkedSource.id);
 });
 
 test("approved feedback replays the original request and detects when its card is unpublished", async (t) => {

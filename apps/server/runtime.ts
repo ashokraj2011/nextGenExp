@@ -21,9 +21,11 @@ import { readRetirementView } from "../../packages/retirement-accounts";
 import { retirementListIntent, retirementBeneficiaryIntent } from "../../packages/contracts/retirement-accounts";
 import { retirementAccountsResultSchema } from "../../packages/contracts/model-schemas";
 import { goalProgressSchema, isHomeGoalSummary } from "../../packages/contracts/goal-progress";
+import { projectExtraGoalSavings } from "../../packages/capabilities/calculations";
+import { goalScenarioSource } from "./goal-scenarios";
 import {
   balanceInputSchema, balanceResultSchema, compositionOutputSchema, contextResultSchema, portfolioInputSchema, portfolioResultSchema,
-  glossaryInputSchema, glossaryResultSchema, goalProgressInputSchema, goalProgressResultSchema,
+  glossaryInputSchema, glossaryResultSchema, goalProgressInputSchema, goalProgressResultSchema, goalSavingsInputSchema, goalSavingsResultSchema,
   fundingAgentResultSchema, fundingOptionsResultSchema, fundingReadInputSchema, fundingStatusResultSchema, fundingPreviewInputSchema,
   fundingPreviewResultSchema, treatmentRecommendationsResultSchema, treatmentDecisionResultSchema,
   propensityInputSchema, propensityResultSchema, routingOutputSchema,
@@ -144,6 +146,7 @@ const toolRefs = {
   retirementAccounts: `${sfieldTools.retirementAccounts.id}@${toolVersion}`,
   portfolio: `${sfieldTools.portfolio.id}@${toolVersion}`,
   goal: `${sfieldTools.goal.id}@${toolVersion}`,
+  goalScenario: `${sfieldTools.goalScenario.id}@${toolVersion}`,
   fundingOptions: fundingToolRef("fundingOptions"),
   fundingStatus: fundingToolRef("fundingStatus"),
   fundingPreview: fundingToolRef("fundingPreview"),
@@ -158,11 +161,13 @@ const registryPurposes = {
   retirementScopeId: "pzn-retirement-accounts",
   portfolioScopeId: "pzn-portfolio-snapshot",
   goalScopeId: "pzn-goal-progress",
+  goalScenarioScopeId: "pzn-goal-savings-preview",
   workflowScopeId: "pzn-customer-workflow",
 } as const;
 const registryBoundaries = {
   catalog: "catalogScopeId", propensity: "catalogScopeId", selection: "tsScopeId", glossary: "glossaryScopeId", portfolio: "portfolioScopeId",
-  retirementAccounts: "retirementScopeId", goal: "goalScopeId", fundingOptions: "workflowScopeId", fundingStatus: "workflowScopeId", fundingPreview: "workflowScopeId",
+  retirementAccounts: "retirementScopeId", goal: "goalScopeId", goalScenario: "goalScenarioScopeId",
+  fundingOptions: "workflowScopeId", fundingStatus: "workflowScopeId", fundingPreview: "workflowScopeId",
 } as const;
 export function principalFor(id: string, scope?: Pick<Scope, "userId" | "personaId" | "domainId">): Principal {
   const persona = scope?.personaId ? findProfileById(scope.personaId) : undefined;
@@ -1343,6 +1348,18 @@ export class Runtime implements IntegrationTaskRuntime {
           const progress = goalProgressSchema.safeParse(reading);
           if (!progress.success) throw new ToolError("GOAL_PROGRESS_UNAVAILABLE");
           return progress.data;
+        },
+      }),
+      read("goalScenario", {
+        inputs: goalSavingsInputSchema, outputs: goalSavingsResultSchema,
+        handler: ({ turnRef, sourceTurnId, extraMonthlyCents, startMonth }, ctx) => {
+          const { turn } = this.scopedRegistryTurn(turnRef, ctx, "goalScenario");
+          requireToolEnabled(turn, "goal");
+          const request = turn.goalScenario;
+          requireCheck(request && request.sourceTurnId === sourceTurnId && request.startMonth === startMonth, "GOAL_SCENARIO_REQUIRED");
+          const source = goalScenarioSource(this.store.turn(request.sourceTurnId), turn);
+          requireCheck(source && source.option.extraMonthlyCents === extraMonthlyCents, "GOAL_SCENARIO_SOURCE_REQUIRED");
+          return projectExtraGoalSavings(source.goal, source.option.extraMonthlyCents, source.firstMonth, request.startMonth);
         },
       }),
       read("glossary", {

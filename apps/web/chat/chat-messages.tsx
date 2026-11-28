@@ -164,10 +164,11 @@ export function AssistantMessage() {
   const turnId = turn?.id;
   const latestId = latest?.id;
   const replyReady = Boolean(turn && (turn.status !== "working" || turn.previewExperience));
+  const goalSourceTurnId = turn?.goalScenario?.sourceTurnId;
   useEffect(() => {
     if (!element.current || !turnId || turnId !== latestId) return;
-    return followTurn(turnId, element.current, replyReady);
-  }, [followTurn, latestId, turnId, replyReady]);
+    return followTurn(turnId, element.current, replyReady, goalSourceTurnId);
+  }, [followTurn, latestId, turnId, replyReady, goalSourceTurnId]);
   if (!turn) return null;
   const experience = turn.experience;
   const steps = progressHistory[turn.id] ?? [turn.progress];

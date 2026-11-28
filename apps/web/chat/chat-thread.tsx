@@ -7,6 +7,7 @@ import { AssistantRuntimeProvider, ThreadPrimitive, useExternalStoreRuntime } fr
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import type { Bootstrap, ConversationView, DemoPersona, Progress, TurnView } from "../../../packages/contracts/api";
 import type { DomainPack } from "../../../packages/contracts/domain-packs";
+import type { GoalSavingsProjection } from "../../../packages/contracts/goal-progress";
 import type { HandoffTicket } from "../../../packages/contracts/handoff";
 import type { ExpertiseMode, Watchcard } from "../../../packages/contracts/nextgen-chat";
 import { pendingActionsContext, type WorkspacePin } from "../../../packages/contracts/workspace";
@@ -100,6 +101,17 @@ export function Chat({
     return () => { closed = true; clearTimeout(timer); };
   }, [conversation?.id, latest?.id, running]);
   const messages = useMemo(() => visibleMessages(turns), [turns]);
+  const goalScenarios = useMemo(() => {
+    const byTurn = new Map(turns.map((turn) => [turn.id, turn.experience?.experienceId]));
+    const bySurface = new Map<string, GoalSavingsProjection>();
+    for (const { goalScenario } of turns) {
+      const source = goalScenario && byTurn.get(goalScenario.sourceTurnId);
+      if (source && goalScenario) bySurface.set(source, goalScenario.projection);
+    }
+    return { byTurn, bySurface };
+  }, [turns]);
+  const goalSurfaces = useRef(goalScenarios.byTurn);
+  goalSurfaces.current = goalScenarios.byTurn;
   const runtime = useExternalStoreRuntime({
     messages, convertMessage: (message) => message, isRunning: running, activeRunId: running ? latest?.id : undefined,
     onNew: async (message) => {
@@ -115,10 +127,22 @@ export function Chat({
   const initialTurn = useRef(latest?.id);
   const lastAnchor = useRef(initialTurn.current);
   const pausedTurn = useRef<string>(undefined);
-  const followTurn = useCallback((id: string, message: HTMLElement, replyReady: boolean) => {
+  const followTurn = useCallback((id: string, message: HTMLElement, replyReady: boolean, goalSourceTurnId?: string) => {
     const scroll = viewport.current;
     const list = messageList.current;
     if (!scroll || !list) return;
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const goalSurfaceId = goalSourceTurnId && goalSurfaces.current.get(goalSourceTurnId);
+    if (goalSurfaceId && pausedTurn.current !== id) {
+      const frame = requestAnimationFrame(() => {
+        const chart = scroll.querySelector(`[data-goal-scenario-chart="${CSS.escape(goalSurfaceId)}"]`);
+        if (chart) {
+          const top = scroll.scrollTop + chart.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+          scroll.scrollTo({ top: Math.max(0, top - 18), behavior: motion.matches ? "instant" : "smooth" });
+        }
+      });
+      return () => cancelAnimationFrame(frame);
+    }
     const restoring = initialTurn.current === id;
     if (lastAnchor.current !== id) {
       lastAnchor.current = id;
@@ -128,7 +152,6 @@ export function Chat({
     }
     if (pausedTurn.current === id) return;
 
-    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
     const interaction = new AbortController();
     const observer = new ResizeObserver(() => {
       // Leave the question in view when the reply fits. Otherwise reveal the end above the composer.
@@ -193,6 +216,7 @@ export function Chat({
   return <AssistantRuntimeProvider runtime={runtime}>
     <ExperienceControls.Provider value={{
       activeExperienceId,
+      goalScenarios: goalScenarios.bySurface,
       allowRuleCreation: adminChat,
       accountFunding: !adminChat && conversation?.domainId === "wealth" ? {
         conversationId: conversation.id, latestExperienceId: fundingExperienceId,

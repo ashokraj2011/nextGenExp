@@ -21,7 +21,8 @@ import type { UsageSummary } from "@sfield/core";
 import type { ContentEntry, CatalogSnapshot, ContentDecision, PropensityResult, RouteDecision, BalanceProof, Scope, SelectionMode } from "../../packages/contracts/domain";
 import type { Conversation, ConversationChange, ConversationFolder, FailureCode, Progress, PublicEvent, PublicEventType, TurnStatus, TurnView } from "../../packages/contracts/api";
 import type { GatewayExchange, OfferClick, TimedCall, TreatmentRun, TurnExchange, TurnExchangeStage } from "../../packages/contracts/inspector";
-import type { GoalProgress } from "../../packages/contracts/goal-progress";
+import type { GoalProgress, GoalScenarioUpdate } from "../../packages/contracts/goal-progress";
+import { goalScenarioCard, type GoalScenarioInvocation } from "./goal-scenarios";
 import {
   asksAboutFunding, defaultAgentFundingWorkflow, fundingPreviewWorkflow, type ActionRecommendation, type TreatmentRecommendations, type WorkflowLaunch,
 } from "../../packages/contracts/funding-workflow";
@@ -130,6 +131,8 @@ export type TurnRecord = {
   portfolioSnapshot?: PortfolioSnapshot;
   goalScopeId?: string;
   goalProgress?: GoalProgress;
+  goalScenarioScopeId?: string;
+  goalScenario?: GoalScenarioInvocation;
   workflow?: WorkflowLaunch;
   workflowScopeId?: string;
   fundingRun?: FundingRun;
@@ -684,6 +687,16 @@ export class Store {
             ...(state.completion && watch && { completion: { ...state.completion, value: watch.value } }),
           };
         }
+        if (orig.public.experience && goalScenarioCard(orig)) {
+          const { actions } = this.experience(orig.public.experience.experienceId, source.principalId);
+          copied = buildSurface(orig.public.experience, orig.public.experience.blocks, actions);
+          cloned.scope.turnId = clonedTurnId;
+          cloned.public.experience = copied.display;
+        }
+        if (orig.public.goalScenario) {
+          const sourceTurnId = clonedTurns.get(orig.public.goalScenario.sourceTurnId);
+          cloned.public.goalScenario = sourceTurnId ? { ...orig.public.goalScenario, sourceTurnId } : undefined;
+        }
         this.db.run(
           "INSERT INTO turns (id, conversation_id, request_id, ordinal, status, record) VALUES (?, ?, ?, ?, ?, ?)",
           clonedTurnId, forked.id, `fork:${orig.public.id}:${clonedTurnId}`, cloned.ordinal, cloned.public.status, JSON.stringify(cloned),
@@ -949,7 +962,7 @@ export class Store {
   accept(input: {
     conversation: ConversationRecord; requestId: string; origin: string; message: string; selectionMode: SelectionMode; now: number;
     retry?: TurnRecord; workflow?: WorkflowLaunch; agentLaunch?: AgentLaunch; operatorName?: string; requestSessionId?: string;
-    tenantOperator?: boolean; interactive?: InteractiveInvocation;
+    tenantOperator?: boolean; interactive?: InteractiveInvocation; goalScenario?: GoalScenarioInvocation;
   }) {
     let created = false;
     const turn = this.db.tx(() => {
@@ -1003,6 +1016,7 @@ export class Store {
         flowCatalog: this.routingFlows(conversation, Boolean(input.tenantOperator)),
         agentLaunch: input.agentLaunch ?? retry?.agentLaunch,
         interactive: input.interactive ?? retry?.interactive,
+        goalScenario: input.goalScenario ?? retry?.goalScenario,
         fundingRun: continuation,
         ...(uiLayouts.length && { uiLayouts }),
         toolSetup: continuation ? latest?.toolSetup : setup.fundingWorkflow ? setup : { ...setup, fundingWorkflow: workflowDefinition },
@@ -1167,7 +1181,7 @@ export class Store {
 
   finish(
     id: string,
-    outcome: { type: "completed"; result: CompiledExperience; interactive?: InteractiveCompletion; verifiedContentIds?: readonly string[] }
+    outcome: { type: "completed"; result: CompiledExperience; interactive?: InteractiveCompletion; goalScenario?: GoalScenarioUpdate; verifiedContentIds?: readonly string[] }
       | { type: "failed"; code: FailureCode }
       | { type: "cancelled" },
     now: number,
@@ -1186,6 +1200,7 @@ export class Store {
         delete turn.public.previewExperience;
         if (turn.agentLaunch && "capability" in turn.agentLaunch) delete turn.agentLaunch.values;
         turn.public.experience = display;
+        if (outcome.goalScenario) turn.public.goalScenario = outcome.goalScenario;
         if (outcome.interactive) {
           const { state, callId, watch } = outcome.interactive;
           turn.public.interactiveExperience = state;

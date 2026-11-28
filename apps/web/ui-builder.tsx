@@ -4,6 +4,7 @@ import {
   GripVertical, LayoutGrid, LayoutTemplate, List, Plus, SlidersHorizontal, Sparkles, Trash2, Type, X,
 } from "lucide-react";
 import { dataDictionary, type DataBindingKey } from "../../packages/contracts/data-bindings";
+import { defaultExtraMonthlyCents } from "../../packages/contracts/goal-progress";
 import type { Customer360AdminRecord } from "../../packages/contracts/customer-360";
 import {
   bindingDomain, layoutWidgets, recordIntentOption, widgetSequence, type RecordIntent, layoutComponents, layoutTargetDomain, maxLayoutDescription, maxLayoutSlots, maxLayoutTargets, maxLayouts, targetKey,
@@ -236,7 +237,7 @@ function makeNewField(): CustomFormField {
 }
 
 function slotMetaSummary(slot: LayoutSlot): string {
-  if (slot.kind === "block") return "Built-in component";
+  if (slot.kind === "block") return slot.extraMonthlyCents ? "Includes a savings preview" : "Built-in component";
   if (slot.kind === "text") return slot.tone === "accent" ? "Highlighted callout" : "Text note";
   if (slot.kind === "form") {
     const bound = slot.fields.filter((f) => f.defaultBinding).length;
@@ -426,7 +427,7 @@ function SlotAccordion({
     : slot.kind === "form" ? (slot.title.trim() || "Interactive form")
     : slot.kind === "widget" ? (slot.title.trim() || "Data-bound widget")
     : (slot.heading.trim() || "Text section");
-  const editable = slot.kind !== "block";
+  const editable = slot.kind !== "block" || slot.component === "PznGoalProgress";
   const destination = slot.kind === "widget" && slot.nextWidgetId ? widgets.get(slot.nextWidgetId) : undefined;
   const nextWidgets = slot.kind === "widget" ? [...widgets.values()].filter((candidate) => {
     const { steps, issue } = widgetSequence(candidate, widgets);
@@ -493,6 +494,16 @@ function SlotAccordion({
           <button type="button" aria-label={"Remove " + label} onClick={remove}><X size={15} /></button>
         </div>
       </div>
+
+      {expanded && slot.kind === "block" && slot.component === "PznGoalProgress" && (
+        <div className="ui-slot-fields">
+          <label className="ui-checkbox">
+            <input type="checkbox" checked={slot.extraMonthlyCents !== undefined}
+              onChange={(event) => change({ ...slot, extraMonthlyCents: event.target.checked ? defaultExtraMonthlyCents : undefined })} />
+            Offer Add $500 a month
+          </label>
+        </div>
+      )}
 
       {expanded && slot.kind === "text" && (
         <div className="ui-slot-fields">

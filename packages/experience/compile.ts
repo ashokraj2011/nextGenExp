@@ -19,7 +19,7 @@ export const makeId = (prefix: string) => prefix + "_" + randomUUID().replaceAll
 export type IssuedAction = DisplayExperience["actions"][number] & {
   userMessage: string; followUpId: string; workflow?: WorkflowRecommendation; agentAction?: AgentAction;
   standaloneAction?: ActionRecommendation; offerSourceId?: string;
-  interactive?: InteractiveClickInvocation; inline?: boolean;
+  interactive?: InteractiveClickInvocation; goalScenario?: true; inline?: boolean;
 };
 export type CompiledExperience = { display: DisplayExperience; issued: IssuedAction[] };
 type ExperienceInput = {

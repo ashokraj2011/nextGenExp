@@ -26,7 +26,7 @@ export type ConversationOperations = {
   pinCanvas: (turn: TurnView) => void;
   branchTurn?: (turn: TurnView) => void;
   retry: (id: string) => void;
-  followTurn: (id: string, message: HTMLElement, replyReady: boolean) => (() => void) | undefined;
+  followTurn: (id: string, message: HTMLElement, replyReady: boolean, goalSourceTurnId?: string) => (() => void) | undefined;
   feedback: (turnId: string, experienceId: string, value: "helpful" | "unhelpful") => void;
   runPrompt: (prompt: string) => void;
   previewFunding: () => void;

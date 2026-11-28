@@ -124,6 +124,14 @@ async function routeReadPayloads(
   return call ? registryPayload(inspection, call) : null;
 }
 
+async function goalScenarioPayload(sf: SField, inspection: Inspection, turn: TurnRecord) {
+  if (!turn.goalScenarioScopeId || !turn.goalScenario) return;
+  const call = (await sf.persistence.listCalls(turn.goalScenarioScopeId)).find((entry) => (
+    entry.toolRef === `${sfieldTools.goalScenario.id}@${toolVersion}` && entry.proposedArguments.turnRef === turn.public.id
+  ));
+  return call && { sourceTurnId: turn.goalScenario.sourceTurnId, call: registryPayload(inspection, call) };
+}
+
 async function discoveryPayloads(sf: SField, inspection: Inspection, turn: TurnRecord): Promise<Pick<TurnPayloads, "catalogLookup" | "topicScores">> {
   if (!turn.catalogScopeId) return { topicScores: null };
   const calls = (await sf.persistence.listCalls(turn.catalogScopeId)).filter((call) => call.proposedArguments.turnRef === turn.public.id);
@@ -312,6 +320,7 @@ function callTimings(turn: TurnRecord, payload: TurnPayloads): NonNullable<TurnP
   add("Treatment Selector", payload.treatment);
   add("Retirement account records", payload.retirementAccounts);
   add("Goal Progress", payload.goal);
+  add("Savings scenario", payload.goalScenario?.call);
   add("CCRE glossary", payload.glossary);
   attempts("Experience Composer", payload.composer);
   const compiler = payload.handoffs?.compiler?.timing;
@@ -329,7 +338,7 @@ function callTimings(turn: TurnRecord, payload: TurnPayloads): NonNullable<TurnP
 }
 
 export async function readTurnPayloads(sf: SField, store: Store, inspection: Inspection, turn: TurnRecord, conversation: ConversationRecord): Promise<TurnPayloads> {
-  const [discovery, router, glossary, treatment, portfolio, goal, composer, workflow, agentic, customerLookup, retirementAccounts, interactiveCall] = await Promise.all([
+  const [discovery, router, glossary, treatment, portfolio, goal, composer, workflow, agentic, customerLookup, retirementAccounts, interactiveCall, goalScenario] = await Promise.all([
     discoveryPayloads(sf, inspection, turn),
     modelPayloads(sf, store, inspection, turn, "route"),
     glossaryPayloads(sf, inspection, turn),
@@ -342,6 +351,7 @@ export async function readTurnPayloads(sf: SField, store: Store, inspection: Ins
     scopedToolPayload(sf, inspection, turn, turn.customerTask),
     routeReadPayloads(sf, inspection, turn, turn.retirementScopeId, "retirementAccounts"),
     scopedToolPayload(sf, inspection, turn, { sfieldRunId: turn.public.interactiveExperience?.sfieldRunId, sfieldCallId: turn.interactiveCallId }),
+    goalScenarioPayload(sf, inspection, turn),
   ]);
   const sourceId = turn.workflow?.sourceExperienceId ?? (turn.agentLaunch && "capability" in turn.agentLaunch ? turn.agentLaunch.sourceExperienceId : undefined);
   const source = sourceId && store.experience(sourceId, turn.scope.principalId).turn;
@@ -365,5 +375,6 @@ export async function readTurnPayloads(sf: SField, store: Store, inspection: Ins
       call: interactiveCall,
     };
   }
+  if (goalScenario) payloads.goalScenario = goalScenario;
   return { ...payloads, timing: callTimings(turn, payloads) };
 }

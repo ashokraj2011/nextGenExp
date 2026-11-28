@@ -5,6 +5,7 @@ import { capabilityIdSchema } from "./agentic";
 import { dataBindingKeySchema } from "./data-bindings";
 import { contentComponentCatalog } from "./domain";
 import type { RoutingIntentId } from "./routing-intents";
+import { extraMonthlyCentsSchema } from "./goal-progress";
 
 export const layoutComponents = [
   ...contentComponentCatalog,
@@ -132,11 +133,12 @@ export const resolvedBoundWidgetSchema = z.object({
 export type ResolvedBoundWidgetProps = z.infer<typeof resolvedBoundWidgetSchema>;
 
 export const layoutSlotSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("block"), id: slotId, component: z.enum(ids) }).strict(),
+  z.object({ kind: z.literal("block"), id: slotId, component: z.enum(ids), extraMonthlyCents: extraMonthlyCentsSchema.optional() }).strict(),
   layoutTextSchema.extend({ kind: z.literal("text"), id: slotId }),
   layoutFormSchema.extend({ kind: z.literal("form"), id: slotId }),
   layoutBoundWidgetSchema.extend({ kind: z.literal("widget"), id: slotId }),
-]);
+]).refine((slot) => slot.kind !== "block" || slot.component === "PznGoalProgress" || slot.extraMonthlyCents === undefined,
+  { message: "Extra monthly savings requires a goal progress block." });
 export type LayoutSlot = z.infer<typeof layoutSlotSchema>;
 export type WidgetSlot = Extract<LayoutSlot, { kind: "widget" }>;
 

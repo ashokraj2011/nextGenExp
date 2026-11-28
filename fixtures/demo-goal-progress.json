@@ -2,6 +2,7 @@
   "fixtureVersion": "pzn-demo-home-goal-v1",
   "goalId": "home_down_payment",
   "currency": "USD",
+  "monthlyContributionCents": 200000,
   "goals": [
     {
       "mid": "DEMO-MID-1001",

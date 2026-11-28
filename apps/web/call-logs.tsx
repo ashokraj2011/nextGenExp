@@ -267,7 +267,13 @@ function TurnPayloadLog({ turn }: { turn: TurnView }) {
         <JsonBlock title="Saved record and run state" value={payloads.interactiveExperience.state} />
       </section>}
       {payloads.customerLookup && <ReadToolStage title="Customer record lookup" stage={payloads.customerLookup} />}
-      {((!payloads.workflow && !payloads.agentic && !payloads.customerLookup && !payloads.interactiveExperience) || payloads.topicScores || payloads.router || payloads.treatment) && <>
+      {payloads.goalScenario && <section aria-label="Savings scenario">
+        <h3>Savings scenario</h3>
+        <p><a href={diagnosticHref(adminPaths.logs, turn.conversationId, payloads.goalScenario.sourceTurnId)}>Open the original goal turn</a></p>
+        <ReadToolStage title="sfield savings projection" stage={payloads.goalScenario.call} expanded />
+      </section>}
+      {((!payloads.workflow && !payloads.agentic && !payloads.customerLookup && !payloads.interactiveExperience && !payloads.goalScenario)
+        || payloads.topicScores || payloads.router || payloads.treatment) && <>
         {!payloads.catalogLookup && !payloads.topicScores && !payloads.router && <ModelStage title="Context Router" stage={null} />}
         {payloads.glossary && <ReadToolStage title="CCRE glossary" payloadLabel="Glossary" stage={payloads.glossary} />}
         {payloads.retirementAccounts && <ReadToolStage title="Retirement account records" stage={payloads.retirementAccounts} />}

@@ -18,7 +18,9 @@ import {
   fundingOptionsSchema, fundingPreviewSchema, fundingPreviewWorkflow, fundingStatusSchema, fundingToolKey,
   fundingWorkflowIssue, resolveFundingWorkflow, chatTreatmentSchema, treatmentRecommendationsSchema, type WorkflowLaunch,
 } from "../../packages/contracts/funding-workflow";
-import { goalProgressSchema, isHomeGoalSummary } from "../../packages/contracts/goal-progress";
+import { formatGoalMonth, goalProgressSchema, goalSavingsProjectionSchema, isHomeGoalSummary } from "../../packages/contracts/goal-progress";
+import { formatPortfolioAmount } from "../../packages/contracts/portfolio";
+import { goalScenarioCard, goalScenarioMonth, goalScenarioSource, type GoalScenarioInvocation } from "./goal-scenarios";
 import type { ContextRoutingInput, ExperienceCompositionInput } from "../../packages/contracts/model-inputs";
 import { isPortfolioSummary, portfolioSnapshotSchema } from "../../packages/contracts/portfolio";
 import { ruleGlossarySchema } from "../../packages/contracts/rule-glossary";
@@ -195,13 +197,13 @@ export class ExperienceService {
     return current;
   }
 
-  submit(conversation: ConversationRecord, message: string, requestId: string, origin = "message", retry?: TurnRecord, workflow?: WorkflowLaunch, agentLaunch?: AgentLaunch, operatorName?: string, requestSessionId?: string, interactive?: InteractiveInvocation) {
+  submit(conversation: ConversationRecord, message: string, requestId: string, origin = "message", retry?: TurnRecord, workflow?: WorkflowLaunch, agentLaunch?: AgentLaunch, operatorName?: string, requestSessionId?: string, interactive?: InteractiveInvocation, goalScenario?: GoalScenarioInvocation) {
     if (conversation.audience === "admin" && !this.canCreateRule) {
       throw new ApiError(404, "not_found", "This conversation is unavailable.");
     }
     const actor = conversation.domainId === "wealth" && conversation.audience !== "admin" ? undefined : operatorName;
     const { turn, created } = this.store.accept({
-      conversation, message, requestId, origin, retry, workflow, agentLaunch, operatorName: actor, requestSessionId, interactive,
+      conversation, message, requestId, origin, retry, workflow, agentLaunch, operatorName: actor, requestSessionId, interactive, goalScenario,
       tenantOperator: Boolean(actor && this.dynamicUi?.isTenantAdmin?.(actor)), selectionMode: this.selectionMode, now: this.now(),
     });
     if (created) this.schedule(turn);
@@ -235,6 +237,21 @@ export class ExperienceService {
     const conversation = this.store.conversation(turn.scope.conversationId, principalId);
     if (!operatorName && (conversation.audience === "admin" || this.store.hasOperatorContent(conversation.id))) {
       throw new ApiError(403, "operator_required", "Sign in with your operator account to continue this turn.");
+    }
+    if (signed.goalScenario) {
+      if (Object.keys(action.context).some((key) => key !== "actionId")) {
+        throw new ApiError(400, "action_input_invalid", "This button uses the amount shown on the goal.");
+      }
+      const origin = "goal_scenario:" + signed.actionId;
+      const previous = this.store.existingRequest(conversation.id, requestId, signed.userMessage, origin);
+      if (previous) return this.accepted(previous);
+      const source = goalScenarioCard(turn);
+      if (conversation.domainId !== "wealth" || this.store.latestTurn(conversation.id)?.public.id !== turn.public.id
+        || (turn.public.experience?.expiresAt ?? 0) <= this.now() || source?.option.actionId !== signed.actionId) {
+        throw new ApiError(409, "action_stale", "Open your current home-buying goal to try this option again.");
+      }
+      return this.submit(conversation, signed.userMessage, requestId, origin, undefined, undefined, undefined,
+        operatorName, requestSessionId, undefined, { sourceTurnId: turn.public.id, startMonth: source.firstMonth });
     }
     if (signed.interactive && turn.interactive) {
       if (Object.keys(action.context).some((key) => key !== "actionId")) {
@@ -412,6 +429,45 @@ export class ExperienceService {
     return true;
   }
 
+  private async runGoalScenario(runtime: Runtime, turn: TurnRecord, signal: AbortSignal) {
+    let request = turn.goalScenario;
+    const previous = this.store.previousCompletedTurn(turn.scope.conversationId, turn.ordinal)?.public.goalScenario;
+    const sourceId = request?.sourceTurnId ?? previous?.sourceTurnId;
+    const source = sourceId && goalScenarioSource(this.store.turn(sourceId), turn);
+    const reply = (text: string) => {
+      const now = this.now();
+      this.store.finish(turn.public.id, { type: "completed", result: compileChatReply(text, "reply", now + DECISION_TTL) }, now);
+      return true;
+    };
+    if (!request && previous && source) {
+      const next = goalScenarioMonth(turn.public.message, source.firstMonth);
+      if (!next) return false;
+      if (!next.month) return reply("Choose a future start month within the next 10 years.");
+      request = { sourceTurnId: previous.sourceTurnId, startMonth: next.month };
+      const resolved = request;
+      this.store.update(turn.public.id, (row) => { row.goalScenario = resolved; });
+    }
+    if (!request) return false;
+    if (!source) return reply("Open your current home-buying goal to try a new savings scenario.");
+    const { sourceTurnId, startMonth } = request;
+    this.store.progress(turn.public.id, "goal", this.now());
+    const run = await runtime.registry(turn, "goalScenarioScopeId", 1, signal, (call) => call("goalScenario", {
+      turnRef: turn.public.id, sourceTurnId, startMonth, extraMonthlyCents: source.option.extraMonthlyCents,
+    }));
+    signal.throwIfAborted();
+    if (run.status !== "succeeded") return reply("I couldn’t update the savings projection. Please try again.");
+    const projection = goalSavingsProjectionSchema.parse(run.output);
+    const amount = formatPortfolioAmount(projection.extraMonthlyCents);
+    const start = formatGoalMonth(projection.startMonth);
+    const target = projection.projectedTargetMonth
+      ? `the projected target is ${formatGoalMonth(projection.projectedTargetMonth)}`
+      : "the goal is beyond the 10-year projection";
+    const now = this.now();
+    const result = compileChatReply(`With an extra ${amount} a month starting in ${start}, ${target}. I updated your savings chart above.`, "reply", now + DECISION_TTL);
+    this.store.finish(turn.public.id, { type: "completed", result, goalScenario: { sourceTurnId, projection } }, now);
+    return true;
+  }
+
   private async execute(id: string, recovering: boolean) {
     const initial = this.store.turn(id);
     if (this.closing || initial?.public.status !== "working") return;
@@ -501,6 +557,11 @@ export class ExperienceService {
       return true;
     };
     try {
+      if (accountHelp && domain === "wealth" && !initial.workflow && !initial.agentLaunch && !initial.interactive) {
+        stage = "goal";
+        if (await this.runGoalScenario(runtime, initial, signal)) return;
+        stage = "catalog";
+      }
       if (!workspaceContext && (initial.interactive || initial.uiLayouts?.some(({ design }) => design.experience))) {
         stage = "experience";
         if (await this.runInteractiveExperience(initial, current)) return;

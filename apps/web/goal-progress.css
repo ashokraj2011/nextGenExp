@@ -56,7 +56,8 @@
 .goal-figure canvas { display: block; width: 100%; height: clamp(153px, 18vw, 190px); }
 .goal-legend {
   display: flex;
-  gap: 17px;
+  flex-wrap: wrap;
+  gap: 6px 15px;
   justify-content: center;
   padding: 0 10px 10px;
   color: #4d6558;
@@ -64,7 +65,16 @@
 }
 .goal-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .goal-legend span::before { content: ""; width: 16px; border-top: 2px solid #226149; }
-.goal-legend span + span::before { border-top: 1px dashed #8b6947; }
+.goal-legend .goal-legend-target::before { border-top: 1px dashed #8b6947; }
+.goal-legend .goal-legend-current::before { border-top: 2px dotted #5b6d62; }
+.goal-legend .goal-legend-project::before { border-top: 2px dashed #2a5b9d; }
+.goal-scenario-action { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.goal-scenario-action .secondary-button { color: #28563e; }
+.goal-scenario-action span, .goal-scenario p { color: #4d6558; font-size: .8rem; }
+.goal-scenario { margin: 0; padding: 12px; border: 1px solid #dbe7f1; border-radius: 10px; background: #f5f9fd; }
+.goal-scenario dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 7px; }
+.goal-scenario dt { font-size: .74rem; color: #405c72; }
+.goal-scenario dd { margin-top: 3px; font-weight: 720; color: #193b61; }
 .goal-history { margin: 0; }
 .goal-history table { width: 100%; margin-top: 8px; border-collapse: collapse; font-size: .81rem; }
 .goal-history th, .goal-history td { padding: 6px 2px; border-bottom: 1px solid #e6ede4; text-align: left; }

@@ -1,6 +1,6 @@
 import type { JsonObject } from "@sfield/core";
 import { fundingAgentOutcomes } from "./funding-workflow";
-import { goalMonthPattern, homeDownPaymentGoalId } from "./goal-progress";
+import { goalMonthPattern, goalProjectionMonths, homeDownPaymentGoalId } from "./goal-progress";
 import { glossaryOperators, glossaryValueTypes } from "./rule-glossary";
 import { routingIntents } from "./routing-intents";
 import contextSchema from "./schemas/context-selection-proposal.schema.json";
@@ -27,8 +27,8 @@ export const compositionOutputSchema = {
 
 const string = { type: "string" } as const;
 const score = { type: ["number", "null"], minimum: 0, maximum: 1 };
-function closed(properties: JsonObject): JsonObject {
-  return { type: "object", properties, required: Object.keys(properties), additionalProperties: false };
+function closed(properties: JsonObject, optional: readonly string[] = []): JsonObject {
+  return { type: "object", properties, required: Object.keys(properties).filter((key) => !optional.includes(key)), additionalProperties: false };
 }
 function array(items: JsonObject, maxItems: number): JsonObject {
   return { type: "array", items, maxItems };
@@ -94,10 +94,21 @@ export const goalProgressResultSchema = closed({
   goalId: { type: "string", enum: [homeDownPaymentGoalId] },
   currency: { type: "string", enum: ["USD"] },
   targetCents: { ...cents, minimum: 1 },
+  monthlyContributionCents: { ...cents, maximum: 100_000_000 },
   history: {
     ...array(closed({ month: { ...string, pattern: goalMonthPattern.source }, savedCents: cents }), 12),
     minItems: 2,
   },
+}, ["monthlyContributionCents"]);
+const goalMonth = { ...string, pattern: goalMonthPattern.source };
+const extraMonthlyCents = { ...cents, minimum: 1, maximum: 500_000 };
+const targetMonth = { anyOf: [goalMonth, { type: "null" }] };
+const projectedCents = { ...cents, maximum: 1_100_000_000_000 };
+export const goalSavingsInputSchema = closed({ turnRef: string, sourceTurnId: string, startMonth: goalMonth, extraMonthlyCents });
+export const goalSavingsResultSchema = closed({
+  currentMonthlyCents: { ...cents, maximum: 100_000_000 }, extraMonthlyCents, startMonth: goalMonth,
+  currentTargetMonth: targetMonth, projectedTargetMonth: targetMonth,
+  points: { ...array(closed({ month: goalMonth, currentCents: projectedCents, projectedCents }), goalProjectionMonths + 2), minItems: 2 },
 });
 const glossaryAttributeResultSchema = closed({
   id: string,

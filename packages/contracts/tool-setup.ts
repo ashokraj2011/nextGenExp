@@ -49,6 +49,12 @@ export const sfieldTools = {
     category: "data_read" as SfieldToolCategory,
     description: "Reads the scoped demo member’s down payment target and savings history for an eligible home-buying goal.",
   },
+  goalScenario: {
+    id: "goal.savings.preview",
+    label: "Savings scenario",
+    category: "data_read" as SfieldToolCategory,
+    description: "Compares the current monthly savings plan with the extra amount and start month chosen in chat.",
+  },
   ...fundingTools,
 } as const;
 export type ToolKey = keyof typeof sfieldTools;
@@ -117,7 +123,7 @@ export const toolSetupSchema = z.object({
   enabled: z.object({
     catalog: z.boolean(), propensity: z.boolean(), selection: z.boolean(), balances: z.boolean(),
     glossary: z.boolean().optional(), portfolio: z.boolean().optional(), goal: z.boolean().optional(), retirementAccounts: z.boolean().optional(),
-    fundingOptions: z.boolean().optional(), fundingStatus: z.boolean().optional(), fundingPreview: z.boolean().optional(),
+    fundingOptions: z.boolean().optional(), fundingStatus: z.boolean().optional(), fundingPreview: z.boolean().optional(), goalScenario: z.boolean().optional(),
   }).strict(),
   treatmentOverrides: z.array(treatmentOverrideSchema).max(64).refine((rules) => (
     new Set(rules.map(({ scenarioId, contextId }) => JSON.stringify([scenarioId, contextId]))).size === rules.length
@@ -131,7 +137,7 @@ export type MockOutput = z.infer<typeof mockOutputSchema>;
 export const defaultToolSetup: ToolSetup = {
   enabled: {
     catalog: true, propensity: true, selection: true, balances: true, glossary: true, portfolio: true, goal: true, retirementAccounts: true,
-    fundingOptions: true, fundingStatus: true, fundingPreview: true,
+    fundingOptions: true, fundingStatus: true, fundingPreview: true, goalScenario: true,
   },
   treatmentOverrides: [],
 };

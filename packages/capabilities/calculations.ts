@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { goalProgressSchema } from "../contracts/goal-progress";
+import {
+  extraMonthlyCentsSchema, goalMonthAt, goalMonthIndex, goalMonthSchema, goalProgressSchema, goalProjectionMonths, goalSavingsProjectionSchema,
+} from "../contracts/goal-progress";
 
 const cents = z.number().int().nonnegative().max(2_200_000_000_000);
 const pointSchema = z.object({ month: z.number().int().nonnegative(), savedCents: cents }).strict();
@@ -36,6 +38,45 @@ export const projectionSchema = z.object({
 }).strict();
 
 export const contributionSchema = z.object(base).strict();
+
+export function projectExtraGoalSavings(progress: unknown, extraCents: number, firstMonth: string, startMonth: string) {
+  const goal = goalProgressSchema.parse(progress);
+  const currentMonthlyCents = goal.monthlyContributionCents;
+  const extraMonthlyCents = extraMonthlyCentsSchema.parse(extraCents);
+  const latest = goal.history.at(-1)!;
+  const first = goalMonthIndex(goalMonthSchema.parse(firstMonth));
+  const delay = goalMonthIndex(goalMonthSchema.parse(startMonth)) - first;
+  if (currentMonthlyCents === undefined || first <= goalMonthIndex(latest.month) || delay < 0 || delay >= goalProjectionMonths) {
+    throw new Error("Goal savings assumptions are unavailable.");
+  }
+  const remaining = Math.max(0, goal.targetCents - latest.savedCents);
+  const currentMonths = remaining === 0 ? 0 : Math.ceil(remaining / currentMonthlyCents);
+  const projectedMonths = delay * currentMonthlyCents >= remaining
+    ? currentMonths
+    : delay + Math.ceil((remaining - delay * currentMonthlyCents) / (currentMonthlyCents + extraMonthlyCents));
+  const targetMonth = (months: number) => remaining <= 0 ? latest.month
+    : months <= goalProjectionMonths ? goalMonthAt(first + months - 1) : null;
+  const horizon = Math.min(goalProjectionMonths, Math.max(12, delay + 1,
+    Number.isFinite(currentMonths) ? currentMonths : projectedMonths));
+  const opening = { month: latest.month, currentCents: latest.savedCents, projectedCents: latest.savedCents };
+
+  return goalSavingsProjectionSchema.parse({
+    currentMonthlyCents,
+    extraMonthlyCents,
+    startMonth,
+    currentTargetMonth: targetMonth(currentMonths),
+    projectedTargetMonth: targetMonth(projectedMonths),
+    points: [
+      opening,
+      ...(first > goalMonthIndex(latest.month) + 1 ? [{ ...opening, month: goalMonthAt(first - 1) }] : []),
+      ...Array.from({ length: horizon }, (_, index) => {
+        const currentCents = latest.savedCents + (index + 1) * currentMonthlyCents;
+        return { month: goalMonthAt(first + index), currentCents,
+          projectedCents: currentCents + Math.max(0, index + 1 - delay) * extraMonthlyCents };
+      }),
+    ],
+  });
+}
 
 export function savingsProjection(
   progress: unknown,

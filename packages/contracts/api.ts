@@ -1,5 +1,5 @@
 import type { SelectionMode } from "./domain";
-import type { GoalProgress } from "./goal-progress";
+import type { GoalProgress, GoalScenarioUpdate } from "./goal-progress";
 import type { PiiRedactionTrace } from "./pii-firewall";
 import type { PortfolioHistoryPoint, PortfolioSnapshot } from "./portfolio";
 import type { DisplayExperience } from "./surface";
@@ -136,6 +136,7 @@ export type TurnView = {
   semanticRoute?: SemanticRouteTrace;
   customerLookup?: CustomerLookupSummary;
   interactiveExperience?: import("./interactive-experience").InteractiveTurnState;
+  goalScenario?: GoalScenarioUpdate;
   emotionalState?: EmotionalAssessment;
   providerArbitration?: ProviderArbitrationTrace;
   piiRedaction?: PiiRedactionTrace;

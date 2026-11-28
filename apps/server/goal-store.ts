@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import goalFixture from "../../fixtures/demo-goal-progress.json";
 import { findProfileById } from "../../packages/customer-profiles";
 
 export type GoalCategory = "home" | "retirement" | "education" | "emergency" | "travel" | "custom";
@@ -89,7 +90,7 @@ export class CustomerGoalStore {
         category: "home",
         targetCents: profile.homeGoalTargetCents,
         savedCents: profile.homeGoalSavedCents,
-        monthlyContributionCents: 200_000,
+        monthlyContributionCents: goalFixture.monthlyContributionCents,
         targetDate: "2028-06-01",
         createdAt: 0,
         updatedAt: 0,

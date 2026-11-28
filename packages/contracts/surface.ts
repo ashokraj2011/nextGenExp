@@ -4,7 +4,7 @@ import { z } from "zod";
 import { retirementViewSchema } from "./retirement-accounts";
 import { comparisonFieldSchema, metricValueSchema, stepSchema } from "./domain";
 import { fundingOptionsSchema, fundingPreviewSchema } from "./funding-workflow";
-import { goalProgressSchema } from "./goal-progress";
+import { extraMonthlyCentsSchema, goalProgressSchema } from "./goal-progress";
 import { portfolioSnapshotSchema } from "./portfolio";
 import { contributionSchema, projectionSchema } from "../capabilities/calculations";
 import { inputFieldSchema } from "./agentic";
@@ -38,7 +38,7 @@ export const metricSummary = { name: "PznMetricSummary", schema: z.object({
   ...shared, observedAt: z.string().datetime(), values: z.array(metricValueSchema).min(1).max(2),
 }).strict() } as const;
 export const goalProgressCard = { name: "PznGoalProgress", schema: z.object({
-  ...shared, goal: goalProgressSchema,
+  ...shared, goal: goalProgressSchema, savingsOption: z.object({ actionId: id, extraMonthlyCents: extraMonthlyCentsSchema }).strict().optional(),
 }).strict() } as const;
 export const experienceRoot = { name: "PznExperience", schema: z.object({
   children: ChildListSchema,

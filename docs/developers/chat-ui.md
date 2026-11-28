@@ -10,6 +10,12 @@ Chat continues using the current publication while a change is under review. If 
 
 In **sfield Studio → Overview & Locks**, **Request lock approval** submits the current sfield configuration fingerprint for review. When approved, the lock records the exact configuration fingerprint and the operator who approved it.
 
+### Add a savings preview to a goal
+
+In **Content Catalog**, open **Home down payment** and choose **Design in UI Builder**. Expand the **Goal progress** block and select **Offer Add $500 a month**. Save the draft, then select **Publish**. In **Review in Admin chat**, expand **Review prepared change** to see the button in the design preview and approve that revision.
+
+Sign in as Alice and ask **“Show my home-buying goal and savings progress.”** Click **Add $500 a month**, then ask **“What if I start in March?”** The original chart compares actual savings with both projections and keeps the updated scenario in the thread. The first projection begins the month after the latest recorded month or the current month, whichever is later. The follow-up uses the next March in that window. **Logs → Savings scenario** shows the original goal turn, the requested amount and start month, and the calculation returned by `goal.savings.preview@1.0.0`.
+
 ### Publish a balance comparison
 
 1. In **Administration → UI Builder**, select **Wealth** and open the balance comparison layout or its starter design. Set **Layout name** to **Balance definitions**.

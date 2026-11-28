@@ -14,6 +14,7 @@ const usage = {
   retirementAccounts: { caller: "sfield · Reads account records", contract: "retirement-accounts", description: "Lists retirement accounts for the signed-in member and reads the designation on the account selected from the chat." },
   portfolio: { caller: "App · Summarizes a portfolio", contract: "portfolio", description: "Looks up what the demo customer holds in their portfolio." },
   goal: { caller: "App · Shows goal progress", contract: "goal", description: "Looks up the down payment target and monthly savings." },
+  goalScenario: { caller: "App · Updates a savings preview", contract: "goal", description: "Calculates the effect of an extra monthly contribution starting in the month chosen in chat." },
   fundingOptions: { caller: "Funding preview workflow", contract: "funding", description: "Reads eligible funding methods and the preview amount." },
   fundingStatus: { caller: "Funding preview workflow", contract: "funding", description: "Checks funding status before the agent lists the available methods." },
   fundingPreview: { caller: "Funding preview workflow", contract: "funding", description: "Builds a sample preview using the method read for this turn." },

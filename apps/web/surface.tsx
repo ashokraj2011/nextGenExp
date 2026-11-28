@@ -12,6 +12,7 @@ import {
 import { ArrowRight, ArrowUpRight, BookOpenText, ChartNoAxesColumnIncreasing, ChevronDown, Columns2, FileText, House, ListChecks } from "lucide-react";
 import { makeAssistantDataUI } from "@assistant-ui/react";
 import type { FundingOptions, FundingPreview } from "../../packages/contracts/funding-workflow";
+import type { GoalSavingsProjection } from "../../packages/contracts/goal-progress";
 import { accountPortalPath } from "../../packages/contracts/workspace";
 import { formatPortfolioAmount } from "../../packages/contracts/portfolio";
 import {
@@ -438,9 +439,15 @@ function BalanceComparisonCard({ columns, sources, disclosures }: ComparisonProp
   </section>;
 }
 
-function ContentBlock({ block, form }: { block: DisplayBlock; form?: { experienceId: string; componentId: string; enabled: boolean } }) {
+function ContentBlock({ block, form, onAction }: {
+  block: DisplayBlock; form?: { experienceId: string; componentId: string; enabled: boolean }; onAction?: (id: string) => void;
+}) {
   const controls = useContext(ExperienceControls);
-  const { balanceComparison } = useContext(SurfaceActions);
+  const { balanceComparison, experienceId } = useContext(SurfaceActions);
+  const inlineAction = onAction ?? (form?.enabled ? (actionId: string) => controls.followUp(form.experienceId, {
+    version: "1.0", action: { name: FOLLOW_UP_EVENT, surfaceId: form.experienceId, sourceComponentId: form.componentId,
+      timestamp: new Date().toISOString(), context: { actionId } },
+  }) : undefined);
   if (balanceComparison && block.component === comparison.name) return <BalanceComparisonCard {...block.props} />;
   if (block.component === retirementAccounts.name) return <RetirementAccountsCard {...block.props} />;
   if (block.component === savingsChart.name) return <SavingsChart {...block.props} />;
@@ -453,10 +460,7 @@ function ContentBlock({ block, form }: { block: DisplayBlock; form?: { experienc
   if (block.component === boundWidget.name) return <BoundWidgetBlock {...block.props} />;
   if (block.component === widgetWizard.name) return <WidgetWizardBlock {...block.props} />;
   if (block.component === dynamicCanvas.name) return <DynamicCanvasBlock {...block.props} onFollowUp={controls.askPrompt}
-    onAction={form?.enabled ? (actionId) => controls.followUp(form.experienceId, {
-      version: "1.0", action: { name: FOLLOW_UP_EVENT, surfaceId: form.experienceId, sourceComponentId: form.componentId,
-        timestamp: new Date().toISOString(), context: { actionId } },
-    }) : undefined} />;
+    onAction={inlineAction} />;
   if (block.component === ruleCreation.name) return <RuleBlock {...block.props} />;
   if (block.component === portfolioSnapshot.name) return <ChatPortfolio {...block.props} />;
   if (block.component === fundingPreview.name) return <FundingPreviewBlock {...block.props} />;
@@ -464,9 +468,11 @@ function ContentBlock({ block, form }: { block: DisplayBlock; form?: { experienc
   const { component, props } = block;
   const Icon = icons[component];
   const recommendation = block.component === "PznContentCard" && block.props.recommendation;
+  const savingsOption = block.component === goalProgressCard.name ? block.props.savingsOption : undefined;
   return (
     <section className={"content-card " + props.variant + (recommendation ? " suggested-next-step" : "")}
-      aria-label={component === "PznGoalProgress" ? props.title : undefined}>
+      aria-label={component === "PznGoalProgress" ? props.title : undefined}
+      data-goal-scenario-chart={savingsOption ? experienceId : undefined}>
       <div className="content-kind"><Icon size={16} aria-hidden="true" />{recommendation ? "Suggested next step" : blockLabels[component]}</div>
       <h3>{props.title}</h3>
       {block.component === "PznContentCard" && (recommendation || block.props.variant === "expanded" ? (
@@ -512,7 +518,10 @@ function ContentBlock({ block, form }: { block: DisplayBlock; form?: { experienc
           </p>
         </>
       )}
-      {block.component === goalProgressCard.name && <GoalProgressDetails goal={block.props.goal} />}
+      {block.component === goalProgressCard.name && <GoalProgressDetails goal={block.props.goal}
+        projection={savingsOption ? controls.goalScenarios?.get(experienceId) : undefined}
+        extraMonthlyCents={savingsOption?.extraMonthlyCents}
+        onPreview={savingsOption && inlineAction ? () => inlineAction(savingsOption.actionId) : undefined} />}
       <CardSources sources={props.sources} disclosures={props.disclosures} />
     </section>
   );
@@ -566,7 +575,12 @@ const pznCatalog = new Catalog<ReactCatalogComponent>(PZN_CATALOG_ID, "1.0", [
   createComponentImplementation(stepList, ({ props }) => <ContentBlock block={{ component: stepList.name, props }} />),
   createComponentImplementation(metricSummary, ({ props }) => <ContentBlock block={{ component: metricSummary.name, props }} />),
   createComponentImplementation(retirementAccounts, ({ props }) => <RetirementAccountsCard {...props} />),
-  createComponentImplementation(goalProgressCard, ({ props }) => <ContentBlock block={{ component: goalProgressCard.name, props }} />),
+  createComponentImplementation(goalProgressCard, ({ props, context }) => {
+    const { enabled } = useContext(SurfaceActions);
+    return <ContentBlock block={{ component: goalProgressCard.name, props }} onAction={enabled
+      ? (actionId) => void context.dispatchAction({ event: { name: FOLLOW_UP_EVENT, context: { actionId } } }).catch(() => undefined)
+      : undefined} />;
+  }),
   createComponentImplementation(portfolioSnapshot, ({ props }) => <ChatPortfolio {...props} />),
   createComponentImplementation(fundingPreview, ({ props }) => <FundingPreviewBlock {...props} />),
   createComponentImplementation(fundingOptions, ({ props }) => <FundingOptionsBlock {...props} />),
@@ -679,6 +693,7 @@ type SurfaceControls = {
     completion?: { confirmedAt?: number };
   };
   activeExperienceId?: string;
+  goalScenarios?: ReadonlyMap<string, GoalSavingsProjection>;
   allowRuleCreation?: boolean;
   simplifyBalanceComparison?: boolean;
   askPrompt?: (prompt: string) => void;
