@@ -1150,3 +1150,93 @@ test("full cross-layer cohesion: 0 Wealth drift, MCP/A2A live virtual tools, dyn
   // Clean up
   await client.request("/api/admin/domain-models-delete?domain=wealth", { modelId: "wealth.cohesion_vdm" });
 });
+
+test("unified system DB schema persists smass/sphoton/integrations/MCP configs with revision history, atomic rollback, tenant bundle export/import, and chat copilot", async (t) => {
+  const app = await startTestPreview();
+  t.after(() => app.close());
+  const client = await testClient(app.url);
+
+  // 1. Unified system_entities table already holds bootstrapped integrations, task contracts, and MCP exposure
+  const initialSys = await client.request<{
+    tenantId: string;
+    totalEntities: number;
+    totalRevisions: number;
+    countsByKind: Record<string, number>;
+    schema: { tables: Array<{ name: string }>; mermaidEr: string };
+  }>("/api/admin/system-config");
+  assert.ok(initialSys.totalEntities >= 5);
+  assert.ok((initialSys.countsByKind.integration ?? 0) >= 2);
+  assert.ok((initialSys.countsByKind.task_contract ?? 0) >= 3);
+  assert.equal(initialSys.countsByKind.mcp_exposure, 1);
+  assert.match(initialSys.schema.mermaidEr, /SYSTEM_ENTITIES \|\|--o\{ SYSTEM_ENTITY_REVISIONS/);
+
+  // 2. Create a smass virtual model (rev #1), then toggle to Draft (rev #2), then Rollback to rev #1 via /api/admin/system-config-rollback
+  await client.request("/api/admin/domain-models?domain=wealth", {
+    id: "wealth.sys_db_model",
+    version: "1.0.0",
+    status: "published",
+    label: "System DB Test Model",
+    principalKey: "mid",
+    primaryKey: "mid",
+    fields: [
+      { kind: "mapped", key: "cashCents", label: "Cash", toolRef: "portfolio.snapshot.read@1.0.0", outputPath: "cashCents", format: "currency_cents", required: true, exposed: true },
+    ],
+  });
+  await client.request("/api/admin/domain-models-status?domain=wealth", {
+    modelId: "wealth.sys_db_model",
+    status: "draft",
+  });
+
+  const hist = await client.request<{ revisions: Array<{ revision: number; status: string }> }>(
+    "/api/admin/system-config-history?domain=wealth&kind=smass_virtual_model&entityId=wealth.sys_db_model",
+  );
+  assert.equal(hist.revisions.length, 2);
+  assert.equal(hist.revisions[0]!.revision, 2);
+  assert.equal(hist.revisions[0]!.status, "draft");
+  assert.equal(hist.revisions[1]!.revision, 1);
+  assert.equal(hist.revisions[1]!.status, "published");
+
+  // Roll back to revision #1 -> creates revision #3 with status "published" and hot-reloads smass!
+  const rolled = await client.request<{ entity: { revision: number; status: string } }>(
+    "/api/admin/system-config-rollback",
+    { domainId: "wealth", kind: "smass_virtual_model", entityId: "wealth.sys_db_model", targetRevision: 1 },
+  );
+  assert.equal(rolled.entity.revision, 3);
+  assert.equal(rolled.entity.status, "published");
+
+  const afterRollback = await client.request<{ models: SmassModelSummary[] }>("/api/admin/domain-models?domain=wealth");
+  assert.equal(afterRollback.models.find((m) => m.id === "wealth.sys_db_model")?.status, "published");
+
+  // 3. Export signed tenant config bundle, delete the model, then Import bundle -> model is restored & hot-reloaded!
+  const bundle = await client.request<{
+    format: string;
+    tenantId: string;
+    bundleDigest: string;
+    entities: Array<{ kind: string; entityId: string }>;
+  }>("/api/admin/system-config-export");
+  assert.equal(bundle.format, "cep.system.bundle@1.0.0");
+  assert.ok(bundle.entities.some((e) => e.kind === "smass_virtual_model" && e.entityId === "wealth.sys_db_model"));
+
+  // Tampered digest is rejected
+  await client.request("/api/admin/system-config-import", { ...bundle, bundleDigest: "0".repeat(64) }, 400);
+
+  await client.request("/api/admin/domain-models-delete?domain=wealth", { modelId: "wealth.sys_db_model" });
+  const afterDel = await client.request<{ customModelIds: string[] }>("/api/admin/domain-models?domain=wealth");
+  assert.equal(afterDel.customModelIds.includes("wealth.sys_db_model"), false);
+
+  const imported = await client.request<{ importedCount: number }>("/api/admin/system-config-import", bundle);
+  assert.ok(imported.importedCount >= 5);
+  const afterImport = await client.request<{ customModelIds: string[] }>("/api/admin/domain-models?domain=wealth");
+  assert.equal(afterImport.customModelIds.includes("wealth.sys_db_model"), true);
+
+  // 4. Conversational System Config Copilot (/api/admin/system-copilot)
+  const chatSchema = await client.request<{ cards: Array<{ kind: string }> }>("/api/admin/system-copilot", { message: "Show system DB schema" });
+  assert.equal(chatSchema.cards[0]?.kind, "system_schema");
+
+  const chatHealth = await client.request<{ cards: Array<{ kind: string; driftCount?: number }> }>("/api/admin/system-copilot", { message: "Show health & drift" });
+  assert.equal(chatHealth.cards[0]?.kind, "system_health");
+  assert.equal(chatHealth.cards[0]?.driftCount, 0);
+
+  // Clean up
+  await client.request("/api/admin/domain-models-delete?domain=wealth", { modelId: "wealth.sys_db_model" });
+});

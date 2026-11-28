@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { z } from "zod";
 import { empathyAssessToolRef } from "../../packages/contracts/empathy";
+import type { SystemConfigStore } from "./system-config-store";
 
 export const customer360ReadToolId = "cep.customer360.read";
 export const customer360ReadToolVersion = "1.0.0";
@@ -52,40 +53,86 @@ export const STANDALONE_SFIELD_MCP_TOOLS: ReadonlyArray<{
 
 export class McpExposureStore {
   private readonly filePath: string;
+  private readonly systemConfig?: SystemConfigStore;
   private cache: McpExposureConfig | null = null;
 
-  constructor(dataDir: string) {
+  constructor(dataDir: string, systemConfig?: SystemConfigStore) {
     this.filePath = resolve(dataDir, "mcp-server-config.json");
+    this.systemConfig = systemConfig;
+    this.bootstrapToSystemConfig();
+  }
+
+  private bootstrapToSystemConfig() {
+    if (!this.systemConfig) return;
+    if (this.systemConfig.get("tenant", "mcp_exposure", "default")) return;
+    const initial = this.readFromFileOrDefault();
+    this.systemConfig.upsert({
+      domainId: "tenant",
+      kind: "mcp_exposure",
+      entityId: "default",
+      label: "MCP Server Exposure",
+      status: "published",
+      payload: initial,
+      updatedBy: "system",
+      changeNote: existsSync(this.filePath) ? "Migrated from mcp-server-config.json" : "Seeded default MCP exposure",
+    });
+  }
+
+  private readFromFileOrDefault(): McpExposureConfig {
+    if (existsSync(this.filePath)) {
+      try {
+        const parsed = mcpExposureConfigSchema.safeParse(JSON.parse(readFileSync(this.filePath, "utf8")));
+        if (parsed.success) return parsed.data;
+      } catch {
+        // fall through
+      }
+    }
+    return { ...DEFAULT_CONFIG, enabledToolRefs: [...DEFAULT_CONFIG.enabledToolRefs] };
+  }
+
+  reloadFromSystemConfig() {
+    this.cache = null;
+    this.get();
   }
 
   get(): McpExposureConfig {
     if (this.cache) return this.cache;
-    if (!existsSync(this.filePath)) {
-      this.cache = { ...DEFAULT_CONFIG, enabledToolRefs: [...DEFAULT_CONFIG.enabledToolRefs] };
-      return this.cache;
-    }
-    try {
-      const parsed = mcpExposureConfigSchema.safeParse(JSON.parse(readFileSync(this.filePath, "utf8")));
-      if (parsed.success) {
-        this.cache = parsed.data;
-        return this.cache;
+    if (this.systemConfig) {
+      const entity = this.systemConfig.get("tenant", "mcp_exposure", "default");
+      if (entity) {
+        const parsed = mcpExposureConfigSchema.safeParse(entity.payload);
+        if (parsed.success) {
+          this.cache = parsed.data;
+          return this.cache;
+        }
       }
-    } catch {
-      // Fall through to default config
     }
-    this.cache = { ...DEFAULT_CONFIG, enabledToolRefs: [...DEFAULT_CONFIG.enabledToolRefs] };
+    this.cache = this.readFromFileOrDefault();
     return this.cache;
   }
 
-  save(input: McpExposureConfig): McpExposureConfig {
+  save(input: McpExposureConfig, updatedBy = "operator"): McpExposureConfig {
     const parsed = mcpExposureConfigSchema.parse({
       enabledToolRefs: [...new Set(input.enabledToolRefs)],
       includeKnowledgeSearch: input.includeKnowledgeSearch,
       includePublishedTasks: input.includePublishedTasks,
     });
     this.cache = parsed;
-    mkdirSync(dirname(this.filePath), { recursive: true });
-    writeFileSync(this.filePath, JSON.stringify(parsed, null, 2), "utf8");
+    if (this.systemConfig) {
+      this.systemConfig.upsert({
+        domainId: "tenant",
+        kind: "mcp_exposure",
+        entityId: "default",
+        label: "MCP Server Exposure",
+        status: "published",
+        payload: parsed,
+        updatedBy,
+        changeNote: "Updated MCP server exposure policy",
+      });
+    } else {
+      mkdirSync(dirname(this.filePath), { recursive: true });
+      writeFileSync(this.filePath, JSON.stringify(parsed, null, 2), "utf8");
+    }
     return parsed;
   }
 }

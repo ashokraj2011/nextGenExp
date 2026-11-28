@@ -5,6 +5,7 @@ import { z } from "zod";
 import { DOMAIN_PACKS, type DomainPackId } from "../../packages/contracts/domain-packs";
 import type { RuleGlossary } from "../../packages/contracts/rule-glossary";
 import { buildDynamicRuleGlossary } from "../../packages/rule-glossary";
+import type { SystemConfigStore } from "./system-config-store";
 import {
   balanceInputSchema,
   balanceResultSchema,
@@ -272,6 +273,7 @@ export class SphotonCatalogService {
     portfolioSnapshots?: PortfolioSnapshotProvider;
     opsStore?: OpsIncidentStore;
     salesStore?: SalesDealStore;
+    systemConfig?: SystemConfigStore;
   }) {
     this.signingSecret = loadOrCreateSphotonSecret(deps.dataDir);
     this.smass = deps.smass ?? createCepSmassRegistry({ opsStore: deps.opsStore, salesStore: deps.salesStore });
@@ -284,16 +286,64 @@ export class SphotonCatalogService {
   }
 
   private loadOverrides() {
+    if (this.deps.systemConfig) {
+      const dbItems = this.deps.systemConfig.list({ kind: "sphoton_exposure" });
+      if (dbItems.length > 0 || this.deps.systemConfig.hasAnyRevision("sphoton_exposure")) {
+        const next: ExposureOverrideFile = {};
+        for (const row of dbItems) {
+          const parsed = domainFieldExposureSchema.safeParse(row.payload);
+          if (!parsed.success) continue;
+          const domain = row.domainId as DomainPackId;
+          next[domain] = [...(next[domain] ?? []), parsed.data];
+        }
+        this.overrides = next;
+        return;
+      }
+    }
     try {
       if (!existsSync(this.exposureFile)) return;
       const parsed = JSON.parse(readFileSync(this.exposureFile, "utf8")) as ExposureOverrideFile;
-      if (parsed && typeof parsed === "object") this.overrides = parsed;
+      if (parsed && typeof parsed === "object") {
+        this.overrides = parsed;
+        if (this.deps.systemConfig) this.syncOverridesToSystemConfig("system", "Migrated from sphoton-exposures.json");
+      }
     } catch {
       this.overrides = {};
     }
   }
 
+  private syncOverridesToSystemConfig(updatedBy = "operator", changeNote?: string) {
+    const sys = this.deps.systemConfig;
+    if (!sys) return;
+    const currentKeys = new Set<string>();
+    for (const [domain, list] of Object.entries(this.overrides)) {
+      for (const item of list ?? []) {
+        const entityId = `${item.toolRef}::${item.outputPath}`;
+        currentKeys.add(`${domain}::${entityId}`);
+        sys.upsert({
+          domainId: domain,
+          kind: "sphoton_exposure",
+          entityId,
+          label: item.label || item.outputPath,
+          status: item.exposed ? "published" : "draft",
+          payload: item,
+          updatedBy,
+          ...(changeNote ? { changeNote } : {}),
+        });
+      }
+    }
+    for (const row of sys.list({ kind: "sphoton_exposure" })) {
+      if (!currentKeys.has(`${row.domainId}::${row.entityId}`)) {
+        sys.remove({ domainId: row.domainId, kind: "sphoton_exposure", entityId: row.entityId, updatedBy });
+      }
+    }
+  }
+
   private saveOverrides() {
+    if (this.deps.systemConfig) {
+      this.syncOverridesToSystemConfig();
+      return;
+    }
     mkdirSync(dirname(this.exposureFile), { recursive: true });
     writeFileSync(this.exposureFile, JSON.stringify(this.overrides, null, 2));
   }
@@ -418,6 +468,21 @@ export class SphotonCatalogService {
   }
 
   private loadCustomModels() {
+    if (this.deps.systemConfig) {
+      const dbItems = this.deps.systemConfig.list({ kind: "smass_virtual_model" });
+      if (dbItems.length > 0 || this.deps.systemConfig.hasAnyRevision("smass_virtual_model")) {
+        const next: CustomVirtualModelFile = {};
+        for (const row of dbItems) {
+          const valid = customVirtualModelInputSchema.safeParse(row.payload);
+          if (!valid.success) continue;
+          const domain = row.domainId as DomainPackId;
+          next[domain] = [...(next[domain] ?? []), valid.data];
+          this.smass.register(this.compileCustomVirtualModel(domain, valid.data));
+        }
+        this.customModels = next;
+        return;
+      }
+    }
     try {
       if (!existsSync(this.customModelsFile)) return;
       const parsed = JSON.parse(readFileSync(this.customModelsFile, "utf8")) as CustomVirtualModelFile;
@@ -431,29 +496,124 @@ export class SphotonCatalogService {
           }
         }
       }
+      if (this.deps.systemConfig) this.syncCustomModelsToSystemConfig("system", "Migrated from smass-virtual-models.json");
     } catch {
       this.customModels = {};
     }
   }
 
+  private syncCustomModelsToSystemConfig(updatedBy = "operator", changeNote?: string) {
+    const sys = this.deps.systemConfig;
+    if (!sys) return;
+    const currentKeys = new Set<string>();
+    for (const [domain, list] of Object.entries(this.customModels)) {
+      for (const model of list ?? []) {
+        currentKeys.add(`${domain}::${model.id}`);
+        sys.upsert({
+          domainId: domain,
+          kind: "smass_virtual_model",
+          entityId: model.id,
+          label: model.label,
+          status: model.status ?? "published",
+          payload: model,
+          updatedBy,
+          ...(changeNote ? { changeNote } : {}),
+        });
+      }
+    }
+    for (const row of sys.list({ kind: "smass_virtual_model" })) {
+      if (!currentKeys.has(`${row.domainId}::${row.entityId}`)) {
+        sys.remove({ domainId: row.domainId, kind: "smass_virtual_model", entityId: row.entityId, updatedBy });
+      }
+    }
+  }
+
   private saveCustomModelsFile() {
+    if (this.deps.systemConfig) {
+      this.syncCustomModelsToSystemConfig();
+      return;
+    }
     mkdirSync(dirname(this.customModelsFile), { recursive: true });
     writeFileSync(this.customModelsFile, JSON.stringify(this.customModels, null, 2));
   }
 
   private loadCustomRelations() {
+    if (this.deps.systemConfig) {
+      const dbItems = this.deps.systemConfig.list({ kind: "smass_relation" });
+      if (dbItems.length > 0 || this.deps.systemConfig.hasAnyRevision("smass_relation")) {
+        const next: CustomDomainRelationFile = {};
+        for (const row of dbItems) {
+          const valid = customDomainRelationInputSchema.safeParse(row.payload);
+          if (!valid.success) continue;
+          const domain = row.domainId as DomainPackId;
+          next[domain] = [...(next[domain] ?? []), valid.data];
+        }
+        this.customRelations = next;
+        return;
+      }
+    }
     try {
       if (!existsSync(this.customRelationsFile)) return;
       const parsed = JSON.parse(readFileSync(this.customRelationsFile, "utf8")) as CustomDomainRelationFile;
-      if (parsed && typeof parsed === "object") this.customRelations = parsed;
+      if (parsed && typeof parsed === "object") {
+        this.customRelations = parsed;
+        if (this.deps.systemConfig) this.syncCustomRelationsToSystemConfig("system", "Migrated from smass-relations.json");
+      }
     } catch {
       this.customRelations = {};
     }
   }
 
+  private syncCustomRelationsToSystemConfig(updatedBy = "operator", changeNote?: string) {
+    const sys = this.deps.systemConfig;
+    if (!sys) return;
+    const currentKeys = new Set<string>();
+    for (const [domain, list] of Object.entries(this.customRelations)) {
+      for (const rel of list ?? []) {
+        const entityId = `${rel.sourceModelId}::${rel.name}::${rel.targetModelId}`;
+        currentKeys.add(`${domain}::${entityId}`);
+        sys.upsert({
+          domainId: domain,
+          kind: "smass_relation",
+          entityId,
+          label: `${rel.sourceModelId} → ${rel.targetModelId} (${rel.name})`,
+          status: "published",
+          payload: rel,
+          updatedBy,
+          ...(changeNote ? { changeNote } : {}),
+        });
+      }
+    }
+    for (const row of sys.list({ kind: "smass_relation" })) {
+      if (!currentKeys.has(`${row.domainId}::${row.entityId}`)) {
+        sys.remove({ domainId: row.domainId, kind: "smass_relation", entityId: row.entityId, updatedBy });
+      }
+    }
+  }
+
   private saveCustomRelationsFile() {
+    if (this.deps.systemConfig) {
+      this.syncCustomRelationsToSystemConfig();
+      return;
+    }
     mkdirSync(dirname(this.customRelationsFile), { recursive: true });
     writeFileSync(this.customRelationsFile, JSON.stringify(this.customRelations, null, 2));
+  }
+
+  /** Hot-reloads all custom smass virtual models, ER relations, and sphoton exposures from SystemConfigStore (e.g. after rollback or bundle import). */
+  reloadFromSystemConfig() {
+    if (!this.deps.systemConfig) return;
+    for (const list of Object.values(this.customModels)) {
+      for (const model of list ?? []) {
+        this.smass.unregister(model.id);
+      }
+    }
+    this.customModels = {};
+    this.customRelations = {};
+    this.overrides = {};
+    this.loadOverrides();
+    this.loadCustomModels();
+    this.loadCustomRelations();
   }
 
   saveDomainRelation(domainId: DomainPackId, input: CustomDomainRelationInput) {

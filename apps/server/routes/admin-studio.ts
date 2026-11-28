@@ -43,7 +43,15 @@ import { generateWidgetFromMultimodal } from "../dynamic-ui-generator";
 import type { EvalRunnerStore } from "../eval-runner";
 import { simulateCustomerEvent } from "../event-simulator";
 import type { GatewaySettings } from "../gateway";
-import type { IntegrationTaskService } from "../integration-tasks";
+import {
+  systemConfigBundleSchema,
+  systemConfigKindSchema,
+  systemCopilotRequestSchema,
+  systemRollbackRequestSchema,
+} from "../../../packages/contracts/system-config";
+import type { IntegrationTaskService, IntegrationTaskStore } from "../integration-tasks";
+import type { SystemConfigStore } from "../system-config-store";
+import { handleSystemCopilotMessage, reloadAllControlPlaneStores } from "../system-copilot";
 import type { KnowledgeBaseStore } from "../knowledge-base";
 import { discoverMcpServer, mcpToolConnector } from "../mcp-discovery";
 import { mcpExposureConfigSchema, STANDALONE_SFIELD_MCP_TOOLS, type McpExposureStore } from "../mcp-exposure-store";
@@ -172,6 +180,8 @@ export interface AdminStudioRouteDeps {
   writeAudit: WriteAuditStore;
   mcpExposure: McpExposureStore;
   integrationService: IntegrationTaskService;
+  integrationTasks: IntegrationTaskStore;
+  systemConfig: SystemConfigStore;
   knowledgeBase: KnowledgeBaseStore;
   scheduledJobs: ScheduledJobStore;
   verticalFactory: VerticalPackStore;
@@ -195,7 +205,7 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
     goalProgressProvider, recommendationRegistry, opsStore, salesStore, profileStore, customer360, publicationReviews,
     widgetLibrary, widgetLibraries, omnichannelStore, evalRunner, uxEvolution, tradeStore,
     approvalStore, connectorStore, workflowEngine, writeAudit, mcpExposure, integrationService,
-    knowledgeBase, scheduledJobs, verticalFactory, piiFirewall, sphotonCatalog, now, json, body,
+    integrationTasks, systemConfig, knowledgeBase, scheduledJobs, verticalFactory, piiFirewall, sphotonCatalog, now, json, body,
     requireOperator, requireChatDomain, authoringDomain, createChat, listAdminCustomers,
     buildExperienceRegistryView,
   } = deps;
@@ -846,6 +856,82 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
     const { id: proposalId } = await body(req, z.object({ id: z.string().regex(idPattern) }).strict());
     json(res, uxEvolution.dismissProposal(proposalId));
     return true;
+  }
+
+  if (id === "system-config" && method === "GET") {
+    const entities = systemConfig.list();
+    const countsByKind: Record<string, number> = {};
+    for (const e of entities) countsByKind[e.kind] = (countsByKind[e.kind] ?? 0) + 1;
+    json(res, {
+      tenantId: systemConfig.tenantId,
+      totalEntities: entities.length,
+      totalRevisions: systemConfig.countRevisions(),
+      countsByKind,
+      entities,
+      schema: systemConfig.schemaMetadata(),
+    });
+    return true;
+  }
+  if (id === "system-config-history" && method === "GET") {
+    const domainId = url.searchParams.get("domain") || "wealth";
+    const kindParsed = systemConfigKindSchema.safeParse(url.searchParams.get("kind"));
+    const entityId = url.searchParams.get("entityId") || "";
+    if (!kindParsed.success || !entityId) {
+      json(res, { revisions: systemConfig.listRecentRevisions(30) });
+      return true;
+    }
+    json(res, { revisions: systemConfig.history(domainId, kindParsed.data, entityId) });
+    return true;
+  }
+  if (id === "system-config-rollback" && method === "POST") {
+    const input = await body(req, systemRollbackRequestSchema, 8 * 1024);
+    try {
+      const entity = systemConfig.rollback({ ...input, updatedBy: requireOperator() });
+      reloadAllControlPlaneStores({ sphotonCatalog, integrationTasks, mcpExposure });
+      json(res, {
+        entity,
+        revisions: systemConfig.history(input.domainId, input.kind, input.entityId),
+      });
+      return true;
+    } catch (err) {
+      throw new ApiError(400, "system_rollback_failed", err instanceof Error ? err.message : "Could not roll back config entity.");
+    }
+  }
+  if (id === "system-config-export" && method === "GET") {
+    json(res, systemConfig.exportTenantBundle());
+    return true;
+  }
+  if (id === "system-config-import" && method === "POST") {
+    const raw = await body(req, systemConfigBundleSchema, 256 * 1024);
+    try {
+      const result = systemConfig.importTenantBundle(raw, requireOperator());
+      reloadAllControlPlaneStores({ sphotonCatalog, integrationTasks, mcpExposure });
+      json(res, {
+        ...result,
+        entities: systemConfig.list(),
+      });
+      return true;
+    } catch (err) {
+      throw new ApiError(400, "system_bundle_invalid", err instanceof Error ? err.message : "Could not import tenant config bundle.");
+    }
+  }
+  if (id === "system-copilot" && method === "POST") {
+    const { message } = await body(req, systemCopilotRequestSchema, 16 * 1024);
+    try {
+      json(
+        res,
+        handleSystemCopilotMessage(message, {
+          systemConfig,
+          sphotonCatalog,
+          integrationTasks,
+          mcpExposure,
+          operatorName: requireOperator(),
+        }),
+      );
+      return true;
+    } catch (err) {
+      throw new ApiError(400, "system_copilot_error", err instanceof Error ? err.message : "Could not process system config request.");
+    }
   }
 
   return false;

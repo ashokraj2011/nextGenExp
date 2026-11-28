@@ -184,6 +184,11 @@ export class Store {
   private readonly events = new EventEmitter().setMaxListeners(0);
   private domainBindingContext?: (id: string) => { incident?: IncidentRecord; deal?: DealRecord };
 
+  /** Exposes the shared SQLite handle so platform control-plane stores (e.g. SystemConfigStore) live in the same DB. */
+  get database(): SqliteDatabase {
+    return this.db;
+  }
+
   setDomainBindingContext(provider: (id: string) => { incident?: IncidentRecord; deal?: DealRecord }) {
     this.domainBindingContext = provider;
   }

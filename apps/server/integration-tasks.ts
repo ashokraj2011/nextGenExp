@@ -1,4 +1,5 @@
 import { customerOrderTask, orderSource } from "./commerce-orders";
+import type { SystemConfigStore } from "./system-config-store";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -407,35 +408,105 @@ type Persisted = { integrations: Integration[]; contracts: TaskContract[]; runs:
 
 export class IntegrationTaskStore {
   private readonly filePath: string;
+  private readonly systemConfig?: SystemConfigStore;
   private state: Persisted;
 
   readonly orders: ReturnType<typeof orderSource>;
-  constructor(dataDir: string) {
+  constructor(dataDir: string, systemConfig?: SystemConfigStore) {
     this.orders = orderSource(dataDir);
     this.filePath = join(dataDir, "integration-tasks.json");
+    this.systemConfig = systemConfig;
     this.state = this.load();
     if (this.state.integrations.length === 0) this.seed();
     if (!this.integration("commerce_sandbox")) {
       this.upsertIntegration({ id: "commerce_sandbox", name: "Order fulfillment", transport: "sandbox" });
       this.publish(this.upsertDraft(customerOrderTask).ref);
     }
+    this.syncToSystemConfig("system", "Bootstrapped integration catalog into system DB");
   }
 
   private load(): Persisted {
+    let runs: TaskRun[] = [];
+    let legacyIntegrations: Integration[] = [];
+    let legacyContracts: TaskContract[] = [];
     if (existsSync(this.filePath)) {
       try {
         const raw = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<Persisted>;
-        return {
-          integrations: (raw.integrations ?? []).flatMap((i) => { const r = integrationSchema.safeParse(i); return r.success ? [r.data] : []; }),
-          contracts: (raw.contracts ?? []).flatMap((c) => { const r = taskContractSchema.safeParse(c); return r.success ? [r.data] : []; }),
-          runs: (raw.runs ?? []).flatMap((c) => { const r = taskRunSchema.safeParse(c); return r.success ? [r.data] : []; }),
-        };
+        legacyIntegrations = (raw.integrations ?? []).flatMap((i) => { const r = integrationSchema.safeParse(i); return r.success ? [r.data] : []; });
+        legacyContracts = (raw.contracts ?? []).flatMap((c) => { const r = taskContractSchema.safeParse(c); return r.success ? [r.data] : []; });
+        runs = (raw.runs ?? []).flatMap((c) => { const r = taskRunSchema.safeParse(c); return r.success ? [r.data] : []; });
       } catch { /* fall through to empty */ }
     }
-    return { integrations: [], contracts: [], runs: [] };
+    if (this.systemConfig && (this.systemConfig.hasAny("integration") || this.systemConfig.hasAny("task_contract"))) {
+      const integrations = this.systemConfig.list({ kind: "integration" }).flatMap((e) => {
+        const r = integrationSchema.safeParse(e.payload);
+        return r.success ? [r.data] : [];
+      });
+      const contracts = this.systemConfig.list({ kind: "task_contract" }).flatMap((e) => {
+        const r = taskContractSchema.safeParse(e.payload);
+        return r.success ? [r.data] : [];
+      });
+      return { integrations, contracts, runs };
+    }
+    return { integrations: legacyIntegrations, contracts: legacyContracts, runs };
+  }
+
+  private syncToSystemConfig(updatedBy = "operator", changeNote?: string) {
+    if (!this.systemConfig) return;
+    const currentIntegrationIds = new Set(this.state.integrations.map((i) => i.id));
+    for (const existing of this.systemConfig.list({ kind: "integration" })) {
+      if (!currentIntegrationIds.has(existing.entityId)) {
+        this.systemConfig.remove({ domainId: existing.domainId, kind: "integration", entityId: existing.entityId, updatedBy, changeNote: "Deleted integration" });
+      }
+    }
+    for (const i of this.state.integrations) {
+      this.systemConfig.upsert({
+        domainId: "tenant",
+        kind: "integration",
+        entityId: i.id,
+        label: i.name,
+        status: i.enabled ? "published" : "draft",
+        payload: i,
+        updatedBy,
+        ...(changeNote ? { changeNote } : {}),
+      });
+    }
+
+    const currentContractRefs = new Set(this.state.contracts.map((c) => c.ref));
+    for (const existing of this.systemConfig.list({ kind: "task_contract" })) {
+      if (!currentContractRefs.has(existing.entityId)) {
+        this.systemConfig.remove({ domainId: existing.domainId, kind: "task_contract", entityId: existing.entityId, updatedBy, changeNote: "Deleted task draft" });
+      }
+    }
+    for (const c of this.state.contracts) {
+      this.systemConfig.upsert({
+        domainId: "tenant",
+        kind: "task_contract",
+        entityId: c.ref,
+        label: `${c.integrationId}.${c.taskId} v${c.version}`,
+        status: c.status,
+        payload: c,
+        updatedBy,
+        ...(changeNote ? { changeNote } : {}),
+      });
+    }
+  }
+
+  reloadFromSystemConfig() {
+    if (!this.systemConfig) return;
+    const integrations = this.systemConfig.list({ kind: "integration" }).flatMap((e) => {
+      const r = integrationSchema.safeParse(e.payload);
+      return r.success ? [r.data] : [];
+    });
+    const contracts = this.systemConfig.list({ kind: "task_contract" }).flatMap((e) => {
+      const r = taskContractSchema.safeParse(e.payload);
+      return r.success ? [r.data] : [];
+    });
+    this.state = { integrations, contracts, runs: this.state.runs };
   }
 
   private save() {
+    this.syncToSystemConfig();
     mkdirSync(dirname(this.filePath), { recursive: true });
     writeFileSync(this.filePath, JSON.stringify(this.state, null, 2), "utf8");
   }

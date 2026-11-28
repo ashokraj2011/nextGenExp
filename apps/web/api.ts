@@ -744,6 +744,21 @@ export const api = {
   resetIntegrationResilience: (integrationId: string) => request<{ view: IntegrationTasksView }>("/api/integrations/resilience/reset", { integrationId }),
   deleteIntegrationDraft: (ref: string) => request<{ deleted: true; ref: string; view: IntegrationTasksView }>("/api/integrations/contracts/delete", { ref }),
   deleteIntegration: (id: string) => request<{ deleted: true; id: string; view: IntegrationTasksView }>("/api/integrations/integrations/delete", { id }),
+  systemConfig: () => request<{
+    tenantId: string;
+    totalEntities: number;
+    totalRevisions: number;
+    countsByKind: Record<string, number>;
+    entities: import("../../packages/contracts/system-config").SystemConfigEntity[];
+    schema: { tables: Array<{ name: string; primaryKey: string[]; columns: Array<{ name: string; type: string; note: string }> }>; mermaidEr: string };
+  }>("/api/admin/system-config"),
+  systemConfigRollback: (input: { domainId: string; kind: import("../../packages/contracts/system-config").SystemConfigKind; entityId: string; targetRevision: number }) =>
+    request<{ entity: import("../../packages/contracts/system-config").SystemConfigEntity; revisions: import("../../packages/contracts/system-config").SystemConfigRevision[] }>("/api/admin/system-config-rollback", input),
+  systemConfigExport: () => request<import("../../packages/contracts/system-config").SystemConfigBundle>("/api/admin/system-config-export"),
+  systemConfigImport: (bundle: import("../../packages/contracts/system-config").SystemConfigBundle) =>
+    request<{ importedCount: number; updatedKinds: string[]; entities: import("../../packages/contracts/system-config").SystemConfigEntity[] }>("/api/admin/system-config-import", bundle),
+  systemCopilot: (message: string) =>
+    request<import("../../packages/contracts/system-config").SystemCopilotResponse>("/api/admin/system-copilot", { message }),
   handoffs: () => request<import("../../packages/contracts/handoff").HandoffInboxView>("/api/admin/handoffs"),
   activeHandoff: (personaId: string) => request<{ ticket: import("../../packages/contracts/handoff").HandoffTicket | null }>(`/api/handoffs/active?personaId=${encodeURIComponent(personaId)}`),
   createHandoff: (input: import("../../packages/contracts/handoff").CreateHandoffInput) => request<{ ticket: import("../../packages/contracts/handoff").HandoffTicket }>("/api/handoffs", input),

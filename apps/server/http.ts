@@ -17,6 +17,7 @@ import { recordIntentOption, layoutTargetDomain, uiDesignSchema, uiLayoutChangeS
 import { widgetGenerateRequestSchema, widgetLibraryChangeSchema } from "../../packages/contracts/widget";
 import { previewUiLayout, uiTargetOptions, validateUiDesign } from "./ui-layouts";
 import { SphotonCatalogService } from "./sphoton-catalog";
+import { SystemConfigStore } from "./system-config-store";
 import { Customer360Service } from "./customer-360";
 import { dataBindingKeySchema } from "../../packages/smass";
 import { customer360ProfileInputSchema, type Customer360AdminRecord } from "../../packages/contracts/customer-360";
@@ -267,7 +268,9 @@ export async function startApp(options: Options) {
     ],
     options.dataDir,
   );
-  const integrationTasks = new IntegrationTaskStore(options.dataDir);
+  const store = new Store(join(options.dataDir, "app.sqlite"));
+  const systemConfig = new SystemConfigStore(store.database, serverTenantId);
+  const integrationTasks = new IntegrationTaskStore(options.dataDir, systemConfig);
   const profileStore = new CustomerProfileStore(options.dataDir);
   setActiveCustomerProfileStore(profileStore);
   const experienceRegistry = new ExperienceRegistryStore(options.dataDir);
@@ -371,7 +374,6 @@ export async function startApp(options: Options) {
       nbaRules: experienceRegistry.listNbaRules(),
     };
   }
-  const store = new Store(join(options.dataDir, "app.sqlite"));
   const opsStore = new OpsIncidentStore(options.dataDir);
   const salesStore = new SalesDealStore(options.dataDir);
   const connectorStore = new ConnectorStore(options.dataDir);
@@ -385,7 +387,7 @@ export async function startApp(options: Options) {
   const workflowEngine = new WorkflowEngine(options.dataDir, { approvalStore, connectorStore });
   const proactiveStore = new ProactiveEventStore(options.dataDir);
   const knowledgeBase = new KnowledgeBaseStore(options.dataDir);
-  const mcpExposure = new McpExposureStore(options.dataDir);
+  const mcpExposure = new McpExposureStore(options.dataDir, systemConfig);
   const verticalFactory = new VerticalPackStore(options.dataDir);
   const piiFirewall = new PiiFirewallStore(options.dataDir, options.piiEnabledByDefault);
   const telemetry = new CepTelemetry(options.dataDir);
@@ -471,6 +473,7 @@ export async function startApp(options: Options) {
     portfolioSnapshots,
     opsStore,
     salesStore,
+    systemConfig,
   });
   runtime?.setSmassBridge(sphotonCatalog);
   const goalStore = new CustomerGoalStore(tenantDataDirectory(options.dataDir));
@@ -1165,7 +1168,7 @@ export async function startApp(options: Options) {
       registry, membership, portfolioSnapshots, goalProgressProvider, recommendationRegistry, opsStore, salesStore,
       profileStore, customer360, publicationReviews, widgetLibrary, widgetLibraries,
       omnichannelStore, evalRunner, uxEvolution, tradeStore, approvalStore, connectorStore,
-      workflowEngine, writeAudit, mcpExposure, integrationService, knowledgeBase, scheduledJobs,
+      workflowEngine, writeAudit, mcpExposure, integrationService, integrationTasks, systemConfig, knowledgeBase, scheduledJobs,
       verticalFactory, piiFirewall, sphotonCatalog, now, json, body, requireOperator, requireChatDomain,
       authoringDomain, createChat, listAdminCustomers, buildExperienceRegistryView,
     })) return;
