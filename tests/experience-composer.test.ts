@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ExperienceComposerEngine } from "../apps/server/experience-composer";
 import { startTestPreview } from "./preview";
 
@@ -177,4 +180,55 @@ test("HTTP /api/experience-composer/* composes Retirement 401(k) across channels
   };
   assert.equal(sphotonData.composed.zones.main.uiResolution.mode, "runtime_sphoton_generative");
   assert.ok((sphotonData.composed.zones.main.uiResolution.a2uiNodes?.length ?? 0) >= 3);
+});
+
+test("ExperienceComposerEngine persists custom subject areas, channels, experiences, UI bindings, and dismissals across SQLite restarts", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "sphoton-composer-sqlite-"));
+  try {
+    const engine1 = new ExperienceComposerEngine("persist-secret", undefined, dir);
+    const createdSub = engine1.createSubjectArea({
+      label: "Insurance & Protection",
+      tagline: "Policies & claims",
+      smassModelId: "insurance_360",
+    });
+    const createdCh = engine1.createChannel({
+      label: "Branch Kiosk",
+      shortLabel: "Kiosk",
+      frameMode: "web",
+      maxTasks: 2,
+      maxNba: 1,
+      maxCompanionTotal: 3,
+      maxFollowUps: 2,
+    });
+    engine1.updateUiBinding({
+      experienceId: createdSub.experienceId,
+      uiResolutionMode: "runtime_sphoton_generative",
+    });
+    const preClose = await engine1.compose({ experienceId: createdSub.experienceId, channel: createdCh.id });
+    assert.equal(preClose.zones.nba.length, 1);
+    await engine1.dismissNba({
+      experienceId: createdSub.experienceId,
+      channel: createdCh.id,
+      nbaId: preClose.zones.nba[0]!.id,
+    });
+    engine1.close();
+
+    // Reopen fresh instance from the same SQLite directory
+    const engine2 = new ExperienceComposerEngine("persist-secret", undefined, dir);
+    try {
+      const boot = engine2.getBootstrap();
+      assert.ok(boot.subjectAreas.some((s) => s.id === createdSub.subjectArea.id && s.smassModelId === "insurance_360"));
+      assert.ok(boot.channels.some((c) => c.id === createdCh.id && c.shortLabel === "Kiosk"));
+      assert.ok(boot.smassGraphs[createdSub.subjectArea.id]?.entities[0]?.id === "insurance_360");
+
+      const rehydrated = await engine2.compose({ experienceId: createdSub.experienceId, channel: createdCh.id });
+      assert.equal(rehydrated.zones.main.uiResolution.mode, "runtime_sphoton_generative");
+      assert.equal(rehydrated.zones.nba.length, 0);
+      assert.ok(rehydrated.suppressed.some((s) => s.reason.includes("dismissed")));
+    } finally {
+      engine2.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -65,7 +65,7 @@ const CHANNEL_ICONS: Record<ChannelSurfaceId, typeof MessageSquare> = {
   advisor_desktop: Monitor,
 };
 
-export function ExperienceComposerStudio() {
+export function ExperienceComposerStudio({ embedded = false }: { embedded?: boolean } = {}) {
   const [bootstrap, setBootstrap] = useState<ExperienceComposerBootstrap | null>(null);
   const [composed, setComposed] = useState<ComposedExperienceResult | null>(null);
   const [subjectArea, setSubjectArea] = useState<SubjectAreaId>("wealth");
@@ -496,44 +496,70 @@ export function ExperienceComposerStudio() {
   };
 
   return (
-    <div className="ec-page">
-      <header className="ec-topbar">
-        <div className="ec-topbar-left">
-          <a href="/" className="ec-pill-link">
-            <ArrowLeft size={14} /> Chat
-          </a>
+    <div className={"ec-page" + (embedded ? " is-embedded" : "")}>
+      {!embedded ? (
+        <header className="ec-topbar">
+          <div className="ec-topbar-left">
+            <a href="/" className="ec-pill-link">
+              <ArrowLeft size={14} /> Chat
+            </a>
+            <div className="ec-title-wrap">
+              <span className="ec-eyebrow">
+                <Layers size={12} /> SPHOTON EXPERIENCE COMPOSER (SMASS DATA · SFIELD TOOLS INCLUDING PZN)
+              </span>
+              <h1>Compose 5-Class Experiences Across Subject Areas &amp; Channels</h1>
+            </div>
+          </div>
+          <div className="ec-topbar-right">
+            <button
+              type="button"
+              className="ec-btn-primary"
+              onClick={() => setCreateModal({ open: true, tab: "experience" })}
+            >
+              <Plus size={14} aria-hidden="true" /> Create New
+            </button>
+            <a href="/pzn-architecture" className="ec-pill-link">
+              PZN Trace View
+            </a>
+            <button
+              type="button"
+              className={"ec-pill-btn" + (showAnatomy ? " is-active" : "")}
+              onClick={() => setShowAnatomy((v) => !v)}
+            >
+              {showAnatomy ? <Eye size={14} /> : <EyeOff size={14} />}
+              Zone Anatomy
+            </button>
+            <button type="button" className="ec-pill-btn" disabled={busy} onClick={() => void resetAll()}>
+              <RotateCcw size={14} /> Reset
+            </button>
+            <ThemeToggle compact />
+          </div>
+        </header>
+      ) : (
+        <div className="ec-embedded-bar">
           <div className="ec-title-wrap">
             <span className="ec-eyebrow">
-              <Layers size={12} /> SPHOTON EXPERIENCE COMPOSER (SMASS DATA · SFIELD TOOLS INCLUDING PZN)
+              <Layers size={12} /> SPHOTON 5-CLASS EXPERIENCE COMPOSER (SQLITE PERSISTED)
             </span>
-            <h1>Compose 5-Class Experiences Across Subject Areas &amp; Channels</h1>
+          </div>
+          <div className="ec-topbar-right">
+            <button type="button" className="ec-btn-primary" onClick={() => setCreateModal({ open: true, tab: "experience" })}>
+              <Plus size={14} aria-hidden="true" /> Create New
+            </button>
+            <button
+              type="button"
+              className={"ec-pill-btn" + (showAnatomy ? " is-active" : "")}
+              onClick={() => setShowAnatomy((v) => !v)}
+            >
+              {showAnatomy ? <Eye size={14} /> : <EyeOff size={14} />}
+              Zone Anatomy
+            </button>
+            <button type="button" className="ec-pill-btn" disabled={busy} onClick={() => void resetAll()}>
+              <RotateCcw size={14} /> Reset
+            </button>
           </div>
         </div>
-        <div className="ec-topbar-right">
-          <button
-            type="button"
-            className="ec-btn-primary"
-            onClick={() => setCreateModal({ open: true, tab: "experience" })}
-          >
-            <Plus size={14} aria-hidden="true" /> Create New
-          </button>
-          <a href="/pzn-architecture" className="ec-pill-link">
-            PZN Trace View
-          </a>
-          <button
-            type="button"
-            className={"ec-pill-btn" + (showAnatomy ? " is-active" : "")}
-            onClick={() => setShowAnatomy((v) => !v)}
-          >
-            {showAnatomy ? <Eye size={14} /> : <EyeOff size={14} />}
-            Zone Anatomy
-          </button>
-          <button type="button" className="ec-pill-btn" disabled={busy} onClick={() => void resetAll()}>
-            <RotateCcw size={14} /> Reset
-          </button>
-          <ThemeToggle compact />
-        </div>
-      </header>
+      )}
 
       <main className="ec-main">
         {/* 3-Dimension Switcher Bar: Subject Area -> Customer Experience -> Channel */}

@@ -124,6 +124,14 @@ export type LiveHarnessStage = {
   thinking?: string;
   durationMs?: number;
 };
+export type SurfaceArbitrationTrace = {
+  channelId: string;
+  maxCompanionTotal: number;
+  placedTasks: number;
+  placedNba: number;
+  suppressed: Array<{ uiClass: "tasks" | "nba"; id: string; title: string; reason: string }>;
+  arbitrationLog: Array<{ uiClass: string; outcome: string; itemId: string; reason: string }>;
+};
 export type TurnView = {
   id: string;
   conversationId: string;
@@ -139,6 +147,7 @@ export type TurnView = {
   goalScenario?: GoalScenarioUpdate;
   emotionalState?: EmotionalAssessment;
   providerArbitration?: ProviderArbitrationTrace;
+  surfaceArbitration?: SurfaceArbitrationTrace;
   piiRedaction?: PiiRedactionTrace;
   nextBestAction?: NextBestActionCard;
   /** Read-only, verified account surface published while recommendations are pending. */

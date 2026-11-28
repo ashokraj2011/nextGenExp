@@ -98,4 +98,30 @@ A slot (`block` or `widget`) declares a `toolBinding`:
 
 Any domain (`wealth`, `it_ops`, `sales_revops`, or future packs) publishes cards through the same `packages/sphoton/` compiler using its own catalog (`ops.incident.read@1.0.0`, `sales.deal.read@1.0.0`, etc.). Cross-domain tool bindings are blocked at validation and preview time.
 
-- **How `smass` feeds `sphoton` without coupling**: `packages/smass/` and `packages/sphoton/` have zero direct imports of each other. `smass` models each domain's relational entities (`wealth.customer`, `wealth.home_goal`, `wealth.portfolio`, `wealth.balances`, `ops.service`, `ops.incident`, `sales.account`, `sales.deal`) and projects UI-exposable fields and actions via `projectBindingsForDomain(domain)`. The host bridge (`apps/server/sphoton-catalog.ts`) merges those projections with live domain-owner toggles from **Tool setup** (`/admin`), fingerprints each closed `sfield` tool contract, and hands `sphoton` a signed `SphotonBindingCatalog` (`GET /api/admin/ui-binding-catalog?domain=<domain>`). At runtime, `sphoton` never reads `smass` directly — every read and sealed action executes through `sfield`. See `docs/developers/smass.md`.
+- **How `smass` feeds `sphoton` without coupling**: `packages/smass/` and `packages/sphoton/` have zero direct imports of each other. `smass` models each domain's relational entities (`wealth.customer`, `wealth.home_goal`, `wealth.portfolio`, `wealth.balances`, `ops.service`, `ops.incident`, `sales.account`, `sales.deal`), holds the canonical field binding catalog (`packages/smass/bindings.ts`), and projects UI-exposable fields and actions via `projectBindingsForDomain(domain)`. The host bridge (`apps/server/sphoton-catalog.ts`) merges those projections with live domain-owner toggles from **Tool setup** (`/admin`), fingerprints each closed `sfield` tool contract, and hands `sphoton` a signed `SphotonBindingCatalog` (`GET /api/admin/ui-binding-catalog?domain=<domain>`). At runtime, `sphoton` never reads `smass` directly — every read and sealed action executes through `sfield`. See `docs/developers/smass.md`.
+
+---
+
+### 6. Unified 5-Class Experience Composer & Surface Policies (`packages/sphoton/experience-composer.ts`)
+
+`sphoton` owns **Experience Composition & Surface Policies** across all domains and channels, while **`sfield` tools** (including PZN, domain APIs, compliance checks, and workflows) supply verified candidates and actions:
+
+- **Zero PZN coupling in `sphoton`**: PZN (`pzn.treatments.decide@1.0.0`) is simply one pluggable `sfield` tool. Any domain (Wealth, Banking, Retirement, IT Ops, RevOps) can bind its own `sfield` tools into the exact same 5-class surface arbitrator.
+- **5-Class UI Taxonomy (`SphotonUiPlacementClass`)**:
+  1. `main` — Primary experience fulfilling user intent (non-negotiable #1).
+  2. `tasks` — Pending obligations (outranks `nba` when channel companion caps are tight).
+  3. `nba` — Ranked recommendations (auto-promotes into freed companion slots on live task completion; dismissals sync cross-channel via `sfield` memory).
+  4. `actions` — Interactive HMAC-signed `sfield` workflows.
+  5. `chrome` — Follow-up chips (clamped to channel budget) + immutable compliance disclosures.
+- **3 UI Resolution Modes (`resolveExperienceUi`)**:
+  - `pinned_widget` — Design-time attached component from the unified UI Registry or Widget Studio (`/admin/ui`).
+  - `runtime_tool_selected` — Runtime template dynamically picked by a bound `sfield` tool per member and channel.
+  - `runtime_sphoton_generative` — Runtime-synthesized declarative A2UI node tree bound strictly to verified `smass` snapshot fields.
+- **Channel Surface Budgets (`DEFAULT_SPHOTON_CHANNEL_BUDGETS` & `arbitrateExperienceSurface`)**:
+  - `chat_turn`: `1 Main + max 1 Companion (Task > NBA) + 3 Follow-ups` (wired directly into live customer chat turns in `apps/server/service.ts` via `TurnView.surfaceArbitration`).
+  - `web_dashboard`: `1 Main + max 3 Tasks + 1 NBA + 4 Follow-ups`.
+  - `mobile_compact`: `1 Main + max 1 Priority Pill (Task > NBA) + 1 Follow-up`.
+  - `advisor_desktop`: `1 Main + max 4 Tasks + 3 NBAs + full provenance`.
+- **Consolidated Studio & SQLite Persistence**:
+  - `/admin/ui` (**sphoton UI Studio**) unifies UI Layouts, Widget Library, SurfaceBinder Lab, and the 5-Class Experience Composer (`/experience-composer`) in one place.
+  - Custom Subject Areas, Experiences, Channel Budgets, UI Bindings, and cross-channel dismissals persist in SQLite (`experience-composer.sqlite`) across server restarts.

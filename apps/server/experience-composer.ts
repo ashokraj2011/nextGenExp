@@ -1,4 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   defineStoreBackedModel,
   SmassDomainRegistry,
@@ -528,9 +531,20 @@ const EXPERIENCES: ComposerExperienceOption[] = [
   },
 ];
 
+type PersistedComposerSnapshot = {
+  customSubjectAreas: SubjectAreaMeta[];
+  customChannels: ChannelBudgetSpec[];
+  customExperiences: ComposerExperienceOption[];
+  members: Array<[string, ComposerMemberRecord]>;
+  uiBindings: Array<[string, { uiResolutionMode: UiResolutionMode; attachedUiId?: string }]>;
+  dismissedByMid: Array<[string, string[]]>;
+  revisionsByKey: Array<[string, number]>;
+};
+
 export class ExperienceComposerEngine {
   private readonly secret: Buffer;
   private readonly externalWidgets?: ExternalWidgetProvider;
+  private readonly db?: DatabaseSync;
   private subjectAreas: SubjectAreaMeta[] = SUBJECT_AREAS.map((s) => ({ ...s }));
   private channels: ChannelBudgetSpec[] = CHANNEL_BUDGETS.map((c) => ({ ...c }));
   private experiences: ComposerExperienceOption[] = EXPERIENCES.map((e) => ({ ...e }));
@@ -540,7 +554,7 @@ export class ExperienceComposerEngine {
   private revisionsByKey = new Map<string, number>();
   private registries: Record<string, SmassDomainRegistry>;
 
-  constructor(secretSeed?: string, externalWidgets?: ExternalWidgetProvider) {
+  constructor(secretSeed?: string, externalWidgets?: ExternalWidgetProvider, dataDir?: string) {
     this.secret = Buffer.from(secretSeed ?? randomBytes(32).toString("hex"), "utf8");
     this.externalWidgets = externalWidgets;
     this.registries = {
@@ -548,6 +562,69 @@ export class ExperienceComposerEngine {
       banking: this.buildRegistry("banking", "banking_account_360", "Banking Account 360"),
       retirement: this.buildRegistry("retirement", "retirement_plan_360", "Retirement Plan 360"),
     };
+    if (dataDir) {
+      mkdirSync(dataDir, { recursive: true });
+      this.db = new DatabaseSync(join(dataDir, "experience-composer.sqlite"));
+      this.db.exec(`CREATE TABLE IF NOT EXISTS composer_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+      this.hydrateFromDb();
+    }
+  }
+
+  close(): void {
+    this.db?.close();
+  }
+
+  private persistToDb(): void {
+    if (!this.db) return;
+    const payload: PersistedComposerSnapshot = {
+      customSubjectAreas: this.subjectAreas.filter((s) => s.custom),
+      customChannels: this.channels.filter((c) => c.custom),
+      customExperiences: this.experiences.filter((e) => e.custom),
+      members: [...this.members.entries()],
+      uiBindings: this.experiences
+        .filter((e) => e.uiResolutionMode !== undefined)
+        .map((e) => [e.id, { uiResolutionMode: e.uiResolutionMode!, ...(e.attachedUiId ? { attachedUiId: e.attachedUiId } : {}) }]),
+      dismissedByMid: [...this.dismissedByMid.entries()].map(([mid, set]) => [mid, [...set]]),
+      revisionsByKey: [...this.revisionsByKey.entries()],
+    };
+    this.db
+      .prepare("INSERT INTO composer_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .run("snapshot", JSON.stringify(payload));
+  }
+
+  private hydrateFromDb(): void {
+    if (!this.db) return;
+    const row = this.db.prepare("SELECT value FROM composer_state WHERE key = ?").get("snapshot") as { value?: string } | undefined;
+    if (!row?.value) return;
+    try {
+      const saved = JSON.parse(row.value) as Partial<PersistedComposerSnapshot>;
+      for (const area of saved.customSubjectAreas ?? []) {
+        if (!this.subjectAreas.some((s) => s.id === area.id)) {
+          this.subjectAreas.push(area);
+          this.registries[area.id] = this.buildRegistry(area.id, area.smassModelId, `${area.label} 360`);
+        }
+      }
+      for (const ch of saved.customChannels ?? []) {
+        if (!this.channels.some((c) => c.id === ch.id)) this.channels.push(ch);
+      }
+      for (const exp of saved.customExperiences ?? []) {
+        if (!this.experiences.some((e) => e.id === exp.id)) this.experiences.push(exp);
+      }
+      for (const [mid, member] of saved.members ?? []) {
+        this.members.set(mid, member);
+      }
+      for (const [expId, binding] of saved.uiBindings ?? []) {
+        const exp = this.experiences.find((e) => e.id === expId);
+        if (exp) {
+          exp.uiResolutionMode = binding.uiResolutionMode;
+          exp.attachedUiId = binding.attachedUiId;
+        }
+      }
+      this.dismissedByMid = new Map((saved.dismissedByMid ?? []).map(([mid, ids]) => [mid, new Set(ids)]));
+      this.revisionsByKey = new Map(saved.revisionsByKey ?? []);
+    } catch {
+      // ignore corrupted snapshot and fall back to defaults
+    }
   }
 
   private mapWidgetKindToVisual(kind: string): UiTemplateVisualKind {
@@ -580,6 +657,7 @@ export class ExperienceComposerEngine {
     if (!exp) throw new Error(`Unknown experience "${input.experienceId}".`);
     exp.uiResolutionMode = input.uiResolutionMode;
     exp.attachedUiId = input.uiResolutionMode === "pinned_widget" ? input.attachedUiId : undefined;
+    this.persistToDb();
     return exp;
   }
 
@@ -882,6 +960,7 @@ export class ExperienceComposerEngine {
       },
     };
     this.experiences.push(option);
+    this.persistToDb();
     return option;
   }
 
@@ -918,6 +997,7 @@ export class ExperienceComposerEngine {
       custom: true,
     };
     this.channels.push(spec);
+    this.persistToDb();
     return spec;
   }
 
@@ -1164,6 +1244,7 @@ export class ExperienceComposerEngine {
       const nextRev = (this.revisionsByKey.get(this.keyFor(exp.id)) ?? 1) + 1;
       this.revisionsByKey.set(this.keyFor(exp.id), nextRev);
       this.executionsByKey.delete(this.keyFor(exp.id));
+      this.persistToDb();
     }
     return this.compose({ experienceId: exp.id, channel: input.channel });
   }
@@ -1178,6 +1259,7 @@ export class ExperienceComposerEngine {
     set.add(input.nbaId);
     const nextRev = (this.revisionsByKey.get(this.keyFor(exp.id)) ?? 1) + 1;
     this.revisionsByKey.set(this.keyFor(exp.id), nextRev);
+    this.persistToDb();
     return this.compose({ experienceId: exp.id, channel: input.channel });
   }
 
@@ -1194,6 +1276,7 @@ export class ExperienceComposerEngine {
     this.dismissedByMid.clear();
     this.executionsByKey.clear();
     this.revisionsByKey.clear();
+    this.db?.prepare("DELETE FROM composer_state WHERE key = ?").run("snapshot");
     const safeExp = this.experiences.some((e) => e.id === experienceId) ? experienceId : this.experiences[0].id;
     const safeChannel = this.channels.some((c) => c.id === channel) ? channel : "chat_turn";
     return this.compose({ experienceId: safeExp, channel: safeChannel });

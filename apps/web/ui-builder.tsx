@@ -3,7 +3,7 @@ import {
   ArrowDown, ArrowRight, ArrowUp, Check, ChevronDown, ChevronRight, Database, FormInput,
   GripVertical, LayoutGrid, LayoutTemplate, List, Plus, SlidersHorizontal, Sparkles, Trash2, Type, X,
 } from "lucide-react";
-import { dataDictionary, type DataBindingKey } from "../../packages/contracts/data-bindings";
+import { dataDictionary, type DataBindingKey } from "../../packages/smass/bindings";
 import type { SphotonBindingCatalog } from "../../packages/sphoton/contracts";
 import { defaultExtraMonthlyCents } from "../../packages/contracts/goal-progress";
 import type { Customer360AdminRecord } from "../../packages/contracts/customer-360";
@@ -24,6 +24,7 @@ import { InteractiveExperienceEditor, orderExperienceTemplate, startInteractiveE
 import { DesignLibrary } from "./design-library";
 import { getDomainPack, type DomainPackId } from "../../packages/contracts/domain-packs";
 import { WidgetStudio } from "./widget-studio";
+import { ExperienceComposerStudio } from "./experience-composer-studio";
 import { SurfaceBinderLab } from "./surface-binder-lab";
 import "./ui-builder.css";
 
@@ -827,7 +828,7 @@ function UiWorkspace({ initial, customers }: {
       ? id === publication.id
       : draft.targets.some((target) => targetKey(target) === contentKey)))
     : scopedDomain ? initial.layouts.find(({ domainId }) => domainId === scopedDomain) : initial.layouts[0];
-  const [view, setView] = useState<"editor" | "widgets" | "designs" | "surfaces">(() => {
+  const [view, setView] = useState<"editor" | "widgets" | "designs" | "surfaces" | "composer">(() => {
     const param = params.get("view");
     if (param === "surfaces") return "surfaces";
     if (!initial.domains.length || param === "library" || (publication && !initialRecord)) return "designs";
@@ -1180,6 +1181,11 @@ function UiWorkspace({ initial, customers }: {
         </div>
 
         <div className="ui-studio-topbar-right">
+          <button type="button" className="ui-button ui-button-plain ui-compact-btn" aria-pressed={view === "composer"}
+            onClick={() => setView(view === "composer" && initial.domains.length ? "editor" : "composer")}>
+            <Sparkles size={14} aria-hidden="true" />
+            {view === "composer" ? "Back to Studio" : "Experience Composer"}
+          </button>
           <button type="button" className="ui-button ui-button-plain ui-compact-btn" aria-pressed={view === "surfaces"}
             onClick={() => setView(view === "surfaces" && initial.domains.length ? "editor" : "surfaces")}>
             <Sparkles size={14} aria-hidden="true" />
@@ -1237,6 +1243,8 @@ function UiWorkspace({ initial, customers }: {
         <WidgetStudio key={domainId} domainId={domainId} widgets={widgets} onWidgetsChange={setWidgets} onInsertIntoLayout={insertWidgetIntoLayout} />
       ) : view === "surfaces" ? (
         <SurfaceBinderLab />
+      ) : view === "composer" ? (
+        <ExperienceComposerStudio embedded />
       ) : experience ? (
         <>
           {notice && <p className="ui-builder-notice" role="status">{notice}</p>}

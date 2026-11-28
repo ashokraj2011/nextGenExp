@@ -16,7 +16,7 @@ const destinations = [
   { label: "Recommendations", path: adminPaths.recommendations, Icon: Layers },
   { label: "Customer 360", path: adminPaths.customers, Icon: UsersRound },
   { label: "Intents & Catalog", path: adminPaths.intents, Icon: GitBranch },
-  { label: "UI Builder", path: adminPaths.builder, Icon: PanelsTopLeft },
+  { label: "sphoton UI Studio", path: adminPaths.builder, Icon: PanelsTopLeft },
   { label: "Embed SDK", path: adminPaths.embed, Icon: Blocks },
   { label: "Logs", path: adminPaths.logs, Icon: FileText },
   { label: "Inspector", path: adminPaths.inspector, Icon: Code2 },

@@ -1,4 +1,4 @@
-import { dataBindingKeySchema, dataDictionary, type DataBindingKey } from "../../packages/contracts/data-bindings";
+import { dataBindingKeySchema, dataDictionary, type DataBindingKey } from "../../packages/smass";
 import { getDomainPack, type DomainPackId } from "../../packages/contracts/domain-packs";
 import {
   bindingDomain,

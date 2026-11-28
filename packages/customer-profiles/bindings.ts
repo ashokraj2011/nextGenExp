@@ -1,4 +1,4 @@
-import type { DataBindingValues } from "../contracts/data-bindings";
+import type { DataBindingValues } from "../smass";
 import type { IncidentRecord } from "../contracts/ops";
 import type { DealRecord } from "../contracts/sales";
 import { formatPortfolioAmount, type PortfolioSnapshot } from "../contracts/portfolio";

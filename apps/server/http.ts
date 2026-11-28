@@ -18,7 +18,7 @@ import { widgetGenerateRequestSchema, widgetLibraryChangeSchema } from "../../pa
 import { previewUiLayout, uiTargetOptions, validateUiDesign } from "./ui-layouts";
 import { SphotonCatalogService } from "./sphoton-catalog";
 import { Customer360Service } from "./customer-360";
-import { dataBindingKeySchema } from "../../packages/contracts/data-bindings";
+import { dataBindingKeySchema } from "../../packages/smass";
 import { customer360ProfileInputSchema, type Customer360AdminRecord } from "../../packages/contracts/customer-360";
 import {
   managedContentInputSchema,
@@ -258,8 +258,14 @@ export async function startApp(options: Options) {
   const widgetLibrary = widgetLibraries.wealth;
   const selfServicePzn = new SelfServicePznStore(options.dataDir);
   const pznDecisionPlane = new PznDecisionPlane();
-  const experienceComposer = new ExperienceComposerEngine(undefined, () =>
-    widgetLibraries.wealth.list("default-workspace", Date.now()),
+  const experienceComposer = new ExperienceComposerEngine(
+    undefined,
+    () => [
+      ...widgetLibraries.wealth.list("default-workspace", Date.now()),
+      ...widgetLibraries.it_ops.list("default-workspace", Date.now()),
+      ...widgetLibraries.sales_revops.list("default-workspace", Date.now()),
+    ],
+    options.dataDir,
   );
   const integrationTasks = new IntegrationTaskStore(options.dataDir);
   const profileStore = new CustomerProfileStore(options.dataDir);
@@ -1874,6 +1880,7 @@ export async function startApp(options: Options) {
       workflowEngine.close();
       scheduledJobs.close();
       selfServicePzn.close();
+      experienceComposer.close();
       unregisterLlmEgressContext(options.dataDir);
       if (getActiveCustomerProfileStore() === profileStore) setActiveCustomerProfileStore(null);
       if (getActiveEquityLedger() === tradeStore) setActiveEquityLedger(null);

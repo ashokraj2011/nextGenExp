@@ -2,7 +2,7 @@ import { z } from "zod";
 import { interactiveExperienceSchema } from "./interactive-experience";
 import { domainPackIds, type DomainPackId } from "./domain-packs";
 import { capabilityIdSchema } from "./agentic";
-import { dataBindingKeySchema } from "./data-bindings";
+import { dataBindingKeySchema } from "../smass/bindings";
 import { contentComponentCatalog } from "./domain";
 import type { RoutingIntentId } from "./routing-intents";
 import { extraMonthlyCentsSchema } from "./goal-progress";

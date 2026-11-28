@@ -4,6 +4,25 @@
   color: var(--ink, #141414);
   font-family: var(--font-sans, Inter, system-ui, sans-serif);
 }
+.ec-page.is-embedded {
+  min-height: auto;
+  background: transparent;
+}
+.ec-page.is-embedded .ec-main {
+  max-width: none;
+  padding: 12px 0 24px;
+}
+.ec-embedded-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--white, #ffffff);
+}
 
 .ec-topbar {
   position: sticky;

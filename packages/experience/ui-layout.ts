@@ -1,4 +1,4 @@
-import { interpolateBindingTokens, type DataBindingValues } from "../contracts/data-bindings";
+import { interpolateBindingTokens, type DataBindingValues } from "../smass/bindings";
 import type { DisplayBlock, DisplayExperience } from "../contracts/surface";
 import { formatPortfolioAmount } from "../contracts/portfolio";
 import {

@@ -1,3 +1,7 @@
+import {
+  arbitrateExperienceSurface,
+  DEFAULT_SPHOTON_CHANNEL_BUDGETS,
+} from "../../packages/sphoton";
 import { interactiveScalar, interactiveValue, type InteractiveTurnState } from "../../packages/contracts/interactive-experience";
 import {
   compileInteractiveView, interactiveAction, interactiveWatchId, matchInteractiveExperience, type InteractiveInvocation,
@@ -1198,6 +1202,23 @@ export class ExperienceService {
           signal,
         });
         const dynamicResult = compileDynamicCanvas(generated.intro, governedCanvas, now + DECISION_TTL);
+        const chatBudget = DEFAULT_SPHOTON_CHANNEL_BUDGETS[0];
+        const dynArbitration = arbitrateExperienceSurface({
+          budget: chatBudget,
+          mainItemId: semanticRoute.capabilityId,
+          mainRationale: `Main dynamic canvas (${domain}/${semanticRoute.capabilityId}) locked at priority #1.`,
+          revision: 1,
+          accountVersion: 1,
+          taskCandidates: dynamicResult.display.actions.length
+            ? [{ id: `${semanticRoute.capabilityId}_action`, title: dynamicResult.display.actions[0]!.label, sourceToolRef: providerArbitration?.toolRef ?? `${domain}.tools@1.0.0` }]
+            : [],
+          nbaCandidates: providerArbitration?.winnerTitle
+            ? [{ id: `${semanticRoute.capabilityId}_rec`, title: providerArbitration.winnerTitle, sourceToolRef: providerArbitration.toolRef, score: 0.9 }]
+            : [],
+          dismissedIds: new Set(),
+          followUps: dynamicResult.display.actions.map((a) => a.label),
+          disclosures: [],
+        });
         this.store.update(id, (row) => {
           row.public.actionMode = "dynamic_ui";
           if (lookupInfo) row.public.customerLookup = lookupInfo.lookup;
@@ -1208,6 +1229,14 @@ export class ExperienceService {
             row.trace.intentId = namedIntent?.view === view ? namedIntent.id : recordIntentId(domain, view);
           }
           if (providerArbitration) row.public.providerArbitration = providerArbitration;
+          row.public.surfaceArbitration = {
+            channelId: chatBudget.id,
+            maxCompanionTotal: chatBudget.maxCompanionTotal,
+            placedTasks: dynArbitration.placedTasks.length,
+            placedNba: dynArbitration.placedNba.length,
+            suppressed: dynArbitration.suppressed,
+            arbitrationLog: dynArbitration.arbitrationLog,
+          };
           row.trace.components = dynamicResult.display.blocks.map((block) => block.component);
         });
         this.store.finish(id, { type: "completed", result: dynamicResult }, now);
@@ -1590,6 +1619,22 @@ export class ExperienceService {
           }
         }
       }
+      const chatBudget = DEFAULT_SPHOTON_CHANNEL_BUDGETS[0];
+      const wealthArbitration = arbitrateExperienceSurface({
+        budget: chatBudget,
+        mainItemId: intentId ?? "verified_experience",
+        mainRationale: `Main verified experience (${resultForDisplay.display.blocks.length} block(s)) locked at priority #1.`,
+        revision: 1,
+        accountVersion: 1,
+        taskCandidates: [],
+        nbaCandidates: companionNba
+          ? [{ id: companionNba.id, title: companionNba.title, sourceToolRef: recommendationArbitrateToolRef, score: 0.92 }]
+          : [],
+        dismissedIds: new Set(),
+        followUps: resultForDisplay.display.actions.map((a) => a.label),
+        disclosures: [],
+      });
+      if (wealthArbitration.placedNba.length === 0) companionNba = undefined;
       this.store.update(id, (row) => {
         row.public.actionMode = resultForDisplay.display.status === "clarify"
           ? "clarify"
@@ -1599,6 +1644,14 @@ export class ExperienceService {
         if (lookupSummary) row.public.customerLookup = lookupSummary;
         if (companionNba) row.public.nextBestAction = companionNba;
         if (customerEvaluation) row.trace.customerEvaluation = customerEvaluation;
+        row.public.surfaceArbitration = {
+          channelId: chatBudget.id,
+          maxCompanionTotal: chatBudget.maxCompanionTotal,
+          placedTasks: wealthArbitration.placedTasks.length,
+          placedNba: wealthArbitration.placedNba.length,
+          suppressed: wealthArbitration.suppressed,
+          arbitrationLog: wealthArbitration.arbitrationLog,
+        };
         const tsElapsed = row.trace.markers.tsResolved - row.trace.markers.eligibility;
         row.public.providerArbitration = {
           toolRef: recommendationArbitrateToolRef,

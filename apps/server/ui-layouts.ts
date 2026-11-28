@@ -9,7 +9,7 @@ import type { DealRecord } from "../../packages/contracts/sales";
 import { availableFundingOptions, fundingPreviewFrom } from "../../packages/capabilities";
 import { requiredContribution, savingsProjection } from "../../packages/capabilities/calculations";
 import type { ComponentKind } from "../../packages/contracts/agentic";
-import { canSaveProfileBinding, dataBindingKeySchema } from "../../packages/contracts/data-bindings";
+import { canSaveProfileBinding, dataBindingKeySchema } from "../../packages/smass";
 import { synthesizeDynamicCanvas } from "./dynamic-ui-generator";
 import type { OpsIncidentStore } from "./ops-store";
 import type { SalesDealStore } from "./sales-store";
