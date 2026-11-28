@@ -6,8 +6,8 @@ import {
   type SmassExecutionContext,
 } from "../../packages/smass";
 
-export type SubjectAreaId = "wealth" | "banking" | "retirement";
-export type ChannelSurfaceId = "chat_turn" | "web_dashboard" | "mobile_compact" | "advisor_desktop";
+export type SubjectAreaId = string;
+export type ChannelSurfaceId = string;
 export type UiPlacementClass = "main" | "tasks" | "nba" | "actions" | "chrome";
 
 export type SubjectAreaMeta = {
@@ -16,6 +16,7 @@ export type SubjectAreaMeta = {
   tagline: string;
   accentLabel: string;
   smassModelId: string;
+  custom?: boolean;
 };
 
 export type ChannelBudgetSpec = {
@@ -30,6 +31,7 @@ export type ChannelBudgetSpec = {
   maxFollowUps: number;
   showProvenanceRail: boolean;
   frameMode: "chat" | "web" | "mobile" | "advisor";
+  custom?: boolean;
 };
 
 export type ComposerMemberRecord = {
@@ -56,6 +58,7 @@ export type ComposerExperienceOption = {
   mid: string;
   label: string;
   userPrompt: string;
+  custom?: boolean;
   mainTitle: string;
   mainSubtitle: string;
   mainKind: "portfolio_summary" | "address_task" | "cashflow_overview" | "retirement_readiness";
@@ -192,9 +195,9 @@ export type ComposedExperienceResult = {
 export type ExperienceComposerBootstrap = {
   subjectAreas: SubjectAreaMeta[];
   channels: ChannelBudgetSpec[];
-  experiences: Array<Pick<ComposerExperienceOption, "id" | "subjectArea" | "mid" | "label" | "userPrompt">>;
+  experiences: Array<Pick<ComposerExperienceOption, "id" | "subjectArea" | "mid" | "label" | "userPrompt" | "custom">>;
   members: ComposerMemberRecord[];
-  smassGraphs: Record<SubjectAreaId, SmassDataModelGraph>;
+  smassGraphs: Record<string, SmassDataModelGraph>;
 };
 
 export const SUBJECT_AREAS: SubjectAreaMeta[] = [
@@ -559,11 +562,14 @@ const EXPERIENCES: ComposerExperienceOption[] = [
 
 export class ExperienceComposerEngine {
   private readonly secret: Buffer;
+  private subjectAreas: SubjectAreaMeta[] = SUBJECT_AREAS.map((s) => ({ ...s }));
+  private channels: ChannelBudgetSpec[] = CHANNEL_BUDGETS.map((c) => ({ ...c }));
+  private experiences: ComposerExperienceOption[] = EXPERIENCES.map((e) => ({ ...e }));
   private members = initialMembers();
   private dismissedByMid = new Map<string, Set<string>>();
   private executionsByKey = new Map<string, ComposedActionExecution>();
   private revisionsByKey = new Map<string, number>();
-  private registries: Record<SubjectAreaId, SmassDomainRegistry>;
+  private registries: Record<string, SmassDomainRegistry>;
 
   constructor(secretSeed?: string) {
     this.secret = Buffer.from(secretSeed ?? randomBytes(32).toString("hex"), "utf8");
@@ -572,6 +578,15 @@ export class ExperienceComposerEngine {
       banking: this.buildRegistry("banking", "banking_account_360", "Banking Account 360"),
       retirement: this.buildRegistry("retirement", "retirement_plan_360", "Retirement Plan 360"),
     };
+  }
+
+  private slugify(raw: string, fallback: string): string {
+    const clean = raw
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 42);
+    return clean || fallback;
   }
 
   private buildRegistry(subjectArea: SubjectAreaId, modelId: string, label: string): SmassDomainRegistry {
@@ -587,7 +602,7 @@ export class ExperienceComposerEngine {
       fields: {
         mid: { type: "string", label: "Member ID", primaryKey: true, principalKey: "mid", required: true, classification: "pii" },
         displayName: { type: "string", label: "Member Name", required: true, classification: "pii" },
-        subjectArea: { type: "string", label: "Subject Area", required: true, enumValues: ["wealth", "banking", "retirement"] },
+        subjectArea: { type: "string", label: "Subject Area", required: true },
         primaryMetricCents: { type: "integer", label: "Primary Metric", format: "currency_cents", required: true },
         secondaryMetricCents: { type: "integer", label: "Secondary Metric", format: "currency_cents", required: true },
         tertiaryMetricCents: { type: "integer", label: "Tertiary Metric", format: "currency_cents", required: true },
@@ -660,30 +675,248 @@ export class ExperienceComposerEngine {
   }
 
   getBootstrap(): ExperienceComposerBootstrap {
+    const smassGraphs: Record<string, SmassDataModelGraph> = {};
+    for (const area of this.subjectAreas) {
+      const reg = this.registries[area.id];
+      if (reg) smassGraphs[area.id] = reg.toDataModelGraph(area.id);
+    }
     return {
-      subjectAreas: SUBJECT_AREAS,
-      channels: CHANNEL_BUDGETS,
-      experiences: EXPERIENCES.map(({ id, subjectArea, mid, label, userPrompt }) => ({
+      subjectAreas: this.subjectAreas.map((s) => ({ ...s })),
+      channels: this.channels.map((c) => ({ ...c })),
+      experiences: this.experiences.map(({ id, subjectArea, mid, label, userPrompt, custom }) => ({
         id,
         subjectArea,
         mid,
         label,
         userPrompt,
+        custom,
       })),
       members: [...this.members.values()].map((m) => ({ ...m })),
-      smassGraphs: {
-        wealth: this.registries.wealth.toDataModelGraph("wealth"),
-        banking: this.registries.banking.toDataModelGraph("banking"),
-        retirement: this.registries.retirement.toDataModelGraph("retirement"),
-      },
+      smassGraphs,
     };
   }
 
+  createSubjectArea(input: {
+    label: string;
+    tagline: string;
+    smassModelId?: string;
+  }): { subjectArea: SubjectAreaMeta; experienceId: string } {
+    const baseId = this.slugify(input.label, "custom-domain").replace(/-/g, "_");
+    let id = baseId;
+    let suffix = 2;
+    while (this.subjectAreas.some((s) => s.id === id)) {
+      id = `${baseId}_${suffix++}`;
+    }
+    const smassModelId = input.smassModelId?.trim()
+      ? input.smassModelId.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_")
+      : `${id}_360`;
+    const meta: SubjectAreaMeta = {
+      id,
+      label: input.label.trim(),
+      tagline: input.tagline.trim() || `Governed ${input.label.trim()} experiences powered by smass & sfield`,
+      accentLabel: `${input.label.trim()} · Customer 360`,
+      smassModelId,
+      custom: true,
+    };
+    this.subjectAreas.push(meta);
+    this.registries[id] = this.buildRegistry(id, smassModelId, `${meta.label} 360`);
+
+    // Create a ready-to-run starter experience in this new subject area so switching to it works immediately
+    const created = this.createExperience({
+      subjectArea: id,
+      memberName: "Elena Vance",
+      segment: `${meta.label} · Active Member`,
+      label: `Elena · ${meta.label} Overview`,
+      userPrompt: `Show my ${meta.label.toLowerCase()} summary and open items.`,
+      mainTitle: `${meta.label} overview`,
+      mainSubtitle: `Live verified snapshot bound from smass model ${smassModelId}@1.0.0.`,
+      primaryMetricLabel: "Active Coverage / Value",
+      primaryMetricDollars: 120000,
+      secondaryMetricLabel: "YTD Activity",
+      secondaryMetricDollars: 14500,
+      tertiaryMetricLabel: "Available Benefit",
+      tertiaryMetricDollars: 4800,
+      taskRuleId: `${id}_verification_required`,
+      taskTitle: `Verify ${meta.label.toLowerCase()} profile details`,
+      taskSummary: `Shared CCRE rule across channels — confirm required ${meta.label.toLowerCase()} documents.`,
+      taskCtaLabel: "Preview verification steps",
+      taskWorkflowId: `${id}.verify.preview`,
+      taskEventName: `${id}.verified`,
+      nbaRuleId: `${id}_optimization_opportunity`,
+      nbaTitle: `Optimize your ${meta.label.toLowerCase()} plan`,
+      nbaSummary: `PZN Ranking Model identified a tailored optimization based on your ${smassModelId} snapshot.`,
+      nbaScore: 0.92,
+      nbaEstimatedValue: "+$720/yr projected value",
+      nbaCtaLabel: "Preview recommendation",
+      nbaWorkflowId: `${id}.optimize.preview`,
+      followUps: [`Compare ${meta.label.toLowerCase()} tiers`, "Simulate annual savings", "Review policy details"],
+      disclosure: `For illustration. Verified against smass ${smassModelId}@1.0.0 snapshot.`,
+    });
+
+    return { subjectArea: meta, experienceId: created.id };
+  }
+
+  createExperience(input: {
+    subjectArea: SubjectAreaId;
+    memberName: string;
+    segment?: string;
+    label: string;
+    userPrompt: string;
+    mainTitle: string;
+    mainSubtitle?: string;
+    primaryMetricLabel: string;
+    primaryMetricDollars: number;
+    secondaryMetricLabel: string;
+    secondaryMetricDollars: number;
+    tertiaryMetricLabel: string;
+    tertiaryMetricDollars: number;
+    taskRuleId: string;
+    taskTitle: string;
+    taskSummary: string;
+    taskCtaLabel: string;
+    taskWorkflowId: string;
+    taskEventName: string;
+    nbaRuleId: string;
+    nbaTitle: string;
+    nbaSummary: string;
+    nbaScore: number;
+    nbaEstimatedValue: string;
+    nbaCtaLabel: string;
+    nbaWorkflowId: string;
+    followUps: string[];
+    disclosure: string;
+  }): ComposerExperienceOption {
+    const area = this.subjectAreas.find((s) => s.id === input.subjectArea);
+    if (!area) throw new Error(`Unknown subject area "${input.subjectArea}".`);
+    const baseExpId = `${area.id}-${this.slugify(input.label, "experience")}`;
+    let expId = baseExpId;
+    let suffix = 2;
+    while (this.experiences.some((e) => e.id === expId)) {
+      expId = `${baseExpId}-${suffix++}`;
+    }
+    const midNum = 4000 + this.members.size + 1;
+    const mid = `DEMO-MID-${midNum}`;
+    const verPrefix = area.id.slice(0, 3);
+    const member: ComposerMemberRecord = {
+      mid,
+      displayName: input.memberName.trim() || "Custom Member",
+      subjectArea: area.id,
+      segment: input.segment?.trim() || `${area.label} · Custom Experience`,
+      accountVersion: 11,
+      balanceVersion: `${verPrefix}_11`,
+      primaryMetricLabel: input.primaryMetricLabel.trim() || "Primary Value",
+      primaryMetricCents: Math.round(input.primaryMetricDollars * 100),
+      secondaryMetricLabel: input.secondaryMetricLabel.trim() || "Secondary Value",
+      secondaryMetricCents: Math.round(input.secondaryMetricDollars * 100),
+      tertiaryMetricLabel: input.tertiaryMetricLabel.trim() || "Opportunity",
+      tertiaryMetricCents: Math.round(input.tertiaryMetricDollars * 100),
+      taskStatus: "open",
+      nbaEligible: true,
+      defaultExperienceId: expId,
+    };
+    this.members.set(mid, member);
+
+    const cleanWorkflow = (raw: string, fallback: string) =>
+      raw.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "") || fallback;
+    const taskWf = cleanWorkflow(input.taskWorkflowId, `${area.id}.task.preview`);
+    const nbaWf = cleanWorkflow(input.nbaWorkflowId, `${area.id}.nba.preview`);
+
+    const option: ComposerExperienceOption = {
+      id: expId,
+      subjectArea: area.id,
+      mid,
+      label: input.label.trim(),
+      userPrompt: input.userPrompt.trim() || `Show ${input.mainTitle.trim()}`,
+      custom: true,
+      mainTitle: input.mainTitle.trim(),
+      mainSubtitle: input.mainSubtitle?.trim() || `Live verified snapshot bound from smass ${area.smassModelId}@1.0.0.`,
+      mainKind: "portfolio_summary",
+      mainHighlights: [
+        { label: "Subject Area", value: area.label, tone: "positive" },
+        { label: "smass Model", value: `${area.smassModelId}@1.0.0` },
+        { label: "Open Task", value: input.taskRuleId.trim() || "pending_check", tone: "warn" },
+      ],
+      disclosures: [input.disclosure.trim() || `For illustration. Verified against smass ${area.smassModelId}@1.0.0.`],
+      sources: [
+        { title: `${area.label} Snapshot (smass)`, version: member.balanceVersion },
+        { title: "PZN Shared Policy Catalog", version: "v1.0" },
+      ],
+      followUps: input.followUps.filter((f) => f.trim().length > 0).slice(0, 4),
+      taskCandidate: {
+        id: `task_${expId.replace(/[^a-z0-9]+/g, "_")}`,
+        ruleId: input.taskRuleId.trim() || `${area.id}_task_rule`,
+        title: input.taskTitle.trim(),
+        summary: input.taskSummary.trim(),
+        urgency: "high",
+        ctaLabel: input.taskCtaLabel.trim() || "Preview task",
+        workflowId: taskWf,
+        workflowVersion: "1.0.0",
+        eventName: input.taskEventName.trim() || `${area.id}.task.confirmed`,
+        previewSummary: `sfield verified preview ready for "${input.taskTitle.trim()}" (${member.displayName}).`,
+        previewAmountCents: Math.max(0, member.tertiaryMetricCents),
+        toolRefs: [`${taskWf}.read@1.0.0`, `${taskWf}.options@1.0.0`, `${taskWf}.build@1.0.0`],
+      },
+      nbaCandidate: {
+        id: `nba_${expId.replace(/[^a-z0-9]+/g, "_")}`,
+        ruleId: input.nbaRuleId.trim() || `${area.id}_nba_rule`,
+        title: input.nbaTitle.trim(),
+        summary: input.nbaSummary.trim(),
+        score: Math.min(0.99, Math.max(0.5, Number(input.nbaScore) || 0.9)),
+        estimatedValue: input.nbaEstimatedValue.trim() || "Personalized value",
+        ctaLabel: input.nbaCtaLabel.trim() || "Preview offer",
+        workflowId: nbaWf,
+        workflowVersion: "1.0.0",
+        previewSummary: `sfield verified offer preview ready for "${input.nbaTitle.trim()}" (${input.nbaEstimatedValue.trim() || "governed"}).`,
+        previewAmountCents: Math.max(0, member.tertiaryMetricCents),
+        toolRefs: [`${nbaWf}.read@1.0.0`, `${nbaWf}.rank@1.0.0`, `${nbaWf}.build@1.0.0`],
+      },
+    };
+    this.experiences.push(option);
+    return option;
+  }
+
+  createChannel(input: {
+    label: string;
+    shortLabel?: string;
+    description?: string;
+    frameMode: "chat" | "web" | "mobile" | "advisor";
+    maxTasks: number;
+    maxNba: number;
+    maxCompanionTotal: number;
+    maxFollowUps: number;
+  }): ChannelBudgetSpec {
+    const baseId = this.slugify(input.label, "custom-channel").replace(/-/g, "_");
+    let id = baseId;
+    let suffix = 2;
+    while (this.channels.some((c) => c.id === id)) {
+      id = `${baseId}_${suffix++}`;
+    }
+    const spec: ChannelBudgetSpec = {
+      id,
+      label: input.label.trim(),
+      shortLabel: (input.shortLabel?.trim() || input.label.trim()).slice(0, 22),
+      description:
+        input.description?.trim() ||
+        `Custom channel budget: 1 Main + max ${input.maxCompanionTotal} companion (Tasks ${input.maxTasks}, NBA ${input.maxNba}) + ${input.maxFollowUps} follow-ups.`,
+      maxMain: 1,
+      maxTasks: Math.max(0, Math.min(5, Math.round(input.maxTasks))),
+      maxNba: Math.max(0, Math.min(5, Math.round(input.maxNba))),
+      maxCompanionTotal: Math.max(0, Math.min(8, Math.round(input.maxCompanionTotal))),
+      maxFollowUps: Math.max(0, Math.min(5, Math.round(input.maxFollowUps))),
+      showProvenanceRail: input.frameMode === "advisor",
+      frameMode: input.frameMode,
+      custom: true,
+    };
+    this.channels.push(spec);
+    return spec;
+  }
+
   async compose(input: { experienceId: string; channel: ChannelSurfaceId }): Promise<ComposedExperienceResult> {
-    const exp = EXPERIENCES.find((e) => e.id === input.experienceId) ?? EXPERIENCES[0];
-    const budget = CHANNEL_BUDGETS.find((c) => c.id === input.channel) ?? CHANNEL_BUDGETS[0];
+    const exp = this.experiences.find((e) => e.id === input.experienceId) ?? this.experiences[0];
+    const budget = this.channels.find((c) => c.id === input.channel) ?? this.channels[0];
     const reg = this.registries[exp.subjectArea];
-    const readToolRef = `${SUBJECT_AREAS.find((s) => s.id === exp.subjectArea)!.smassModelId}.read@1.0.0`;
+    const areaMeta = this.subjectAreas.find((s) => s.id === exp.subjectArea)!;
+    const readToolRef = `${areaMeta.smassModelId}.read@1.0.0`;
     const ctx: SmassExecutionContext = { tenantId: "pzn-composer", domainId: exp.subjectArea, principalId: exp.mid, customerId: exp.mid };
     const snapRead = await reg.executeStoreRead(readToolRef, { mid: exp.mid }, ctx);
     if (!snapRead.found || !snapRead.output) {
@@ -888,7 +1121,7 @@ export class ExperienceComposerEngine {
     channel: ChannelSurfaceId;
     signedActionToken: string;
   }): Promise<{ ok: true; composed: ComposedExperienceResult; execution: ComposedActionExecution } | { ok: false; status: number; error: string }> {
-    const exp = EXPERIENCES.find((e) => e.id === input.experienceId);
+    const exp = this.experiences.find((e) => e.id === input.experienceId);
     if (!exp) return { ok: false, status: 404, error: `Unknown experience "${input.experienceId}".` };
     const check = this.verifyToken(input.signedActionToken);
     if (!check.valid) return { ok: false, status: 403, error: check.error };
@@ -919,7 +1152,7 @@ export class ExperienceComposerEngine {
   }
 
   async completeTaskEvent(input: { experienceId: string; channel: ChannelSurfaceId }): Promise<ComposedExperienceResult> {
-    const exp = EXPERIENCES.find((e) => e.id === input.experienceId) ?? EXPERIENCES[0];
+    const exp = this.experiences.find((e) => e.id === input.experienceId) ?? this.experiences[0];
     const member = this.members.get(exp.mid);
     if (member && member.taskStatus === "open") {
       member.taskStatus = "completed";
@@ -937,7 +1170,7 @@ export class ExperienceComposerEngine {
   }
 
   async dismissNba(input: { experienceId: string; channel: ChannelSurfaceId; nbaId: string }): Promise<ComposedExperienceResult> {
-    const exp = EXPERIENCES.find((e) => e.id === input.experienceId) ?? EXPERIENCES[0];
+    const exp = this.experiences.find((e) => e.id === input.experienceId) ?? this.experiences[0];
     let set = this.dismissedByMid.get(exp.mid);
     if (!set) {
       set = new Set<string>();
@@ -950,10 +1183,20 @@ export class ExperienceComposerEngine {
   }
 
   async reset(experienceId = EXPERIENCES[0].id, channel: ChannelSurfaceId = "chat_turn"): Promise<ComposedExperienceResult> {
+    this.subjectAreas = SUBJECT_AREAS.map((s) => ({ ...s }));
+    this.channels = CHANNEL_BUDGETS.map((c) => ({ ...c }));
+    this.experiences = EXPERIENCES.map((e) => ({ ...e }));
+    this.registries = {
+      wealth: this.buildRegistry("wealth", "wealth_customer_360", "Wealth Customer 360"),
+      banking: this.buildRegistry("banking", "banking_account_360", "Banking Account 360"),
+      retirement: this.buildRegistry("retirement", "retirement_plan_360", "Retirement Plan 360"),
+    };
     this.members = initialMembers();
     this.dismissedByMid.clear();
     this.executionsByKey.clear();
     this.revisionsByKey.clear();
-    return this.compose({ experienceId, channel });
+    const safeExp = this.experiences.some((e) => e.id === experienceId) ? experienceId : this.experiences[0].id;
+    const safeChannel = this.channels.some((c) => c.id === channel) ? channel : "chat_turn";
+    return this.compose({ experienceId: safeExp, channel: safeChannel });
   }
 }

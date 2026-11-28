@@ -12,6 +12,7 @@ import {
   MessageSquare,
   Monitor,
   Play,
+  Plus,
   RotateCcw,
   ShieldAlert,
   ShieldCheck,
@@ -26,6 +27,7 @@ import type {
   ExperienceComposerBootstrap,
   SubjectAreaId,
 } from "../server/experience-composer";
+import { ExperienceComposerModal, type CreateModalTab } from "./experience-composer-modal";
 import { ThemeToggle } from "./theme";
 import "./experience-composer-studio.css";
 
@@ -71,6 +73,7 @@ export function ExperienceComposerStudio() {
   const [showAnatomy, setShowAnatomy] = useState<boolean>(true);
   const [busy, setBusy] = useState<boolean>(false);
   const [banner, setBanner] = useState<{ kind: "info" | "success" | "warn" | "error"; text: string } | null>(null);
+  const [createModal, setCreateModal] = useState<{ open: boolean; tab: CreateModalTab }>({ open: false, tab: "experience" });
 
   const composeView = useCallback(async (nextExpId: string, nextChannel: ChannelSurfaceId, silent = false) => {
     setBusy(true);
@@ -389,6 +392,13 @@ export function ExperienceComposerStudio() {
           </div>
         </div>
         <div className="ec-topbar-right">
+          <button
+            type="button"
+            className="ec-btn-primary"
+            onClick={() => setCreateModal({ open: true, tab: "experience" })}
+          >
+            <Plus size={14} aria-hidden="true" /> Create New
+          </button>
           <a href="/pzn-architecture" className="ec-pill-link">
             PZN Trace View
           </a>
@@ -411,10 +421,15 @@ export function ExperienceComposerStudio() {
         {/* 3-Dimension Switcher Bar: Subject Area -> Customer Experience -> Channel */}
         <section className="ec-control-deck" aria-label="Experience dimensions">
           <div className="ec-control-group">
-            <label>1. Subject Area</label>
+            <div className="ec-control-head">
+              <label>1. Subject Area</label>
+              <button type="button" className="ec-inline-add" onClick={() => setCreateModal({ open: true, tab: "subject" })}>
+                <Plus size={12} /> New
+              </button>
+            </div>
             <div className="ec-seg-row">
               {bootstrap?.subjectAreas.map((area) => {
-                const Icon = SUBJECT_ICONS[area.id];
+                const Icon = SUBJECT_ICONS[area.id] ?? Layers;
                 return (
                   <button
                     key={area.id}
@@ -432,7 +447,12 @@ export function ExperienceComposerStudio() {
           </div>
 
           <div className="ec-control-group">
-            <label>2. Customer Experience</label>
+            <div className="ec-control-head">
+              <label>2. Customer Experience</label>
+              <button type="button" className="ec-inline-add" onClick={() => setCreateModal({ open: true, tab: "experience" })}>
+                <Plus size={12} /> New
+              </button>
+            </div>
             <div className="ec-seg-row">
               {subjectExperiences.map((exp) => (
                 <button
@@ -449,10 +469,15 @@ export function ExperienceComposerStudio() {
           </div>
 
           <div className="ec-control-group">
-            <label>3. Target Channel &amp; Surface Budget</label>
+            <div className="ec-control-head">
+              <label>3. Target Channel &amp; Surface Budget</label>
+              <button type="button" className="ec-inline-add" onClick={() => setCreateModal({ open: true, tab: "channel" })}>
+                <Plus size={12} /> New
+              </button>
+            </div>
             <div className="ec-seg-row">
               {bootstrap?.channels.map((ch) => {
-                const Icon = CHANNEL_ICONS[ch.id];
+                const Icon = CHANNEL_ICONS[ch.id] ?? LayoutDashboard;
                 return (
                   <button
                     key={ch.id}
@@ -628,6 +653,26 @@ export function ExperienceComposerStudio() {
           </aside>
         </div>
       </main>
+      {createModal.open && (
+        <ExperienceComposerModal
+          key={`${createModal.tab}-${subjectArea}`}
+          open={createModal.open}
+          initialTab={createModal.tab}
+          bootstrap={bootstrap}
+          activeSubjectArea={subjectArea}
+          activeExperienceId={experienceId}
+          activeChannel={channel}
+          onClose={() => setCreateModal((m) => ({ ...m, open: false }))}
+          onCreated={({ composed: nextComposed, bootstrap: nextBootstrap, notice }) => {
+            setBootstrap(nextBootstrap);
+            setComposed(nextComposed);
+            setSubjectArea(nextComposed.subjectArea);
+            setExperienceId(nextComposed.experienceId);
+            setChannel(nextComposed.channel);
+            setBanner({ kind: "success", text: notice });
+          }}
+        />
+      )}
     </div>
   );
 }

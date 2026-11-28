@@ -1617,6 +1617,7 @@ export async function startApp(options: Options) {
       });
     }
     if (resource === "experience-composer") {
+      const channelIdSchema = z.string().min(1).max(64);
       if (id === "bootstrap" && !operation && method === "GET") {
         return json(res, experienceComposer.getBootstrap());
       }
@@ -1625,18 +1626,99 @@ export async function startApp(options: Options) {
           req,
           z.object({
             experienceId: z.string().min(1).max(80),
-            channel: z.enum(["chat_turn", "web_dashboard", "mobile_compact", "advisor_desktop"]),
+            channel: channelIdSchema,
           }).strict(),
         );
         const composed = await experienceComposer.compose(input);
         return json(res, { composed, bootstrap: experienceComposer.getBootstrap() });
+      }
+      if (id === "create-subject" && !operation && method === "POST") {
+        const input = await body(
+          req,
+          z.object({
+            label: z.string().min(2).max(60),
+            tagline: z.string().max(160).optional().default(""),
+            smassModelId: z.string().max(64).optional(),
+            channel: channelIdSchema.optional(),
+          }).strict(),
+        );
+        const created = experienceComposer.createSubjectArea(input);
+        const composed = await experienceComposer.compose({
+          experienceId: created.experienceId,
+          channel: input.channel ?? "chat_turn",
+        });
+        return json(res, { ...created, composed, bootstrap: experienceComposer.getBootstrap() }, 201);
+      }
+      if (id === "create-experience" && !operation && method === "POST") {
+        const input = await body(
+          req,
+          z.object({
+            subjectArea: z.string().min(1).max(64),
+            channel: channelIdSchema.optional(),
+            memberName: z.string().min(1).max(80),
+            segment: z.string().max(100).optional(),
+            label: z.string().min(2).max(80),
+            userPrompt: z.string().min(2).max(240),
+            mainTitle: z.string().min(2).max(120),
+            mainSubtitle: z.string().max(220).optional(),
+            primaryMetricLabel: z.string().min(1).max(60),
+            primaryMetricDollars: z.number().min(0).max(100_000_000),
+            secondaryMetricLabel: z.string().min(1).max(60),
+            secondaryMetricDollars: z.number().min(0).max(100_000_000),
+            tertiaryMetricLabel: z.string().min(1).max(60),
+            tertiaryMetricDollars: z.number().min(0).max(100_000_000),
+            taskRuleId: z.string().min(1).max(64),
+            taskTitle: z.string().min(2).max(120),
+            taskSummary: z.string().min(2).max(260),
+            taskCtaLabel: z.string().min(2).max(60),
+            taskWorkflowId: z.string().min(2).max(80),
+            taskEventName: z.string().min(2).max(80),
+            nbaRuleId: z.string().min(1).max(64),
+            nbaTitle: z.string().min(2).max(120),
+            nbaSummary: z.string().min(2).max(260),
+            nbaScore: z.number().min(0.5).max(0.99),
+            nbaEstimatedValue: z.string().min(1).max(80),
+            nbaCtaLabel: z.string().min(2).max(60),
+            nbaWorkflowId: z.string().min(2).max(80),
+            followUps: z.array(z.string().max(80)).max(6),
+            disclosure: z.string().min(2).max(260),
+          }).strict(),
+        );
+        const created = experienceComposer.createExperience(input);
+        const composed = await experienceComposer.compose({
+          experienceId: created.id,
+          channel: input.channel ?? "chat_turn",
+        });
+        return json(res, { experience: created, composed, bootstrap: experienceComposer.getBootstrap() }, 201);
+      }
+      if (id === "create-channel" && !operation && method === "POST") {
+        const input = await body(
+          req,
+          z.object({
+            label: z.string().min(2).max(60),
+            shortLabel: z.string().max(24).optional(),
+            description: z.string().max(220).optional(),
+            frameMode: z.enum(["chat", "web", "mobile", "advisor"]),
+            maxTasks: z.number().int().min(0).max(5),
+            maxNba: z.number().int().min(0).max(5),
+            maxCompanionTotal: z.number().int().min(0).max(8),
+            maxFollowUps: z.number().int().min(0).max(5),
+            experienceId: z.string().min(1).max(80).optional(),
+          }).strict(),
+        );
+        const created = experienceComposer.createChannel(input);
+        const composed = await experienceComposer.compose({
+          experienceId: input.experienceId ?? "wealth-portfolio-summary",
+          channel: created.id,
+        });
+        return json(res, { channel: created, composed, bootstrap: experienceComposer.getBootstrap() }, 201);
       }
       if (id === "execute" && !operation && method === "POST") {
         const input = await body(
           req,
           z.object({
             experienceId: z.string().min(1).max(80),
-            channel: z.enum(["chat_turn", "web_dashboard", "mobile_compact", "advisor_desktop"]),
+            channel: channelIdSchema,
             signedActionToken: z.string().min(1).max(2048),
           }).strict(),
         );
@@ -1649,7 +1731,7 @@ export async function startApp(options: Options) {
           req,
           z.object({
             experienceId: z.string().min(1).max(80),
-            channel: z.enum(["chat_turn", "web_dashboard", "mobile_compact", "advisor_desktop"]),
+            channel: channelIdSchema,
           }).strict(),
         );
         const composed = await experienceComposer.completeTaskEvent(input);
@@ -1660,7 +1742,7 @@ export async function startApp(options: Options) {
           req,
           z.object({
             experienceId: z.string().min(1).max(80),
-            channel: z.enum(["chat_turn", "web_dashboard", "mobile_compact", "advisor_desktop"]),
+            channel: channelIdSchema,
             nbaId: z.string().min(1).max(80),
           }).strict(),
         );
@@ -1672,7 +1754,7 @@ export async function startApp(options: Options) {
           req,
           z.object({
             experienceId: z.string().min(1).max(80).optional(),
-            channel: z.enum(["chat_turn", "web_dashboard", "mobile_compact", "advisor_desktop"]).optional(),
+            channel: channelIdSchema.optional(),
           }).strict(),
         );
         const composed = await experienceComposer.reset(input.experienceId, input.channel);

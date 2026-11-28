@@ -618,10 +618,192 @@
   border-color: #274166;
 }
 
+.ec-control-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ec-inline-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px dashed var(--teal-border, #c7e2c1);
+  background: var(--teal-pale, #eff7ed);
+  color: var(--teal-dark, #1e6f1d);
+  font-size: 0.68rem;
+  font-weight: 680;
+  cursor: pointer;
+}
+.ec-inline-add:hover {
+  background: var(--teal, #368727);
+  border-style: solid;
+  border-color: var(--teal, #368727);
+  color: #ffffff;
+}
+
+/* Create New Modal */
+.ec-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(12, 18, 14, 0.56);
+  backdrop-filter: blur(4px);
+}
+.ec-modal {
+  width: min(100%, 820px);
+  max-height: 90vh;
+  overflow-y: auto;
+  border-radius: 22px;
+  border: 1px solid var(--line-strong);
+  background: var(--white, #ffffff);
+  padding: 20px 22px;
+  box-shadow: 0 24px 60px rgba(10, 18, 13, 0.25);
+  display: grid;
+  gap: 14px;
+}
+.ec-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ec-modal-head h2 {
+  margin: 2px 0 0;
+  font-size: 1.05rem;
+  font-weight: 690;
+}
+.ec-modal-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  color: var(--soft-ink);
+  cursor: pointer;
+}
+.ec-modal-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+}
+.ec-modal-tabs button {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.79rem;
+  font-weight: 620;
+  cursor: pointer;
+}
+.ec-modal-tabs button.is-active {
+  background: var(--teal-pale);
+  border-color: var(--teal-border);
+  color: var(--teal-dark);
+}
+.ec-modal-form {
+  display: grid;
+  gap: 12px;
+}
+.ec-preset-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.ec-preset-chip {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--teal-border);
+  background: var(--teal-pale);
+  color: var(--teal-dark);
+  font-size: 0.73rem;
+  font-weight: 620;
+  cursor: pointer;
+}
+.ec-form-section {
+  padding: 13px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--paper, #f7f5f0);
+  display: grid;
+  gap: 10px;
+}
+.ec-form-section.is-task { border-color: #ebd48c; background: #fffdf5; }
+.ec-form-section.is-nba { border-color: var(--teal-border); background: #f3faf2; }
+.ec-form-section h4 {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+.ec-form-section label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.72rem;
+  font-weight: 620;
+  color: var(--muted);
+}
+.ec-form-section input,
+.ec-form-section select {
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--white, #ffffff);
+  color: var(--ink);
+  font-size: 0.81rem;
+  font-family: inherit;
+}
+.ec-form-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.ec-form-grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.ec-form-grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.ec-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+:root[data-theme="dark"] .ec-modal {
+  background: #141b17;
+  border-color: #2a3730;
+}
+:root[data-theme="dark"] .ec-form-section {
+  background: #101612;
+  border-color: #25302a;
+}
+:root[data-theme="dark"] .ec-form-section.is-task { background: #1d1a10; border-color: #4f411b; }
+:root[data-theme="dark"] .ec-form-section.is-nba { background: #122015; border-color: #2b4d31; }
+:root[data-theme="dark"] .ec-form-section input,
+:root[data-theme="dark"] .ec-form-section select,
+:root[data-theme="dark"] .ec-modal-close {
+  background: #18211c;
+  border-color: #2a3730;
+  color: var(--ink);
+}
+
 @media (max-width: 1120px) {
   .ec-control-deck,
   .ec-studio-grid,
-  .ec-two-col-canvas {
+  .ec-two-col-canvas,
+  .ec-form-grid-2,
+  .ec-form-grid-3,
+  .ec-form-grid-4 {
     grid-template-columns: minmax(0, 1fr);
   }
 }

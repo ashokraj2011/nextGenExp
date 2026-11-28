@@ -110,4 +110,49 @@ test("HTTP /api/experience-composer/* composes Retirement 401(k) across channels
   assert.equal(refreshed.composed.revision, 2);
   assert.equal(refreshed.composed.zones.tasks.length, 0);
   assert.equal(refreshed.composed.zones.nba[0]?.id, "nba_capture_employer_match");
+
+  // Create a custom Subject Area (compiles live smass model), custom Experience, and custom Channel Budget
+  const subRes = await fetch(`${server.url}/api/experience-composer/create-subject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      label: "Insurance & Protection",
+      tagline: "Policies & renewals",
+      smassModelId: "insurance_policy_360",
+      channel: "chat_turn",
+    }),
+  });
+  assert.equal(subRes.status, 201);
+  const subData = (await subRes.json()) as {
+    subjectArea: { id: string; smassModelId: string };
+    bootstrap: { smassGraphs: Record<string, { entities: Array<{ id: string }> }> };
+    composed: { subjectArea: string; zones: { tasks: unknown[]; nba: unknown[] } };
+  };
+  assert.equal(subData.subjectArea.smassModelId, "insurance_policy_360");
+  assert.equal(subData.bootstrap.smassGraphs[subData.subjectArea.id]?.entities[0]?.id, "insurance_policy_360");
+  assert.equal(subData.composed.zones.tasks.length, 1);
+
+  const chRes = await fetch(`${server.url}/api/experience-composer/create-channel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      label: "Watch Glance",
+      shortLabel: "Watch",
+      frameMode: "mobile",
+      maxTasks: 0,
+      maxNba: 0,
+      maxCompanionTotal: 0,
+      maxFollowUps: 0,
+      experienceId: "wealth-portfolio-summary",
+    }),
+  });
+  assert.equal(chRes.status, 201);
+  const chData = (await chRes.json()) as {
+    composed: { zones: { main: { title: string }; tasks: unknown[]; nba: unknown[]; chrome: { followUps: unknown[]; disclosures: unknown[] } } };
+  };
+  assert.equal(chData.composed.zones.main.title, "Portfolio summary");
+  assert.equal(chData.composed.zones.tasks.length, 0);
+  assert.equal(chData.composed.zones.nba.length, 0);
+  assert.equal(chData.composed.zones.chrome.followUps.length, 0);
+  assert.equal(chData.composed.zones.chrome.disclosures.length, 1); // Disclosures stay immutable!
 });
