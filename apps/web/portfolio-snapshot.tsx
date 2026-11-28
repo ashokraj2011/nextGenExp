@@ -1,6 +1,7 @@
 import { useId, useState, type CSSProperties } from "react";
 import { ArrowUpRight, ChevronDown, ChevronUp, SlidersHorizontal } from "lucide-react";
 import { formatPortfolioAmount, type PortfolioSnapshot } from "../../packages/contracts/portfolio";
+import { VerifiedProvenanceBadge } from "./verified-provenance";
 
 const asOfFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" });
 
@@ -40,7 +41,10 @@ export function PortfolioSnapshotBlock({ asOf, cashCents, equityCents, fixedInco
 
   return <section className="content-card portfolio-snapshot" aria-labelledby={titleId}>
     <header className="portfolio-heading">
-      <h3 id={titleId}>Portfolio snapshot</h3>
+      <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+        <h3 id={titleId}>Portfolio snapshot</h3>
+        <VerifiedProvenanceBadge toolRef="portfolio.snapshot.read@1.0.0" domain="wealth" observedAt={asOf} />
+      </div>
       <p>As of <time dateTime={asOf}>{asOfFormat.format(new Date(asOf))}</time></p>
     </header>
     <div className="portfolio-body">

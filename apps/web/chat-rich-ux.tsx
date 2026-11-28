@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  Brain, Check, CheckCircle2, Copy, Download, Ellipsis, GitBranch, Headphones, PanelRightOpen,
+  Brain, Check, CheckCircle2, ChevronLeft, ChevronRight, Copy, Download, Ellipsis, GitBranch, Headphones, Lock, PanelRightOpen,
   Plus, Search, Send, Sparkles, Table2, Trash2, UserCheck, X,
 } from "lucide-react";
 import type { TurnView } from "../../packages/contracts/api";
@@ -10,6 +10,7 @@ import type { DisplayExperience } from "../../packages/contracts/surface";
 import { api, toolSetupErrorMessage } from "./api";
 import { ExperienceCanvasView } from "./surface";
 import "./chat-rich-ux.css";
+import "./immersive-ux.css";
 
 /* ============================================================================
  * 1. Slash-Command Palette
@@ -479,15 +480,44 @@ export function TurnRichActions({ turn, pending, pinnedInCanvas, onPinCanvas, on
  * 6. Split-Pane Live Canvas Drawer
  * ========================================================================== */
 
-export function LiveCanvasPane({ turn, onClose }: { turn: TurnView; onClose: () => void }) {
+export function LiveCanvasPane({
+  turn,
+  onClose,
+  autoFollow = true,
+  onToggleAutoFollow,
+  cardIndex = 0,
+  totalCards = 1,
+  onSelectOffset,
+  onRefine,
+  pending = false,
+}: {
+  turn: TurnView;
+  onClose: () => void;
+  autoFollow?: boolean;
+  onToggleAutoFollow?: () => void;
+  cardIndex?: number;
+  totalCards?: number;
+  onSelectOffset?: (delta: -1 | 1) => void;
+  onRefine?: (prompt: string) => void;
+  pending?: boolean;
+}) {
   const [copied, setCopied] = useState(false);
+  const [refineText, setRefineText] = useState("");
   if (!turn.experience) return null;
+
+  function submitRefine(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = refineText.trim();
+    if (!trimmed || !onRefine || pending) return;
+    onRefine(trimmed);
+    setRefineText("");
+  }
 
   return (
     <aside className="live-canvas-pane" aria-label="Interactive live canvas">
       <header className="live-canvas-head">
         <div className="live-canvas-title">
-          <span className="rich-kicker"><PanelRightOpen size={12} aria-hidden="true" /> LIVE CANVAS</span>
+          <span className="rich-kicker"><PanelRightOpen size={12} aria-hidden="true" /> LIVING CANVAS</span>
           <strong title={turn.message}>{turn.message.slice(0, 64)}{turn.message.length > 64 ? "…" : ""}</strong>
         </div>
         <div className="live-canvas-controls">
@@ -508,9 +538,64 @@ export function LiveCanvasPane({ turn, onClose }: { turn: TurnView; onClose: () 
           </button>
         </div>
       </header>
+
+      {(onToggleAutoFollow || totalCards > 1) && (
+        <div className="living-canvas-bar">
+          {onToggleAutoFollow ? (
+            <button
+              type="button"
+              className={"living-sync-btn" + (autoFollow ? " is-live" : "")}
+              aria-pressed={autoFollow}
+              onClick={onToggleAutoFollow}
+              title={autoFollow ? "Canvas automatically updates with each new chat reply" : "Canvas locked to this card — click to re-enable Live Sync"}
+            >
+              {autoFollow ? <span className="living-sync-dot" aria-hidden="true" /> : <Lock size={11} aria-hidden="true" />}
+              {autoFollow ? "Live Sync ON · follows chat" : "Locked to this card"}
+            </button>
+          ) : <span />}
+          {totalCards > 1 && onSelectOffset && (
+            <div className="living-canvas-stepper" role="group" aria-label="Switch canvas card">
+              <button
+                type="button"
+                aria-label="Previous card"
+                disabled={cardIndex <= 0}
+                onClick={() => onSelectOffset(-1)}
+              >
+                <ChevronLeft size={14} aria-hidden="true" />
+              </button>
+              <span>{cardIndex + 1} / {totalCards}</span>
+              <button
+                type="button"
+                aria-label="Next card"
+                disabled={cardIndex >= totalCards - 1}
+                onClick={() => onSelectOffset(1)}
+              >
+                <ChevronRight size={14} aria-hidden="true" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="live-canvas-body">
         <ExperienceCanvasView data={turn.experience} />
       </div>
+
+      {onRefine && (
+        <form className="living-canvas-refine" onSubmit={submitRefine}>
+          <input
+            aria-label="Refine this canvas"
+            placeholder="Refine this visual (e.g. 'add $500/mo' or 'as table')…"
+            value={refineText}
+            disabled={pending}
+            onChange={(e) => setRefineText(e.target.value)}
+          />
+          <button type="submit" disabled={pending || !refineText.trim()}>
+            <Sparkles size={13} aria-hidden="true" />
+            Refine
+          </button>
+        </form>
+      )}
     </aside>
   );
 }

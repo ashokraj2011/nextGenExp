@@ -78,11 +78,31 @@ export function Chat({
   const latest = turns.at(-1);
   const running = turns.some((t) => t.status === "working");
   const [pinnedTurnId, setPinnedTurnId] = useState<string | undefined>(undefined);
-  useEffect(() => { setPinnedTurnId(undefined); }, [conversation?.id]);
+  const [canvasAutoFollow, setCanvasAutoFollow] = useState(true);
+  useEffect(() => { setPinnedTurnId(undefined); setCanvasAutoFollow(true); }, [conversation?.id]);
+  const richTurns = useMemo(
+    () => turns.filter((t) => Boolean(t.experience && t.experience.blocks.length > 0)),
+    [turns],
+  );
+  // When Living Canvas is open and Live Sync is ON, automatically advance to the newest rich card.
+  const latestRichTurnId = richTurns.at(-1)?.id;
+  useEffect(() => {
+    if (pinnedTurnId && canvasAutoFollow && latestRichTurnId && latestRichTurnId !== pinnedTurnId) {
+      setPinnedTurnId(latestRichTurnId);
+    }
+  }, [pinnedTurnId, canvasAutoFollow, latestRichTurnId]);
   const pinnedTurn = useMemo(() => turns.find((t) => t.id === pinnedTurnId && t.experience), [turns, pinnedTurnId]);
+  const pinnedCardIndex = useMemo(
+    () => (pinnedTurn ? richTurns.findIndex((t) => t.id === pinnedTurn.id) : -1),
+    [richTurns, pinnedTurn],
+  );
   const pinCanvas = useCallback((turn: TurnView) => {
-    setPinnedTurnId((curr) => (curr === turn.id ? undefined : turn.id));
-  }, []);
+    setPinnedTurnId((curr) => {
+      if (curr === turn.id) return undefined;
+      setCanvasAutoFollow(turn.id === latestRichTurnId);
+      return turn.id;
+    });
+  }, [latestRichTurnId]);
   const [updates, setUpdates] = useState<Awaited<ReturnType<typeof api.recordUpdates>>>([]);
   useEffect(() => {
     setUpdates([]);
@@ -285,7 +305,28 @@ export function Chat({
             onClose={() => onToggleFutures(false)}
           />
         ) : (
-          pinnedTurn && <LiveCanvasPane turn={pinnedTurn} onClose={() => setPinnedTurnId(undefined)} />
+          pinnedTurn && (
+            <LiveCanvasPane
+              turn={pinnedTurn}
+              onClose={() => setPinnedTurnId(undefined)}
+              autoFollow={canvasAutoFollow}
+              onToggleAutoFollow={() => setCanvasAutoFollow((v) => !v)}
+              cardIndex={Math.max(0, pinnedCardIndex)}
+              totalCards={richTurns.length}
+              onSelectOffset={(delta) => {
+                const target = richTurns[pinnedCardIndex + delta];
+                if (target) {
+                  setCanvasAutoFollow(false);
+                  setPinnedTurnId(target.id);
+                }
+              }}
+              onRefine={canWrite ? (prompt) => {
+                setCanvasAutoFollow(true);
+                void onSend(prompt);
+              } : undefined}
+              pending={pending || running}
+            />
+          )
         )}
         </div>
       </ConversationControls.Provider>

@@ -22,6 +22,7 @@ import {
 import { DynamicCanvasBlock } from "./dynamic-canvas";
 import { PortfolioSnapshotBlock } from "./portfolio-snapshot";
 import { GoalProgressDetails } from "./goal-progress";
+import { VerifiedProvenanceBadge } from "./verified-provenance";
 import { DepositConfirmation } from "./workspace-actions";
 
 const RuleCreationBlock = lazy(() => import("./rule-creation-block").then(({ RuleCreationBlock }) => ({ default: RuleCreationBlock })));
@@ -473,7 +474,15 @@ function ContentBlock({ block, form, onAction }: {
     <section className={"content-card " + props.variant + (recommendation ? " suggested-next-step" : "")}
       aria-label={component === "PznGoalProgress" ? props.title : undefined}
       data-goal-scenario-chart={savingsOption ? experienceId : undefined}>
-      <div className="content-kind"><Icon size={16} aria-hidden="true" />{recommendation ? "Suggested next step" : blockLabels[component]}</div>
+      <div className="card-kind-row">
+        <div className="content-kind"><Icon size={16} aria-hidden="true" />{recommendation ? "Suggested next step" : blockLabels[component]}</div>
+        {block.component === goalProgressCard.name && (
+          <VerifiedProvenanceBadge toolRef="goal.progress.read@1.0.0" domain="wealth" />
+        )}
+        {block.component === "PznMetricSummary" && (
+          <VerifiedProvenanceBadge toolRef="demo.balance.read@1.0.0" domain="wealth" observedAt={block.props.observedAt} />
+        )}
+      </div>
       <h3>{props.title}</h3>
       {block.component === "PznContentCard" && (recommendation || block.props.variant === "expanded" ? (
         <p className="content-body">{block.props.body}</p>
@@ -521,7 +530,8 @@ function ContentBlock({ block, form, onAction }: {
       {block.component === goalProgressCard.name && <GoalProgressDetails goal={block.props.goal}
         projection={savingsOption ? controls.goalScenarios?.get(experienceId) : undefined}
         extraMonthlyCents={savingsOption?.extraMonthlyCents}
-        onPreview={savingsOption && inlineAction ? () => inlineAction(savingsOption.actionId) : undefined} />}
+        onPreview={savingsOption && inlineAction ? () => inlineAction(savingsOption.actionId) : undefined}
+        onExplorePrompt={controls.askPrompt} />}
       <CardSources sources={props.sources} disclosures={props.disclosures} />
     </section>
   );

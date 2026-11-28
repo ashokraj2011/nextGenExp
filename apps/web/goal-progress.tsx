@@ -1,8 +1,52 @@
-import { useEffect, useRef } from "react";
-import { ChevronDown } from "lucide-react";
-import { formatGoalMonth, goalMonthIndex, type GoalProgress, type GoalSavingsProjection } from "../../packages/contracts/goal-progress";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { ArrowUpRight, ChevronDown, ChevronUp, SlidersHorizontal } from "lucide-react";
+import {
+  firstGoalContributionMonth, formatGoalMonth, goalMonthAt, goalMonthIndex, goalProjectionMonths,
+  type GoalProgress, type GoalSavingsProjection,
+} from "../../packages/contracts/goal-progress";
 import { formatPortfolioAmount } from "../../packages/contracts/portfolio";
 import "./goal-progress.css";
+import "./immersive-ux.css";
+
+function simulateGoalProjection(
+  goal: GoalProgress,
+  extraMonthlyCents: number,
+  startMonth: string,
+): GoalSavingsProjection {
+  const latest = goal.history[goal.history.length - 1];
+  const prev = goal.history[goal.history.length - 2];
+  const inferredMonthly = goal.monthlyContributionCents
+    ?? Math.max(25_000, latest.savedCents - prev.savedCents);
+  const baseIdx = goalMonthIndex(latest.month);
+  const startIdx = goalMonthIndex(startMonth);
+  let currentCents = latest.savedCents;
+  let projectedCents = latest.savedCents;
+  let currentTargetMonth: string | null = currentCents >= goal.targetCents ? latest.month : null;
+  let projectedTargetMonth: string | null = projectedCents >= goal.targetCents ? latest.month : null;
+  const points: GoalSavingsProjection["points"] = [
+    { month: latest.month, currentCents, projectedCents },
+  ];
+
+  for (let step = 1; step <= goalProjectionMonths; step++) {
+    const idx = baseIdx + step;
+    const month = goalMonthAt(idx);
+    currentCents += inferredMonthly;
+    projectedCents += inferredMonthly + (idx >= startIdx ? extraMonthlyCents : 0);
+    if (!currentTargetMonth && currentCents >= goal.targetCents) currentTargetMonth = month;
+    if (!projectedTargetMonth && projectedCents >= goal.targetCents) projectedTargetMonth = month;
+    points.push({ month, currentCents, projectedCents });
+    if (currentTargetMonth && projectedTargetMonth && step >= 12) break;
+  }
+
+  return {
+    currentMonthlyCents: inferredMonthly,
+    extraMonthlyCents: Math.max(1, extraMonthlyCents),
+    startMonth,
+    currentTargetMonth,
+    projectedTargetMonth,
+    points,
+  };
+}
 
 const monthShort = new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" });
 const compactUsd = new Intl.NumberFormat("en-US", {
@@ -156,16 +200,37 @@ export function SavingsGrowthChart({ goal, projection }: { goal: GoalProgress; p
   </figure>;
 }
 
-export function GoalProgressDetails({ goal, projection, extraMonthlyCents, onPreview }: {
+export function GoalProgressDetails({ goal, projection, extraMonthlyCents, onPreview, onExplorePrompt }: {
   goal: GoalProgress;
   projection?: GoalSavingsProjection;
   extraMonthlyCents?: number;
   onPreview?: () => void;
+  onExplorePrompt?: (prompt: string) => void;
 }) {
   const { history, targetCents } = goal;
   const saved = history[history.length - 1].savedCents;
   const remaining = Math.max(0, targetCents - saved);
   const percent = Math.min(100, Math.floor(saved * 100 / targetCents));
+  const [simOpen, setSimOpen] = useState(false);
+  const [simExtraDollars, setSimExtraDollars] = useState(() => Math.round((extraMonthlyCents ?? 50_000) / 100));
+  const [startOffsetMonths, setStartOffsetMonths] = useState(0);
+  const extraSliderId = useId();
+  const startSliderId = useId();
+
+  const firstMonth = useMemo(() => firstGoalContributionMonth(goal, Date.now()), [goal]);
+  const simStartMonth = useMemo(
+    () => goalMonthAt(goalMonthIndex(firstMonth) + startOffsetMonths),
+    [firstMonth, startOffsetMonths],
+  );
+  const liveWhatIf = useMemo(
+    () => (simOpen && simExtraDollars > 0 ? simulateGoalProjection(goal, simExtraDollars * 100, simStartMonth) : undefined),
+    [simOpen, simExtraDollars, goal, simStartMonth],
+  );
+  const activeProjection = liveWhatIf ?? projection;
+  const monthsSaved = useMemo(() => {
+    if (!liveWhatIf?.currentTargetMonth || !liveWhatIf?.projectedTargetMonth) return 0;
+    return Math.max(0, goalMonthIndex(liveWhatIf.currentTargetMonth) - goalMonthIndex(liveWhatIf.projectedTargetMonth));
+  }, [liveWhatIf]);
 
   return <div className="goal-progress-details">
     <div className="goal-progress-layout">
@@ -180,7 +245,7 @@ export function GoalProgressDetails({ goal, projection, extraMonthlyCents, onPre
           <strong>{percent}% saved</strong>
         </div>
       </div>
-      <SavingsGrowthChart goal={goal} projection={projection} />
+      <SavingsGrowthChart goal={goal} projection={activeProjection} />
     </div>
     {projection ? (
       <div className="goal-scenario" aria-label="Savings scenario">
@@ -200,6 +265,98 @@ export function GoalProgressDetails({ goal, projection, extraMonthlyCents, onPre
         <span>Preview a savings change</span>
       </div>
     )}
+    <div className="goal-sim-wrap">
+      <button
+        type="button"
+        className="goal-sim-toggle"
+        aria-expanded={simOpen}
+        onClick={() => setSimOpen((v) => !v)}
+      >
+        <SlidersHorizontal size={14} aria-hidden="true" />
+        <span>Explore what-if savings</span>
+        {simOpen ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+      </button>
+      {simOpen && (
+        <div className="goal-sim-panel" role="region" aria-label="Interactive savings what-if simulator">
+          <div className="goal-sim-presets" role="group" aria-label="Monthly boost presets">
+            {[250, 500, 1000, 1500].map((amt) => (
+              <button
+                key={amt}
+                type="button"
+                className={simExtraDollars === amt ? "is-active" : ""}
+                onClick={() => setSimExtraDollars(amt)}
+              >
+                +${amt.toLocaleString()}/mo
+              </button>
+            ))}
+          </div>
+          <div className="goal-sim-sliders">
+            <div className="goal-sim-field">
+              <div className="goal-sim-field-head">
+                <label htmlFor={extraSliderId}>Extra monthly savings</label>
+                <output htmlFor={extraSliderId}>+${simExtraDollars.toLocaleString()}/mo</output>
+              </div>
+              <input
+                id={extraSliderId}
+                type="range"
+                min={0}
+                max={2000}
+                step={50}
+                value={simExtraDollars}
+                onChange={(e) => setSimExtraDollars(Number(e.target.value))}
+              />
+              <div className="goal-sim-bounds" aria-hidden="true"><span>$0</span><span>$2,000/mo</span></div>
+            </div>
+            <div className="goal-sim-field">
+              <div className="goal-sim-field-head">
+                <label htmlFor={startSliderId}>Start month</label>
+                <output htmlFor={startSliderId}>{formatGoalMonth(simStartMonth)}</output>
+              </div>
+              <input
+                id={startSliderId}
+                type="range"
+                min={0}
+                max={6}
+                step={1}
+                value={startOffsetMonths}
+                onChange={(e) => setStartOffsetMonths(Number(e.target.value))}
+              />
+              <div className="goal-sim-bounds" aria-hidden="true"><span>{formatGoalMonth(firstMonth)}</span><span>+6 months</span></div>
+            </div>
+          </div>
+          {liveWhatIf && (
+            <div className="goal-sim-summary">
+              <div className="goal-sim-metrics">
+                <div>
+                  <span>Current target</span>
+                  <strong>{liveWhatIf.currentTargetMonth ? formatGoalMonth(liveWhatIf.currentTargetMonth) : "Beyond 10 yrs"}</strong>
+                </div>
+                <div>
+                  <span>What-if target</span>
+                  <strong>{liveWhatIf.projectedTargetMonth ? formatGoalMonth(liveWhatIf.projectedTargetMonth) : "Beyond 10 yrs"}</strong>
+                </div>
+                {monthsSaved > 0 && (
+                  <div style={{ alignSelf: "center" }}>
+                    <span className="goal-sim-saved-pill">{monthsSaved} {monthsSaved === 1 ? "month" : "months"} faster</span>
+                  </div>
+                )}
+              </div>
+              {onExplorePrompt && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => onExplorePrompt(
+                    `What if I add $${simExtraDollars.toLocaleString()} a month starting ${formatGoalMonth(simStartMonth)} toward my home-buying goal?`,
+                  )}
+                >
+                  Verify this scenario <ArrowUpRight size={13} aria-hidden="true" />
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
     <details className="inline-details goal-history">
       <summary>View monthly values <ChevronDown size={14} aria-hidden="true" /></summary>
       <table>

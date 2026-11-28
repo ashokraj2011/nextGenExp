@@ -6,7 +6,7 @@ import { useContext, useEffect, useRef, useState } from "react";
 import { MessagePrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import {
   ArrowUpRight, BookOpenText, Columns2, GraduationCap, House, ListChecks, MapPin,
-  RotateCcw, Sparkles, ThumbsDown, ThumbsUp,
+  PanelRightOpen, RotateCcw, Sparkles, ThumbsDown, ThumbsUp,
 } from "lucide-react";
 import { progressLabels, type NextBestActionCard, type TurnView } from "../../../packages/contracts/api";
 import { api } from "../api";
@@ -229,14 +229,27 @@ export function AssistantMessage() {
           )}
           {experience?.status === "ready" && experience.outcome !== "create_rule" && (
             <footer className="reply-footer">
-              <TurnRichActions
-                turn={turn}
-                pending={pending}
-                pinnedInCanvas={pinnedTurnId === turn.id}
-                onPinCanvas={pinCanvas}
-                onReframe={runPrompt}
-                onBranch={branchTurn}
-              >{recommendation && companion}</TurnRichActions>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                {experience.blocks.length > 0 && (
+                  <button
+                    type="button"
+                    className={"reply-canvas-btn" + (pinnedTurnId === turn.id ? " is-active" : "")}
+                    aria-pressed={pinnedTurnId === turn.id}
+                    onClick={() => pinCanvas(turn)}
+                  >
+                    <PanelRightOpen size={13} aria-hidden="true" />
+                    {pinnedTurnId === turn.id ? "In Living Canvas" : "Open in Canvas"}
+                  </button>
+                )}
+                <TurnRichActions
+                  turn={turn}
+                  pending={pending}
+                  pinnedInCanvas={pinnedTurnId === turn.id}
+                  onPinCanvas={pinCanvas}
+                  onReframe={runPrompt}
+                  onBranch={branchTurn}
+                >{recommendation && companion}</TurnRichActions>
+              </div>
               <div className="feedback-controls" role="group" aria-label="Response feedback">
                 <SpeakButton text={experience.question ?? experience.intro} />
                 <span className="feedback-label">Was this helpful?</span>

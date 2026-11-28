@@ -6,7 +6,57 @@ import { api } from "./api";
 import { notifyDomainDataUpdated } from "./domain-pack-ui";
 import { PublicationReviewDetails } from "./publication-review-details";
 import { TradeTicketNode } from "./trade-ticket";
+import { DealDiscountScrubber, VerifiedProvenanceBadge } from "./verified-provenance";
 import { WorkflowRunnerNode } from "./workflow-runner";
+
+function parseCurrencyUsd(raw: string): number | null {
+  const clean = raw.replace(/[,$\s]/g, "").toUpperCase();
+  const match = clean.match(/^(\d+(?:\.\d+)?)([KM])?$/);
+  if (!match) return null;
+  const num = Number(match[1]);
+  if (!Number.isFinite(num) || num <= 0) return null;
+  const mult = match[2] === "M" ? 1_000_000 : match[2] === "K" ? 1_000 : 1;
+  return Math.round(num * mult);
+}
+
+function parsePercentNum(raw: string): number | null {
+  const match = raw.match(/(\d+(?:\.\d+)?)\s*%/);
+  return match ? Number(match[1]) : null;
+}
+
+function inferCanvasToolRef(props: DynamicCanvasProps): { toolRef: string; domain?: string } {
+  const src = `${props.dataSource ?? ""} ${props.badge ?? ""} ${props.title ?? ""}`.toLowerCase();
+  if (src.includes("incident") || src.includes("sre") || src.includes("ops")) {
+    return { toolRef: "ops.incident.read@1.0.0", domain: "it_ops" };
+  }
+  if (src.includes("deal") || src.includes("crm") || src.includes("revops") || src.includes("pipeline")) {
+    return { toolRef: "sales.deal.read@1.0.0", domain: "sales_revops" };
+  }
+  if (src.includes("portfolio") || src.includes("holding") || src.includes("trade") || src.includes("tax")) {
+    return { toolRef: "portfolio.snapshot.read@1.0.0", domain: "wealth" };
+  }
+  return { toolRef: "cep.recommendations.arbitrate@1.0.0" };
+}
+
+function detectDealScrubberContext(props: DynamicCanvasProps): { baseArrUsd: number; initialDiscountPct: number; dealId?: string } | null {
+  const metrics = props.nodes.filter((n): n is Extract<DynamicCanvasNode, { type: "metrics" }> => n.type === "metrics");
+  let arrUsd: number | null = null;
+  let discountPct: number | null = null;
+  for (const m of metrics) {
+    for (const item of m.items) {
+      const lbl = item.label.toLowerCase();
+      if (arrUsd === null && (lbl.includes("arr") || lbl.includes("deal value") || lbl.includes("acv"))) {
+        arrUsd = parseCurrencyUsd(item.value);
+      }
+      if (discountPct === null && lbl.includes("discount")) {
+        discountPct = parsePercentNum(item.value);
+      }
+    }
+  }
+  if (arrUsd === null || discountPct === null) return null;
+  const idMatch = `${props.title} ${props.subtitle ?? ""} ${props.recordId ?? ""}`.match(/\bDEAL-\d+\b/i);
+  return { baseArrUsd: arrUsd, initialDiscountPct: discountPct, dealId: idMatch?.[0]?.toUpperCase() };
+}
 
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const PIE_PALETTE = ["#2f7d32", "#476b8a", "#c88a2b", "#0d9488", "#6d5bd0", "#c2410c", "#0284c7", "#64748b"];
@@ -925,6 +975,7 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
                 Live data · {props.dataSource}
               </span>
             )}
+            <VerifiedProvenanceBadge {...inferCanvasToolRef(props)} />
           </div>}
           <h3 id={titleId}>{props.title}</h3>
           {props.subtitle && <p className="dyn-canvas-subtitle">{props.subtitle}</p>}
@@ -1120,6 +1171,18 @@ export function DynamicCanvasBlock(props: DynamicCanvasProps & { onFollowUp?: (p
           );
         })}
       </div>
+
+      {!authored && (() => {
+        const dealSim = detectDealScrubberContext(props);
+        return dealSim ? (
+          <DealDiscountScrubber
+            baseArrUsd={dealSim.baseArrUsd}
+            initialDiscountPct={dealSim.initialDiscountPct}
+            dealId={dealSim.dealId}
+            onApply={props.onFollowUp}
+          />
+        ) : null;
+      })()}
 
       {!authored && <footer className="dyn-canvas-footer">
         <p className="disclosure">{props.disclaimer}</p>
