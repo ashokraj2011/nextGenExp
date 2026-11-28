@@ -63,6 +63,8 @@ import type { TradeStore } from "../trade-store";
 import { generateBoundUiLayoutWithLlm } from "../ui-layout-generator";
 import { previewUiLayout, recordViewOptions, uiTargetOptions, validateUiDesign } from "../ui-layouts";
 import {
+  customDomainRelationDeleteSchema,
+  customDomainRelationInputSchema,
   customVirtualModelDeleteSchema,
   customVirtualModelInputSchema,
   customVirtualModelTestSchema,
@@ -256,6 +258,26 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
       json(res, { snapshot });
     } catch (err) {
       throw new ApiError(400, "virtual_model_materialize_failed", err instanceof Error ? err.message : "Could not materialize virtual snapshot.");
+    }
+    return true;
+  }
+  if (id === "domain-models-relation" && method === "POST") {
+    const domainId = authoringDomain();
+    const payload = await body(req, customDomainRelationInputSchema, 4 * 1024);
+    try {
+      json(res, sphotonCatalog.saveDomainRelation(domainId, payload));
+    } catch (err) {
+      throw new ApiError(400, "domain_relation_invalid", err instanceof Error ? err.message : "Could not save entity relationship.");
+    }
+    return true;
+  }
+  if (id === "domain-models-relation-delete" && method === "POST") {
+    const domainId = authoringDomain();
+    const payload = await body(req, customDomainRelationDeleteSchema, 4 * 1024);
+    try {
+      json(res, sphotonCatalog.deleteDomainRelation(domainId, payload));
+    } catch (err) {
+      throw new ApiError(400, "domain_relation_delete_failed", err instanceof Error ? err.message : "Could not delete entity relationship.");
     }
     return true;
   }

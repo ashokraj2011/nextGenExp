@@ -167,7 +167,24 @@ export const customVirtualModelTestSchema = z.object({
 }).strict();
 export type CustomVirtualModelTestInput = z.infer<typeof customVirtualModelTestSchema>;
 
+export const customDomainRelationInputSchema = z.object({
+  sourceModelId: z.string().trim().regex(virtualModelIdPattern),
+  targetModelId: z.string().trim().regex(virtualModelIdPattern),
+  name: z.string().trim().min(1).max(60),
+  cardinality: smassRelationCardinalitySchema,
+  localField: z.string().trim().regex(virtualModelFieldIdPattern),
+  foreignField: z.string().trim().regex(virtualModelFieldIdPattern),
+}).strict();
+export type CustomDomainRelationInput = z.infer<typeof customDomainRelationInputSchema>;
+
+export const customDomainRelationDeleteSchema = z.object({
+  sourceModelId: z.string().trim().regex(virtualModelIdPattern),
+  targetModelId: z.string().trim().regex(virtualModelIdPattern),
+  name: z.string().trim().min(1).max(60),
+}).strict();
+
 type CustomVirtualModelFile = Partial<Record<DomainPackId, CustomVirtualModelInput[]>>;
+type CustomDomainRelationFile = Partial<Record<DomainPackId, CustomDomainRelationInput[]>>;
 
 export function loadOrCreateSphotonSecret(dataDir: string): string {
   const keyPath = join(dataDir, "sphoton-signing.key");
@@ -219,8 +236,10 @@ export class SphotonCatalogService {
   readonly smass: SmassDomainRegistry;
   private readonly exposureFile: string;
   private readonly customModelsFile: string;
+  private readonly customRelationsFile: string;
   private overrides: ExposureOverrideFile = {};
   private customModels: CustomVirtualModelFile = {};
+  private customRelations: CustomDomainRelationFile = {};
   private customToolSchemas = new Map<string, SfieldToolDescriptor>();
 
   constructor(private readonly deps: {
@@ -238,8 +257,10 @@ export class SphotonCatalogService {
     this.smass = deps.smass ?? createCepSmassRegistry({ opsStore: deps.opsStore, salesStore: deps.salesStore });
     this.exposureFile = join(deps.dataDir, "sphoton-exposures.json");
     this.customModelsFile = join(deps.dataDir, "smass-virtual-models.json");
+    this.customRelationsFile = join(deps.dataDir, "smass-relations.json");
     this.loadOverrides();
     this.loadCustomModels();
+    this.loadCustomRelations();
   }
 
   private loadOverrides() {
@@ -394,6 +415,61 @@ export class SphotonCatalogService {
   private saveCustomModelsFile() {
     mkdirSync(dirname(this.customModelsFile), { recursive: true });
     writeFileSync(this.customModelsFile, JSON.stringify(this.customModels, null, 2));
+  }
+
+  private loadCustomRelations() {
+    try {
+      if (!existsSync(this.customRelationsFile)) return;
+      const parsed = JSON.parse(readFileSync(this.customRelationsFile, "utf8")) as CustomDomainRelationFile;
+      if (parsed && typeof parsed === "object") this.customRelations = parsed;
+    } catch {
+      this.customRelations = {};
+    }
+  }
+
+  private saveCustomRelationsFile() {
+    mkdirSync(dirname(this.customRelationsFile), { recursive: true });
+    writeFileSync(this.customRelationsFile, JSON.stringify(this.customRelations, null, 2));
+  }
+
+  saveDomainRelation(domainId: DomainPackId, input: CustomDomainRelationInput) {
+    const parsed = customDomainRelationInputSchema.parse(input);
+    const source = this.smass.get(parsed.sourceModelId);
+    const target = this.smass.get(parsed.targetModelId);
+    if (!source) throw new Error(`Source entity "${parsed.sourceModelId}" does not exist.`);
+    if (!target) throw new Error(`Target entity "${parsed.targetModelId}" does not exist.`);
+
+    const list = (this.customRelations[domainId] ?? []).filter(
+      (r) => !(r.sourceModelId === parsed.sourceModelId && r.targetModelId === parsed.targetModelId && r.name === parsed.name),
+    );
+    list.push(parsed);
+    this.customRelations[domainId] = list;
+    this.saveCustomRelationsFile();
+    return this.domainWorkbenchView(domainId);
+  }
+
+  deleteDomainRelation(domainId: DomainPackId, input: { sourceModelId: string; targetModelId: string; name: string }) {
+    const parsed = customDomainRelationDeleteSchema.parse(input);
+    const before = this.customRelations[domainId] ?? [];
+    const after = before.filter(
+      (r) => !(r.sourceModelId === parsed.sourceModelId && r.targetModelId === parsed.targetModelId && r.name === parsed.name),
+    );
+    if (after.length !== before.length) {
+      this.customRelations[domainId] = after;
+      this.saveCustomRelationsFile();
+    } else {
+      // Also allow removing an inline relation declared on a custom virtual model
+      const customList = this.customModels[domainId] ?? [];
+      const customTarget = customList.find((m) => m.id === parsed.sourceModelId);
+      if (customTarget?.relations?.length) {
+        customTarget.relations = customTarget.relations.filter(
+          (r) => !(r.targetModelId === parsed.targetModelId && r.name === parsed.name),
+        );
+        this.smass.register(this.compileCustomVirtualModel(domainId, customTarget));
+        this.saveCustomModelsFile();
+      }
+    }
+    return this.domainWorkbenchView(domainId);
   }
 
   saveVirtualModel(domainId: DomainPackId, input: CustomVirtualModelInput) {
@@ -598,6 +674,23 @@ export class SphotonCatalogService {
     const descriptors = new Map(this.allToolDescriptors().map((desc) => [desc.ref, desc]));
     const summaries = this.smass.summarize(domainId, descriptors);
     if (!domainId) return summaries;
+    const customRels = this.customRelations[domainId] ?? [];
+    for (const rel of customRels) {
+      const sourceSummary = summaries.find((m) => m.id === rel.sourceModelId);
+      if (!sourceSummary) continue;
+      const exists = sourceSummary.relations.some(
+        (existing) => existing.targetModelId === rel.targetModelId && existing.name === rel.name,
+      );
+      if (!exists) {
+        sourceSummary.relations.push({
+          name: rel.name,
+          targetModelId: rel.targetModelId,
+          cardinality: rel.cardinality,
+          localField: rel.localField,
+          foreignField: rel.foreignField,
+        });
+      }
+    }
     const overrides = this.overrides[domainId] ?? [];
     if (!overrides.length) return summaries;
 
@@ -678,6 +771,7 @@ export class SphotonCatalogService {
       models,
       customModelIds: (this.customModels[domainId] ?? []).map((m) => m.id),
       customModels: this.customModels[domainId] ?? [],
+      customRelations: this.customRelations[domainId] ?? [],
       dataModel,
       tools,
       catalog,

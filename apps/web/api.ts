@@ -214,6 +214,14 @@ export const api = {
       domainId: DomainPackId;
       models: SmassModelSummary[];
       customModelIds: string[];
+      customRelations: Array<{
+        sourceModelId: string;
+        targetModelId: string;
+        name: string;
+        cardinality: import("../../packages/smass").SmassRelationCardinality;
+        localField: string;
+        foreignField: string;
+      }>;
       customModels: Array<{
         id: string;
         version: string;
@@ -360,6 +368,21 @@ export const api = {
       "/api/admin/domain-models-test?domain=" + domainId,
       input,
     ),
+  saveDomainRelation: (
+    domainId: DomainPackId,
+    input: {
+      sourceModelId: string;
+      targetModelId: string;
+      name: string;
+      cardinality: import("../../packages/smass").SmassRelationCardinality;
+      localField: string;
+      foreignField: string;
+    },
+  ) => request<Awaited<ReturnType<typeof api.domainModels>>>("/api/admin/domain-models-relation?domain=" + domainId, input),
+  deleteDomainRelation: (
+    domainId: DomainPackId,
+    input: { sourceModelId: string; targetModelId: string; name: string },
+  ) => request<Awaited<ReturnType<typeof api.domainModels>>>("/api/admin/domain-models-relation-delete?domain=" + domainId, input),
   setBindingFieldExposure: (
     domainId: DomainPackId,
     input: { toolRef: string; outputPath: string; label: string; exposed: boolean; defaultFormat?: SphotonFormat },

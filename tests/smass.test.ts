@@ -765,4 +765,29 @@ test("smass VDM handles hierarchical JSON via both Flatten (nested objects + arr
 
   await client.request("/api/admin/domain-models-delete?domain=wealth", { modelId: "wealth.flat_hierarchy" });
   await client.request("/api/admin/domain-models-delete?domain=wealth", { modelId: "wealth.goal_history_items" });
+
+  // 3. Persist and remove a custom ER relationship between any two entities (manual or auto-detected on ER Canvas)
+  const linked = await client.request<{
+    customRelations: Array<{ sourceModelId: string; targetModelId: string; name: string }>;
+    dataModel: { mermaidEr: string; relations: Array<{ sourceModelId: string; targetModelId: string; name: string }> };
+  }>("/api/admin/domain-models-relation?domain=wealth", {
+    sourceModelId: "wealth.portfolio",
+    targetModelId: "wealth.home_goal",
+    name: "funds_goal",
+    cardinality: "one_to_many",
+    localField: "customerId",
+    foreignField: "customerId",
+  });
+  assert.ok(linked.customRelations.some((r) => r.name === "funds_goal"));
+  assert.ok(linked.dataModel.relations.some((r) => r.sourceModelId === "wealth.portfolio" && r.targetModelId === "wealth.home_goal" && r.name === "funds_goal"));
+  assert.match(linked.dataModel.mermaidEr, /WEALTH_PORTFOLIO \|\|--o\{ WEALTH_HOME_GOAL : "funds_goal"/);
+
+  const unlinked = await client.request<{
+    customRelations: Array<{ name: string }>;
+  }>("/api/admin/domain-models-relation-delete?domain=wealth", {
+    sourceModelId: "wealth.portfolio",
+    targetModelId: "wealth.home_goal",
+    name: "funds_goal",
+  });
+  assert.equal(unlinked.customRelations.some((r) => r.name === "funds_goal"), false);
 });
