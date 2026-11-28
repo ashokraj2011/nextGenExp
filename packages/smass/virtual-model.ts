@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type {
+  SmassAggregateFilterSpec,
   SmassAggregateSpec,
   SmassClassification,
   SmassDomainModel,
@@ -39,6 +40,8 @@ export type SmassSnapshotRequest = {
   executeTool?: SmassToolExecutor;
   /** Optional custom extractor for source version tokens. */
   extractVersions?: SmassVersionExtractor;
+  /** Optional resolver for cross-entity rollup aggregates (`aggregate.targetModelId`), wired automatically by SmassDomainRegistry. */
+  resolveRelatedModel?: (targetModelId: string) => Promise<Record<string, unknown>[]>;
 };
 
 export type SmassSnapshotValidationIssue = {
@@ -253,14 +256,21 @@ function satisfiesMinVersions(
 }
 
 /**
- * Safe, zero-eval deterministic arithmetic expression evaluator for `smass` computed fields.
- * Supports: numbers, identifiers, `+`, `-`, `*`, `/`, unary `-`, parentheses,
- * and safe numeric functions `min`, `max`, `abs`, `round`, `floor`, `ceil`.
+ * Safe, zero-eval deterministic expression evaluator for `smass` derived columns.
+ * Supports:
+ * - Numbers, strings ("high_cash"), booleans (true/false), null
+ * - Arithmetic (+ - * /), string concatenation (+), comparisons (== != > >= < <=), logical (&& || !), ternary (? :)
+ * - Functions (case-insensitive): IF(cond, a, b), COALESCE(a, b, ...), CONCAT(...), UPPER, LOWER, LEN, MIN, MAX, ABS, ROUND, FLOOR, CEIL
  */
+type ExprValue = number | string | boolean | null | undefined;
+
 type ExprToken =
   | { kind: "num"; value: number }
+  | { kind: "str"; value: string }
   | { kind: "id"; value: string }
-  | { kind: "op"; value: "+" | "-" | "*" | "/" }
+  | { kind: "op"; value: "+" | "-" | "*" | "/" | "==" | "!=" | ">=" | "<=" | ">" | "<" | "&&" | "||" | "!" }
+  | { kind: "qmark" }
+  | { kind: "colon" }
   | { kind: "lparen" }
   | { kind: "rparen" }
   | { kind: "comma" };
@@ -274,8 +284,24 @@ function tokenizeExpression(expr: string): ExprToken[] {
       i++;
       continue;
     }
-    if (ch === "+" || ch === "-" || ch === "*" || ch === "/") {
+    const two = expr.slice(i, i + 2);
+    if (two === "==" || two === "!=" || two === ">=" || two === "<=" || two === "&&" || two === "||") {
+      tokens.push({ kind: "op", value: two });
+      i += 2;
+      continue;
+    }
+    if (ch === "+" || ch === "-" || ch === "*" || ch === "/" || ch === ">" || ch === "<" || ch === "!") {
       tokens.push({ kind: "op", value: ch });
+      i++;
+      continue;
+    }
+    if (ch === "?") {
+      tokens.push({ kind: "qmark" });
+      i++;
+      continue;
+    }
+    if (ch === ":") {
+      tokens.push({ kind: "colon" });
       i++;
       continue;
     }
@@ -292,6 +318,24 @@ function tokenizeExpression(expr: string): ExprToken[] {
     if (ch === ",") {
       tokens.push({ kind: "comma" });
       i++;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      const quote = ch;
+      let j = i + 1;
+      let out = "";
+      while (j < expr.length && expr[j] !== quote) {
+        if (expr[j] === "\\" && j + 1 < expr.length) {
+          out += expr[j + 1];
+          j += 2;
+        } else {
+          out += expr[j];
+          j++;
+        }
+      }
+      if (j >= expr.length) throw new Error(`Unterminated string literal in expression "${expr}"`);
+      tokens.push({ kind: "str", value: out });
+      i = j + 1;
       continue;
     }
     if (/[0-9.]/.test(ch)) {
@@ -318,19 +362,32 @@ function tokenizeExpression(expr: string): ExprToken[] {
   return tokens;
 }
 
-const SAFE_MATH_FNS: Record<string, (...args: number[]) => number> = {
-  min: (...args) => Math.min(...args),
-  max: (...args) => Math.max(...args),
-  abs: (x) => Math.abs(x),
-  round: (x) => Math.round(x),
-  floor: (x) => Math.floor(x),
-  ceil: (x) => Math.ceil(x),
+function asNumber(val: ExprValue, expr: string): number {
+  if (typeof val !== "number" || !Number.isFinite(val)) {
+    throw new Error(`Expected numeric value in expression "${expr}" (got ${typeof val})`);
+  }
+  return val;
+}
+
+const SAFE_EXPR_FNS: Record<string, (args: ExprValue[], expr: string) => ExprValue> = {
+  if: (args) => (Boolean(args[0]) ? args[1] : args[2]),
+  coalesce: (args) => args.find((v) => v !== null && v !== undefined) ?? null,
+  concat: (args) => args.map((v) => (v === null || v === undefined ? "" : String(v))).join(""),
+  upper: (args) => String(args[0] ?? "").toUpperCase(),
+  lower: (args) => String(args[0] ?? "").toLowerCase(),
+  len: (args) => String(args[0] ?? "").length,
+  min: (args, expr) => Math.min(...args.map((a) => asNumber(a, expr))),
+  max: (args, expr) => Math.max(...args.map((a) => asNumber(a, expr))),
+  abs: (args, expr) => Math.abs(asNumber(args[0], expr)),
+  round: (args, expr) => Math.round(asNumber(args[0], expr)),
+  floor: (args, expr) => Math.floor(asNumber(args[0], expr)),
+  ceil: (args, expr) => Math.ceil(asNumber(args[0], expr)),
 };
 
 export function evaluateSmassComputedExpression(
   expression: string,
   scope: Record<string, unknown>,
-): number {
+): number | string | boolean | null {
   const tokens = tokenizeExpression(expression);
   let pos = 0;
 
@@ -342,14 +399,47 @@ export function evaluateSmassComputedExpression(
     return tok;
   };
 
-  const parseAddSub = (): number => {
-    let left = parseMulDiv();
+  const parseTernary = (): ExprValue => {
+    const cond = parseOr();
+    if (peek()?.kind === "qmark") {
+      consume();
+      const thenVal = parseTernary();
+      const colon = consume();
+      if (colon.kind !== "colon") throw new Error(`Expected ":" in ternary expression "${expression}"`);
+      const elseVal = parseTernary();
+      return Boolean(cond) ? thenVal : elseVal;
+    }
+    return cond;
+  };
+
+  const parseOr = (): ExprValue => {
+    let left = parseAnd();
+    while (peek()?.kind === "op" && (peek() as { value: string }).value === "||") {
+      consume();
+      const right = parseAnd();
+      left = Boolean(left) || Boolean(right);
+    }
+    return left;
+  };
+
+  const parseAnd = (): ExprValue => {
+    let left = parseEquality();
+    while (peek()?.kind === "op" && (peek() as { value: string }).value === "&&") {
+      consume();
+      const right = parseEquality();
+      left = Boolean(left) && Boolean(right);
+    }
+    return left;
+  };
+
+  const parseEquality = (): ExprValue => {
+    let left = parseRelational();
     while (true) {
       const next = peek();
-      if (next?.kind === "op" && (next.value === "+" || next.value === "-")) {
+      if (next?.kind === "op" && (next.value === "==" || next.value === "!=")) {
         consume();
-        const right = parseMulDiv();
-        left = next.value === "+" ? left + right : left - right;
+        const right = parseRelational();
+        left = next.value === "==" ? left === right : left !== right;
       } else {
         break;
       }
@@ -357,18 +447,39 @@ export function evaluateSmassComputedExpression(
     return left;
   };
 
-  const parseMulDiv = (): number => {
-    let left = parseUnary();
+  const parseRelational = (): ExprValue => {
+    let left = parseAddSub();
     while (true) {
       const next = peek();
-      if (next?.kind === "op" && (next.value === "*" || next.value === "/")) {
+      if (next?.kind === "op" && (next.value === ">" || next.value === ">=" || next.value === "<" || next.value === "<=")) {
         consume();
-        const right = parseUnary();
-        if (next.value === "/") {
-          if (right === 0) throw new Error(`Division by zero in expression "${expression}"`);
-          left = left / right;
+        const right = parseAddSub();
+        const l = asNumber(left, expression);
+        const r = asNumber(right, expression);
+        if (next.value === ">") left = l > r;
+        else if (next.value === ">=") left = l >= r;
+        else if (next.value === "<") left = l < r;
+        else left = l <= r;
+      } else {
+        break;
+      }
+    }
+    return left;
+  };
+
+  const parseAddSub = (): ExprValue => {
+    let left = parseMulDiv();
+    while (true) {
+      const next = peek();
+      if (next?.kind === "op" && (next.value === "+" || next.value === "-")) {
+        consume();
+        const right = parseMulDiv();
+        if (next.value === "+" && (typeof left === "string" || typeof right === "string")) {
+          left = `${left ?? ""}${right ?? ""}`;
         } else {
-          left = left * right;
+          const l = asNumber(left, expression);
+          const r = asNumber(right, expression);
+          left = next.value === "+" ? l + r : l - r;
         }
       } else {
         break;
@@ -377,24 +488,51 @@ export function evaluateSmassComputedExpression(
     return left;
   };
 
-  const parseUnary = (): number => {
+  const parseMulDiv = (): ExprValue => {
+    let left = parseUnary();
+    while (true) {
+      const next = peek();
+      if (next?.kind === "op" && (next.value === "*" || next.value === "/")) {
+        consume();
+        const right = parseUnary();
+        const l = asNumber(left, expression);
+        const r = asNumber(right, expression);
+        if (next.value === "/") {
+          if (r === 0) throw new Error(`Division by zero in expression "${expression}"`);
+          left = l / r;
+        } else {
+          left = l * r;
+        }
+      } else {
+        break;
+      }
+    }
+    return left;
+  };
+
+  const parseUnary = (): ExprValue => {
     const next = peek();
     if (next?.kind === "op" && next.value === "-") {
       consume();
-      return -parseUnary();
+      return -asNumber(parseUnary(), expression);
     }
     if (next?.kind === "op" && next.value === "+") {
       consume();
-      return parseUnary();
+      return asNumber(parseUnary(), expression);
+    }
+    if (next?.kind === "op" && next.value === "!") {
+      consume();
+      return !Boolean(parseUnary());
     }
     return parsePrimary();
   };
 
-  const parsePrimary = (): number => {
+  const parsePrimary = (): ExprValue => {
     const tok = consume();
     if (tok.kind === "num") return tok.value;
+    if (tok.kind === "str") return tok.value;
     if (tok.kind === "lparen") {
-      const val = parseAddSub();
+      const val = parseTernary();
       const closing = consume();
       if (closing.kind !== "rparen") {
         throw new Error(`Expected ")" in expression "${expression}"`);
@@ -403,37 +541,39 @@ export function evaluateSmassComputedExpression(
     }
     if (tok.kind === "id") {
       if (peek()?.kind === "lparen") {
-        const fn = SAFE_MATH_FNS[tok.value];
+        const fn = SAFE_EXPR_FNS[tok.value.toLowerCase()];
         if (!fn) throw new Error(`Unsupported function "${tok.value}" in expression "${expression}"`);
         consume(); // '('
-        const args: number[] = [];
+        const args: ExprValue[] = [];
         if (peek()?.kind !== "rparen") {
-          args.push(parseAddSub());
+          args.push(parseTernary());
           while (peek()?.kind === "comma") {
             consume();
-            args.push(parseAddSub());
+            args.push(parseTernary());
           }
         }
         const closing = consume();
         if (closing.kind !== "rparen") {
           throw new Error(`Expected ")" after arguments to "${tok.value}" in "${expression}"`);
         }
-        return fn(...args);
+        return fn(args, expression);
       }
+      if (tok.value === "true") return true;
+      if (tok.value === "false") return false;
+      if (tok.value === "null") return null;
       const val = tok.value.includes(".") ? readDotPath(scope, tok.value) : scope[tok.value];
-      if (typeof val !== "number" || !Number.isFinite(val)) {
-        throw new Error(`Computed dependency "${tok.value}" is not a finite number (got ${typeof val})`);
-      }
-      return val;
+      if (val === undefined || val === null) return val as null | undefined;
+      if (typeof val === "number" || typeof val === "string" || typeof val === "boolean") return val;
+      throw new Error(`Computed dependency "${tok.value}" has unsupported runtime type "${typeof val}"`);
     }
     throw new Error(`Unexpected token in expression "${expression}"`);
   };
 
-  const result = parseAddSub();
+  const result = parseTernary();
   if (pos < tokens.length) {
     throw new Error(`Unexpected trailing tokens in expression "${expression}"`);
   }
-  return result;
+  return result === undefined ? null : result;
 }
 
 function expandProjectedFields(
@@ -470,24 +610,53 @@ function expandProjectedFields(
   return [...included];
 }
 
+function matchesAggregateFilter(item: unknown, filter: SmassAggregateFilterSpec): boolean {
+  const actual = readDotPath(item, filter.field);
+  const expected = filter.value;
+  switch (filter.op) {
+    case "==":
+      return actual === expected;
+    case "!=":
+      return actual !== expected;
+    case ">":
+      return typeof actual === "number" && typeof expected === "number" && actual > expected;
+    case ">=":
+      return typeof actual === "number" && typeof expected === "number" && actual >= expected;
+    case "<":
+      return typeof actual === "number" && typeof expected === "number" && actual < expected;
+    case "<=":
+      return typeof actual === "number" && typeof expected === "number" && actual <= expected;
+    case "contains":
+      return typeof actual === "string" && actual.toLowerCase().includes(String(expected).toLowerCase());
+  }
+}
+
 /**
  * Deterministic aggregate evaluator for `smass` virtual models.
  * Supports:
- * - Array aggregation (`sourceField` + optional `itemField`, e.g. `sum(history.savedCents)`, `last(history.savedCents)`, `count(history)`)
- * - Multi-column scalar aggregation (`sourceFields`, e.g. `sum(cashCents, equityCents, fixedIncomeCents)`, `avg(...)`, `min(...)`, `max(...)`)
+ * - Array aggregation (`sourceField` + optional `itemField` + optional `where` filter)
+ * - Cross-entity rollup aggregation (`targetModelId` + `relatedRows` + optional `itemField` + optional `where` filter)
+ * - Multi-column scalar aggregation (`sourceFields`)
  */
 export function evaluateSmassAggregate(
   spec: SmassAggregateSpec,
   scope: Record<string, unknown>,
+  relatedRows?: readonly Record<string, unknown>[],
 ): unknown {
   let values: unknown[] = [];
 
-  if (spec.sourceField) {
+  if (spec.targetModelId && relatedRows) {
+    const filtered = spec.where ? relatedRows.filter((row) => matchesAggregateFilter(row, spec.where!)) : relatedRows;
+    values = spec.itemField
+      ? filtered.map((item) => readDotPath(item, spec.itemField!)).filter((v) => v !== undefined && v !== null)
+      : filtered.filter((v) => v !== undefined && v !== null);
+  } else if (spec.sourceField) {
     const raw = scope[spec.sourceField];
     if (Array.isArray(raw)) {
+      const filtered = spec.where ? raw.filter((item) => matchesAggregateFilter(item, spec.where!)) : raw;
       values = spec.itemField
-        ? raw.map((item) => readDotPath(item, spec.itemField!)).filter((v) => v !== undefined && v !== null)
-        : raw.filter((v) => v !== undefined && v !== null);
+        ? filtered.map((item) => readDotPath(item, spec.itemField!)).filter((v) => v !== undefined && v !== null)
+        : filtered.filter((v) => v !== undefined && v !== null);
     } else if (raw !== undefined && raw !== null) {
       values = [raw];
     }
@@ -798,14 +967,18 @@ export async function materializeVirtualSnapshot(
         for (const key of projectedFields) {
           const spec = toolModel.fields[key];
           if (!spec?.aggregate) continue;
-          const aggValue = evaluateSmassAggregate(spec.aggregate, row);
+          const relatedRows =
+            spec.aggregate.targetModelId && req.resolveRelatedModel
+              ? await req.resolveRelatedModel(spec.aggregate.targetModelId)
+              : undefined;
+          const aggValue = evaluateSmassAggregate(spec.aggregate, row, relatedRows);
           row[key] = spec.type === "integer" && typeof aggValue === "number" ? Math.round(aggValue) : aggValue;
         }
         for (const key of computedOrder) {
           const spec = toolModel.fields[key]!;
           if (!spec.computed) continue;
           const computedValue = evaluateSmassComputedExpression(spec.computed.expression, row);
-          row[key] = spec.type === "integer" ? Math.round(computedValue) : computedValue;
+          row[key] = spec.type === "integer" && typeof computedValue === "number" ? Math.round(computedValue) : computedValue;
         }
 
         const rowIssues = validateMaterializedFields(model, projectedFields, row);
@@ -893,11 +1066,19 @@ export async function materializeVirtualSnapshot(
     };
   }
 
-  // 3a. Evaluate aggregate columns before derived expressions (so derived columns can reference aggregates)
+  // 3a. Evaluate aggregate columns before derived expressions (including cross-entity rollups via `resolveRelatedModel`)
+  const relatedCache = new Map<string, Record<string, unknown>[]>();
   for (const key of projectedFields) {
     const spec = model.fields[key];
     if (!spec?.aggregate) continue;
-    const aggValue = evaluateSmassAggregate(spec.aggregate, rawValues);
+    let relatedRows: Record<string, unknown>[] | undefined;
+    if (spec.aggregate.targetModelId && req.resolveRelatedModel) {
+      if (!relatedCache.has(spec.aggregate.targetModelId)) {
+        relatedCache.set(spec.aggregate.targetModelId, await req.resolveRelatedModel(spec.aggregate.targetModelId));
+      }
+      relatedRows = relatedCache.get(spec.aggregate.targetModelId);
+    }
+    const aggValue = evaluateSmassAggregate(spec.aggregate, rawValues, relatedRows);
     rawValues[key] = spec.type === "integer" && typeof aggValue === "number" ? Math.round(aggValue) : aggValue;
   }
 
@@ -906,7 +1087,7 @@ export async function materializeVirtualSnapshot(
     const spec = model.fields[key]!;
     if (!spec.computed) continue;
     const computedValue = evaluateSmassComputedExpression(spec.computed.expression, rawValues);
-    rawValues[key] = spec.type === "integer" ? Math.round(computedValue) : computedValue;
+    rawValues[key] = spec.type === "integer" && typeof computedValue === "number" ? Math.round(computedValue) : computedValue;
   }
 
   // 4. Closed-schema runtime validation

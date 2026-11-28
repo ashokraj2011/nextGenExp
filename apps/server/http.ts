@@ -993,7 +993,7 @@ export async function startApp(options: Options) {
       || (resource === "proactive" && id === "trigger");
     if (internalApi) {
       const actor = requireOperator();
-      const domainAdmin = resource === "admin" && (isExperienceRegistryEndpoint(id) || ["routing-flows", "ui-layouts", "ui-binding-catalog", "domain-models", "domain-models-delete", "domain-models-test", "domain-models-relation", "domain-models-relation-delete", "ui-layout-preview", "ui-layout-test", "ui-layout-generate", "widgets", "widget-generate",
+      const domainAdmin = resource === "admin" && (isExperienceRegistryEndpoint(id) || ["routing-flows", "ui-layouts", "ui-binding-catalog", "domain-models", "domain-models-status", "domain-models-delete", "domain-models-test", "domain-models-relation", "domain-models-relation-delete", "ui-layout-preview", "ui-layout-test", "ui-layout-generate", "widgets", "widget-generate",
         "customers", "bootstrap", "conversations", "logs", "inspector", "tools", "ccre-rules", "treatment-preview", "treatment-runs"].includes(id));
       const domainApproval = resource === "approvals" && id !== "policy";
       const domainApi = domainAdmin || domainApproval || ["debug", "ops", "ops-incidents", "sales", "sales-deals"].includes(resource);

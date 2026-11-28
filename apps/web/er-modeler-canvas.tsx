@@ -1,28 +1,35 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
 import {
+  AlertTriangle,
   Check,
   Code2,
   Copy,
   Database,
+  Download,
+  GitFork,
   GripVertical,
   KeyRound,
   LayoutGrid,
   Link2,
+  Maximize2,
   Minus,
   PanelLeft,
   Pencil,
   Play,
   Plus,
+  Search,
   Sigma,
   Sparkles,
   Split,
   Trash2,
   Wand2,
+  Wrench,
   X,
 } from "lucide-react";
 import { DOMAIN_PACKS, getDomainPack, type DomainPackId } from "../../packages/contracts/domain-packs";
 import type {
   SmassDataModelRelationEdge,
+  SmassModelStatus,
   SmassModelSummary,
   SmassRelationCardinality,
   SmassVirtualSnapshotResult,
@@ -65,6 +72,20 @@ const NODE_WIDTH = 272;
 const HEADER_HEIGHT = 48;
 const COL_HEIGHT = 29;
 const DRAG_MIME = "application/x-smass-er-item";
+const WEALTH_PERSONAS = [
+  { id: "demo-learner", label: "Alice Morgan" },
+  { id: "demo-returning", label: "Jordan Lee" },
+  { id: "demo-new-account", label: "Marcus Reed" },
+] as const;
+
+function escapeXml(raw: string): string {
+  return raw
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
 
 function posStorageKey(domainId: DomainPackId) {
   return `smass.er.positions.v1.${domainId}`;
@@ -370,6 +391,10 @@ export function ErModelerStudio({
   const [positions, setPositions] = useState<Record<string, NodePos>>({});
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [builderEditModelId, setBuilderEditModelId] = useState<string | null>(null);
+  const [confirmDeleteModelId, setConfirmDeleteModelId] = useState<string | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
 
   // Selection state (either an Entity or a Relationship edge)
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
@@ -380,8 +405,10 @@ export function ErModelerStudio({
   const [dropTargetEntityId, setDropTargetEntityId] = useState<string | null>(null);
   const activeToolDragRef = useRef<DragToolPayload | null>(null);
 
-  // Entity node pointer-drag state
+  // Entity node pointer-drag & background canvas pan state
   const draggingNodeRef = useRef<{ id: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
+  const panningRef = useRef<{ startX: number; startY: number; origScrollLeft: number; origScrollTop: number; moved: boolean } | null>(null);
+  const suppressNextCanvasClickRef = useRef(false);
 
   // Manual column-to-column drag-to-connect state
   const [connecting, setConnecting] = useState<{
@@ -405,6 +432,7 @@ export function ErModelerStudio({
 
   // Live 1x snapshot preview in inspector
   const [testingSnapshot, setTestingSnapshot] = useState(false);
+  const [testCustomerId, setTestCustomerId] = useState<string>("demo-learner");
   const [redactPii, setRedactPii] = useState(false);
   const [liveSnap, setLiveSnap] = useState<SmassVirtualSnapshotResult | null>(null);
 
@@ -429,6 +457,9 @@ export function ErModelerStudio({
   useEffect(() => {
     setSelectedEntityId(null);
     setSelectedRelation(null);
+    setBuilderEditModelId(null);
+    setConfirmDeleteModelId(null);
+    setSearchQuery("");
     setLiveSnap(null);
     setNotice("");
     setError("");
@@ -454,6 +485,36 @@ export function ErModelerStudio({
     return out;
   }, [rawRelations]);
   const customModelIdSet = useMemo(() => new Set(data?.customModelIds ?? []), [data?.customModelIds]);
+
+  const driftByModel = useMemo(() => {
+    const map = new Map<string, Array<{ fieldKey?: string; toolRef?: string; outputPath?: string; message: string }>>();
+    for (const issue of data?.driftIssues ?? []) {
+      const list = map.get(issue.modelId) ?? [];
+      list.push(issue);
+      map.set(issue.modelId, list);
+    }
+    return map;
+  }, [data?.driftIssues]);
+
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const matchedEntityIds = useMemo(() => {
+    if (!normalizedSearch) return null;
+    const set = new Set<string>();
+    for (const e of entities) {
+      if (
+        e.id.toLowerCase().includes(normalizedSearch) ||
+        e.label.toLowerCase().includes(normalizedSearch) ||
+        e.fields.some(
+          (f) =>
+            f.key.toLowerCase().includes(normalizedSearch) ||
+            f.label.toLowerCase().includes(normalizedSearch),
+        )
+      ) {
+        set.add(e.id);
+      }
+    }
+    return set;
+  }, [entities, normalizedSearch]);
 
   // Ensure every entity has a layout coordinate
   const effectivePositions = useMemo(() => {
@@ -500,7 +561,7 @@ export function ErModelerStudio({
     return { width: maxX, height: maxY };
   }, [entities, effectivePositions]);
 
-  // Window pointer handlers for smooth node dragging and drag-to-connect rubber band
+  // Window pointer handlers for smooth node dragging, background drag-to-pan, and drag-to-connect rubber band
   useEffect(() => {
     function handlePointerMove(e: PointerEvent) {
       if (draggingNodeRef.current) {
@@ -508,6 +569,13 @@ export function ErModelerStudio({
         const nx = Math.max(16, Math.round(d.origX + (e.clientX - d.startX) / zoom));
         const ny = Math.max(16, Math.round(d.origY + (e.clientY - d.startY) / zoom));
         setPositions((prev) => ({ ...prev, [d.id]: { x: nx, y: ny } }));
+      } else if (panningRef.current && viewportRef.current) {
+        const p = panningRef.current;
+        const dx = e.clientX - p.startX;
+        const dy = e.clientY - p.startY;
+        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) p.moved = true;
+        viewportRef.current.scrollLeft = Math.max(0, p.origScrollLeft - dx);
+        viewportRef.current.scrollTop = Math.max(0, p.origScrollTop - dy);
       } else if (connectingRef.current && stageRef.current) {
         const rect = stageRef.current.getBoundingClientRect();
         const curX = (e.clientX - rect.left) / zoom;
@@ -525,6 +593,13 @@ export function ErModelerStudio({
           savePositions(domainId, latest);
           return latest;
         });
+      }
+      if (panningRef.current) {
+        if (panningRef.current.moved) {
+          suppressNextCanvasClickRef.current = true;
+        }
+        panningRef.current = null;
+        setIsPanning(false);
       }
       const activeConn = connectingRef.current;
       if (activeConn) {
@@ -574,6 +649,23 @@ export function ErModelerStudio({
     };
   }, [domainId, entities, zoom]);
 
+  function startCanvasPan(e: ReactPointerEvent<HTMLDivElement>) {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest(".er-entity-node, .er-edge-label, .er-floating-banner, .er-canvas-footer, button, input, select")) {
+      return;
+    }
+    if (!viewportRef.current) return;
+    panningRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      origScrollLeft: viewportRef.current.scrollLeft,
+      origScrollTop: viewportRef.current.scrollTop,
+      moved: false,
+    };
+    setIsPanning(true);
+  }
+
   function startNodeDrag(e: ReactPointerEvent<HTMLDivElement>, entityId: string) {
     if ((e.target as HTMLElement).closest("button")) return;
     e.stopPropagation();
@@ -581,6 +673,7 @@ export function ErModelerStudio({
     draggingNodeRef.current = { id: entityId, startX: e.clientX, startY: e.clientY, origX: cur.x, origY: cur.y };
     setSelectedEntityId(entityId);
     setSelectedRelation(null);
+    setConfirmDeleteModelId(null);
     setLiveSnap(null);
   }
 
@@ -928,12 +1021,29 @@ export function ErModelerStudio({
     }
   }
 
+  async function toggleSelectedEntityStatus(modelId: string, nextStatus: SmassModelStatus) {
+    setError("");
+    setNotice("");
+    try {
+      const next = await api.setDomainModelStatus(domainId, { modelId, status: nextStatus });
+      setData(next);
+      setNotice(
+        nextStatus === "published"
+          ? `Published "${modelId}" — compiled into live sfield read tool & sphoton UI catalog.`
+          : `Moved "${modelId}" to Draft — isolated from sphoton UI catalog & agents.`,
+      );
+    } catch (err) {
+      setError(toolSetupErrorMessage(err));
+    }
+  }
+
   async function deleteSelectedEntity(modelId: string) {
     setError("");
     try {
       const next = await api.deleteDomainModel(domainId, modelId);
       setData(next);
       setSelectedEntityId(null);
+      setConfirmDeleteModelId(null);
       setLiveSnap(null);
       setNotice(`Deleted virtual entity "${modelId}".`);
     } catch (err) {
@@ -941,11 +1051,19 @@ export function ErModelerStudio({
     }
   }
 
-  async function testSelectedEntitySnapshot(modelId: string, nextRedact = redactPii) {
+  async function testSelectedEntitySnapshot(
+    modelId: string,
+    nextRedact = redactPii,
+    nextCustomerId = testCustomerId,
+  ) {
     setTestingSnapshot(true);
     setError("");
     try {
-      const { snapshot } = await api.testDomainModelSnapshot(domainId, { modelId, redactPii: nextRedact });
+      const { snapshot } = await api.testDomainModelSnapshot(domainId, {
+        modelId,
+        ...(domainId === "wealth" ? { customerId: nextCustomerId } : {}),
+        redactPii: nextRedact,
+      });
       setLiveSnap(snapshot);
     } catch (err) {
       setError(toolSetupErrorMessage(err));
@@ -959,6 +1077,105 @@ export function ErModelerStudio({
     setPositions(next);
     savePositions(domainId, next);
     setNotice("Auto-arranged entity diagram layout.");
+  }
+
+  function fitViewToCanvas() {
+    if (!viewportRef.current || entities.length === 0) return;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = 0;
+    let maxY = 0;
+    for (const e of entities) {
+      const p = effectivePositions[e.id] ?? { x: 60, y: 60 };
+      const h = HEADER_HEIGHT + e.fields.length * COL_HEIGHT + 16;
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x + NODE_WIDTH);
+      maxY = Math.max(maxY, p.y + h);
+    }
+    const contentW = Math.max(300, maxX - minX + 80);
+    const contentH = Math.max(240, maxY - minY + 80);
+    const vw = Math.max(360, viewportRef.current.clientWidth - 24);
+    const vh = Math.max(280, viewportRef.current.clientHeight - 48);
+    const nextZoom = Math.max(0.55, Math.min(1.15, Number(Math.min(vw / contentW, vh / contentH).toFixed(2))));
+    setZoom(nextZoom);
+    requestAnimationFrame(() => {
+      if (!viewportRef.current) return;
+      viewportRef.current.scrollLeft = Math.max(0, Math.round((minX - 28) * nextZoom));
+      viewportRef.current.scrollTop = Math.max(0, Math.round((minY - 28) * nextZoom));
+    });
+    setNotice(`Fit ${entities.length} entities to view (${Math.round(nextZoom * 100)}%).`);
+  }
+
+  function exportDiagramSvg() {
+    if (entities.length === 0) return;
+    const pad = 40;
+    let maxX = 800;
+    let maxY = 500;
+    for (const e of entities) {
+      const p = effectivePositions[e.id] ?? { x: 60, y: 60 };
+      maxX = Math.max(maxX, p.x + NODE_WIDTH + pad);
+      maxY = Math.max(maxY, p.y + HEADER_HEIGHT + e.fields.length * COL_HEIGHT + pad + 20);
+    }
+    const parts: string[] = [
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${maxX}" height="${maxY}" viewBox="0 0 ${maxX} ${maxY}">`,
+      `<rect width="100%" height="100%" fill="#f6f8f6"/>`,
+    ];
+
+    // Relationships
+    for (const rel of relations) {
+      const src = entities.find((e) => e.id === rel.sourceModelId);
+      const tgt = entities.find((e) => e.id === rel.targetModelId);
+      if (!src || !tgt) continue;
+      const srcPos = effectivePositions[src.id];
+      const tgtPos = effectivePositions[tgt.id];
+      if (!srcPos || !tgtPos) continue;
+      const geom = buildEdgeGeometry(srcPos, src, rel.localField, tgtPos, tgt, rel.foreignField);
+      const pillText = `${cardinalityLabel(rel.cardinality)} · ${rel.name}`;
+      const pillW = Math.max(82, pillText.length * 6.3 + 16);
+      parts.push(`<path d="${geom.d}" fill="none" stroke="#476855" stroke-width="2"/>`);
+      parts.push(
+        `<g transform="translate(${geom.mx - pillW / 2}, ${geom.my - 11})">` +
+          `<rect width="${pillW}" height="22" rx="11" fill="#ffffff" stroke="#476855" stroke-width="1.2"/>` +
+          `<text x="${pillW / 2}" y="14" text-anchor="middle" font-size="10.5" font-weight="600" fill="#1f3a29" font-family="Inter, system-ui, sans-serif">${escapeXml(pillText)}</text>` +
+          `</g>`,
+      );
+    }
+
+    // Entity cards
+    for (const e of entities) {
+      const p = effectivePositions[e.id] ?? { x: 60, y: 60 };
+      const h = HEADER_HEIGHT + e.fields.length * COL_HEIGHT + 8;
+      const isCustom = customModelIdSet.has(e.id);
+      const isNormalized = Boolean(e.unnest);
+      const headColor = isNormalized ? "#3730a3" : isCustom ? "#15663a" : "#1a4731";
+      parts.push(`<g transform="translate(${p.x}, ${p.y})">`);
+      parts.push(`<rect width="${NODE_WIDTH}" height="${h}" rx="10" fill="#ffffff" stroke="#cbd9d0" stroke-width="1.5"/>`);
+      parts.push(`<rect width="${NODE_WIDTH}" height="${HEADER_HEIGHT}" rx="10" fill="${headColor}"/>`);
+      parts.push(`<rect y="${HEADER_HEIGHT - 10}" width="${NODE_WIDTH}" height="10" fill="${headColor}"/>`);
+      parts.push(`<text x="11" y="21" font-size="13" font-weight="700" fill="#ffffff" font-family="Inter, system-ui, sans-serif">${escapeXml(e.label)}</text>`);
+      parts.push(`<text x="11" y="38" font-size="10.5" fill="rgba(255,255,255,0.85)" font-family="monospace">${escapeXml(e.id)}</text>`);
+      e.fields.forEach((col, i) => {
+        const cy = HEADER_HEIGHT + 4 + i * COL_HEIGHT;
+        const prefix = col.primaryKey ? "PK " : col.foreignKey ? "FK " : col.aggregate ? "Σ " : col.computed ? "fx " : "";
+        parts.push(`<line x1="0" y1="${cy + COL_HEIGHT}" x2="${NODE_WIDTH}" y2="${cy + COL_HEIGHT}" stroke="#eef2ef" stroke-width="1"/>`);
+        parts.push(`<text x="12" y="${cy + 19}" font-size="11.5" font-weight="${col.primaryKey ? "700" : "500"}" fill="#142419" font-family="monospace">${escapeXml(prefix + col.key)}</text>`);
+        parts.push(`<text x="${NODE_WIDTH - 12}" y="${cy + 19}" text-anchor="end" font-size="10.5" fill="#64748b" font-family="monospace">${escapeXml(col.type ?? "any")}</text>`);
+      });
+      parts.push(`</g>`);
+    }
+    parts.push(`</svg>`);
+
+    const blob = new Blob([parts.join("\n")], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${domainId}-er-diagram.svg`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setNotice(`Exported ${domainId}-er-diagram.svg (${entities.length} entities, ${relations.length} relations).`);
   }
 
   const selectedEntity = entities.find((e) => e.id === selectedEntityId) ?? null;
@@ -994,7 +1211,16 @@ export function ErModelerStudio({
               <LayoutGrid size={13} aria-hidden="true" />
               ER Canvas ({entities.length})
             </button>
-            <button type="button" role="tab" aria-selected={tab === "builder"} className={`er-pill-btn${tab === "builder" ? " is-active" : ""}`} onClick={() => setTab("builder")}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "builder"}
+              className={`er-pill-btn${tab === "builder" ? " is-active" : ""}`}
+              onClick={() => {
+                setBuilderEditModelId(null);
+                setTab("builder");
+              }}
+            >
               <Sparkles size={13} aria-hidden="true" />
               Virtual Builder
             </button>
@@ -1010,6 +1236,26 @@ export function ErModelerStudio({
 
         {tab === "canvas" && (
           <div className="er-topbar-group">
+            <div className="er-search-box">
+              <Search size={12} color="#64748b" aria-hidden="true" />
+              <input
+                type="search"
+                aria-label="Search entities and columns"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search entities & columns…"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  onClick={() => setSearchQuery("")}
+                  style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "inline-flex", color: "#64748b" }}
+                >
+                  <X size={11} />
+                </button>
+              )}
+            </div>
             <button
               type="button"
               className="secondary-button"
@@ -1078,6 +1324,26 @@ export function ErModelerStudio({
               style={{ padding: "4px 9px", fontSize: "0.75rem" }}
             >
               Auto-Arrange
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={fitViewToCanvas}
+              style={{ padding: "4px 8px", fontSize: "0.75rem", display: "inline-flex", alignItems: "center", gap: "4px" }}
+              title="Fit all entities to canvas viewport"
+            >
+              <Maximize2 size={12} aria-hidden="true" />
+              Fit
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={exportDiagramSvg}
+              style={{ padding: "4px 8px", fontSize: "0.75rem", display: "inline-flex", alignItems: "center", gap: "4px" }}
+              title="Download ER diagram as standalone SVG"
+            >
+              <Download size={12} aria-hidden="true" />
+              SVG
             </button>
             <div className="er-pill-group" aria-label="Canvas zoom">
               <button type="button" className="er-pill-btn" aria-label="Zoom out" onClick={() => setZoom((z) => Math.max(0.6, Number((z - 0.1).toFixed(2))))}>
@@ -1184,11 +1450,17 @@ export function ErModelerStudio({
           {/* Center Full-Page Interactive ER Canvas */}
           <div
             ref={viewportRef}
-            className={`er-canvas-viewport${canvasDragOver ? " is-drag-over" : ""}`}
+            className={`er-canvas-viewport${canvasDragOver ? " is-drag-over" : ""}${isPanning ? " is-panning" : ""}`}
             data-testid="smass-er-canvas"
+            onPointerDown={startCanvasPan}
             onClick={() => {
+              if (suppressNextCanvasClickRef.current) {
+                suppressNextCanvasClickRef.current = false;
+                return;
+              }
               setSelectedEntityId(null);
               setSelectedRelation(null);
+              setConfirmDeleteModelId(null);
             }}
             onDragOver={(e) => {
               e.preventDefault();
@@ -1350,19 +1622,24 @@ export function ErModelerStudio({
                 const pos = effectivePositions[entity.id] ?? { x: 60, y: 60 };
                 const isCustom = customModelIdSet.has(entity.id);
                 const isNormalized = Boolean(entity.unnest);
+                const isDraft = entity.status === "draft";
+                const entityDrift = driftByModel.get(entity.id) ?? [];
                 const isSelected = selectedEntityId === entity.id;
                 const isDropTarget = dropTargetEntityId === entity.id;
+                const isSearchMatch = matchedEntityIds ? matchedEntityIds.has(entity.id) : false;
+                const isSearchDimmed = matchedEntityIds ? !matchedEntityIds.has(entity.id) : false;
 
                 return (
                   <div
                     key={entity.id}
                     data-er-entity={entity.id}
-                    className={`er-entity-node${isCustom ? " is-custom" : ""}${isNormalized ? " is-normalized" : ""}${isSelected ? " is-selected" : ""}${isDropTarget ? " is-drop-target" : ""}`}
+                    className={`er-entity-node${isCustom ? " is-custom" : ""}${isNormalized ? " is-normalized" : ""}${isDraft ? " is-draft" : ""}${isSelected ? " is-selected" : ""}${isDropTarget ? " is-drop-target" : ""}${isSearchMatch ? " is-search-match" : ""}${isSearchDimmed ? " is-search-dimmed" : ""}`}
                     style={{ left: `${pos.x}px`, top: `${pos.y}px` }}
                     onClick={(e) => {
                       e.stopPropagation();
                       setSelectedEntityId(entity.id);
                       setSelectedRelation(null);
+                      setConfirmDeleteModelId(null);
                       setLiveSnap(null);
                     }}
                     onDragOver={(e) => {
@@ -1398,17 +1675,38 @@ export function ErModelerStudio({
                           {entity.id}
                         </div>
                       </div>
-                      <span
-                        style={{
-                          fontSize: "0.64rem",
-                          padding: "2px 6px",
-                          borderRadius: "999px",
-                          background: "rgba(255,255,255,0.18)",
-                          fontWeight: 700,
-                          flexShrink: 0,
-                        }}
-                      >
-                        {isNormalized ? "1:N Child" : isCustom ? "Virtual" : "Canonical"}
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: "3px", flexShrink: 0 }}>
+                        {entityDrift.length > 0 && (
+                          <span
+                            title={entityDrift.map((d) => d.message).join("; ")}
+                            style={{
+                              fontSize: "0.6rem",
+                              padding: "1px 5px",
+                              borderRadius: "999px",
+                              background: "#dc2626",
+                              color: "#fff",
+                              fontWeight: 700,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "2px",
+                            }}
+                          >
+                            <AlertTriangle size={9} aria-hidden="true" />
+                            Drift {entityDrift.length}
+                          </span>
+                        )}
+                        <span
+                          style={{
+                            fontSize: "0.62rem",
+                            padding: "1px 5px",
+                            borderRadius: "999px",
+                            background: isDraft ? "#f59e0b" : "rgba(255,255,255,0.18)",
+                            color: isDraft ? "#1f2937" : "#fff",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {isDraft ? "Draft" : isNormalized ? "1:N" : isCustom ? "Virtual" : "Canonical"}
+                        </span>
                       </span>
                     </div>
 
@@ -1469,7 +1767,7 @@ export function ErModelerStudio({
             </div>
 
             <div className="er-canvas-footer">
-              <span><strong>Tip:</strong> Drag any tool from left onto canvas to auto-link · Drag any column dot (●) to another entity to connect manually</span>
+              <span><strong>Tip:</strong> Drag empty canvas to pan · Drag tools from left to auto-link · Drag any column dot (●) to connect manually</span>
             </div>
           </div>
 
@@ -1499,6 +1797,86 @@ export function ErModelerStudio({
                       <Split size={13} aria-hidden="true" />
                       Normalized from <code>{selectedEntity.unnest.slot}.{selectedEntity.unnest.path}</code>
                     </div>
+                  )}
+
+                  {/* Governance: Lifecycle Status + Live Compiled sfield Read Tool */}
+                  {(customModelIdSet.has(selectedEntity.id) || selectedEntity.virtualReadToolRef) && (
+                    <div style={{ padding: "8px 10px", borderRadius: "8px", background: "var(--paper)", border: "1px solid var(--border)", display: "grid", gap: "6px", fontSize: "0.74rem" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "6px" }}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                          <span
+                            style={{
+                              fontSize: "0.68rem",
+                              padding: "2px 7px",
+                              borderRadius: "999px",
+                              fontWeight: 700,
+                              background: selectedEntity.status === "draft" ? "#fef3c7" : "#dcfce7",
+                              color: selectedEntity.status === "draft" ? "#92400e" : "#155331",
+                            }}
+                          >
+                            {selectedEntity.status === "draft" ? "Draft" : "Published"}
+                          </span>
+                          <span style={{ color: "var(--muted)", fontSize: "0.71rem" }}>
+                            {selectedEntity.status === "draft" ? "Studio only" : "Live in sphoton & agents"}
+                          </span>
+                        </span>
+                        {customModelIdSet.has(selectedEntity.id) && (
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={() =>
+                              void toggleSelectedEntityStatus(
+                                selectedEntity.id,
+                                selectedEntity.status === "draft" ? "published" : "draft",
+                              )
+                            }
+                            style={{ padding: "2px 8px", fontSize: "0.7rem" }}
+                          >
+                            {selectedEntity.status === "draft" ? "Publish" : "Set Draft"}
+                          </button>
+                        )}
+                      </div>
+                      {selectedEntity.virtualReadToolRef && selectedEntity.status !== "draft" && (
+                        <div style={{ display: "flex", alignItems: "center", gap: "5px", color: "#155e75", fontSize: "0.71rem" }}>
+                          <Wrench size={11} aria-hidden="true" />
+                          <span>Live <code>sfield</code> tool:</span>
+                          <code style={{ fontWeight: 700 }}>{selectedEntity.virtualReadToolRef}</code>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Schema Drift Alerts */}
+                  {(driftByModel.get(selectedEntity.id)?.length ?? 0) > 0 && (
+                    <div style={{ padding: "8px 10px", borderRadius: "8px", background: "#fef2f2", border: "1px solid #fecaca", color: "#991b1b", display: "grid", gap: "4px", fontSize: "0.73rem" }}>
+                      <strong style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                        <AlertTriangle size={13} aria-hidden="true" />
+                        Schema Drift Detected ({driftByModel.get(selectedEntity.id)!.length})
+                      </strong>
+                      {driftByModel.get(selectedEntity.id)!.map((issue, idx) => (
+                        <span key={idx}>{issue.message}</span>
+                      ))}
+                    </div>
+                  )}
+
+                  {domainId === "wealth" && (
+                    <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", fontSize: "0.73rem", color: "var(--muted)" }}>
+                      <span>Test Persona:</span>
+                      <select
+                        aria-label="Test customer persona"
+                        value={testCustomerId}
+                        onChange={(e) => {
+                          const nextCust = e.target.value;
+                          setTestCustomerId(nextCust);
+                          if (liveSnap) void testSelectedEntitySnapshot(selectedEntity.id, redactPii, nextCust);
+                        }}
+                        style={{ padding: "3px 6px", borderRadius: "6px", border: "1px solid var(--border)", fontSize: "0.73rem" }}
+                      >
+                        {WEALTH_PERSONAS.map((p) => (
+                          <option key={p.id} value={p.id}>{p.label}</option>
+                        ))}
+                      </select>
+                    </label>
                   )}
 
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
@@ -1535,7 +1913,10 @@ export function ErModelerStudio({
                     <button
                       type="button"
                       className="secondary-button"
-                      onClick={() => setTab("builder")}
+                      onClick={() => {
+                        setBuilderEditModelId(selectedEntity.id);
+                        setTab("builder");
+                      }}
                       style={{ padding: "5px 9px", fontSize: "0.75rem", display: "inline-flex", alignItems: "center", gap: "4px" }}
                     >
                       <Pencil size={12} aria-hidden="true" />
@@ -1545,7 +1926,17 @@ export function ErModelerStudio({
                       <button
                         type="button"
                         className="secondary-button"
-                        onClick={() => void deleteSelectedEntity(selectedEntity.id)}
+                        onClick={() => {
+                          const lin = data?.lineage?.[selectedEntity.id];
+                          const depCount = lin
+                            ? lin.uiLayouts.length + lin.widgets.length + lin.ccreRules.length + lin.childModels.length
+                            : 0;
+                          if (depCount > 0 && confirmDeleteModelId !== selectedEntity.id) {
+                            setConfirmDeleteModelId(selectedEntity.id);
+                          } else {
+                            void deleteSelectedEntity(selectedEntity.id);
+                          }
+                        }}
                         style={{ padding: "5px 9px", fontSize: "0.75rem", color: "#b91c1c", display: "inline-flex", alignItems: "center", gap: "4px" }}
                       >
                         <Trash2 size={12} aria-hidden="true" />
@@ -1553,6 +1944,52 @@ export function ErModelerStudio({
                       </button>
                     )}
                   </div>
+
+                  {confirmDeleteModelId === selectedEntity.id && (
+                    <div style={{ padding: "8px 10px", borderRadius: "8px", background: "#fef2f2", border: "1px solid #f87171", fontSize: "0.74rem", display: "grid", gap: "6px" }}>
+                      <strong style={{ color: "#991b1b" }}>Downstream dependents detected!</strong>
+                      <span style={{ color: "#7f1d1d" }}>
+                        Deleting <code>{selectedEntity.id}</code> may impact bound UI layouts, widgets, CCRE rules, or child entities listed below.
+                      </span>
+                      <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+                        <button type="button" className="secondary-button" style={{ padding: "3px 8px", fontSize: "0.71rem" }} onClick={() => setConfirmDeleteModelId(null)}>
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          style={{ padding: "3px 8px", fontSize: "0.71rem", background: "#dc2626", color: "#fff", borderColor: "#dc2626" }}
+                          onClick={() => void deleteSelectedEntity(selectedEntity.id)}
+                        >
+                          Confirm Delete
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Downstream Lineage & Impact */}
+                  {data?.lineage?.[selectedEntity.id] && (() => {
+                    const lin = data.lineage[selectedEntity.id]!;
+                    const total = lin.uiLayouts.length + lin.widgets.length + lin.ccreRules.length + lin.childModels.length;
+                    return (
+                      <div style={{ padding: "8px 10px", borderRadius: "8px", background: "var(--paper)", border: "1px solid var(--border)", display: "grid", gap: "4px", fontSize: "0.72rem" }}>
+                        <strong style={{ display: "inline-flex", alignItems: "center", gap: "5px", color: "var(--ink)" }}>
+                          <GitFork size={12} aria-hidden="true" />
+                          Downstream Lineage ({total})
+                        </strong>
+                        {total === 0 ? (
+                          <span style={{ color: "var(--muted)" }}>No UI layouts, widgets, CCRE rules, or child tables depend on this entity yet.</span>
+                        ) : (
+                          <div style={{ display: "grid", gap: "3px", color: "var(--muted)" }}>
+                            {lin.uiLayouts.length > 0 && <div><strong>UI Layouts ({lin.uiLayouts.length}):</strong> {lin.uiLayouts.join(", ")}</div>}
+                            {lin.widgets.length > 0 && <div><strong>Widgets ({lin.widgets.length}):</strong> {lin.widgets.join(", ")}</div>}
+                            {lin.ccreRules.length > 0 && <div><strong>CCRE Rules ({lin.ccreRules.length}):</strong> {lin.ccreRules.join(", ")}</div>}
+                            {lin.childModels.length > 0 && <div><strong>Child Tables ({lin.childModels.length}):</strong> {lin.childModels.join(", ")}</div>}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {liveSnap && (
                     <div style={{ borderRadius: "8px", padding: "9px", background: "#0f172a", color: "#e2e8f0", display: "grid", gap: "6px", fontSize: "0.72rem" }}>
@@ -1595,7 +2032,17 @@ export function ErModelerStudio({
                         <span style={{ fontSize: "0.71rem", color: "var(--muted)" }}>{f.label}</span>
                         {f.toolRef && <code style={{ fontSize: "0.68rem", color: "#475569" }}>{f.toolRef} → {f.outputPath}</code>}
                         {f.computed && <code style={{ fontSize: "0.68rem", color: "#7e22ce" }}>Derived: {f.computed.expression}</code>}
-                        {f.aggregate && <code style={{ fontSize: "0.68rem", color: "#b45309" }}>Agg: {f.aggregate.op.toUpperCase()}({f.aggregate.sourceField ?? f.aggregate.sourceFields?.join(", ")})</code>}
+                        {f.aggregate && (
+                          <code style={{ fontSize: "0.68rem", color: "#b45309" }}>
+                            Agg: {f.aggregate.op.toUpperCase()}(
+                            {f.aggregate.targetModelId
+                              ? `${f.aggregate.targetModelId}${f.aggregate.itemField ? `.${f.aggregate.itemField}` : ""}`
+                              : f.aggregate.sourceField
+                                ? `${f.aggregate.sourceField}${f.aggregate.itemField ? `.${f.aggregate.itemField}` : ""}`
+                                : f.aggregate.sourceFields?.join(", ")}
+                            {f.aggregate.where ? ` WHERE ${f.aggregate.where.field} ${f.aggregate.where.op} ${JSON.stringify(f.aggregate.where.value)}` : ""})
+                          </code>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1659,7 +2106,12 @@ export function ErModelerStudio({
         </div>
       ) : tab === "builder" ? (
         <div style={{ overflowY: "auto", padding: "0 18px 24px" }}>
-          <DomainToolsAndModelPanel domainId={domainId} defaultOpenBuilder />
+          <DomainToolsAndModelPanel
+            domainId={domainId}
+            defaultOpenBuilder
+            initialEditModelId={builderEditModelId}
+            onDataChanged={(next) => setData(next)}
+          />
         </div>
       ) : tab === "mermaid" ? (
         <div style={{ overflowY: "auto", padding: "18px", maxWidth: "1100px", width: "100%", margin: "0 auto" }}>

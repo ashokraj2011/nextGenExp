@@ -22,15 +22,19 @@ import {
   createTurnSnapshotCache,
   defineToolBackedModel,
   evaluateSmassComputedExpression,
+  smassAggregateFilterOpSchema,
   smassAggregateOpSchema,
   smassClassificationSchema,
   smassFieldFormatSchema,
   smassFieldTypeSchema,
+  smassModelStatusSchema,
   smassRelationCardinalitySchema,
+  validateDomainGraph,
   validateToolBackedModel,
   type SmassDomainRegistry,
   type SmassFieldSpec,
   type SmassModelSummary,
+  type SmassModelValidationIssue,
   type SmassRelationSpec,
   type SmassToolBackedModel,
   type SmassVirtualSnapshotResult,
@@ -102,6 +106,12 @@ export const customVirtualModelComputedFieldSchema = z.object({
   exposed: z.boolean().default(true),
 }).strict();
 
+export const customVirtualModelAggregateFilterSchema = z.object({
+  field: z.string().trim().min(1).max(80),
+  op: smassAggregateFilterOpSchema,
+  value: z.union([z.string(), z.number(), z.boolean()]),
+}).strict();
+
 export const customVirtualModelAggregateFieldSchema = z.object({
   kind: z.literal("aggregate"),
   key: z.string().trim().regex(virtualModelFieldIdPattern, "Field key must be a valid identifier."),
@@ -110,13 +120,20 @@ export const customVirtualModelAggregateFieldSchema = z.object({
   sourceField: z.string().trim().regex(virtualModelFieldIdPattern).optional(),
   itemField: z.string().trim().min(1).max(80).optional(),
   sourceFields: z.array(z.string().trim().regex(virtualModelFieldIdPattern)).min(1).max(12).optional(),
+  targetModelId: z.string().trim().regex(virtualModelIdPattern).optional(),
+  where: customVirtualModelAggregateFilterSchema.optional(),
   type: smassFieldTypeSchema.default("number"),
   format: smassFieldFormatSchema.optional(),
   classification: smassClassificationSchema.default("internal"),
   exposed: z.boolean().default(true),
-}).strict().refine((data) => Boolean(data.sourceField || data.sourceFields?.length), {
-  message: "Aggregate field must target an array sourceField or one or more scalar sourceFields.",
+}).strict().refine((data) => Boolean(data.sourceField || data.sourceFields?.length || data.targetModelId), {
+  message: "Aggregate field must target an array sourceField, scalar sourceFields, or a related targetModelId.",
 });
+
+export const customVirtualModelStatusSchema = z.object({
+  modelId: z.string().trim().regex(virtualModelIdPattern),
+  status: smassModelStatusSchema,
+}).strict();
 
 export const customVirtualModelRelationSchema = z.object({
   name: z.string().trim().min(1).max(60),
@@ -138,6 +155,7 @@ export const customVirtualModelInputSchema = z.object({
   id: z.string().trim().regex(virtualModelIdPattern, "Model ID must look like wealth.advisor_brief."),
   previousId: z.string().trim().regex(virtualModelIdPattern).optional(),
   version: z.string().trim().regex(/^\d+\.\d+\.\d+$/).default("1.0.0"),
+  status: smassModelStatusSchema.default("published"),
   label: z.string().trim().min(1).max(80),
   description: z.string().trim().max(240).optional(),
   primaryKey: z.string().trim().regex(virtualModelFieldIdPattern).optional(),
@@ -349,6 +367,8 @@ export class SphotonCatalogService {
             ...(field.sourceField ? { sourceField: field.sourceField } : {}),
             ...(field.itemField ? { itemField: field.itemField } : {}),
             ...(field.sourceFields?.length ? { sourceFields: field.sourceFields } : {}),
+            ...(field.targetModelId ? { targetModelId: field.targetModelId } : {}),
+            ...(field.where ? { where: field.where } : {}),
           },
           primaryKey: primaryKey === field.key,
           exposed: field.exposed,
@@ -384,6 +404,8 @@ export class SphotonCatalogService {
       version: spec.version,
       domain: domainId,
       label: spec.label,
+      status: spec.status ?? "published",
+      exposeAsTool: true,
       ...(spec.description ? { description: spec.description } : {}),
       ...(primaryKey ? { primaryKey } : {}),
       sources,
@@ -511,6 +533,18 @@ export class SphotonCatalogService {
       persistedSpec,
     ];
     this.customModels[domainId] = nextList;
+    this.saveCustomModelsFile();
+    return this.domainWorkbenchView(domainId);
+  }
+
+  setVirtualModelStatus(domainId: DomainPackId, modelId: string, status: "draft" | "published") {
+    const list = this.customModels[domainId] ?? [];
+    const target = list.find((m) => m.id === modelId);
+    if (!target) {
+      throw new Error(`Custom virtual model "${modelId}" was not found in domain "${domainId}".`);
+    }
+    target.status = status;
+    this.smass.register(this.compileCustomVirtualModel(domainId, target));
     this.saveCustomModelsFile();
     return this.domainWorkbenchView(domainId);
   }
@@ -667,6 +701,11 @@ export class SphotonCatalogService {
     for (const [ref, custom] of this.customToolSchemas) {
       byRef.set(ref, custom);
     }
+
+    // Expose all published custom smass Virtual Models as executable closed-schema sfield read tools
+    for (const virtualDesc of this.smass.describeVirtualModelTools(byRef, undefined, false)) {
+      byRef.set(virtualDesc.ref, virtualDesc);
+    }
     return [...byRef.values()];
   }
 
@@ -725,7 +764,14 @@ export class SphotonCatalogService {
     return summaries;
   }
 
-  domainWorkbenchView(domainId: DomainPackId) {
+  domainWorkbenchView(
+    domainId: DomainPackId,
+    downstream?: {
+      uiLayouts?: Array<{ name: string; refs: string[] }>;
+      widgets?: Array<{ name: string; refs: string[] }>;
+      ccreRules?: Array<{ name: string; refs: string[] }>;
+    },
+  ) {
     const descriptors = new Map(this.allToolDescriptors().map((desc) => [desc.ref, desc]));
     const models = this.summarizeDomainModels(domainId);
     const dataModel = this.smass.toDataModelGraph(domainId, descriptors, models);
@@ -733,7 +779,50 @@ export class SphotonCatalogService {
     const exposedByKey = new Map(catalog.fields.map((f) => [`${f.toolRef}::${f.outputPath}`, f]));
     const actionRefs = new Set(models.flatMap((m) => m.actions.map((a) => a.toolRef)));
     const domainToolRefs = new Set<string>(models.flatMap((m) => m.toolRefs));
-    for (const t of catalog.tools) domainToolRefs.add(t.toolRef);
+    for (const t of catalog.tools) {
+      if (!t.toolRef.startsWith("smass.")) domainToolRefs.add(t.toolRef);
+    }
+
+    // Schema drift detection across all domain models (flags broken source paths immediately on the ER canvas)
+    const driftIssues: SmassModelValidationIssue[] = [];
+    const domainRawModels = this.smass.list(domainId);
+    for (const rawModel of domainRawModels) {
+      if (rawModel.mode === "tool_backed") {
+        driftIssues.push(...validateToolBackedModel(rawModel, descriptors));
+      }
+    }
+    driftIssues.push(...validateDomainGraph(domainRawModels));
+
+    // Downstream lineage & impact map (which UI layouts, widgets, CCRE rules, and child entities depend on each model)
+    const lineage: Record<
+      string,
+      { uiLayouts: string[]; widgets: string[]; ccreRules: string[]; childModels: string[]; virtualToolRef?: string }
+    > = {};
+    for (const model of models) {
+      const needles = new Set<string>([
+        model.id,
+        ...model.toolRefs,
+        ...(model.virtualReadToolRef ? [model.virtualReadToolRef] : []),
+        ...model.fields.map((f) => f.key),
+      ]);
+      const matchesAny = (refs: string[]) =>
+        refs.some((r) => {
+          if (needles.has(r)) return true;
+          for (const tRef of model.toolRefs) if (r.includes(tRef)) return true;
+          if (model.virtualReadToolRef && r.includes(model.virtualReadToolRef)) return true;
+          return r.includes(model.id);
+        });
+      const childModels = models
+        .filter((other) => other.id !== model.id && (other.unnest?.parentModelId === model.id || other.relations.some((rel) => rel.targetModelId === model.id)))
+        .map((other) => other.id);
+      lineage[model.id] = {
+        uiLayouts: (downstream?.uiLayouts ?? []).filter((item) => matchesAny(item.refs)).map((item) => item.name),
+        widgets: (downstream?.widgets ?? []).filter((item) => matchesAny(item.refs)).map((item) => item.name),
+        ccreRules: (downstream?.ccreRules ?? []).filter((item) => matchesAny(item.refs)).map((item) => item.name),
+        childModels,
+        ...(model.virtualReadToolRef ? { virtualToolRef: model.virtualReadToolRef } : {}),
+      };
+    }
 
     const tools = [...domainToolRefs]
       .sort()
@@ -765,6 +854,14 @@ export class SphotonCatalogService {
         };
       });
 
+    const virtualTools = this.smass.describeVirtualModelTools(descriptors, domainId, false).map((desc) => ({
+      toolRef: desc.ref,
+      id: desc.id,
+      version: desc.version,
+      description: desc.description ?? "",
+      contractFingerprint: fingerprintToolContract(desc.ref, desc.inputs, desc.outputs),
+    }));
+
     return {
       tenantId: this.deps.tenantId,
       domainId,
@@ -772,6 +869,9 @@ export class SphotonCatalogService {
       customModelIds: (this.customModels[domainId] ?? []).map((m) => m.id),
       customModels: this.customModels[domainId] ?? [],
       customRelations: this.customRelations[domainId] ?? [],
+      driftIssues,
+      lineage,
+      virtualTools,
       dataModel,
       tools,
       catalog,
@@ -818,6 +918,35 @@ export class SphotonCatalogService {
           return { status: "failed", toolRef, error: { code: "CUSTOMER_REQUIRED", message: "Customer scope is required for balances." } };
         }
         return { status: "succeeded", toolRef, output: readDemoBalance(profile.personaId, profile.syntheticMid, Date.now()) };
+      }
+
+      // Delegate published custom Virtual Data Model tools (`smass.<modelId>.read@<version>`) directly to VDM runtime
+      const virtualModel = this.smass.findVirtualModelByToolRef(toolRef);
+      if (virtualModel) {
+        try {
+          const snap = await this.materializeVirtualModel(
+            virtualModel.domain as DomainPackId,
+            {
+              modelId: virtualModel.id,
+              customerId: typeof inputs.customerId === "string" ? inputs.customerId : scope.customerId,
+              redactPii: false,
+            },
+            scope.principalId,
+          );
+          if (snap.status !== "ok") {
+            return { status: "failed", toolRef, error: { code: "STALE_VERSION_RETRY", message: snap.message } };
+          }
+          const output = snap.rows
+            ? { ...snap.data, rows: snap.rows, rowCount: snap.rowCount ?? snap.rows.length }
+            : snap.data;
+          return { status: "succeeded", toolRef, output };
+        } catch (err) {
+          return {
+            status: "failed",
+            toolRef,
+            error: { code: "VIRTUAL_MODEL_READ_FAILED", message: err instanceof Error ? err.message : "Virtual snapshot read failed." },
+          };
+        }
       }
 
       // Delegate all store-backed domain models cleanly to smass

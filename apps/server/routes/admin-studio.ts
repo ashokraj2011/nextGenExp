@@ -67,6 +67,7 @@ import {
   customDomainRelationInputSchema,
   customVirtualModelDeleteSchema,
   customVirtualModelInputSchema,
+  customVirtualModelStatusSchema,
   customVirtualModelTestSchema,
   domainFieldExposureSchema,
   type SphotonCatalogService,
@@ -225,18 +226,49 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
     await createChat("admin");
     return true;
   }
+  const buildDomainLineage = (domainId: DomainPackId) => {
+    const uiLayouts = store.publishedUiLayouts(domainId).map((layout) => ({
+      name: layout.design.name || layout.id,
+      refs: [JSON.stringify(layout.design)],
+    }));
+    const lib = widgetLibraries[domainId];
+    const owner = lib ? lib.authorKey(principalId, requireOperator()) : principalId;
+    const widgets = (lib ? lib.list(owner, now()) : []).map((w) => ({
+      name: w.name || w.id,
+      refs: [JSON.stringify(w)],
+    }));
+    const setup = store.toolSetup(domainId);
+    const ccreRules = (setup.ccreRules ?? []).map((r) => ({
+      name: r.name || r.scenarioId,
+      refs: [JSON.stringify(r)],
+    }));
+    return { uiLayouts, widgets, ccreRules };
+  };
+
   if (id === "domain-models" && method === "GET") {
     const domainId = authoringDomain();
-    json(res, sphotonCatalog.domainWorkbenchView(domainId));
+    json(res, sphotonCatalog.domainWorkbenchView(domainId, buildDomainLineage(domainId)));
     return true;
   }
   if (id === "domain-models" && method === "POST") {
     const domainId = authoringDomain();
     const spec = await body(req, customVirtualModelInputSchema, 32 * 1024);
     try {
-      json(res, sphotonCatalog.saveVirtualModel(domainId, spec));
+      sphotonCatalog.saveVirtualModel(domainId, spec);
+      json(res, sphotonCatalog.domainWorkbenchView(domainId, buildDomainLineage(domainId)));
     } catch (err) {
       throw new ApiError(400, "virtual_model_invalid", err instanceof Error ? err.message : "Could not save virtual model.");
+    }
+    return true;
+  }
+  if (id === "domain-models-status" && method === "POST") {
+    const domainId = authoringDomain();
+    const payload = await body(req, customVirtualModelStatusSchema, 4 * 1024);
+    try {
+      sphotonCatalog.setVirtualModelStatus(domainId, payload.modelId, payload.status);
+      json(res, sphotonCatalog.domainWorkbenchView(domainId, buildDomainLineage(domainId)));
+    } catch (err) {
+      throw new ApiError(404, "virtual_model_not_found", err instanceof Error ? err.message : "Virtual model not found.");
     }
     return true;
   }
@@ -244,7 +276,8 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
     const domainId = authoringDomain();
     const payload = await body(req, customVirtualModelDeleteSchema, 4 * 1024);
     try {
-      json(res, sphotonCatalog.deleteVirtualModel(domainId, payload.modelId));
+      sphotonCatalog.deleteVirtualModel(domainId, payload.modelId);
+      json(res, sphotonCatalog.domainWorkbenchView(domainId, buildDomainLineage(domainId)));
     } catch (err) {
       throw new ApiError(404, "virtual_model_not_found", err instanceof Error ? err.message : "Virtual model not found.");
     }
@@ -265,7 +298,8 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
     const domainId = authoringDomain();
     const payload = await body(req, customDomainRelationInputSchema, 4 * 1024);
     try {
-      json(res, sphotonCatalog.saveDomainRelation(domainId, payload));
+      sphotonCatalog.saveDomainRelation(domainId, payload);
+      json(res, sphotonCatalog.domainWorkbenchView(domainId, buildDomainLineage(domainId)));
     } catch (err) {
       throw new ApiError(400, "domain_relation_invalid", err instanceof Error ? err.message : "Could not save entity relationship.");
     }
@@ -275,7 +309,8 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
     const domainId = authoringDomain();
     const payload = await body(req, customDomainRelationDeleteSchema, 4 * 1024);
     try {
-      json(res, sphotonCatalog.deleteDomainRelation(domainId, payload));
+      sphotonCatalog.deleteDomainRelation(domainId, payload);
+      json(res, sphotonCatalog.domainWorkbenchView(domainId, buildDomainLineage(domainId)));
     } catch (err) {
       throw new ApiError(400, "domain_relation_delete_failed", err instanceof Error ? err.message : "Could not delete entity relationship.");
     }

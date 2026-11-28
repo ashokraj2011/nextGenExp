@@ -791,3 +791,204 @@ test("smass VDM handles hierarchical JSON via both Flatten (nested objects + arr
   });
   assert.equal(unlinked.customRelations.some((r) => r.name === "funds_goal"), false);
 });
+
+test("smass rich derived expressions (IF, COALESCE, CONCAT, UPPER/LOWER/LEN, ternary), WHERE aggregates, and cross-entity rollups", async () => {
+  // 1. Rich expression evaluator (zero eval)
+  assert.equal(
+    evaluateSmassComputedExpression('IF(cashCents >= 1000000, "high_cash", "standard")', { cashCents: 1_500_000 }),
+    "high_cash",
+  );
+  assert.equal(
+    evaluateSmassComputedExpression('IF(cashCents >= 1000000, "high_cash", "standard")', { cashCents: 250_000 }),
+    "standard",
+  );
+  assert.equal(evaluateSmassComputedExpression("COALESCE(nickname, firstName, 'Guest')", { nickname: null, firstName: "Alice" }), "Alice");
+  assert.equal(evaluateSmassComputedExpression("COALESCE(missingVal, 42)", {}), 42);
+  assert.equal(evaluateSmassComputedExpression('CONCAT(UPPER(tier), " - ", LOWER(status))', { tier: "private", status: "ACTIVE" }), "PRIVATE - active");
+  assert.equal(evaluateSmassComputedExpression('LEN(tier)', { tier: "private" }), 7);
+  assert.equal(evaluateSmassComputedExpression("a > 10 && b != 0 ? a + b : 0", { a: 20, b: 5 }), 25);
+  assert.equal(evaluateSmassComputedExpression("!(a > 10) || b == 5", { a: 20, b: 5 }), true);
+  assert.throws(() => evaluateSmassComputedExpression("eval('1+1')", {}), /Unsupported function/);
+
+  // 2. Cross-entity rollup + WHERE filter sharing a single 1x turn cache
+  const childOrders = defineToolBackedModel({
+    id: "crm.order_items",
+    version: "1.0.0",
+    domain: "crm",
+    label: "Order Items",
+    primaryKey: "rowIndex",
+    unnest: { slot: "orders", path: "items", indexField: "rowIndex" },
+    sources: { orders: { toolRef: "crm.orders.read@1.0.0" } },
+    fields: {
+      rowIndex: { type: "integer", label: "Row #", primaryKey: true },
+      status: { type: "string", from: "orders.items[].status", label: "Status" },
+      amountCents: { type: "integer", from: "orders.items[].amountCents", label: "Amount" },
+    },
+  });
+
+  const parentSummary = defineToolBackedModel({
+    id: "crm.customer_rollup",
+    version: "1.0.0",
+    domain: "crm",
+    label: "Customer Rollup",
+    primaryKey: "mid",
+    exposeAsTool: true,
+    sources: { orders: { toolRef: "crm.orders.read@1.0.0" } },
+    fields: {
+      mid: { type: "string", principalKey: "mid", primaryKey: true, label: "MID" },
+      items: { type: "array", from: "orders.items", label: "Items", exposed: false },
+      paidItemsCount: {
+        type: "integer",
+        label: "Paid Items (WHERE)",
+        aggregate: { op: "count", sourceField: "items", where: { field: "status", op: "==", value: "paid" } },
+      },
+      paidRollupTotalCents: {
+        type: "integer",
+        label: "Paid Rollup Total",
+        aggregate: {
+          op: "sum",
+          targetModelId: "crm.order_items",
+          itemField: "amountCents",
+          where: { field: "status", op: "==", value: "paid" },
+        },
+      },
+      tierLabel: {
+        type: "string",
+        label: "Customer Tier",
+        computed: {
+          expression: 'IF(paidRollupTotalCents >= 50000, "VIP", "STANDARD")',
+          dependsOn: ["paidRollupTotalCents"],
+        },
+      },
+    },
+  });
+
+  const reg = createSmassRegistry([childOrders, parentSummary]);
+  let toolExecCount = 0;
+  const cache = createTurnSnapshotCache();
+  const snap = await reg.materializeSnapshot({
+    modelId: "crm.customer_rollup",
+    ctx: { tenantId: "t1", domainId: "crm", principalId: "C-1" },
+    cache,
+    executeTool: async () => {
+      toolExecCount += 1;
+      return {
+        items: [
+          { status: "paid", amountCents: 30_000 },
+          { status: "pending", amountCents: 99_000 },
+          { status: "paid", amountCents: 25_000 },
+        ],
+        ordersVersion: 2,
+      };
+    },
+  });
+
+  assert.equal(snap.status, "ok");
+  assert.equal(snap.data.paidItemsCount, 2);
+  assert.equal(snap.data.paidRollupTotalCents, 55_000);
+  assert.equal(snap.data.tierLabel, "VIP");
+  // Both parent and child entity used the same underlying tool; cache guarantees only 2 or fewer executions (1 for parent, 1 for child model)
+  assert.ok(toolExecCount <= 2);
+});
+
+test("smass published virtual models compile into live sfield read tools, respect Draft/Published governance, and report lineage & drift", async (t) => {
+  const app = await startTestPreview();
+  t.after(() => app.close());
+  const client = await testClient(app.url);
+
+  // Create a published virtual model with IF() derived column + WHERE-filtered aggregate
+  const created = await client.request<{
+    customModelIds: string[];
+    models: SmassModelSummary[];
+    virtualTools: Array<{ toolRef: string; outputFields: Array<{ path: string; type: string }> }>;
+    driftIssues: Array<{ modelId: string; message: string }>;
+    lineage: Record<string, { uiLayouts: string[]; widgets: string[]; ccreRules: string[]; childModels: string[] }>;
+    catalog: { fields: Array<{ toolRef: string; outputPath: string; label: string }> };
+  }>("/api/admin/domain-models?domain=wealth", {
+    id: "wealth.executive_tier",
+    version: "1.0.0",
+    status: "published",
+    label: "Executive Tier View",
+    principalKey: "mid",
+    primaryKey: "mid",
+    fields: [
+      { kind: "mapped", key: "cashCents", label: "Cash", toolRef: "portfolio.snapshot.read@1.0.0", outputPath: "cashCents", format: "currency_cents", required: true, exposed: true },
+      { kind: "mapped", key: "history", label: "History", toolRef: "goal.progress.read@1.0.0", outputPath: "history", format: "series", required: true, exposed: false },
+      {
+        kind: "aggregate",
+        key: "strongMonths",
+        label: "Strong Savings Months",
+        op: "count",
+        sourceField: "history",
+        where: { field: "savedCents", op: ">=", value: 1_000_000 },
+        type: "integer",
+        exposed: true,
+      },
+      {
+        kind: "computed",
+        key: "cashTier",
+        label: "Cash Tier",
+        expression: 'IF(cashCents >= 1000000, "high_cash", "standard")',
+        dependsOn: ["cashCents"],
+        type: "string",
+        exposed: true,
+      },
+    ],
+  });
+
+  const expectedToolRef = "smass.wealth.executive_tier.read@1.0.0";
+  const modelSummary = created.models.find((m) => m.id === "wealth.executive_tier");
+  assert.ok(modelSummary);
+  assert.equal(modelSummary.status, "published");
+  assert.equal(modelSummary.virtualReadToolRef, expectedToolRef);
+
+  // Compiled live sfield virtual read tool is listed & its derived/aggregate columns are bindable in sphoton catalog!
+  assert.ok(created.virtualTools.some((vt) => vt.toolRef === expectedToolRef));
+  assert.ok(created.catalog.fields.some((f) => f.toolRef === expectedToolRef && f.outputPath === "cashTier"));
+  assert.ok(created.catalog.fields.some((f) => f.toolRef === expectedToolRef && f.outputPath === "strongMonths"));
+  assert.ok(Array.isArray(created.driftIssues));
+  assert.ok(created.lineage["wealth.executive_tier"]);
+
+  // Test live 1x snapshot across two Wealth personas
+  const aliceSnap = await client.request<{ snapshot: { status: string; data: Record<string, unknown> } }>(
+    "/api/admin/domain-models-test?domain=wealth",
+    { modelId: "wealth.executive_tier", customerId: "demo-learner" },
+  );
+  assert.equal(aliceSnap.snapshot.status, "ok");
+  assert.ok(aliceSnap.snapshot.data.cashTier === "high_cash" || aliceSnap.snapshot.data.cashTier === "standard");
+  assert.equal(typeof aliceSnap.snapshot.data.strongMonths, "number");
+
+  // Toggle status to Draft -> hides virtual tool & fields from sphoton catalog while remaining testable in Studio
+  const drafted = await client.request<{
+    models: SmassModelSummary[];
+    virtualTools: Array<{ toolRef: string }>;
+    catalog: { fields: Array<{ toolRef: string; outputPath: string }> };
+  }>("/api/admin/domain-models-status?domain=wealth", {
+    modelId: "wealth.executive_tier",
+    status: "draft",
+  });
+  assert.equal(drafted.models.find((m) => m.id === "wealth.executive_tier")?.status, "draft");
+  assert.equal(drafted.virtualTools.some((vt) => vt.toolRef === expectedToolRef), false);
+  assert.equal(drafted.catalog.fields.some((f) => f.toolRef === expectedToolRef), false);
+
+  // Draft model is still testable in Studio!
+  const draftSnap = await client.request<{ snapshot: { status: string } }>(
+    "/api/admin/domain-models-test?domain=wealth",
+    { modelId: "wealth.executive_tier", customerId: "demo-learner" },
+  );
+  assert.equal(draftSnap.snapshot.status, "ok");
+
+  // Re-publish -> restores live virtual tool & sphoton bindings
+  const republished = await client.request<{
+    virtualTools: Array<{ toolRef: string }>;
+    catalog: { fields: Array<{ toolRef: string; outputPath: string }> };
+  }>("/api/admin/domain-models-status?domain=wealth", {
+    modelId: "wealth.executive_tier",
+    status: "published",
+  });
+  assert.equal(republished.virtualTools.some((vt) => vt.toolRef === expectedToolRef), true);
+  assert.equal(republished.catalog.fields.some((f) => f.toolRef === expectedToolRef && f.outputPath === "cashTier"), true);
+
+  // Clean up
+  await client.request("/api/admin/domain-models-delete?domain=wealth", { modelId: "wealth.executive_tier" });
+});

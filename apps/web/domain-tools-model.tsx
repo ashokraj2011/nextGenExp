@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import {
+  AlertTriangle,
   ArrowRight,
   CheckCircle2,
   Code2,
@@ -27,10 +28,13 @@ import {
 import { adminPaths } from "../../packages/contracts/admin-paths";
 import { getDomainPack, type DomainPackId } from "../../packages/contracts/domain-packs";
 import type {
+  SmassAggregateFilterOp,
+  SmassAggregateFilterSpec,
   SmassAggregateOp,
   SmassClassification,
   SmassFieldFormat,
   SmassFieldType,
+  SmassModelStatus,
   SmassRelationCardinality,
   SmassVirtualSnapshotResult,
 } from "../../packages/smass";
@@ -75,6 +79,8 @@ type DraftAggregateField = {
   sourceField?: string;
   itemField?: string;
   sourceFields?: string[];
+  targetModelId?: string;
+  where?: SmassAggregateFilterSpec;
   type: SmassFieldType;
   format?: SmassFieldFormat;
   classification: SmassClassification;
@@ -101,6 +107,12 @@ const AGGREGATE_OPS: Array<{ op: SmassAggregateOp; label: string }> = [
   { op: "first", label: "FIRST" },
   { op: "last", label: "LAST" },
 ];
+const AGGREGATE_FILTER_OPS: readonly SmassAggregateFilterOp[] = ["==", "!=", ">", ">=", "<", "<=", "contains"];
+const WEALTH_PERSONAS = [
+  { id: "demo-learner", label: "Alice Morgan (demo-learner)" },
+  { id: "demo-returning", label: "Jordan Lee (demo-returning)" },
+  { id: "demo-new-account", label: "Marcus Reed (demo-new-account)" },
+] as const;
 
 function prettifyFieldLabel(path: string): string {
   const leaf = path.split(".").at(-1) ?? path;
@@ -147,11 +159,21 @@ function inferDependsOn(expression: string, knownKeys: readonly string[]): strin
   return [...found];
 }
 
-function formatAggregateSummary(agg: { op: string; sourceField?: string; itemField?: string; sourceFields?: string[] }): string {
-  const target = agg.sourceField
-    ? `${agg.sourceField}${agg.itemField ? `.${agg.itemField}` : ""}`
-    : (agg.sourceFields ?? []).join(", ");
-  return `${agg.op.toUpperCase()}(${target})`;
+function formatAggregateSummary(agg: {
+  op: string;
+  sourceField?: string;
+  itemField?: string;
+  sourceFields?: string[];
+  targetModelId?: string;
+  where?: SmassAggregateFilterSpec;
+}): string {
+  const target = agg.targetModelId
+    ? `${agg.targetModelId}${agg.itemField ? `.${agg.itemField}` : ""}`
+    : agg.sourceField
+      ? `${agg.sourceField}${agg.itemField ? `.${agg.itemField}` : ""}`
+      : (agg.sourceFields ?? []).join(", ");
+  const whereStr = agg.where ? ` WHERE ${agg.where.field} ${agg.where.op} ${JSON.stringify(agg.where.value)}` : "";
+  return `${agg.op.toUpperCase()}(${target}${whereStr})`;
 }
 
 function replaceIdentifier(expression: string, oldKey: string, newKey: string): string {
@@ -176,9 +198,13 @@ function cardinalityLabel(cardinality: SmassRelationCardinality): string {
 export function DomainToolsAndModelPanel({
   domainId,
   defaultOpenBuilder = false,
+  initialEditModelId = null,
+  onDataChanged,
 }: {
   domainId: DomainPackId;
   defaultOpenBuilder?: boolean;
+  initialEditModelId?: string | null;
+  onDataChanged?: (next: DomainWorkbenchData) => void;
 }) {
   const [data, setData] = useState<DomainWorkbenchData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -190,6 +216,7 @@ export function DomainToolsAndModelPanel({
 
   // Drag-and-drop Virtual Model Builder state
   const [editingPreviousId, setEditingPreviousId] = useState<string | null>(null);
+  const [draftStatus, setDraftStatus] = useState<SmassModelStatus>("published");
   const [draftLabel, setDraftLabel] = useState("Customer Summary VDM");
   const [draftId, setDraftId] = useState(() => slugifyModelId(domainId, "Customer Summary VDM"));
   const [idManuallyEdited, setIdManuallyEdited] = useState(false);
@@ -229,18 +256,24 @@ export function DomainToolsAndModelPanel({
   const [relLocalField, setRelLocalField] = useState("mid");
   const [relForeignField, setRelForeignField] = useState("customerId");
 
-  // Aggregate column composer state
-  const [aggMode, setAggMode] = useState<"array" | "columns">("array");
+  // Aggregate column composer state (Array + WHERE, Across Columns, Cross-Entity Rollup)
+  const [aggMode, setAggMode] = useState<"array" | "columns" | "rollup">("array");
   const [aggKey, setAggKey] = useState("");
   const [aggLabel, setAggLabel] = useState("");
   const [aggOp, setAggOp] = useState<SmassAggregateOp>("sum");
   const [aggSourceField, setAggSourceField] = useState("");
   const [aggItemField, setAggItemField] = useState("");
+  const [aggTargetModelId, setAggTargetModelId] = useState("");
+  const [aggWhereEnabled, setAggWhereEnabled] = useState(false);
+  const [aggWhereField, setAggWhereField] = useState("");
+  const [aggWhereOp, setAggWhereOp] = useState<SmassAggregateFilterOp>(">=");
+  const [aggWhereValue, setAggWhereValue] = useState("");
   const [aggSelectedCols, setAggSelectedCols] = useState<string[]>([]);
   const [aggType, setAggType] = useState<SmassFieldType>("integer");
 
-  // Live VDM snapshot test state
+  // Live VDM snapshot test state (with Wealth persona selector)
   const [testingModelId, setTestingModelId] = useState<string | null>(null);
+  const [testCustomerId, setTestCustomerId] = useState<string>("demo-learner");
   const [testRedactPii, setTestRedactPii] = useState(false);
   const [snapshotResults, setSnapshotResults] = useState<Record<string, SmassVirtualSnapshotResult>>({});
 
@@ -273,6 +306,16 @@ export function DomainToolsAndModelPanel({
     setActiveComposer("none");
     void refresh();
   }, [domainId]);
+
+  const appliedInitialRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!data || !initialEditModelId) return;
+    if (appliedInitialRef.current === `${domainId}:${initialEditModelId}`) return;
+    appliedInitialRef.current = `${domainId}:${initialEditModelId}`;
+    if (data.customModels.some((m) => m.id === initialEditModelId)) {
+      loadCustomModelIntoBuilder(initialEditModelId);
+    }
+  }, [data, domainId, initialEditModelId]);
 
   const customModelIdSet = useMemo(() => new Set(data?.customModelIds ?? []), [data?.customModelIds]);
   const droppedSourceKeys = useMemo(
@@ -451,6 +494,7 @@ export function DomainToolsAndModelPanel({
           : {}),
       });
       setData(next);
+      onDataChanged?.(next);
       setActiveComposer("none");
       setViewMode("entities");
       setNotice(
@@ -703,15 +747,51 @@ export function DomainToolsAndModelPanel({
     setActiveComposer("none");
   }
 
+  function parseFilterValue(raw: string): string | number | boolean {
+    const trimmed = raw.trim();
+    if (trimmed === "true") return true;
+    if (trimmed === "false") return false;
+    if (trimmed !== "" && !Number.isNaN(Number(trimmed))) return Number(trimmed);
+    return trimmed;
+  }
+
   function addAggregateFieldToDraft() {
     const cleanKey = sanitizeFieldKey(aggKey);
     if (!cleanKey) {
       setError("Provide a column key for the aggregate.");
       return;
     }
-    if (aggMode === "array") {
+    const whereClause: SmassAggregateFilterSpec | undefined =
+      aggWhereEnabled && aggWhereField.trim() && aggWhereValue.trim()
+        ? { field: aggWhereField.trim(), op: aggWhereOp, value: parseFilterValue(aggWhereValue) }
+        : undefined;
+
+    if (aggMode === "rollup") {
+      if (!aggTargetModelId) {
+        setError("Select a related target entity for the cross-entity rollup.");
+        return;
+      }
+      setError("");
+      setDraftFields((prev) => [
+        ...prev,
+        {
+          kind: "aggregate",
+          uid: `agg:${cleanKey}:${Date.now()}`,
+          key: cleanKey,
+          label: aggLabel.trim() || prettifyFieldLabel(cleanKey),
+          op: aggOp,
+          targetModelId: aggTargetModelId,
+          ...(aggItemField.trim() && aggOp !== "count" ? { itemField: aggItemField.trim() } : {}),
+          ...(whereClause ? { where: whereClause } : {}),
+          type: aggOp === "count" ? "integer" : aggType,
+          format: aggOp === "count" ? "number" : inferFormat(aggItemField || cleanKey, aggType),
+          classification: "internal",
+          exposed: true,
+        },
+      ]);
+    } else if (aggMode === "array") {
       if (!aggSourceField) {
-        setError("Select an array column (such as history) to aggregate over, or switch to Multi-Column mode.");
+        setError("Select an array column (such as history) to aggregate over, or switch to Across Columns / Rollup mode.");
         return;
       }
       setError("");
@@ -725,6 +805,7 @@ export function DomainToolsAndModelPanel({
           op: aggOp,
           sourceField: aggSourceField,
           ...(aggItemField.trim() && aggOp !== "count" ? { itemField: aggItemField.trim() } : {}),
+          ...(whereClause ? { where: whereClause } : {}),
           type: aggOp === "count" ? "integer" : aggType,
           format: aggOp === "count" ? "number" : inferFormat(aggItemField || cleanKey, aggType),
           classification: "internal",
@@ -755,6 +836,9 @@ export function DomainToolsAndModelPanel({
     }
     setAggKey("");
     setAggLabel("");
+    setAggWhereEnabled(false);
+    setAggWhereField("");
+    setAggWhereValue("");
     setActiveComposer("none");
   }
 
@@ -771,6 +855,7 @@ export function DomainToolsAndModelPanel({
         id: draftId.trim(),
         ...(editingPreviousId ? { previousId: editingPreviousId } : {}),
         version: "1.0.0",
+        status: draftStatus,
         label: draftLabel.trim(),
         ...(draftDescription.trim() ? { description: draftDescription.trim() } : {}),
         ...(draftPrincipalKey.trim() ? { principalKey: draftPrincipalKey.trim(), primaryKey: draftPrincipalKey.trim() } : {}),
@@ -798,6 +883,8 @@ export function DomainToolsAndModelPanel({
               ...(f.sourceField ? { sourceField: f.sourceField } : {}),
               ...(f.itemField ? { itemField: f.itemField } : {}),
               ...(f.sourceFields?.length ? { sourceFields: f.sourceFields } : {}),
+              ...(f.targetModelId ? { targetModelId: f.targetModelId } : {}),
+              ...(f.where ? { where: f.where } : {}),
               type: f.type,
               ...(f.format ? { format: f.format } : {}),
               classification: f.classification,
@@ -819,6 +906,7 @@ export function DomainToolsAndModelPanel({
       });
       const wasRenamed = editingPreviousId && editingPreviousId !== draftId.trim();
       setData(next);
+      onDataChanged?.(next);
       setEditingPreviousId(null);
       setViewMode("entities");
       setNotice(
@@ -841,6 +929,7 @@ export function DomainToolsAndModelPanel({
       for (const f of tool.outputFields) toolFieldTypes.set(`${tool.toolRef}::${f.path}`, f.type);
     }
     setEditingPreviousId(found.id);
+    setDraftStatus(found.status ?? "published");
     setDraftId(found.id);
     setDraftLabel(found.label);
     setIdManuallyEdited(true);
@@ -873,6 +962,8 @@ export function DomainToolsAndModelPanel({
             sourceField: f.sourceField,
             itemField: f.itemField,
             sourceFields: f.sourceFields,
+            targetModelId: f.targetModelId,
+            where: f.where,
             type: f.type,
             format: f.format,
             classification: f.classification,
@@ -900,6 +991,7 @@ export function DomainToolsAndModelPanel({
 
   function startFreshVirtualModel() {
     setEditingPreviousId(null);
+    setDraftStatus("published");
     setDraftFields([]);
     setDraftRelations([]);
     setDraftLabel(`${pack.shortLabel} Virtual View`);
@@ -911,12 +1003,30 @@ export function DomainToolsAndModelPanel({
     setViewMode("builder");
   }
 
+  async function toggleModelStatus(modelId: string, nextStatus: SmassModelStatus) {
+    setError("");
+    setNotice("");
+    try {
+      const next = await api.setDomainModelStatus(domainId, { modelId, status: nextStatus });
+      setData(next);
+      onDataChanged?.(next);
+      setNotice(
+        nextStatus === "published"
+          ? `Published "${modelId}" — compiled into live sfield read tool & sphoton UI catalog.`
+          : `Moved "${modelId}" to Draft — hidden from sphoton UI catalog & agents while remaining editable in Studio.`,
+      );
+    } catch (err) {
+      setError(toolSetupErrorMessage(err));
+    }
+  }
+
   async function deleteCustomModel(modelId: string) {
     setError("");
     setNotice("");
     try {
       const next = await api.deleteDomainModel(domainId, modelId);
       setData(next);
+      onDataChanged?.(next);
       setSnapshotResults((prev) => {
         const copy = { ...prev };
         delete copy[modelId];
@@ -928,12 +1038,13 @@ export function DomainToolsAndModelPanel({
     }
   }
 
-  async function runLiveSnapshotTest(modelId: string, redactPii = testRedactPii) {
+  async function runLiveSnapshotTest(modelId: string, redactPii = testRedactPii, customerId = testCustomerId) {
     setTestingModelId(modelId);
     setError("");
     try {
       const { snapshot } = await api.testDomainModelSnapshot(domainId, {
         modelId,
+        ...(domainId === "wealth" ? { customerId } : {}),
         redactPii,
       });
       setSnapshotResults((prev) => ({ ...prev, [modelId]: snapshot }));
@@ -1391,7 +1502,7 @@ export function DomainToolsAndModelPanel({
                   </label>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "8px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: "8px" }}>
                   <label style={{ display: "grid", gap: "3px", fontSize: "0.76rem", fontWeight: 600 }}>
                     Description
                     <input
@@ -1411,6 +1522,18 @@ export function DomainToolsAndModelPanel({
                       placeholder="e.g. mid"
                       style={{ padding: "6px 8px", borderRadius: "7px", border: "1px solid var(--border, #cbd5e1)", fontSize: "0.82rem", fontFamily: "monospace" }}
                     />
+                  </label>
+                  <label style={{ display: "grid", gap: "3px", fontSize: "0.76rem", fontWeight: 600 }}>
+                    Lifecycle Status
+                    <select
+                      aria-label="Model lifecycle status"
+                      value={draftStatus}
+                      onChange={(e) => setDraftStatus(e.target.value as SmassModelStatus)}
+                      style={{ padding: "6px 8px", borderRadius: "7px", border: "1px solid var(--border, #cbd5e1)", fontSize: "0.82rem" }}
+                    >
+                      <option value="published">Published (live sfield tool)</option>
+                      <option value="draft">Draft (studio preview only)</option>
+                    </select>
                   </label>
                 </div>
 
@@ -1630,36 +1753,87 @@ export function DomainToolsAndModelPanel({
                         style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #d8b4fe", fontSize: "0.78rem" }}
                       />
                       <select
+                        aria-label="Derived column type"
                         value={compType}
                         onChange={(e) => setCompType(e.target.value as SmassFieldType)}
                         style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #d8b4fe", fontSize: "0.78rem" }}
                       >
                         <option value="integer">integer</option>
                         <option value="number">number</option>
+                        <option value="string">string</option>
+                        <option value="boolean">boolean</option>
                       </select>
                     </div>
                     {scalarDraftFields.length > 0 && (
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center", fontSize: "0.71rem", color: "#6b21a8" }}>
-                        <span>Insert column:</span>
-                        {scalarDraftFields.map((col) => (
-                          <button
-                            key={col.uid}
-                            type="button"
-                            onClick={() => setCompExpr((prev) => (prev ? `${prev} ${col.key}` : col.key))}
-                            style={{
-                              padding: "2px 6px",
-                              borderRadius: "999px",
-                              border: "1px solid #d8b4fe",
-                              background: "#fff",
-                              color: "#6b21a8",
-                              fontFamily: "monospace",
-                              fontSize: "0.71rem",
-                              cursor: "pointer",
-                            }}
-                          >
-                            + {col.key}
-                          </button>
-                        ))}
+                      <div style={{ display: "grid", gap: "5px" }}>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center", fontSize: "0.71rem", color: "#6b21a8" }}>
+                          <span>Insert column:</span>
+                          {scalarDraftFields.map((col) => (
+                            <button
+                              key={col.uid}
+                              type="button"
+                              onClick={() => setCompExpr((prev) => (prev ? `${prev} ${col.key}` : col.key))}
+                              style={{
+                                padding: "2px 6px",
+                                borderRadius: "999px",
+                                border: "1px solid #d8b4fe",
+                                background: "#fff",
+                                color: "#6b21a8",
+                                fontFamily: "monospace",
+                                fontSize: "0.71rem",
+                                cursor: "pointer",
+                              }}
+                            >
+                              + {col.key}
+                            </button>
+                          ))}
+                        </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center", fontSize: "0.7rem", color: "#6b21a8" }}>
+                          <span>Templates:</span>
+                          {[
+                            {
+                              label: "IF(cond, a, b)",
+                              type: "string" as SmassFieldType,
+                              expr: `IF(${scalarDraftFields[0]!.key} >= 1000000, "high", "standard")`,
+                            },
+                            {
+                              label: "COALESCE(a, 0)",
+                              type: "integer" as SmassFieldType,
+                              expr: `COALESCE(${scalarDraftFields[0]!.key}, 0)`,
+                            },
+                            {
+                              label: "CONCAT(...)",
+                              type: "string" as SmassFieldType,
+                              expr: `CONCAT("${pack.shortLabel}: ", ${scalarDraftFields[0]!.key})`,
+                            },
+                            {
+                              label: "UPPER(...)",
+                              type: "string" as SmassFieldType,
+                              expr: `UPPER(${scalarDraftFields[0]!.key})`,
+                            },
+                          ].map((tpl) => (
+                            <button
+                              key={tpl.label}
+                              type="button"
+                              onClick={() => {
+                                setCompExpr(tpl.expr);
+                                setCompType(tpl.type);
+                              }}
+                              style={{
+                                padding: "2px 6px",
+                                borderRadius: "6px",
+                                border: "1px dashed #c084fc",
+                                background: "#fff",
+                                color: "#7e22ce",
+                                fontFamily: "monospace",
+                                fontSize: "0.69rem",
+                                cursor: "pointer",
+                              }}
+                            >
+                              {tpl.label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     )}
                     <div style={{ display: "flex", gap: "6px" }}>
@@ -1667,7 +1841,7 @@ export function DomainToolsAndModelPanel({
                         type="text"
                         value={compExpr}
                         onChange={(e) => setCompExpr(e.target.value)}
-                        placeholder="Formula (supports + - * / min max abs round, e.g. max(0, targetCents - cashCents))"
+                        placeholder='Formula: IF(cash >= 1000000, "high", "standard"), COALESCE, CONCAT, UPPER, max, min, + - * /'
                         style={{ flex: 1, padding: "5px 7px", borderRadius: "6px", border: "1px solid #d8b4fe", fontFamily: "monospace", fontSize: "0.78rem" }}
                       />
                       <button type="button" className="secondary-button" onClick={addComputedFieldToDraft} style={{ padding: "5px 10px", fontSize: "0.76rem", background: "#7e22ce", color: "#fff", borderColor: "#7e22ce", fontWeight: 600 }}>
@@ -1694,7 +1868,7 @@ export function DomainToolsAndModelPanel({
                         <Sigma size={14} aria-hidden="true" />
                         Add Aggregate Column
                       </strong>
-                      <div style={{ display: "inline-flex", gap: "4px" }}>
+                      <div style={{ display: "inline-flex", gap: "4px", flexWrap: "wrap" }}>
                         <button
                           type="button"
                           className="secondary-button"
@@ -1722,6 +1896,28 @@ export function DomainToolsAndModelPanel({
                           }}
                         >
                           Across Columns
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => {
+                            setAggMode("rollup");
+                            const candidate = entities.find((e) => e.id !== draftId) ?? entities[0];
+                            if (candidate && !aggTargetModelId) {
+                              setAggTargetModelId(candidate.id);
+                              const numField = candidate.fields.find((f) => f.type === "integer" || f.type === "number") ?? candidate.fields[0];
+                              setAggItemField(numField?.key ?? "");
+                            }
+                          }}
+                          style={{
+                            padding: "2px 8px",
+                            fontSize: "0.71rem",
+                            background: aggMode === "rollup" ? "#d97706" : undefined,
+                            color: aggMode === "rollup" ? "#fff" : undefined,
+                            borderColor: aggMode === "rollup" ? "#d97706" : undefined,
+                          }}
+                        >
+                          Cross-Entity Rollup
                         </button>
                         <button type="button" className="secondary-button" style={{ padding: "2px 6px", fontSize: "0.71rem" }} onClick={() => setActiveComposer("none")}>
                           Cancel
@@ -1767,55 +1963,42 @@ export function DomainToolsAndModelPanel({
                       </select>
                     </div>
 
-                    {aggMode === "array" ? (
-                      arrayDraftFields.length === 0 ? (
-                        <p style={{ margin: 0, fontSize: "0.74rem", color: "#92400e" }}>
-                          Drop an array column (like <code>history</code> from <code>goal.progress.read@1.0.0</code>) into the canvas to aggregate over its entries, or switch to <strong>Across Columns</strong>.
-                        </p>
-                      ) : (
+                    {aggMode === "rollup" ? (
+                      <div style={{ display: "grid", gap: "6px" }}>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "6px", alignItems: "center" }}>
                           <select
-                            aria-label="Source array column"
-                            value={aggSourceField}
+                            aria-label="Related entity for rollup"
+                            value={aggTargetModelId}
                             onChange={(e) => {
-                              const nextField = e.target.value;
-                              setAggSourceField(nextField);
-                              const arr = arrayDraftFields.find((f) => f.key === nextField);
-                              const subs = arr ? arrayItemSubfields.get(`${arr.toolRef}::${arr.outputPath}`) ?? [] : [];
-                              setAggItemField(subs.find((s) => s.type === "integer" || s.type === "number")?.subPath ?? subs[0]?.subPath ?? "");
+                              const nextTarget = e.target.value;
+                              setAggTargetModelId(nextTarget);
+                              const tgt = entities.find((m) => m.id === nextTarget);
+                              const numField = tgt?.fields.find((f) => f.type === "integer" || f.type === "number") ?? tgt?.fields[0];
+                              setAggItemField(numField?.key ?? "");
                             }}
                             style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #fcd34d", fontFamily: "monospace", fontSize: "0.78rem" }}
                           >
-                            {arrayDraftFields.map((f) => (
-                              <option key={f.uid} value={f.key}>{f.key} (array)</option>
-                            ))}
+                            <option value="">Select target entity…</option>
+                            {entities
+                              .filter((e) => e.id !== draftId)
+                              .map((e) => (
+                                <option key={e.id} value={e.id}>{e.id} ({e.label})</option>
+                              ))}
                           </select>
                           {aggOp !== "count" ? (
-                            selectedArraySubfields.length > 0 ? (
-                              <select
-                                aria-label="Array item property"
-                                value={aggItemField}
-                                onChange={(e) => setAggItemField(e.target.value)}
-                                style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #fcd34d", fontFamily: "monospace", fontSize: "0.78rem" }}
-                              >
-                                <option value="">(whole element)</option>
-                                {selectedArraySubfields.map((sub) => (
-                                  <option key={sub.subPath} value={sub.subPath}>
-                                    .{sub.subPath} ({sub.type})
-                                  </option>
-                                ))}
-                              </select>
-                            ) : (
-                              <input
-                                type="text"
-                                value={aggItemField}
-                                onChange={(e) => setAggItemField(e.target.value)}
-                                placeholder="Item property (optional)"
-                                style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #fcd34d", fontFamily: "monospace", fontSize: "0.78rem" }}
-                              />
-                            )
+                            <select
+                              aria-label="Target entity column"
+                              value={aggItemField}
+                              onChange={(e) => setAggItemField(e.target.value)}
+                              style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #fcd34d", fontFamily: "monospace", fontSize: "0.78rem" }}
+                            >
+                              <option value="">Select column…</option>
+                              {(entities.find((m) => m.id === aggTargetModelId)?.fields ?? []).map((f) => (
+                                <option key={f.key} value={f.key}>.{f.key} ({f.type ?? "any"})</option>
+                              ))}
+                            </select>
                           ) : (
-                            <span style={{ fontSize: "0.74rem", color: "#92400e" }}>Counts array length</span>
+                            <span style={{ fontSize: "0.74rem", color: "#92400e" }}>Counts matching related rows</span>
                           )}
                           <button
                             type="button"
@@ -1823,8 +2006,161 @@ export function DomainToolsAndModelPanel({
                             onClick={addAggregateFieldToDraft}
                             style={{ padding: "5px 10px", fontSize: "0.76rem", background: "#d97706", color: "#fff", borderColor: "#d97706", fontWeight: 600 }}
                           >
-                            Add aggregate
+                            Add rollup
                           </button>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap", fontSize: "0.74rem" }}>
+                          <label style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontWeight: 600, color: "#92400e", cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={aggWhereEnabled}
+                              onChange={(e) => {
+                                setAggWhereEnabled(e.target.checked);
+                                if (e.target.checked && !aggWhereField) {
+                                  const tgt = entities.find((m) => m.id === aggTargetModelId);
+                                  setAggWhereField(aggItemField || tgt?.fields[0]?.key || "");
+                                }
+                              }}
+                            />
+                            WHERE filter
+                          </label>
+                          {aggWhereEnabled && (
+                            <>
+                              <input
+                                type="text"
+                                aria-label="WHERE filter field"
+                                value={aggWhereField}
+                                onChange={(e) => setAggWhereField(e.target.value)}
+                                placeholder="column (e.g. savedCents)"
+                                style={{ width: "130px", padding: "3px 6px", borderRadius: "5px", border: "1px solid #fcd34d", fontFamily: "monospace", fontSize: "0.74rem" }}
+                              />
+                              <select
+                                aria-label="WHERE filter operator"
+                                value={aggWhereOp}
+                                onChange={(e) => setAggWhereOp(e.target.value as SmassAggregateFilterOp)}
+                                style={{ padding: "3px 5px", borderRadius: "5px", border: "1px solid #fcd34d", fontFamily: "monospace", fontSize: "0.74rem" }}
+                              >
+                                {AGGREGATE_FILTER_OPS.map((op) => (
+                                  <option key={op} value={op}>{op}</option>
+                                ))}
+                              </select>
+                              <input
+                                type="text"
+                                aria-label="WHERE filter value"
+                                value={aggWhereValue}
+                                onChange={(e) => setAggWhereValue(e.target.value)}
+                                placeholder="value (e.g. 1500000)"
+                                style={{ width: "120px", padding: "3px 6px", borderRadius: "5px", border: "1px solid #fcd34d", fontFamily: "monospace", fontSize: "0.74rem" }}
+                              />
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ) : aggMode === "array" ? (
+                      arrayDraftFields.length === 0 ? (
+                        <p style={{ margin: 0, fontSize: "0.74rem", color: "#92400e" }}>
+                          Drop an array column (like <code>history</code> from <code>goal.progress.read@1.0.0</code>) into the canvas to aggregate over its entries, or switch to <strong>Across Columns</strong> or <strong>Cross-Entity Rollup</strong>.
+                        </p>
+                      ) : (
+                        <div style={{ display: "grid", gap: "6px" }}>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "6px", alignItems: "center" }}>
+                            <select
+                              aria-label="Source array column"
+                              value={aggSourceField}
+                              onChange={(e) => {
+                                const nextField = e.target.value;
+                                setAggSourceField(nextField);
+                                const arr = arrayDraftFields.find((f) => f.key === nextField);
+                                const subs = arr ? arrayItemSubfields.get(`${arr.toolRef}::${arr.outputPath}`) ?? [] : [];
+                                setAggItemField(subs.find((s) => s.type === "integer" || s.type === "number")?.subPath ?? subs[0]?.subPath ?? "");
+                              }}
+                              style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #fcd34d", fontFamily: "monospace", fontSize: "0.78rem" }}
+                            >
+                              {arrayDraftFields.map((f) => (
+                                <option key={f.uid} value={f.key}>{f.key} (array)</option>
+                              ))}
+                            </select>
+                            {aggOp !== "count" ? (
+                              selectedArraySubfields.length > 0 ? (
+                                <select
+                                  aria-label="Array item property"
+                                  value={aggItemField}
+                                  onChange={(e) => setAggItemField(e.target.value)}
+                                  style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #fcd34d", fontFamily: "monospace", fontSize: "0.78rem" }}
+                                >
+                                  <option value="">(whole element)</option>
+                                  {selectedArraySubfields.map((sub) => (
+                                    <option key={sub.subPath} value={sub.subPath}>
+                                      .{sub.subPath} ({sub.type})
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <input
+                                  type="text"
+                                  value={aggItemField}
+                                  onChange={(e) => setAggItemField(e.target.value)}
+                                  placeholder="Item property (optional)"
+                                  style={{ padding: "5px 7px", borderRadius: "6px", border: "1px solid #fcd34d", fontFamily: "monospace", fontSize: "0.78rem" }}
+                                />
+                              )
+                            ) : (
+                              <span style={{ fontSize: "0.74rem", color: "#92400e" }}>Counts matching array items</span>
+                            )}
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              onClick={addAggregateFieldToDraft}
+                              style={{ padding: "5px 10px", fontSize: "0.76rem", background: "#d97706", color: "#fff", borderColor: "#d97706", fontWeight: 600 }}
+                            >
+                              Add aggregate
+                            </button>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap", fontSize: "0.74rem" }}>
+                            <label style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontWeight: 600, color: "#92400e", cursor: "pointer" }}>
+                              <input
+                                type="checkbox"
+                                checked={aggWhereEnabled}
+                                onChange={(e) => {
+                                  setAggWhereEnabled(e.target.checked);
+                                  if (e.target.checked && !aggWhereField) {
+                                    setAggWhereField(aggItemField || selectedArraySubfields[0]?.subPath || "");
+                                  }
+                                }}
+                              />
+                              WHERE filter
+                            </label>
+                            {aggWhereEnabled && (
+                              <>
+                                <input
+                                  type="text"
+                                  aria-label="WHERE filter field"
+                                  value={aggWhereField}
+                                  onChange={(e) => setAggWhereField(e.target.value)}
+                                  placeholder="item property (e.g. savedCents)"
+                                  style={{ width: "140px", padding: "3px 6px", borderRadius: "5px", border: "1px solid #fcd34d", fontFamily: "monospace", fontSize: "0.74rem" }}
+                                />
+                                <select
+                                  aria-label="WHERE filter operator"
+                                  value={aggWhereOp}
+                                  onChange={(e) => setAggWhereOp(e.target.value as SmassAggregateFilterOp)}
+                                  style={{ padding: "3px 5px", borderRadius: "5px", border: "1px solid #fcd34d", fontFamily: "monospace", fontSize: "0.74rem" }}
+                                >
+                                  {AGGREGATE_FILTER_OPS.map((op) => (
+                                    <option key={op} value={op}>{op}</option>
+                                  ))}
+                                </select>
+                                <input
+                                  type="text"
+                                  aria-label="WHERE filter value"
+                                  value={aggWhereValue}
+                                  onChange={(e) => setAggWhereValue(e.target.value)}
+                                  placeholder="value (e.g. 1500000)"
+                                  style={{ width: "120px", padding: "3px 6px", borderRadius: "5px", border: "1px solid #fcd34d", fontFamily: "monospace", fontSize: "0.74rem" }}
+                                />
+                              </>
+                            )}
+                          </div>
                         </div>
                       )
                     ) : (
@@ -2263,12 +2599,20 @@ export function DomainToolsAndModelPanel({
 
                 {entities.map((model) => {
                   const isCustom = customModelIdSet.has(model.id);
+                  const isDraft = model.status === "draft";
+                  const modelDrift = (data.driftIssues ?? []).filter((d) => d.modelId === model.id);
                   const liveSnap = snapshotResults[model.id];
                   return (
                     <article
                       key={model.id}
                       style={{
-                        border: isCustom ? "1px solid #86efac" : "1px solid var(--border, #d4e2da)",
+                        border: modelDrift.length > 0
+                          ? "1px solid #fca5a5"
+                          : isDraft
+                            ? "1px dashed #d97706"
+                            : isCustom
+                              ? "1px solid #86efac"
+                              : "1px solid var(--border, #d4e2da)",
                         borderRadius: "10px",
                         padding: "12px",
                         background: "var(--surface, #fff)",
@@ -2286,12 +2630,48 @@ export function DomainToolsAndModelPanel({
                                 fontSize: "0.68rem",
                                 padding: "2px 7px",
                                 borderRadius: "999px",
-                                background: "#dcfce7",
-                                color: "#155331",
+                                background: isDraft ? "#fef3c7" : "#dcfce7",
+                                color: isDraft ? "#92400e" : "#155331",
                                 fontWeight: 700,
                               }}
                             >
-                              Virtual VDM
+                              {isDraft ? "Draft" : "Published VDM"}
+                            </span>
+                          )}
+                          {model.virtualReadToolRef && !isDraft && (
+                            <span
+                              title="Live compiled sfield read tool — bindable in UI Studio, PZN, CCRE & Agents"
+                              style={{
+                                fontSize: "0.67rem",
+                                padding: "2px 7px",
+                                borderRadius: "999px",
+                                background: "#ecfeff",
+                                color: "#155e75",
+                                border: "1px solid #a5f3fc",
+                                fontFamily: "monospace",
+                                fontWeight: 600,
+                              }}
+                            >
+                              {model.virtualReadToolRef}
+                            </span>
+                          )}
+                          {modelDrift.length > 0 && (
+                            <span
+                              title={modelDrift.map((d) => d.message).join("; ")}
+                              style={{
+                                fontSize: "0.67rem",
+                                padding: "2px 7px",
+                                borderRadius: "999px",
+                                background: "#fee2e2",
+                                color: "#991b1b",
+                                fontWeight: 700,
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "3px",
+                              }}
+                            >
+                              <AlertTriangle size={10} aria-hidden="true" />
+                              Drift ({modelDrift.length})
                             </span>
                           )}
                           {model.unnest && (
@@ -2359,6 +2739,19 @@ export function DomainToolsAndModelPanel({
                               <button
                                 type="button"
                                 className="secondary-button"
+                                onClick={() => void toggleModelStatus(model.id, isDraft ? "published" : "draft")}
+                                style={{
+                                  padding: "3px 7px",
+                                  fontSize: "0.71rem",
+                                  color: isDraft ? "#155331" : "#92400e",
+                                  borderColor: isDraft ? "#86efac" : "#fcd34d",
+                                }}
+                              >
+                                {isDraft ? "Publish" : "Set Draft"}
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary-button"
                                 onClick={() => loadCustomModelIntoBuilder(model.id)}
                                 style={{ padding: "3px 7px", fontSize: "0.71rem", display: "inline-flex", alignItems: "center", gap: "3px" }}
                               >
@@ -2398,7 +2791,23 @@ export function DomainToolsAndModelPanel({
                                 ? `Live VDM Snapshot · ${liveSnap.snapshotId} (${liveSnap.sourceCalls} source call${liveSnap.sourceCalls === 1 ? "" : "s"})`
                                 : `Stale Version Retry · ${liveSnap.message}`}
                             </strong>
-                            <div style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                            <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                              {domainId === "wealth" && (
+                                <select
+                                  aria-label="Test customer persona"
+                                  value={testCustomerId}
+                                  onChange={(e) => {
+                                    const nextCust = e.target.value;
+                                    setTestCustomerId(nextCust);
+                                    void runLiveSnapshotTest(model.id, testRedactPii, nextCust);
+                                  }}
+                                  style={{ padding: "2px 6px", borderRadius: "5px", background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", fontSize: "0.7rem" }}
+                                >
+                                  {WEALTH_PERSONAS.map((p) => (
+                                    <option key={p.id} value={p.id}>{p.label}</option>
+                                  ))}
+                                </select>
+                              )}
                               <label style={{ display: "inline-flex", alignItems: "center", gap: "4px", cursor: "pointer", fontSize: "0.71rem" }}>
                                 <input
                                   type="checkbox"
@@ -2406,7 +2815,7 @@ export function DomainToolsAndModelPanel({
                                   onChange={(e) => {
                                     const checked = e.target.checked;
                                     setTestRedactPii(checked);
-                                    void runLiveSnapshotTest(model.id, checked);
+                                    void runLiveSnapshotTest(model.id, checked, testCustomerId);
                                   }}
                                 />
                                 Redact PII

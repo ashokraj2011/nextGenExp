@@ -64,15 +64,35 @@ export type SmassComputedSpec = {
 export const smassAggregateOpSchema = z.enum(["sum", "avg", "min", "max", "count", "first", "last"]);
 export type SmassAggregateOp = z.infer<typeof smassAggregateOpSchema>;
 
+export const smassAggregateFilterOpSchema = z.enum(["==", "!=", ">", ">=", "<", "<=", "contains"]);
+export type SmassAggregateFilterOp = z.infer<typeof smassAggregateFilterOpSchema>;
+
+export type SmassAggregateFilterSpec = {
+  field: string;
+  op: SmassAggregateFilterOp;
+  value: string | number | boolean;
+};
+
 export type SmassAggregateSpec = {
   op: SmassAggregateOp;
   /** Array field to aggregate over (e.g. `history`). */
   sourceField?: string;
-  /** Optional item property inside each array element (e.g. `savedCents`). */
+  /** Optional item property inside each array element or target entity row (e.g. `savedCents`). */
   itemField?: string;
   /** Multiple scalar fields to aggregate across columns (e.g. `["cashCents", "equityCents"]`). */
   sourceFields?: string[];
+  /** Optional target entity ID for cross-entity rollups across an ER relationship (e.g. `wealth.home_goal`). */
+  targetModelId?: string;
+  /** Optional filter predicate evaluated on each array element or related row before aggregation. */
+  where?: SmassAggregateFilterSpec;
 };
+
+export const smassModelStatusSchema = z.enum(["draft", "published"]);
+export type SmassModelStatus = z.infer<typeof smassModelStatusSchema>;
+
+export function virtualModelReadToolRef(modelId: string, version = "1.0.0"): string {
+  return `smass.${modelId}.read@${version}`;
+}
 
 export type SmassRelationSpec = {
   name: string;
@@ -177,6 +197,10 @@ export type SmassToolBackedModel = {
   label: string;
   description?: string;
   primaryKey?: string;
+  /** Governance status for virtual models (draft models stay testable in studio; published models project into UI/rules/MCP). */
+  status?: SmassModelStatus;
+  /** When true, exposes this virtual model as an executable read tool (`smass.<id>.read@<version>`) so derived/aggregate/unnest columns bind cleanly downstream. */
+  exposeAsTool?: boolean;
   sources: Record<string, { toolRef: string; description?: string }>;
   /** When set, normalizes a nested JSON array (1:N) or nested object (1:1) into relational child rows. */
   unnest?: SmassUnnestSpec;
@@ -255,6 +279,8 @@ export type SmassModelSummary = {
   label: string;
   description?: string;
   mode: "tool_backed" | "store_backed";
+  status: SmassModelStatus;
+  virtualReadToolRef?: string;
   primaryKey?: string;
   unnest?: SmassUnnestSpec;
   toolRefs: string[];

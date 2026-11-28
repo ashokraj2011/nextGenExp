@@ -1,22 +1,24 @@
 import type { ToolDefinition } from "@sfield/core";
-import type {
-  SmassActionSpec,
-  SmassDataModelGraph,
-  SmassDataModelRelationEdge,
-  SmassDomainModel,
-  SmassExecutionContext,
-  SmassFieldFormat,
-  SmassFieldType,
-  SmassModelFieldSummary,
-  SmassModelSummary,
-  SmassStoreBackedModel,
-  SmassToolDescriptorLike,
+import {
+  virtualModelReadToolRef,
+  type SmassActionSpec,
+  type SmassDataModelGraph,
+  type SmassDataModelRelationEdge,
+  type SmassDomainModel,
+  type SmassExecutionContext,
+  type SmassFieldFormat,
+  type SmassFieldType,
+  type SmassModelFieldSummary,
+  type SmassModelSummary,
+  type SmassStoreBackedModel,
+  type SmassToolDescriptorLike,
 } from "./contracts";
 import {
   compileDomainJsonSchema,
   compileMermaidErDiagram,
   compileModelToSfieldTools,
   describeStoreBackedModelTools,
+  describeVirtualModelTool,
   resolveSchemaPath,
   validateDomainGraph,
   validateToolBackedModel,
@@ -97,6 +99,34 @@ export class SmassDomainRegistry {
     return out;
   }
 
+  /**
+   * Returns closed JSON Schema read tool descriptors (`smass.<modelId>.read@<version>`)
+   * for all tool-backed virtual models with `exposeAsTool: true` (published by default).
+   */
+  describeVirtualModelTools(
+    descriptors: ReadonlyMap<string, SmassToolDescriptorLike>,
+    domain?: string,
+    includeDrafts = false,
+  ): SmassToolDescriptorLike[] {
+    const out: SmassToolDescriptorLike[] = [];
+    for (const model of this.list(domain)) {
+      if (model.mode !== "tool_backed" || !model.exposeAsTool) continue;
+      if (!includeDrafts && model.status === "draft") continue;
+      out.push(describeVirtualModelTool(model, descriptors));
+    }
+    return out;
+  }
+
+  /** Finds a tool-backed virtual model by its generated virtual read toolRef (`smass.<id>.read@<version>`). */
+  findVirtualModelByToolRef(toolRef: string): SmassDomainModel | undefined {
+    for (const model of this.models.values()) {
+      if (model.mode === "tool_backed" && model.exposeAsTool && virtualModelReadToolRef(model.id, model.version) === toolRef) {
+        return model;
+      }
+    }
+    return undefined;
+  }
+
   /** Compiles all store-backed models into executable `@sfield/core` ToolDefinition[]. */
   toSfieldTools(domain?: string): ToolDefinition[] {
     const out: ToolDefinition[] = [];
@@ -142,14 +172,27 @@ export class SmassDomainRegistry {
 
   /**
    * Materializes a canonical, version-stamped virtual snapshot for a registered model
-   * with projection pushdown, computed fields, turn-scoped 1x caching, and minVersion guards.
+   * with projection pushdown, computed fields, cross-entity rollups, turn-scoped 1x caching, and minVersion guards.
    */
   async materializeSnapshot(req: SmassSnapshotRequest): Promise<SmassVirtualSnapshotResult> {
     const model = this.models.get(req.modelId);
     if (!model) {
       throw new Error(`Unknown smass model "${req.modelId}".`);
     }
-    return materializeVirtualSnapshot(model, req);
+    const resolveRelatedModel =
+      req.resolveRelatedModel ??
+      (async (targetModelId: string): Promise<Record<string, unknown>[]> => {
+        if (targetModelId === req.modelId) return [];
+        const relSnap = await this.materializeSnapshot({
+          ...req,
+          modelId: targetModelId,
+          requestedFields: undefined,
+          redactClassifications: undefined,
+        });
+        if (relSnap.status !== "ok") return [];
+        return relSnap.rows ?? [relSnap.data];
+      });
+    return materializeVirtualSnapshot(model, { ...req, resolveRelatedModel });
   }
 
   /** Validates every tool-backed model against live sfield tool descriptors and validates domain relations/lifecycles. */
@@ -176,28 +219,84 @@ export class SmassDomainRegistry {
     const actions: SmassProjectedAction[] = [];
 
     for (const model of this.list(domain)) {
-      const group = `${model.label} (sfield)`;
+      const group = `${model.label} (${model.mode === "tool_backed" && model.exposeAsTool ? "smass VDM" : "sfield"})`;
       if (model.mode === "tool_backed") {
-        for (const field of Object.values(model.fields)) {
-          if (field.principalKey || field.computed || field.aggregate) continue;
-          if (!field.from || !field.from.includes(".")) continue;
-          const dot = field.from.indexOf(".");
-          const slot = field.from.slice(0, dot);
-          const outputPath = field.from.slice(dot + 1);
-          const source = model.sources[slot];
-          if (!source) continue;
-          fields.push({
-            modelId: model.id,
-            toolRef: source.toolRef,
-            outputPath,
-            label: field.label,
-            group: field.group ?? group,
-            ...(field.description ? { description: field.description } : {}),
-            ...(field.supportedFormats ? { supportedFormats: field.supportedFormats } : {}),
-            ...(field.format ? { defaultFormat: field.format } : {}),
-            ...(field.legacyBindingKey ? { legacyBindingKey: field.legacyBindingKey } : {}),
-            exposed: field.exposed !== false,
-          });
+        // Draft virtual models stay isolated in Data Model Studio until published
+        if (model.status === "draft") continue;
+        if (model.exposeAsTool) {
+          const virtualToolRef = virtualModelReadToolRef(model.id, model.version);
+          for (const [key, field] of Object.entries(model.fields)) {
+            if (field.exposed === false) continue;
+            fields.push({
+              modelId: model.id,
+              toolRef: virtualToolRef,
+              outputPath: model.unnest ? `rows[].${key}` : key,
+              label: field.label,
+              group: field.group ?? group,
+              ...(field.description ? { description: field.description } : {}),
+              ...(field.supportedFormats ? { supportedFormats: field.supportedFormats } : {}),
+              ...(field.format ? { defaultFormat: field.format } : {}),
+              exposed: true,
+            });
+          }
+          if (model.unnest) {
+            fields.push({
+              modelId: model.id,
+              toolRef: virtualToolRef,
+              outputPath: "rows",
+              label: `${model.label} (table rows)`,
+              group,
+              supportedFormats: ["series"],
+              defaultFormat: "series",
+              exposed: true,
+            });
+          } else {
+            // Also project flattened/mapped source paths on underlying tools so existing cards bound to raw tools can bind flattened paths directly
+            for (const field of Object.values(model.fields)) {
+              if (field.principalKey || field.computed || field.aggregate || field.exposed === false) continue;
+              if (!field.from || !field.from.includes(".")) continue;
+              const dot = field.from.indexOf(".");
+              const slot = field.from.slice(0, dot);
+              const outputPath = field.from.slice(dot + 1);
+              if (outputPath.includes("[]")) continue;
+              const source = model.sources[slot];
+              if (!source) continue;
+              fields.push({
+                modelId: model.id,
+                toolRef: source.toolRef,
+                outputPath,
+                label: field.label,
+                group: field.group ?? group,
+                ...(field.description ? { description: field.description } : {}),
+                ...(field.supportedFormats ? { supportedFormats: field.supportedFormats } : {}),
+                ...(field.format ? { defaultFormat: field.format } : {}),
+                ...(field.legacyBindingKey ? { legacyBindingKey: field.legacyBindingKey } : {}),
+                exposed: true,
+              });
+            }
+          }
+        } else {
+          for (const field of Object.values(model.fields)) {
+            if (field.principalKey || field.computed || field.aggregate) continue;
+            if (!field.from || !field.from.includes(".")) continue;
+            const dot = field.from.indexOf(".");
+            const slot = field.from.slice(0, dot);
+            const outputPath = field.from.slice(dot + 1);
+            const source = model.sources[slot];
+            if (!source) continue;
+            fields.push({
+              modelId: model.id,
+              toolRef: source.toolRef,
+              outputPath,
+              label: field.label,
+              group: field.group ?? group,
+              ...(field.description ? { description: field.description } : {}),
+              ...(field.supportedFormats ? { supportedFormats: field.supportedFormats } : {}),
+              ...(field.format ? { defaultFormat: field.format } : {}),
+              ...(field.legacyBindingKey ? { legacyBindingKey: field.legacyBindingKey } : {}),
+              exposed: field.exposed !== false,
+            });
+          }
         }
       } else {
         const storeModel = model as SmassStoreBackedModel;
@@ -303,6 +402,10 @@ export class SmassDomainRegistry {
 
       for (const action of model.actions ?? []) toolRefs.add(action.toolRef);
 
+      const virtualToolRef =
+        model.mode === "tool_backed" && model.exposeAsTool
+          ? virtualModelReadToolRef(model.id, model.version)
+          : undefined;
       return {
         id: model.id,
         version: model.version,
@@ -310,6 +413,8 @@ export class SmassDomainRegistry {
         label: model.label,
         ...(model.description ? { description: model.description } : {}),
         mode: model.mode,
+        status: model.mode === "tool_backed" ? (model.status ?? "published") : "published",
+        ...(virtualToolRef ? { virtualReadToolRef: virtualToolRef } : {}),
         ...(model.primaryKey ? { primaryKey: model.primaryKey } : {}),
         ...(model.mode === "tool_backed" && model.unnest ? { unnest: model.unnest } : {}),
         toolRefs: [...toolRefs],

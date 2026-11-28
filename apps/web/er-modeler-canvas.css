@@ -162,6 +162,45 @@
   background-image: radial-gradient(circle, rgba(30, 111, 29, 0.16) 1px, transparent 1px);
   background-size: 20px 20px;
   user-select: none;
+  cursor: grab;
+}
+
+.er-canvas-viewport.is-panning {
+  cursor: grabbing;
+}
+
+.er-search-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--paper, #f1f5f2);
+  border: 1px solid var(--border, #d8e4dc);
+}
+
+.er-search-box input {
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 0.74rem;
+  width: 145px;
+  color: var(--ink, #142419);
+}
+
+.er-entity-node.is-draft {
+  border-style: dashed;
+  border-color: #d97706;
+}
+
+.er-entity-node.is-search-match {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.25), 0 10px 24px rgba(15, 36, 23, 0.14);
+}
+
+.er-entity-node.is-search-dimmed {
+  opacity: 0.32;
+  filter: grayscale(40%);
 }
 
 .er-canvas-viewport.is-drag-over {

@@ -1,18 +1,19 @@
 import { defineTool, type JsonObject, type JsonSchema, type ToolDefinition } from "@sfield/core";
-import type {
-  SmassActionParamSpec,
-  SmassActionSpec,
-  SmassClassification,
-  SmassDataModelRelationEdge,
-  SmassDomainModel,
-  SmassFieldSpec,
-  SmassFieldType,
-  SmassItemFieldSpec,
-  SmassModelSummary,
-  SmassRelationCardinality,
-  SmassStoreBackedModel,
-  SmassToolBackedModel,
-  SmassToolDescriptorLike,
+import {
+  virtualModelReadToolRef,
+  type SmassActionParamSpec,
+  type SmassActionSpec,
+  type SmassClassification,
+  type SmassDataModelRelationEdge,
+  type SmassDomainModel,
+  type SmassFieldSpec,
+  type SmassFieldType,
+  type SmassItemFieldSpec,
+  type SmassModelSummary,
+  type SmassRelationCardinality,
+  type SmassStoreBackedModel,
+  type SmassToolBackedModel,
+  type SmassToolDescriptorLike,
 } from "./contracts";
 
 type SchemaFieldInput = {
@@ -273,6 +274,9 @@ export function validateToolBackedModel(
       continue;
     }
     if (field.aggregate) {
+      if (field.aggregate.targetModelId) {
+        continue;
+      }
       const deps = [
         ...(field.aggregate.sourceField ? [field.aggregate.sourceField] : []),
         ...(field.aggregate.sourceFields ?? []),
@@ -281,7 +285,7 @@ export function validateToolBackedModel(
         issues.push({
           modelId: model.id,
           field: fieldKey,
-          message: `Aggregate field "${fieldKey}" must specify sourceField or sourceFields.`,
+          message: `Aggregate field "${fieldKey}" must specify sourceField, sourceFields, or targetModelId.`,
         });
       }
       for (const dep of deps) {
@@ -378,6 +382,16 @@ export function validateDomainGraph(models: readonly SmassDomainModel[]): SmassM
         }
       }
       if (field.aggregate) {
+        if (field.aggregate.targetModelId) {
+          if (!byId.has(field.aggregate.targetModelId)) {
+            issues.push({
+              modelId: model.id,
+              field: fieldKey,
+              message: `Cross-entity rollup "${fieldKey}" references unknown target model "${field.aggregate.targetModelId}".`,
+            });
+          }
+          continue;
+        }
         const deps = [
           ...(field.aggregate.sourceField ? [field.aggregate.sourceField] : []),
           ...(field.aggregate.sourceFields ?? []),
@@ -386,7 +400,7 @@ export function validateDomainGraph(models: readonly SmassDomainModel[]): SmassM
           issues.push({
             modelId: model.id,
             field: fieldKey,
-            message: `Aggregate field "${fieldKey}" must specify sourceField or sourceFields.`,
+            message: `Aggregate field "${fieldKey}" must specify sourceField, sourceFields, or targetModelId.`,
           });
         }
         for (const dep of deps) {
@@ -469,10 +483,15 @@ export function compileMermaidErDiagram(
       if (field.format) notes.push(field.format);
       if (field.computed) notes.push(`computed: ${field.computed.expression}`);
       if (field.aggregate) {
-        const target = field.aggregate.sourceField
-          ? `${field.aggregate.sourceField}${field.aggregate.itemField ? `.${field.aggregate.itemField}` : ""}`
-          : (field.aggregate.sourceFields ?? []).join(", ");
-        notes.push(`agg: ${field.aggregate.op}(${target})`);
+        const target = field.aggregate.targetModelId
+          ? `${field.aggregate.targetModelId}${field.aggregate.itemField ? `.${field.aggregate.itemField}` : ""}`
+          : field.aggregate.sourceField
+            ? `${field.aggregate.sourceField}${field.aggregate.itemField ? `.${field.aggregate.itemField}` : ""}`
+            : (field.aggregate.sourceFields ?? []).join(", ");
+        const wherePart = field.aggregate.where
+          ? ` WHERE ${field.aggregate.where.field} ${field.aggregate.where.op} ${JSON.stringify(field.aggregate.where.value)}`
+          : "";
+        notes.push(`agg: ${field.aggregate.op}(${target}${wherePart})`);
       }
       if (field.enumValues?.length) notes.push(`enum: ${field.enumValues.join("|")}`);
       if (field.principalKey) notes.push(`principal.${field.principalKey}`);
@@ -538,6 +557,8 @@ export function compileDomainJsonSchema(
       properties,
       ...(required.length ? { required } : {}),
       "x-smass-mode": entity.mode,
+      "x-smass-status": entity.status,
+      ...(entity.virtualReadToolRef ? { "x-smass-virtual-tool": entity.virtualReadToolRef } : {}),
       ...(entity.primaryKey ? { "x-smass-primary-key": entity.primaryKey } : {}),
       ...(entity.unnest ? { "x-smass-unnest": entity.unnest } : {}),
       "x-smass-tools": entity.toolRefs,
@@ -550,5 +571,78 @@ export function compileDomainJsonSchema(
     $id: `urn:smass:domain:${domain}`,
     title: `${domain} domain data model`,
     $defs: defs,
+  };
+}
+
+/**
+ * Compiles a tool-backed `smass` Virtual Data Model into a first-class closed JSON Schema
+ * read tool descriptor (`smass.<modelId>.read@<version>`), exposing mapped, renamed,
+ * derived, aggregate, and 1:N unnested columns to `sphoton`, PZN/CCRE, and MCP agents.
+ */
+export function describeVirtualModelTool(
+  model: SmassToolBackedModel,
+  descriptors: ReadonlyMap<string, SmassToolDescriptorLike>,
+): SmassToolDescriptorLike {
+  const ref = virtualModelReadToolRef(model.id, model.version);
+  const { id, version } = splitToolRef(ref);
+  const rowProperties: Record<string, unknown> = {};
+  const rowRequired: string[] = [];
+
+  for (const [key, field] of Object.entries(model.fields)) {
+    let fieldType: SmassFieldType = field.type ?? "string";
+    if (!field.type && field.from?.includes(".")) {
+      const dot = field.from.indexOf(".");
+      const slot = field.from.slice(0, dot);
+      const outputPath = field.from.slice(dot + 1);
+      const toolRef = model.sources[slot]?.toolRef;
+      const resolved = toolRef ? resolveSchemaPath(descriptors.get(toolRef)?.outputs, outputPath) : undefined;
+      if (resolved?.types[0]) fieldType = resolved.types[0];
+    }
+    rowProperties[key] = toJsonSchemaNode({
+      type: fieldType,
+      required: field.required,
+      nullable: field.nullable,
+      description: field.description ?? field.label,
+      enumValues: field.enumValues,
+      items: field.items,
+    });
+    if (field.required || field.primaryKey || model.primaryKey === key) {
+      rowRequired.push(key);
+    }
+  }
+
+  const rowSchema: Record<string, unknown> = {
+    type: "object",
+    additionalProperties: false,
+    properties: rowProperties,
+    ...(rowRequired.length ? { required: rowRequired } : {}),
+  };
+
+  const outputs: Record<string, unknown> = model.unnest
+    ? {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          ...rowProperties,
+          rows: { type: "array", items: rowSchema },
+          rowCount: { type: "integer" },
+        },
+        required: ["rows", "rowCount"],
+      }
+    : rowSchema;
+
+  return {
+    ref,
+    id,
+    version,
+    description: model.description ?? `Virtual smass snapshot read for ${model.label} (${model.id}).`,
+    inputs: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        customerId: { type: "string", description: "Optional scoped customer or persona ID." },
+      },
+    },
+    outputs,
   };
 }

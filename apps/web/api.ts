@@ -225,6 +225,7 @@ export const api = {
       customModels: Array<{
         id: string;
         version: string;
+        status?: import("../../packages/smass").SmassModelStatus;
         label: string;
         description?: string;
         primaryKey?: string;
@@ -274,6 +275,8 @@ export const api = {
               sourceField?: string;
               itemField?: string;
               sourceFields?: string[];
+              targetModelId?: string;
+              where?: import("../../packages/smass").SmassAggregateFilterSpec;
               type: import("../../packages/smass").SmassFieldType;
               format?: import("../../packages/smass").SmassFieldFormat;
               classification: import("../../packages/smass").SmassClassification;
@@ -281,6 +284,12 @@ export const api = {
             }
         >;
       }>;
+      driftIssues: Array<{ modelId: string; field?: string; toolRef?: string; message: string }>;
+      lineage: Record<
+        string,
+        { uiLayouts: string[]; widgets: string[]; ccreRules: string[]; childModels: string[]; virtualToolRef?: string }
+      >;
+      virtualTools: Array<{ toolRef: string; id: string; version: string; description: string; contractFingerprint: string }>;
       dataModel: import("../../packages/smass").SmassDataModelGraph;
       tools: Array<{
         toolRef: string;
@@ -301,6 +310,7 @@ export const api = {
       id: string;
       previousId?: string;
       version?: string;
+      status?: import("../../packages/smass").SmassModelStatus;
       label: string;
       description?: string;
       primaryKey?: string;
@@ -350,6 +360,8 @@ export const api = {
             sourceField?: string;
             itemField?: string;
             sourceFields?: string[];
+            targetModelId?: string;
+            where?: import("../../packages/smass").SmassAggregateFilterSpec;
             type?: import("../../packages/smass").SmassFieldType;
             format?: import("../../packages/smass").SmassFieldFormat;
             classification?: import("../../packages/smass").SmassClassification;
@@ -358,6 +370,10 @@ export const api = {
       >;
     },
   ) => request<Awaited<ReturnType<typeof api.domainModels>>>("/api/admin/domain-models?domain=" + domainId, input),
+  setDomainModelStatus: (
+    domainId: DomainPackId,
+    input: { modelId: string; status: import("../../packages/smass").SmassModelStatus },
+  ) => request<Awaited<ReturnType<typeof api.domainModels>>>("/api/admin/domain-models-status?domain=" + domainId, input),
   deleteDomainModel: (domainId: DomainPackId, modelId: string) =>
     request<Awaited<ReturnType<typeof api.domainModels>>>("/api/admin/domain-models-delete?domain=" + domainId, { modelId }),
   testDomainModelSnapshot: (
