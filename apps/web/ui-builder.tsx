@@ -249,6 +249,14 @@ function slotMetaSummary(slot: LayoutSlot): string {
   return `${slot.metrics.length} metrics${bound ? ` · ${bound} live` : ""}${slot.progressBinding ? " · progress" : ""}`;
 }
 
+function samplePhraseFromTemplate(phrase: string): string {
+  return phrase
+    .replace(/\{\{\s*orderId\s*\}\}/gi, "ORD-1001")
+    .replace(/\{\{\s*incidentId\s*\}\}/gi, "INC-4821")
+    .replace(/\{\{\s*dealId\s*\}\}/gi, "DEAL-904")
+    .replace(/\{\{\s*[^}]+\s*\}\}/g, "DEMO-1001");
+}
+
 function LayoutChatTest({ domainId, design, personaId }: { domainId: DomainPackId; design: UiDesign; personaId?: string }) {
   const [message, setMessage] = useState("");
   const [test, setTest] = useState<{ key: string; pending?: boolean; error?: string; result?: DisplayExperience; matched?: boolean; log?: string }>();
@@ -257,10 +265,17 @@ function LayoutChatTest({ domainId, design, personaId }: { domainId: DomainPackI
   const runId = useRef(0);
   useEffect(() => () => { runId.current++; }, []);
 
-  async function run(start: () => Promise<TurnAccepted & { layoutId?: string }>, followingUp = false) {
+  const samplePhrases = design.experience
+    ? [...new Set(design.experience.actions.flatMap((a) => a.phrases).map(samplePhraseFromTemplate).filter(Boolean))].slice(0, 3)
+    : [];
+
+  async function run(start: () => Promise<TurnAccepted & { layoutId?: string }>, followingUp = false, overrideMessage?: string) {
     if (current?.pending) return;
     const id = ++runId.current;
-    setTest({ key, pending: true, ...(followingUp && { result: current?.result }) });
+    const activeKey = overrideMessage !== undefined
+      ? JSON.stringify([domainId, personaId, design, overrideMessage.trim()])
+      : key;
+    setTest({ key: activeKey, pending: true, ...(followingUp && { result: current?.result }) });
     try {
       const accepted = await start();
       const events = await fetch(accepted.eventsUrl);
@@ -271,20 +286,39 @@ function LayoutChatTest({ domainId, design, personaId }: { domainId: DomainPackI
       const matched = design.experience
         ? Boolean(turn.interactiveExperience?.publication.id === accepted.layoutId || (followingUp && turn.interactiveExperience))
         : (await api.debug(accepted.turnId)).uiLayout?.id === accepted.layoutId;
-      if (runId.current === id) setTest({ key, result: turn.experience, matched,
+      if (runId.current === id) setTest({ key: activeKey, result: turn.experience, matched,
         log: diagnosticHref(adminPaths.logs, accepted.conversation.id, accepted.turnId) });
     } catch (error) {
-      if (runId.current === id) setTest({ key, error: error instanceof Error ? error.message : "The chat test could not finish.",
+      if (runId.current === id) setTest({ key: activeKey, error: error instanceof Error ? error.message : "The chat test could not finish.",
         ...(followingUp && { result: current?.result }) });
     }
   }
 
   return <details className="ui-layout-test" open={design.experience ? true : undefined}>
     <summary>Try a chat turn</summary>
-    <p>{design.experience ? "Enter a matching phrase, then try the actions on the result." : "Run a message through the configured chat and published rules using this draft."}</p>
-    <label>Customer message<input value={message} placeholder={design.experience ? "Enter a chat phrase" : undefined} maxLength={1600}
+    <p>{design.experience ? "Click a suggested phrase below or type a matching phrase to test live end-to-end." : "Run a message through the configured chat and published rules using this draft."}</p>
+    {samplePhrases.length > 0 && (
+      <div className="wiz-test-chips">
+        <span>Quick test:</span>
+        {samplePhrases.map((phrase) => (
+          <button
+            key={phrase}
+            type="button"
+            className="wiz-suggestion-chip"
+            disabled={current?.pending}
+            onClick={() => {
+              setMessage(phrase);
+              void run(() => api.testUiLayout(domainId, design, phrase, personaId), false, phrase);
+            }}
+          >
+            <Sparkles size={11} aria-hidden="true" /> {phrase}
+          </button>
+        ))}
+      </div>
+    )}
+    <label>Customer message<input value={message} placeholder={samplePhrases[0] ?? (design.experience ? "Enter a chat phrase" : undefined)} maxLength={1600}
       onChange={(e) => setMessage(e.target.value)} /></label>
-    <button className="ui-button" type="button" disabled={!message.trim() || current?.pending}
+    <button className="ui-button ui-button-primary ui-compact-btn" type="button" disabled={!message.trim() || current?.pending}
       onClick={() => void run(() => api.testUiLayout(domainId, design, message.trim(), personaId))}>
       {current?.pending ? "Waiting for reply…" : "Send message"}
     </button>
@@ -1309,27 +1343,83 @@ function UiWorkspace({ initial, customers }: {
             <section className="ui-work-card ui-editor" aria-label="Interactive experience setup">
               <fieldset className="ui-editor-content ui-simple-editor" disabled={busy}>
                 <div className="ui-identity-strip">
-                  <input className="ui-name-inline-input" aria-label="Experience name" value={activeDesign.name} maxLength={72}
+                  <input className="ui-name-inline-input" aria-label="Experience name" placeholder="Name your experience (e.g. Order tracking)" value={activeDesign.name} maxLength={72}
                     onChange={(e) => edit({ ...activeDesign, name: e.target.value })} />
                   {record?.published && <button type="button" className="ui-button ui-button-plain ui-compact-btn"
                     onClick={() => void save("unpublish")}>Unpublish</button>}
                 </div>
                 {record?.published && <p className="design-scope">Published revision {record.published.revision}</p>}
-                <label className="ui-experience-description">Description<textarea rows={2} maxLength={maxLayoutDescription}
+                <label className="ui-experience-description">Short description (internal note)<textarea rows={2} maxLength={maxLayoutDescription}
+                  placeholder="Describe when chat should use this interactive experience..."
                   value={activeDesign.description} onChange={(e) => edit({ ...activeDesign, description: e.target.value })} /></label>
-                <InteractiveExperienceEditor key={selected} value={experience} tools={tools} domain={domainId}
-                  change={(next) => edit({ ...activeDesign, experience: next })} />
+                <InteractiveExperienceEditor
+                  key={selected}
+                  value={experience}
+                  tools={tools}
+                  domain={domainId}
+                  onApplyTemplate={(template, meta) => edit({ ...activeDesign, name: meta.name, description: meta.description, experience: template })}
+                  change={(next) => edit({ ...activeDesign, experience: next })}
+                />
               </fieldset>
             </section>
             <section className="ui-work-card ui-preview" aria-label="Experience preview">
               <header className="ui-preview-head">
-                <h2>Experience preview</h2>
-                {record?.published && <a className="ui-chat-link" href={domainId === "wealth" && experience.audience === "operator" ? adminPaths.chat : getDomainPack(domainId).path}>Open chat <ArrowRight size={14} /></a>}
+                <div>
+                  <h2>Experience preview</h2>
+                  <p>Live card blueprint &amp; interactive chat test</p>
+                </div>
+                <div className="ui-preview-head-right">
+                  {domainId === "wealth" && experience.audience === "customer" && customers.length > 0 && (
+                    <select
+                      className="ui-preview-persona"
+                      aria-label="Preview as customer"
+                      value={previewPersonaId}
+                      onChange={(e) => setPreviewPersonaId(e.target.value)}
+                    >
+                      {customers.map(({ personaId, displayName }) => <option value={personaId} key={personaId}>Preview: {displayName}</option>)}
+                    </select>
+                  )}
+                  {record?.published && <a className="ui-chat-link" href={domainId === "wealth" && experience.audience === "operator" ? adminPaths.chat : getDomainPack(domainId).path}>Open chat <ArrowRight size={14} /></a>}
+                </div>
               </header>
-              {domainId === "wealth" && experience.audience === "customer" && customers.length > 0 && <label className="ui-experience-persona">Preview as
-                <select aria-label="Preview as customer" value={previewPersonaId} onChange={(e) => setPreviewPersonaId(e.target.value)}>
-                  {customers.map(({ personaId, displayName }) => <option value={personaId} key={personaId}>{displayName}</option>)}
-                </select></label>}
+              <div className="wiz-live-blueprint" aria-label="Live card blueprint">
+                <div className="wiz-blueprint-kicker">
+                  <span>Live blueprint ({experience.actions.length} screen{experience.actions.length === 1 ? "" : "s"})</span>
+                  <code>{experience.audience}</code>
+                </div>
+                {experience.actions.map((act, idx) => (
+                  <div key={act.id} className="wiz-blueprint-card">
+                    <div className="wiz-blueprint-top">
+                      <strong>{idx + 1}. {act.title || "Untitled card"}</strong>
+                      <span className="wiz-blueprint-tool">{act.taskRef.split("@")[0].split(".").at(-1)}</span>
+                    </div>
+                    {act.description && <p className="wiz-blueprint-intro">{act.description}</p>}
+                    {act.phrases.length > 0 ? (
+                      <div className="wiz-blueprint-triggers">
+                        Triggers: {act.phrases.slice(0, 2).map((p) => <code key={p}>{p}</code>)}
+                      </div>
+                    ) : (
+                      <div className="wiz-blueprint-triggers is-empty">No chat phrase yet — add one in Step 1 (or link via button)</div>
+                    )}
+                    {act.metrics.length > 0 && (
+                      <dl className="wiz-blueprint-metrics">
+                        {act.metrics.map((m, mIdx) => (
+                          <div key={mIdx}>
+                            <dt>{m.label || m.path}</dt>
+                            <dd><code>{`{{${m.path}}}`}</code></dd>
+                          </div>
+                        ))}
+                      </dl>
+                    )}
+                    {act.onClick && (
+                      <div className="wiz-blueprint-cta">
+                        <span className="wiz-blueprint-btn">{act.onClick.label || "Action button"} &rarr;</span>
+                        <small>opens &ldquo;{experience.actions.find((a) => a.id === act.onClick?.action)?.title ?? act.onClick.action}&rdquo;</small>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
               <LayoutChatTest key={selected} domainId={domainId} design={activeDesign} personaId={domainId === "wealth" ? previewPersonaId || undefined : undefined} />
             </section>
           </div>

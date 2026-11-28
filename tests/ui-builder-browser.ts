@@ -136,7 +136,7 @@ try {
   await inspector.getByRole("heading", { name: "Published UI" }).waitFor();
   await inspector.getByText("Compare balances layout", { exact: true }).waitFor();
   await openAdmin(page, "builder");
-  await page.getByRole("button", { name: /^Widget Library/ }).click();
+  await page.getByRole("button", { name: /^Widgets/ }).click();
   await page.getByLabel("Describe the widget or paste a screenshot").fill("Create a net worth KPI card showing $145,000 total assets, $22,000 cash reserve, and +6.4% YTD growth");
   await page.getByRole("button", { name: "Generate widget", exact: true }).click();
   await page.getByText("$145,000", { exact: true }).waitFor();

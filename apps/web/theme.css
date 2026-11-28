@@ -963,3 +963,39 @@
   background: #101512;
   border-color: var(--line);
 }
+
+
+/* Guided Experience Wizard (Dark Mode) */
+:root[data-theme="dark"] .wiz-banner {
+  background: linear-gradient(180deg, #17281b 0%, #141b16 100%);
+  border-color: var(--teal-border);
+}
+:root[data-theme="dark"] .wiz-card,
+:root[data-theme="dark"] .wiz-blueprint-card,
+:root[data-theme="dark"] .wiz-step-pill.is-current,
+:root[data-theme="dark"] .wiz-mode-toggle,
+:root[data-theme="dark"] .wiz-screen-pill,
+:root[data-theme="dark"] .wiz-screen-add {
+  background: #161c18;
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+:root[data-theme="dark"] .wiz-screens-bar,
+:root[data-theme="dark"] .wiz-step-pill,
+:root[data-theme="dark"] .wiz-checklist,
+:root[data-theme="dark"] .wiz-live-blueprint,
+:root[data-theme="dark"] .wiz-blueprint-metrics > div,
+:root[data-theme="dark"] .wiz-field-chip {
+  background: #111613;
+  border-color: var(--line);
+}
+:root[data-theme="dark"] .wiz-tool-note {
+  background: #152218;
+  border-color: var(--teal-border);
+}
+:root[data-theme="dark"] .wiz-field-chip.is-selected,
+:root[data-theme="dark"] .wiz-screen-pill.is-active {
+  background: var(--teal-pale);
+  border-color: var(--teal);
+  color: var(--teal-dark);
+}
