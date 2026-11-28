@@ -466,65 +466,221 @@
 }
 .customer-progress { padding-block: .45rem; color: var(--soft-ink); }
 .thread-updates { margin: 12px auto; width: min(92%, 840px); color: var(--teal-dark); font-size: .85rem; }
-.starter-strip {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0 0 10px;
-}
-.starter-strip-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.starter-strip-label {
+/* MacBook Touch Bar-style single-line expandable starter strip */
+.starter-touchbar {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: .72rem;
-  font-weight: 680;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  color: var(--muted);
+  gap: 4px;
+  max-width: 100%;
+  width: fit-content;
+  margin: 0 0 10px;
+  padding: 4px 5px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(244, 241, 234, 0.85);
+  backdrop-filter: blur(10px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 2px 8px rgba(20, 24, 22, 0.04);
+  transition: background-color 240ms ease, border-color 240ms ease, box-shadow 260ms ease;
 }
-.starter-strip-label svg {
-  color: var(--teal);
+.starter-touchbar.is-expanded {
+  border-color: var(--line-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78), 0 4px 14px rgba(20, 24, 22, 0.07);
 }
-.composer-dock .starter-strip .composer-starters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
+.starter-touchbar-viewport {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+.starter-touchbar-viewport::-webkit-scrollbar {
+  display: none;
+}
+.starter-touchbar-viewport.has-fade-right {
+  -webkit-mask-image: linear-gradient(to right, #000 0%, #000 calc(100% - 28px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 0%, #000 calc(100% - 28px), transparent 100%);
+}
+.starter-touchbar-viewport.has-fade-left {
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 28px, #000 100%);
+  mask-image: linear-gradient(to right, transparent 0%, #000 28px, #000 100%);
+}
+.starter-touchbar-viewport.has-fade-left.has-fade-right {
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 26px, #000 calc(100% - 26px), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0%, #000 26px, #000 calc(100% - 26px), transparent 100%);
+}
+.starter-touchbar .composer-starters.starter-touchbar-track {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
   margin: 0;
-  padding: 0;
+  padding: 1px;
   overflow: visible;
+  width: max-content;
 }
-.composer-dock .starter-strip .starter {
+.starter-touchbar-drawer {
+  display: inline-grid;
+  grid-template-columns: 0fr;
+  flex-shrink: 0;
+  opacity: 0;
+  visibility: hidden;
+  margin-left: -6px;
+  transform: translateX(-8px) scale(0.98);
+  transform-origin: left center;
+  transition:
+    grid-template-columns 380ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 220ms ease,
+    margin-left 380ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 360ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 380ms;
+}
+.starter-touchbar-drawer.is-open {
+  grid-template-columns: 1fr;
+  opacity: 1;
+  visibility: visible;
+  margin-left: 0;
+  transform: translateX(0) scale(1);
+  transition:
+    grid-template-columns 380ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 260ms ease 50ms,
+    margin-left 380ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 360ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0s;
+}
+.starter-touchbar-drawer-inner {
+  overflow: hidden;
+  min-width: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+}
+.starter-touchbar .starter {
   background: var(--white);
-  border: 1px solid var(--line-strong);
+  border: 1px solid rgba(20, 24, 22, 0.1);
   color: var(--ink);
-  min-height: 32px;
-  padding: 5px 12px;
-  font-size: .78rem;
+  min-height: 30px;
+  padding: 4px 12px;
+  font-size: .77rem;
   font-weight: 560;
   border-radius: 999px;
   box-shadow: 0 1px 2px rgba(20, 20, 20, .04);
+  flex-shrink: 0;
 }
-.composer-dock .starter-strip .starter:hover:not(:disabled) {
+.starter-touchbar .starter:hover:not(:disabled) {
   background: var(--teal-pale);
   border-color: var(--teal-border, #9ccbb9);
   color: var(--teal-dark);
-  box-shadow: 0 3px 8px rgba(15, 118, 110, .1);
+  box-shadow: 0 2px 6px rgba(15, 118, 110, .12);
 }
-.editorial-hero-stage .composer-hero .starter-strip {
-  margin: 14px 0 4px;
+.starter-touchbar-controls {
+  display: inline-flex;
   align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding-left: 2px;
+}
+.touchbar-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--line-strong);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+.touchbar-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.touchbar-nudge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--soft-ink);
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease, transform 150ms ease, opacity 150ms ease;
+}
+.touchbar-nudge:hover:not(:disabled) {
+  background: rgba(20, 24, 22, 0.07);
+  color: var(--ink);
+}
+.touchbar-nudge:active:not(:disabled) {
+  transform: scale(0.92);
+}
+.touchbar-nudge:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.touchbar-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: .74rem;
+  font-weight: 650;
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.touchbar-toggle.is-expand {
+  padding: 0 9px 0 10px;
+  background: rgba(20, 24, 22, 0.06);
+  color: var(--soft-ink);
+}
+.touchbar-toggle.is-expand:hover {
+  background: var(--teal-pale);
+  border-color: var(--teal-border, #9ccbb9);
+  color: var(--teal-dark);
+}
+.touchbar-toggle.is-expand:hover svg {
+  transform: translateX(2px);
+}
+.touchbar-toggle.is-expand svg {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.touchbar-more-count {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.01em;
+}
+.touchbar-toggle.is-close {
+  width: 28px;
+  padding: 0;
+  background: rgba(20, 24, 22, 0.1);
+  color: var(--ink);
+}
+.touchbar-toggle.is-close:hover {
+  background: rgba(20, 24, 22, 0.18);
+  transform: scale(1.05);
+}
+.touchbar-toggle:active {
+  transform: scale(0.93);
+}
+.editorial-hero-stage .composer-hero .starter-touchbar {
+  margin: 14px auto 4px;
 }
 .editorial-hero-stage .composer-hero .composer-starters {
-  justify-content: center;
-  flex-wrap: wrap;
+  justify-content: flex-start;
   margin: 0;
-  padding: 0;
-  gap: 8px;
+  padding: 1px;
+  gap: 6px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .starter-touchbar,
+  .starter-touchbar-drawer,
+  .touchbar-toggle,
+  .touchbar-nudge {
+    transition: none !important;
+  }
 }
 .editorial-hero-stage .composer-hero .starter {
   background: #ffffff;
@@ -2194,7 +2350,7 @@
 }
 
 @media (min-width: 1120px) {
-  .customer-workbench .composer-starters { flex-wrap: wrap; overflow: visible; }
+  .customer-workbench .composer-starters:not(.starter-touchbar-track) { flex-wrap: wrap; overflow: visible; }
 }
 
 @media (max-width: 1080px) {
@@ -2289,14 +2445,7 @@
   .wealth-thread .stream-user-row > .profile-avatar { display: none; }
   .wealth-thread .stream-user-body { display: grid; justify-items: end; }
   .wealth-thread .stream-user-body .user-bubble { max-width: min(100%, 29ch); border-radius: 15px 15px 4px 15px; }
-  .wealth-thread .composer-dock .starter-strip { margin-block: 0 8px; }
-  .wealth-thread .composer-dock .starter-strip .composer-starters {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-    padding-bottom: 2px;
-  }
-  .wealth-thread .composer-dock .starter-strip .composer-starters::-webkit-scrollbar { display: none; }
+  .wealth-thread .composer-dock .starter-touchbar { margin-block: 0 8px; width: 100%; }
   .wealth-thread .composer-dock :is(.play-button, .stop-button) { width: 40px; height: 40px; }
   .stream-user-row,
   .stream-assistant-row {

@@ -474,11 +474,36 @@
   background: #344439;
 }
 
+:root[data-theme="dark"] .starter-touchbar {
+  background: rgba(20, 27, 23, 0.92);
+  border-color: var(--line-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 4px 16px rgba(0, 0, 0, 0.34);
+}
+:root[data-theme="dark"] .touchbar-nudge:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--ink);
+}
+:root[data-theme="dark"] .touchbar-toggle.is-expand {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--soft-ink);
+}
+:root[data-theme="dark"] .touchbar-toggle.is-expand:hover {
+  background: var(--teal-pale);
+  border-color: var(--teal-border);
+  color: var(--teal-dark);
+}
+:root[data-theme="dark"] .touchbar-toggle.is-close {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--ink);
+}
+:root[data-theme="dark"] .touchbar-toggle.is-close:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
 :root[data-theme="dark"] .next-suggestion-pill,
 :root[data-theme="dark"] .starter,
-:root[data-theme="dark"] .composer-dock .starter-strip .starter,
+:root[data-theme="dark"] .starter-touchbar .starter,
 :root[data-theme="dark"] .editorial-hero-stage .composer-hero .starter {
-  background: rgba(23, 30, 25, 0.96);
+  background: rgba(29, 38, 32, 0.96);
   border-color: var(--line-strong);
   color: var(--soft-ink);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
@@ -486,7 +511,7 @@
 
 :root[data-theme="dark"] .next-suggestion-pill:hover:not(:disabled),
 :root[data-theme="dark"] .starter:hover:not(:disabled),
-:root[data-theme="dark"] .composer-dock .starter-strip .starter:hover:not(:disabled),
+:root[data-theme="dark"] .starter-touchbar .starter:hover:not(:disabled),
 :root[data-theme="dark"] .starter.starter-personalized:hover:not(:disabled) {
   background: var(--teal-pale);
   border-color: var(--teal-border);

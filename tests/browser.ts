@@ -316,7 +316,7 @@ try {
   const [summaryBox, composerBox] = await Promise.all([aliceSummary.boundingBox(), page.getByLabel("Your question").boundingBox()]);
   assert.ok(summaryBox && composerBox && summaryBox.y + summaryBox.height < composerBox.y);
   await page.screenshot({ path: resolve(screenshots, "welcome-desktop.png") });
-  if (!await page.getByRole("button", { name: /Compare two terms/ }).isVisible()) await page.getByText("Explore suggested questions", { exact: true }).click();
+  if (!await page.getByRole("button", { name: /Compare two terms/ }).isVisible()) await page.getByRole("button", { name: "Show more suggested questions", exact: true }).click();
   await page.getByRole("button", { name: /Compare two terms/ }).click();
   await page.getByRole("heading", { name: "Available vs. current balance", exact: true }).waitFor();
   await page.locator('[data-renderer="a2ui"]').waitFor();
@@ -325,7 +325,7 @@ try {
   assert.equal(await page.getByRole("button", { name: "Compare balance terms", exact: true }).count(), 0);
   await page.getByText("Why do they differ?", { exact: true }).click();
   await page.getByText("Activity can change what’s available to use", { exact: false }).waitFor();
-  assert.equal(await page.getByText("Explore suggested questions", { exact: true }).count(), 0);
+  assert.equal(await page.getByRole("group", { name: "Suggested questions", exact: true }).count(), 0);
   await page.screenshot({ path: resolve(screenshots, "comparison-desktop.png") });
 
   await page.getByText("View sources", { exact: true }).click();
@@ -402,7 +402,7 @@ try {
   await page.getByRole("heading", { name: "Understanding your portfolio" }).waitFor();
 
   await page.getByRole("button", { name: "New conversation", exact: true }).click();
-  if (!await page.getByRole("button", { name: /Guide me through a task/ }).isVisible()) await page.getByText("Explore suggested questions", { exact: true }).click();
+  if (!await page.getByRole("button", { name: /Guide me through a task/ }).isVisible()) await page.getByRole("button", { name: "Show more suggested questions", exact: true }).click();
   await page.getByRole("button", { name: /Guide me through a task/ }).click();
   await page.getByRole("heading", { name: "Transfer checklist" }).waitFor();
   assert.deepEqual(await page.locator(".steps-list h4").allTextContents(), [
@@ -465,7 +465,7 @@ try {
   ]);
   await page.screenshot({ path: resolve(screenshots, "ccre-rule-preview.png"), fullPage: true });
   await page.getByRole("button", { name: "Open draft in chat", exact: true }).click();
-  if (!await page.getByRole("button", { name: /Compare two terms/ }).isVisible()) await page.getByText("Explore suggested questions", { exact: true }).click();
+  if (!await page.getByRole("button", { name: /Compare two terms/ }).isVisible()) await page.getByRole("button", { name: "Show more suggested questions", exact: true }).click();
   await page.getByRole("button", { name: /Compare two terms/ }).click();
   await page.getByText(/available balance is the amount marked ready to use\. Current balance is the total recorded in the ledger\. Which one would you like to understand better\?/i).waitFor();
   await openAdmin(page, "logs");
@@ -556,7 +556,7 @@ try {
   await jordanProfile.getByText("On file", { exact: true }).waitFor();
   await demoProfiles.getByRole("button", { name: "Start chat as Jordan Lee", exact: true }).click();
   await jordanProfileTrigger.waitFor();
-  if (!await portfolioPage.getByRole("button", { name: /Learn about retirement/ }).isVisible()) await portfolioPage.getByText("Explore suggested questions", { exact: true }).click();
+  if (!await portfolioPage.getByRole("button", { name: /Learn about retirement/ }).isVisible()) await portfolioPage.getByRole("button", { name: "Show more suggested questions", exact: true }).click();
   await portfolioPage.getByRole("button", { name: /Learn about retirement/ }).click();
   await portfolioPage.getByRole("heading", { name: "Retirement planning basics", exact: true }).waitFor();
   assert.equal(await portfolioPage.getByRole("heading", { name: "Update your beneficiaries", exact: true }).count(), 0);
@@ -678,7 +678,7 @@ try {
   const marcusProfile = demoProfiles.getByRole("article", { name: "Marcus Reed", exact: true });
   await marcusProfile.getByText("Awaiting first deposit", { exact: true }).waitFor();
   await marcusProfile.getByRole("button", { name: "Start chat as Marcus Reed", exact: true }).click();
-  if (!await portfolioPage.getByRole("button", { name: /Update mailing address/ }).isVisible()) await portfolioPage.getByText("Explore suggested questions", { exact: true }).click();
+  if (!await portfolioPage.getByRole("button", { name: /Update mailing address/ }).isVisible()) await portfolioPage.getByRole("button", { name: "Show more suggested questions", exact: true }).click();
   const addressSubmission = portfolioPage.waitForResponse((r) => r.request().method() === "POST" && /\/conversations\/[^/]+\/turns$/.test(r.url()))
     .then(async (r) => ({ request: r.request().postDataJSON(), response: await r.json() }));
   await portfolioPage.getByRole("button", { name: /Update mailing address/ }).click();
@@ -873,7 +873,7 @@ try {
   await openAdmin(portfolioPage, "chat");
   await portfolioPage.getByRole("button", { name: "Profiles, current profile Marcus Reed", exact: true }).click();
   await marcusProfile.getByRole("button", { name: "Start chat as Marcus Reed", exact: true }).click();
-  if (!await portfolioPage.getByRole("button", { name: /Update mailing address/ }).isVisible()) await portfolioPage.getByText("Explore suggested questions", { exact: true }).click();
+  if (!await portfolioPage.getByRole("button", { name: /Update mailing address/ }).isVisible()) await portfolioPage.getByRole("button", { name: "Show more suggested questions", exact: true }).click();
   await portfolioPage.getByRole("button", { name: /Update mailing address/ }).click();
   await portfolioPage.getByRole("button", { name: "Preview funding", exact: true }).click();
   await portfolioPage.getByText("Which funding method would you like to preview?", { exact: true }).waitFor();
@@ -892,7 +892,7 @@ try {
   goalPage.setDefaultTimeout(12_000);
   goalPage.on("pageerror", (error) => pageErrors.push(error.message));
   await goalPage.goto(preview.url);
-  if (!await goalPage.getByRole("button", { name: /Home-buying goal/ }).isVisible()) await goalPage.getByText("Explore suggested questions", { exact: true }).click();
+  if (!await goalPage.getByRole("button", { name: /Home-buying goal/ }).isVisible()) await goalPage.getByRole("button", { name: "Show more suggested questions", exact: true }).click();
   await goalPage.getByRole("button", { name: /Home-buying goal/ }).click();
   const goal = goalPage.locator('[data-renderer="a2ui"]').getByRole("region", { name: "Home down payment", exact: true });
   const goalValues = goal.locator(".goal-values");
@@ -979,7 +979,7 @@ try {
   await mobileProfiles.getByRole("button", { name: "Close profiles", exact: true }).click();
   await mobileMenu.click();
   await mobile.getByRole("button", { name: "Close conversation navigation" }).click();
-  if (!await mobile.getByRole("button", { name: /Compare two terms/ }).isVisible()) await mobile.getByText("Explore suggested questions", { exact: true }).click();
+  if (!await mobile.getByRole("button", { name: /Compare two terms/ }).isVisible()) await mobile.getByRole("button", { name: "Show more suggested questions", exact: true }).click();
   await mobile.getByRole("button", { name: /Compare two terms/ }).click();
   await mobile.getByRole("heading", { name: "Available vs. current balance", exact: true }).waitFor();
   const columns = await mobile.locator(".compare-column").evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().left));
@@ -1050,7 +1050,7 @@ try {
     await route.fulfill({ response, json: payload });
   });
   await fallback.goto(preview.url + "/chat");
-  if (!await fallback.getByRole("button", { name: /Compare two terms/ }).isVisible()) await fallback.getByText("Explore suggested questions", { exact: true }).click();
+  if (!await fallback.getByRole("button", { name: /Compare two terms/ }).isVisible()) await fallback.getByRole("button", { name: "Show more suggested questions", exact: true }).click();
   await fallback.getByRole("button", { name: /Compare two terms/ }).click();
   await fallback.locator('[data-renderer="fallback"]').waitFor();
   await fallback.getByRole("heading", { name: "Available vs. current balance", exact: true }).waitFor();

@@ -5,8 +5,8 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { MessagePrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import {
-  ArrowUpRight, BookOpenText, Check, Columns2, GraduationCap, House, ListChecks, MapPin,
-  PanelRightOpen, Pin, RotateCcw, Sparkles, ThumbsDown, ThumbsUp,
+  ArrowUpRight, BookOpenText, Check, ChevronLeft, ChevronRight, Columns2, GraduationCap, House, ListChecks, MapPin,
+  PanelRightOpen, Pin, RotateCcw, Sparkles, ThumbsDown, ThumbsUp, X,
 } from "lucide-react";
 import { progressLabels, type NextBestActionCard, type TurnView } from "../../../packages/contracts/api";
 import { api } from "../api";
@@ -22,6 +22,11 @@ import { ConversationControls, homeGoalPrompt, timeFormat } from "./chat-context
 
 export function StarterPrompts({ disabled, adminChat }: { disabled: boolean; adminChat: boolean }) {
   const aui = useAui();
+  const [expanded, setExpanded] = useState(false);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  const viewportRef = useRef<HTMLDivElement>(null);
+
   const starters = [
     ...(adminChat ? [{ Icon: BookOpenText, label: "Create a rule", message: "Create a rule" }] : []),
     { Icon: BookOpenText, label: "Explain a concept", message: "Explain the balance labels." },
@@ -33,22 +38,164 @@ export function StarterPrompts({ disabled, adminChat }: { disabled: boolean; adm
     { Icon: House, label: "Explore a savings plan", message: "I want to buy a house in two years. Show me how close I am and help me explore a savings plan." },
     { Icon: MapPin, label: "Update mailing address", message: "I need to update my mailing address." },
   ];
+
+  const primaryStarters = starters.slice(0, 3);
+  const extraStarters = starters.slice(3);
+
+  const syncScrollState = () => {
+    const el = viewportRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  };
+
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    syncScrollState();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(syncScrollState) : null;
+    ro?.observe(el);
+    const timer = window.setTimeout(syncScrollState, 380);
+    return () => {
+      ro?.disconnect();
+      window.clearTimeout(timer);
+    };
+  }, [expanded, starters.length]);
+
+  const expandBar = () => {
+    setExpanded(true);
+    window.setTimeout(() => {
+      const el = viewportRef.current;
+      if (!el) return;
+      syncScrollState();
+      if (el.scrollWidth > el.clientWidth + 24) {
+        el.scrollBy({ left: 160, behavior: "smooth" });
+      }
+    }, 180);
+  };
+
+  const collapseBar = () => {
+    const el = viewportRef.current;
+    if (el && el.scrollLeft > 0) {
+      el.scrollTo({ left: 0, behavior: "smooth" });
+    }
+    setExpanded(false);
+  };
+
+  const slideBy = (delta: number) => {
+    viewportRef.current?.scrollBy({ left: delta, behavior: "smooth" });
+  };
+
   return (
-    <div className="starter-strip">
-      <div className="starter-strip-header">
-        <span className="starter-strip-label">
-          <Sparkles size={12} aria-hidden="true" />
-          Suggested questions
-        </span>
+    <div
+      className={"starter-touchbar" + (expanded ? " is-expanded" : "")}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && expanded) {
+          event.preventDefault();
+          collapseBar();
+        }
+      }}
+    >
+      <div
+        ref={viewportRef}
+        className={
+          "starter-touchbar-viewport" +
+          (canScrollLeft ? " has-fade-left" : "") +
+          (canScrollRight ? " has-fade-right" : "")
+        }
+        onScroll={syncScrollState}
+      >
+        <div className="composer-starters starter-touchbar-track" role="group" aria-label="Suggested questions">
+          {primaryStarters.map(({ Icon, label, message }) => (
+            <button
+              key={label}
+              type="button"
+              className="starter"
+              disabled={disabled}
+              onClick={() => aui.thread().append(message)}
+            >
+              <Icon size={13} aria-hidden="true" />
+              <span>{label}</span>
+            </button>
+          ))}
+          {extraStarters.length > 0 && (
+            <div
+              className={"starter-touchbar-drawer" + (expanded ? " is-open" : "")}
+              aria-hidden={!expanded}
+            >
+              <div className="starter-touchbar-drawer-inner">
+                {extraStarters.map(({ Icon, label, message }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    className="starter"
+                    disabled={disabled}
+                    tabIndex={expanded ? 0 : -1}
+                    onClick={() => aui.thread().append(message)}
+                  >
+                    <Icon size={13} aria-hidden="true" />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
-      <div className="composer-starters" role="group" aria-label="Suggested questions">
-        {starters.map(({ Icon, label, message }) => (
-          <button key={label} type="button" className="starter" disabled={disabled} onClick={() => aui.thread().append(message)}>
-            <Icon size={14} aria-hidden="true" />
-            <span>{label}</span>
-          </button>
-        ))}
-      </div>
+
+      {extraStarters.length > 0 && (
+        <div className="starter-touchbar-controls">
+          {expanded && (canScrollLeft || canScrollRight) && (
+            <div className="touchbar-nav" aria-label="Slide suggested questions">
+              <button
+                type="button"
+                className="touchbar-nudge"
+                disabled={!canScrollLeft}
+                aria-label="Slide suggestions left"
+                title="Slide left"
+                onClick={() => slideBy(-240)}
+              >
+                <ChevronLeft size={14} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="touchbar-nudge"
+                disabled={!canScrollRight}
+                aria-label="Slide suggestions right"
+                title="Slide right"
+                onClick={() => slideBy(240)}
+              >
+                <ChevronRight size={14} aria-hidden="true" />
+              </button>
+            </div>
+          )}
+          <span className="touchbar-divider" aria-hidden="true" />
+          {!expanded ? (
+            <button
+              type="button"
+              className="touchbar-toggle is-expand"
+              aria-expanded={false}
+              aria-label="Show more suggested questions"
+              title={`Show ${extraStarters.length} more suggestions`}
+              onClick={expandBar}
+            >
+              <span className="touchbar-more-count">+{extraStarters.length}</span>
+              <ChevronRight size={14} aria-hidden="true" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="touchbar-toggle is-close"
+              aria-expanded={true}
+              aria-label="Collapse suggested questions"
+              title="Collapse back to top 3"
+              onClick={collapseBar}
+            >
+              <X size={13} aria-hidden="true" />
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
