@@ -1,4 +1,7 @@
-import { domainPackIds } from "../../packages/contracts/domain-packs";
+import { randomUUID } from "node:crypto";
+import { domainPackIds, type DomainPackId } from "../../packages/contracts/domain-packs";
+import { createPinnedCardSchema, type PinnedLiveCard } from "../../packages/contracts/pinned-cards";
+import { inferPinnedCardToolRefs, refreshPinnedCardLive } from "./pinned-cards-live";
 import { createStudioHandler } from "@sfield/studio";
 import { handleAdminStudioRoutes, isExperienceRegistryEndpoint } from "./routes/admin-studio";
 import { handleCollaborationAndProtocolRoutes } from "./routes/collaboration";
@@ -1220,6 +1223,83 @@ export async function startApp(options: Options) {
         const deleted = goalStore.delete(id, input.personaId);
         if (!deleted) throw new ApiError(404, "goal_not_found", "Goal not found.");
         return json(res, { deleted: true, goals: goalStore.list(input.personaId) });
+      }
+    }
+    if (resource === "pinned-cards") {
+      const resolveOwnerKey = (domainId: DomainPackId, personaId?: string) =>
+        domainId === "wealth" ? `persona:${personaId || demo.defaultPersonaId}` : `domain:${domainId}`;
+      const parseDomainParam = (raw?: string | null): DomainPackId =>
+        raw === "it_ops" || raw === "sales_revops" || raw === "wealth" ? raw : "wealth";
+      const refreshDeps = {
+        portfolioSnapshots,
+        goalProgressProvider,
+        opsStore,
+        salesStore,
+        now,
+      };
+      if (method === "GET" && !id) {
+        const domainId = parseDomainParam(url.searchParams.get("domain"));
+        const personaId = url.searchParams.get("personaId") || undefined;
+        const ownerKey = resolveOwnerKey(domainId, personaId);
+        const live = url.searchParams.get("live") !== "0";
+        const stored = store.listPinnedCards(ownerKey, domainId);
+        const cards = live
+          ? await Promise.all(stored.map(async (c) => {
+              const fresh = await refreshPinnedCardLive(c, refreshDeps);
+              store.savePinnedCard(ownerKey, fresh);
+              return fresh;
+            }))
+          : stored;
+        return json(res, { cards });
+      }
+      if (method === "POST" && !id) {
+        const input = await body(req, createPinnedCardSchema, 192 * 1024);
+        const ownerKey = resolveOwnerKey(input.domainId, input.personaId);
+        const exp = input.experience as unknown as import("../../packages/contracts/surface").DisplayExperience;
+        const toolRefs = input.toolRefs?.length ? input.toolRefs : inferPinnedCardToolRefs(exp, input.domainId);
+        const timestamp = now();
+        const card: PinnedLiveCard = {
+          id: "pin_" + randomUUID().replace(/-/g, "").slice(0, 14),
+          domainId: input.domainId,
+          ...(input.personaId ? { personaId: input.personaId } : {}),
+          title: input.title,
+          prompt: input.prompt,
+          ...(input.sourceTurnId ? { sourceTurnId: input.sourceTurnId } : {}),
+          toolRefs,
+          experience: exp,
+          createdAt: timestamp,
+          refreshedAt: timestamp,
+          liveBacked: toolRefs.length > 0,
+        };
+        store.savePinnedCard(ownerKey, card);
+        return json(res, { card, cards: store.listPinnedCards(ownerKey, input.domainId) }, 201);
+      }
+      if (id && method === "POST" && operation === "refresh") {
+        const input = await body(req, z.object({
+          domainId: z.enum(domainPackIds).default("wealth"),
+          personaId: z.string().trim().min(1).max(80).optional(),
+        }).strict());
+        const ownerKey = resolveOwnerKey(input.domainId, input.personaId);
+        const existing = store.getPinnedCard(id, ownerKey);
+        if (!existing) throw new ApiError(404, "pinned_card_not_found", "Pinned card not found.");
+        const refreshed = await refreshPinnedCardLive(existing, refreshDeps);
+        store.savePinnedCard(ownerKey, refreshed);
+        return json(res, { card: refreshed, cards: store.listPinnedCards(ownerKey, input.domainId) });
+      }
+      if (id && ((method === "POST" && operation === "delete") || method === "DELETE")) {
+        const input = method === "POST"
+          ? await body(req, z.object({
+              domainId: z.enum(domainPackIds).default("wealth"),
+              personaId: z.string().trim().min(1).max(80).optional(),
+            }).strict())
+          : {
+              domainId: parseDomainParam(url.searchParams.get("domain")),
+              personaId: url.searchParams.get("personaId") || undefined,
+            };
+        const ownerKey = resolveOwnerKey(input.domainId, input.personaId);
+        const deleted = store.deletePinnedCard(id, ownerKey);
+        if (!deleted) throw new ApiError(404, "pinned_card_not_found", "Pinned card not found.");
+        return json(res, { deleted: true, cards: store.listPinnedCards(ownerKey, input.domainId) });
       }
     }
     if (resource === "admin" && id === "recent-turns" && !operation && method === "GET" && inspectorEnabled) {

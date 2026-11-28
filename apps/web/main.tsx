@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createRoot } from "react-dom/client";
 import type { ActionMessage } from "@a2ui/web_core/v1_0";
 import {
-  ArrowLeft, ChevronDown, ChevronRight, Eye, LayoutDashboard, LogIn, LogOut, PanelLeft, PanelLeftClose, Plus, Sparkles, X,
+  ArrowLeft, ChevronDown, ChevronRight, Eye, LayoutDashboard, LogIn, LogOut, PanelLeft, PanelLeftClose, Pin, Plus, Sparkles, X,
 } from "lucide-react";
 import {
   progressLabels, type Bootstrap, type Conversation, type ConversationChange, type ConversationFolder, type ConversationView,
@@ -28,6 +28,7 @@ import { FolderSettings, ThreadList, ThreadSettings, type ThreadBadge } from "./
 import type { HandoffTicket } from "../../packages/contracts/handoff";
 import { isHandoffPhrase, MemoryDrawer, type MemoryEntry } from "./chat-rich-ux";
 import type { ExpertiseMode, Watchcard } from "../../packages/contracts/nextgen-chat";
+import type { PinnedLiveCard } from "../../packages/contracts/pinned-cards";
 import { ChatToolsMenu, ConsumerA2aDrawer } from "./nextgen-chat-features";
 import { buildWealthDomContext, messageFor } from "./chat/chat-context";
 import { Chat } from "./chat/chat-thread";
@@ -111,6 +112,9 @@ function App() {
   const [watchcards, setWatchcards] = useState<Watchcard[]>([]);
   const [watchCreatorOpen, setWatchCreatorOpen] = useState(false);
   const [delegateOpen, setDelegateOpen] = useState(false);
+  const [pinnedCards, setPinnedCards] = useState<PinnedLiveCard[]>([]);
+  const [activePinnedCardId, setActivePinnedCardId] = useState<string | undefined>(undefined);
+  const [refreshingCardId, setRefreshingCardId] = useState<string | undefined>(undefined);
   const inFlight = useRef(false);
   const previousAttempt = useRef<{ fingerprint: string; id: string } | null>(null);
   const profilesTrigger = useRef<HTMLButtonElement>(null);
@@ -511,6 +515,7 @@ function App() {
     });
   };
   const revealChat = (row: ConversationView) => {
+    setActivePinnedCardId(undefined);
     setSection("summary");
     choose(row);
     if (!adminChat && !row.turns.length) pendingActions.refresh();
@@ -731,6 +736,81 @@ function App() {
     };
   }, [activeProfile?.personaId, adminChat, domainPack.id]);
 
+  useEffect(() => {
+    if (adminChat) return;
+    let alive = true;
+    setActivePinnedCardId(undefined);
+    void api.pinnedCards(domainPack.id, activeProfile?.personaId, true)
+      .then((res) => { if (alive) setPinnedCards(res.cards); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [adminChat, domainPack.id, activeProfile?.personaId]);
+
+  const activePinnedCard = useMemo(
+    () => pinnedCards.find((c) => c.id === activePinnedCardId),
+    [pinnedCards, activePinnedCardId],
+  );
+
+  const clipTurnToMenu = useCallback(async (turn: TurnView) => {
+    if (!turn.experience) return;
+    const existing = pinnedCards.find((c) => c.sourceTurnId === turn.id);
+    if (existing) {
+      setActivePinnedCardId(existing.id);
+      setRailOpen(false);
+      return;
+    }
+    const firstBlock = turn.experience.blocks[0];
+    const derivedTitle = (firstBlock && "props" in firstBlock && "title" in firstBlock.props && typeof firstBlock.props.title === "string" && firstBlock.props.title.trim())
+      ? firstBlock.props.title.trim()
+      : firstBlock?.component === "PznPortfolioSnapshot" ? "Portfolio Snapshot"
+      : firstBlock?.component === "PznGoalProgress" ? "Home-Buying Goal"
+      : firstBlock?.component === "PznMetricSummary" ? "Account Balances"
+      : turn.message.slice(0, 60);
+    try {
+      const res = await api.pinCardToMenu({
+        domainId: domainPack.id,
+        ...(activeProfile?.personaId ? { personaId: activeProfile.personaId } : {}),
+        title: derivedTitle,
+        prompt: turn.message,
+        sourceTurnId: turn.id,
+        experience: turn.experience as unknown as Record<string, unknown>,
+      });
+      setPinnedCards(res.cards);
+      setNotice(`Pinned "${res.card.title}" to your Main Menu as a live card.`);
+    } catch (err) {
+      setNotice(messageFor(err));
+    }
+  }, [pinnedCards, domainPack.id, activeProfile?.personaId]);
+
+  const refreshPinnedCard = useCallback(async (card: PinnedLiveCard) => {
+    setRefreshingCardId(card.id);
+    try {
+      const res = await api.refreshPinnedCard(card.id, domainPack.id, activeProfile?.personaId);
+      setPinnedCards(res.cards);
+    } catch (err) {
+      setNotice(messageFor(err));
+    } finally {
+      setRefreshingCardId(undefined);
+    }
+  }, [domainPack.id, activeProfile?.personaId]);
+
+  const openPinnedCard = useCallback((card: PinnedLiveCard) => {
+    setActivePinnedCardId(card.id);
+    setRailOpen(false);
+    setNotice("");
+    void refreshPinnedCard(card);
+  }, [refreshPinnedCard]);
+
+  const unpinCardFromMenu = useCallback(async (card: PinnedLiveCard) => {
+    try {
+      const res = await api.unpinCardFromMenu(card.id, domainPack.id, activeProfile?.personaId);
+      setPinnedCards(res.cards);
+      if (activePinnedCardId === card.id) setActivePinnedCardId(undefined);
+    } catch (err) {
+      setNotice(messageFor(err));
+    }
+  }, [domainPack.id, activeProfile?.personaId, activePinnedCardId]);
+
   const modelStatus = adminChat
     ? (configuration?.gatewayConfigured ? "Model connected" : "Model offline")
     : configuration?.gatewayConfigured ? (configuration.copilotModel || configuration.openAiModel
@@ -757,8 +837,9 @@ function App() {
         <Plus size={17} aria-hidden="true" />New conversation
       </button>
       <div className="rail-section rail-workbench-nav">
-        <button type="button" className="rail-link rail-overview" aria-current={!chat ? "page" : undefined} disabled={pending}
+        <button type="button" className="rail-link rail-overview" aria-current={!chat && !activePinnedCard ? "page" : undefined} disabled={pending}
           onClick={() => {
+            setActivePinnedCardId(undefined);
             setOverviewOpen(true);
             setSection("summary");
             setRailOpen(false);
@@ -768,6 +849,36 @@ function App() {
           <LayoutDashboard size={16} aria-hidden="true" />Overview
         </button>
       </div>
+      {!adminChat && pinnedCards.length > 0 && (
+        <section className="rail-section rail-pinned-cards" aria-label="Pinned live cards">
+          <h2><Pin size={12} aria-hidden="true" /> Pinned Cards</h2>
+          <nav>
+            {pinnedCards.map((card) => (
+              <div key={card.id} className="rail-pinned-row">
+                <button
+                  type="button"
+                  className="rail-link"
+                  aria-current={activePinnedCardId === card.id ? "page" : undefined}
+                  title={`${card.title} · Live card`}
+                  onClick={() => openPinnedCard(card)}
+                >
+                  <span className="living-sync-dot" aria-hidden="true" />
+                  <span>{card.title}</span>
+                </button>
+                <button
+                  type="button"
+                  className="icon-button rail-pinned-remove"
+                  aria-label={`Unpin ${card.title}`}
+                  title="Unpin from menu"
+                  onClick={() => void unpinCardFromMenu(card)}
+                >
+                  <X size={13} aria-hidden="true" />
+                </button>
+              </div>
+            ))}
+          </nav>
+        </section>
+      )}
       {simpleWealthHeader && <div className="rail-mobile-shortcuts">
         <WorkspaceMenu sidebar pins={pins} section={activeSection} disabled={!configuration}
           onSelect={(next) => {
@@ -799,6 +910,7 @@ function App() {
             {domainPack.id === "wealth"
               ? planningTopics.map(({ id, name, prompt, Icon }) => (
                   <button key={id} type="button" className="rail-link" disabled={!canRunRailActions} onClick={() => {
+                    setActivePinnedCardId(undefined);
                     setRailOpen(false);
                     void send(prompt);
                   }}>
@@ -807,6 +919,7 @@ function App() {
                 ))
               : domainPack.topics.map(({ id, name, prompt }) => (
                   <button key={id} type="button" className="rail-link" disabled={!canRunRailActions} onClick={() => {
+                    setActivePinnedCardId(undefined);
                     setRailOpen(false);
                     void send(prompt);
                   }}>
@@ -1039,7 +1152,15 @@ function App() {
         onWatchcardsChange={setWatchcards}
         watchCreatorOpen={watchCreatorOpen}
         onToggleWatchCreator={(open) => setWatchCreatorOpen((v) => (open === undefined ? !v : open))}
-        onOpenDelegate={() => setDelegateOpen(true)} />
+        onOpenDelegate={() => setDelegateOpen(true)}
+        pinnedCards={pinnedCards}
+        activePinnedCard={activePinnedCard}
+        refreshingCardId={refreshingCardId}
+        onClipToMenu={(t) => void clipTurnToMenu(t)}
+        onOpenPinnedCard={openPinnedCard}
+        onRefreshPinnedCard={(c) => void refreshPinnedCard(c)}
+        onUnpinCard={(c) => void unpinCardFromMenu(c)}
+        onClosePinnedCard={() => setActivePinnedCardId(undefined)} />
     </main>
     <ConsumerA2aDrawer
       open={delegateOpen}

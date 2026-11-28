@@ -5,8 +5,8 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { MessagePrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import {
-  ArrowUpRight, BookOpenText, Columns2, GraduationCap, House, ListChecks, MapPin,
-  PanelRightOpen, RotateCcw, Sparkles, ThumbsDown, ThumbsUp,
+  ArrowUpRight, BookOpenText, Check, Columns2, GraduationCap, House, ListChecks, MapPin,
+  PanelRightOpen, Pin, RotateCcw, Sparkles, ThumbsDown, ThumbsUp,
 } from "lucide-react";
 import { progressLabels, type NextBestActionCard, type TurnView } from "../../../packages/contracts/api";
 import { api } from "../api";
@@ -156,8 +156,8 @@ const replyParts = { Text: ReplyText };
 export function AssistantMessage() {
   const turn = useAuiState((state) => state.message.metadata.custom?.turn as TurnView | undefined);
   const {
-    latest, pending, adminChat, activeProfile, progressHistory, expertiseMode, pinnedTurnId,
-    pinCanvas, branchTurn, retry, feedback, followTurn, runPrompt, previewFunding,
+    latest, pending, adminChat, activeProfile, progressHistory, expertiseMode, pinnedTurnId, pinnedMenuTurnIds,
+    pinCanvas, clipToMenu, branchTurn, retry, feedback, followTurn, runPrompt, previewFunding,
   } = useContext(ConversationControls);
   const element = useRef<HTMLDivElement>(null);
   const [arrivedLive] = useState(turn?.status === "working");
@@ -231,15 +231,32 @@ export function AssistantMessage() {
             <footer className="reply-footer">
               <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                 {experience.blocks.length > 0 && (
-                  <button
-                    type="button"
-                    className={"reply-canvas-btn" + (pinnedTurnId === turn.id ? " is-active" : "")}
-                    aria-pressed={pinnedTurnId === turn.id}
-                    onClick={() => pinCanvas(turn)}
-                  >
-                    <PanelRightOpen size={13} aria-hidden="true" />
-                    {pinnedTurnId === turn.id ? "In Living Canvas" : "Open in Canvas"}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className={"reply-canvas-btn" + (pinnedTurnId === turn.id ? " is-active" : "")}
+                      aria-pressed={pinnedTurnId === turn.id}
+                      onClick={() => pinCanvas(turn)}
+                    >
+                      <PanelRightOpen size={13} aria-hidden="true" />
+                      {pinnedTurnId === turn.id ? "In Living Canvas" : "Open in Canvas"}
+                    </button>
+                    {!adminChat && clipToMenu && (() => {
+                      const alreadyPinned = Boolean(pinnedMenuTurnIds?.has(turn.id));
+                      return (
+                        <button
+                          type="button"
+                          className={"reply-canvas-btn" + (alreadyPinned ? " is-active" : "")}
+                          aria-pressed={alreadyPinned}
+                          title={alreadyPinned ? "Pinned permanently in your Main Menu as a live card" : "Clip this UI card permanently to your Main Menu (stays live)"}
+                          onClick={() => clipToMenu(turn)}
+                        >
+                          {alreadyPinned ? <Check size={13} aria-hidden="true" /> : <Pin size={13} aria-hidden="true" />}
+                          {alreadyPinned ? "Pinned to Menu" : "Pin to Menu"}
+                        </button>
+                      );
+                    })()}
+                  </>
                 )}
                 <TurnRichActions
                   turn={turn}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Brain, Check, CheckCircle2, ChevronLeft, ChevronRight, Copy, Download, Ellipsis, GitBranch, Headphones, Lock, PanelRightOpen,
-  Plus, Search, Send, Sparkles, Table2, Trash2, UserCheck, X,
+  Pin, Plus, Search, Send, Sparkles, Table2, Trash2, UserCheck, X,
 } from "lucide-react";
 import type { TurnView } from "../../packages/contracts/api";
 import type { HandoffTicket } from "../../packages/contracts/handoff";
@@ -489,6 +489,8 @@ export function LiveCanvasPane({
   totalCards = 1,
   onSelectOffset,
   onRefine,
+  onClipToMenu,
+  pinnedToMenu = false,
   pending = false,
 }: {
   turn: TurnView;
@@ -499,6 +501,8 @@ export function LiveCanvasPane({
   totalCards?: number;
   onSelectOffset?: (delta: -1 | 1) => void;
   onRefine?: (prompt: string) => void;
+  onClipToMenu?: (turn: TurnView) => void;
+  pinnedToMenu?: boolean;
   pending?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
@@ -521,6 +525,17 @@ export function LiveCanvasPane({
           <strong title={turn.message}>{turn.message.slice(0, 64)}{turn.message.length > 64 ? "…" : ""}</strong>
         </div>
         <div className="live-canvas-controls">
+          {onClipToMenu && (
+            <button
+              type="button"
+              className={"rich-action-chip" + (pinnedToMenu ? " is-active" : "")}
+              title="Keep this live card permanently in your Main Menu"
+              onClick={() => onClipToMenu(turn)}
+            >
+              {pinnedToMenu ? <Check size={12} /> : <Pin size={12} />}
+              {pinnedToMenu ? "Pinned" : "Pin to Menu"}
+            </button>
+          )}
           <button
             type="button"
             className="rich-action-chip"

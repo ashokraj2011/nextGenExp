@@ -261,6 +261,16 @@ export class Store {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS analytics_rendered ON analytics(experience_id, event_type)
         WHERE event_type IN ('rendered', 'render_fallback');
+      CREATE TABLE IF NOT EXISTS pinned_live_cards (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        owner_key TEXT NOT NULL,
+        domain_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        refreshed_at INTEGER NOT NULL,
+        record TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS pinned_cards_owner ON pinned_live_cards(tenant_id, owner_key, domain_id, created_at);
       UPDATE conversations SET record = json_set(record, '$.audience', 'admin')
         WHERE json_extract(record, '$.audience') IS NULL AND id IN (
           SELECT conversation_id FROM turns WHERE json_extract(record, '$.trace.intentId') = 'create_rule'
@@ -1318,6 +1328,60 @@ export class Store {
       feedbackHelpful: counts.helpful ?? 0,
       feedbackUnhelpful: counts.unhelpful ?? 0,
     };
+  }
+
+  listPinnedCards(ownerKey: string, domainId?: DomainPackId): import("../../packages/contracts/pinned-cards").PinnedLiveCard[] {
+    const rows = domainId
+      ? this.db.all<{ record: string }>(
+          "SELECT record FROM pinned_live_cards WHERE tenant_id = ? AND owner_key = ? AND domain_id = ? ORDER BY created_at DESC",
+          serverTenantId,
+          ownerKey,
+          domainId,
+        )
+      : this.db.all<{ record: string }>(
+          "SELECT record FROM pinned_live_cards WHERE tenant_id = ? AND owner_key = ? ORDER BY created_at DESC",
+          serverTenantId,
+          ownerKey,
+        );
+    return rows.map((row) => parse<import("../../packages/contracts/pinned-cards").PinnedLiveCard>(row)!).filter(Boolean);
+  }
+
+  getPinnedCard(id: string, ownerKey: string): import("../../packages/contracts/pinned-cards").PinnedLiveCard | undefined {
+    const row = this.db.one<{ record: string }>(
+      "SELECT record FROM pinned_live_cards WHERE id = ? AND tenant_id = ? AND owner_key = ?",
+      id,
+      serverTenantId,
+      ownerKey,
+    );
+    return parse<import("../../packages/contracts/pinned-cards").PinnedLiveCard>(row);
+  }
+
+  savePinnedCard(ownerKey: string, card: import("../../packages/contracts/pinned-cards").PinnedLiveCard) {
+    this.db.run(
+      `INSERT INTO pinned_live_cards (id, tenant_id, owner_key, domain_id, created_at, refreshed_at, record)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET refreshed_at = excluded.refreshed_at, record = excluded.record`,
+      card.id,
+      serverTenantId,
+      ownerKey,
+      card.domainId,
+      card.createdAt,
+      card.refreshedAt,
+      JSON.stringify(card),
+    );
+    return card;
+  }
+
+  deletePinnedCard(id: string, ownerKey: string): boolean {
+    const existing = this.getPinnedCard(id, ownerKey);
+    if (!existing) return false;
+    this.db.run(
+      "DELETE FROM pinned_live_cards WHERE id = ? AND tenant_id = ? AND owner_key = ?",
+      id,
+      serverTenantId,
+      ownerKey,
+    );
+    return true;
   }
 
   close() {

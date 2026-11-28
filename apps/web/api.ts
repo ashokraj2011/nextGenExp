@@ -155,6 +155,25 @@ export type Trace = {
   failures: { stage: string; code: string }[];
 };
 export const api = {
+  pinnedCards: (domainId: DomainPackId, personaId?: string, live = true) =>
+    request<{ cards: import("../../packages/contracts/pinned-cards").PinnedLiveCard[] }>(
+      `/api/pinned-cards?domain=${encodeURIComponent(domainId)}${personaId ? `&personaId=${encodeURIComponent(personaId)}` : ""}${live ? "&live=1" : ""}`,
+    ),
+  pinCardToMenu: (input: import("../../packages/contracts/pinned-cards").CreatePinnedCardInput) =>
+    request<{ card: import("../../packages/contracts/pinned-cards").PinnedLiveCard; cards: import("../../packages/contracts/pinned-cards").PinnedLiveCard[] }>(
+      "/api/pinned-cards",
+      input,
+    ),
+  refreshPinnedCard: (cardId: string, domainId: DomainPackId, personaId?: string) =>
+    request<{ card: import("../../packages/contracts/pinned-cards").PinnedLiveCard; cards: import("../../packages/contracts/pinned-cards").PinnedLiveCard[] }>(
+      `/api/pinned-cards/${encodeURIComponent(cardId)}/refresh`,
+      { domainId, ...(personaId ? { personaId } : {}) },
+    ),
+  unpinCardFromMenu: (cardId: string, domainId: DomainPackId, personaId?: string) =>
+    request<{ deleted: boolean; cards: import("../../packages/contracts/pinned-cards").PinnedLiveCard[] }>(
+      `/api/pinned-cards/${encodeURIComponent(cardId)}/delete`,
+      { domainId, ...(personaId ? { personaId } : {}) },
+    ),
   profileOptions: () => request<{ profiles: ProfileChoice[] }>("/api/profile-options"),
   selectProfile: (personaId: string | null) => request<{ personaId: string | null }>("/api/profile-session", { personaId }),
   bootstrap: (domainId: Conversation["domainId"] = "wealth") => request<Bootstrap>("/api/bootstrap?domain=" + domainId),

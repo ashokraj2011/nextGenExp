@@ -10,12 +10,14 @@ import type { DomainPack } from "../../../packages/contracts/domain-packs";
 import type { GoalSavingsProjection } from "../../../packages/contracts/goal-progress";
 import type { HandoffTicket } from "../../../packages/contracts/handoff";
 import type { ExpertiseMode, Watchcard } from "../../../packages/contracts/nextgen-chat";
+import type { PinnedLiveCard } from "../../../packages/contracts/pinned-cards";
 import { pendingActionsContext, type WorkspacePin } from "../../../packages/contracts/workspace";
 import { api } from "../api";
 import { LiveCanvasPane, LiveHandoffCard } from "../chat-rich-ux";
 import { computeNextSuggestions } from "../composer-extras";
 import { DomainLiveHud, DomainWelcomeHome } from "../domain-pack-ui";
 import { LivingWatchcardsStrip, ParallelFuturesPane } from "../nextgen-chat-features";
+import { HomePinnedCardsGrid, PinnedCardWorkspaceView } from "../pinned-card-view";
 import { ExperienceControls, ExperienceDataUI } from "../surface";
 import type { WorkspaceSection } from "../workspace-menu";
 import type { PendingActions } from "../workspace-actions";
@@ -64,6 +66,14 @@ export type ChatProps = {
   watchCreatorOpen: boolean;
   onToggleWatchCreator: (open?: boolean) => void;
   onOpenDelegate: () => void;
+  pinnedCards?: PinnedLiveCard[];
+  activePinnedCard?: PinnedLiveCard;
+  refreshingCardId?: string;
+  onClipToMenu?: (turn: TurnView) => void;
+  onOpenPinnedCard?: (card: PinnedLiveCard) => void;
+  onRefreshPinnedCard?: (card: PinnedLiveCard) => void;
+  onUnpinCard?: (card: PinnedLiveCard) => void;
+  onClosePinnedCard?: () => void;
 };
 
 const noTurns: TurnView[] = [];
@@ -73,6 +83,7 @@ export function Chat({
   onBranch, onFollowUp, onFeedback, notice, section, pins, progressHistory, domainPack, onSelect, onPreviewFunding,
   onRestore, onWriteBack, activeHandoff, onStartHandoff, onDismissHandoff, onOpenMemory, expertiseMode, futuresOpen,
   onToggleFutures, watchcards, onWatchcardsChange, watchCreatorOpen, onToggleWatchCreator, onOpenDelegate,
+  pinnedCards = [], activePinnedCard, refreshingCardId, onClipToMenu, onOpenPinnedCard, onRefreshPinnedCard, onUnpinCard, onClosePinnedCard,
 }: ChatProps) {
   const turns = conversation?.turns ?? noTurns;
   const latest = turns.at(-1);
@@ -251,7 +262,9 @@ export function Chat({
     }}>
       <ConversationControls.Provider value={{
         latest, pending, adminChat, activeProfile, progressHistory, expertiseMode, pinnedTurnId,
+        pinnedMenuTurnIds: new Set(pinnedCards.map((c) => c.sourceTurnId).filter((v): v is string => Boolean(v))),
         pinCanvas: (t) => { onToggleFutures(false); pinCanvas(t); },
+        clipToMenu: onClipToMenu,
         branchTurn: onBranch, retry: onRetry, feedback: onFeedback, followTurn,
         runPrompt: (prompt) => void onSend(prompt),
         previewFunding: () => onPreviewFunding(pendingActionsContext),
@@ -262,6 +275,19 @@ export function Chat({
           <ThreadPrimitive.Viewport className="thread-scroll" ref={viewport}
             autoScroll={false} scrollToBottomOnInitialize={false} scrollToBottomOnRunStart={false} scrollToBottomOnThreadSwitch={false}
             aria-label="Conversation">
+            {activePinnedCard ? (
+              <PinnedCardWorkspaceView
+                card={activePinnedCard}
+                refreshing={refreshingCardId === activePinnedCard.id}
+                onRefresh={() => onRefreshPinnedCard?.(activePinnedCard)}
+                onUnpin={() => onUnpinCard?.(activePinnedCard)}
+                onOpenInChat={(prompt) => {
+                  onClosePinnedCard?.();
+                  void onSend(prompt);
+                }}
+                onBack={() => onClosePinnedCard?.()}
+              />
+            ) : <>
             {!adminChat && (
               <LivingWatchcardsStrip
                 personaId={activeProfile?.personaId ?? configuration?.defaultPersonaId ?? "demo-learner"}
@@ -284,20 +310,53 @@ export function Chat({
             )}
             {showWelcomeCards && (
               domainPack.id === "wealth"
-                ? <WorkspaceHome {...overviewProps} pendingActions={pendingActions}
-                    onReviewGuide={(message) => void onSend(message)} onPreviewFunding={() => onPreviewFunding(pendingActionsContext)} />
+                ? <>
+                    <WorkspaceHome {...overviewProps} pendingActions={pendingActions}
+                      onReviewGuide={(message) => void onSend(message)} onPreviewFunding={() => onPreviewFunding(pendingActionsContext)} />
+                    {pinnedCards.length > 0 && onOpenPinnedCard && onRefreshPinnedCard && onUnpinCard && (
+                      <div className="workspace-overview">
+                        <HomePinnedCardsGrid
+                          cards={pinnedCards}
+                          onOpenCard={onOpenPinnedCard}
+                          onRefreshCard={onRefreshPinnedCard}
+                          onUnpinCard={onUnpinCard}
+                        />
+                      </div>
+                    )}
+                  </>
                 : <div className="editorial-hero-stage">
                     <DomainWelcomeHome domainId={domainPack.id} disabled={!canWrite} onPrompt={(prompt) => void onSend(prompt)} />
                     {useHeroComposer && composerEl}
+                    {pinnedCards.length > 0 && onOpenPinnedCard && onRefreshPinnedCard && onUnpinCard && (
+                      <HomePinnedCardsGrid
+                        cards={pinnedCards}
+                        onOpenCard={onOpenPinnedCard}
+                        onRefreshCard={onRefreshPinnedCard}
+                        onUnpinCard={onUnpinCard}
+                      />
+                    )}
                   </div>
             )}
-            {showOverview && <WorkspaceOverview {...overviewProps} section={section} showNextStep={!turns.length} />}
+            {showOverview && <>
+              <WorkspaceOverview {...overviewProps} section={section} showNextStep={!turns.length} />
+              {!adminChat && section === "summary" && pinnedCards.length > 0 && onOpenPinnedCard && onRefreshPinnedCard && onUnpinCard && (
+                <div className="workspace-overview">
+                  <HomePinnedCardsGrid
+                    cards={pinnedCards}
+                    onOpenCard={onOpenPinnedCard}
+                    onRefreshCard={onRefreshPinnedCard}
+                    onUnpinCard={onUnpinCard}
+                  />
+                </div>
+              )}
+            </>}
             {updates.length > 0 && <section className="thread-updates" aria-label="Record updates" aria-live="polite">{updates.map((w) => <p key={w.id}>{w.state === "reached" ? <strong>Update received</strong> : <strong>Watching</strong>} · {w.label} · Current status: {w.value}</p>)}</section>}
             {turns.length > 0 && <div className="messages" ref={messageList}>
               <ThreadPrimitive.Messages>{({ message }) => message.role === "user" ? <UserMessage /> : <AssistantMessage />}</ThreadPrimitive.Messages>
             </div>}
+            </>}
           </ThreadPrimitive.Viewport>
-          {!useHeroComposer && composerEl}
+          {!activePinnedCard && !useHeroComposer && composerEl}
         </ThreadPrimitive.Root>
         {futuresOpen ? (
           <ParallelFuturesPane
@@ -305,7 +364,7 @@ export function Chat({
             onClose={() => onToggleFutures(false)}
           />
         ) : (
-          pinnedTurn && (
+          !activePinnedCard && pinnedTurn && (
             <LiveCanvasPane
               turn={pinnedTurn}
               onClose={() => setPinnedTurnId(undefined)}
@@ -324,6 +383,8 @@ export function Chat({
                 setCanvasAutoFollow(true);
                 void onSend(prompt);
               } : undefined}
+              onClipToMenu={!adminChat ? onClipToMenu : undefined}
+              pinnedToMenu={pinnedCards.some((c) => c.sourceTurnId === pinnedTurn.id)}
               pending={pending || running}
             />
           )

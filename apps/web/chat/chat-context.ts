@@ -23,7 +23,9 @@ export type ConversationOperations = {
   progressHistory: Record<string, Progress[]>;
   expertiseMode: ExpertiseMode;
   pinnedTurnId?: string;
+  pinnedMenuTurnIds?: ReadonlySet<string>;
   pinCanvas: (turn: TurnView) => void;
+  clipToMenu?: (turn: TurnView) => void;
   branchTurn?: (turn: TurnView) => void;
   retry: (id: string) => void;
   followTurn: (id: string, message: HTMLElement, replyReady: boolean, goalSourceTurnId?: string) => (() => void) | undefined;
