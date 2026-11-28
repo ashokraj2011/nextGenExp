@@ -127,3 +127,51 @@ test("Pinned live cards: clip UI from chat permanently to Main Menu, persist in 
   assert.equal(deleted.deleted, true);
   assert.equal(deleted.cards.length, 0);
 });
+
+test("POST /api/sketch-to-ui turns an uploaded drawing into a live sfield-grounded dashboard turn in chat", async (t) => {
+  const app = await startTestPreview();
+  t.after(() => app.close());
+  const client = await testClient(app.url);
+
+  // Minimal valid 1x1 PNG data URL
+  const samplePng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
+  const res = await client.request<{
+    conversation: { id: string; turns: Array<{ id: string; experience?: { blocks: Array<{ component: string; props: Record<string, unknown> }> } }> };
+    turn: { id: string; status: string };
+    experience: { blocks: Array<{ component: string; props: { title: string; dataSource?: string; nodes: Array<{ type: string; items?: Array<{ label: string; value: string }> }> } }> };
+    source: string;
+  }>(
+    "/api/sketch-to-ui",
+    {
+      domainId: "wealth",
+      personaId: "demo-learner",
+      imageDataUrl: samplePng,
+      imageName: "home-dashboard-sketch.png",
+      prompt: "Show my portfolio KPIs and home savings goal",
+    },
+    201,
+  );
+
+  assert.ok(res.conversation.id);
+  assert.equal(res.turn.status, "completed");
+  assert.equal(res.experience.blocks.length, 1);
+  assert.equal(res.experience.blocks[0].component, "PznDynamicCanvas");
+  const metricsNode = res.experience.blocks[0].props.nodes.find((n) => n.type === "metrics");
+  assert.ok(metricsNode?.items?.some((item) => item.label === "Total Portfolio" && item.value.startsWith("$")));
+
+  // And the user can immediately clip the sketched dashboard permanently to their Main Menu!
+  const clipped = await client.request<{ card: PinnedLiveCard }>(
+    "/api/pinned-cards",
+    {
+      domainId: "wealth",
+      personaId: "demo-learner",
+      title: res.experience.blocks[0].props.title,
+      prompt: "Show my portfolio KPIs and home savings goal",
+      sourceTurnId: res.turn.id,
+      experience: res.experience,
+    },
+    201,
+  );
+  assert.equal(clipped.card.liveBacked, true);
+  assert.ok(clipped.card.toolRefs.includes("portfolio.snapshot.read@1.0.0"));
+});

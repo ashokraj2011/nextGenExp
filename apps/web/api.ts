@@ -174,6 +174,22 @@ export const api = {
       `/api/pinned-cards/${encodeURIComponent(cardId)}/delete`,
       { domainId, ...(personaId ? { personaId } : {}) },
     ),
+  sketchToUi: (input: {
+    conversationId?: string;
+    domainId: DomainPackId;
+    personaId?: string;
+    prompt?: string;
+    imageDataUrl: string;
+    imageName?: string;
+  }) =>
+    request<{
+      conversation: ConversationView;
+      turn: TurnView;
+      experience: DisplayExperience;
+      widget: WidgetDraft;
+      source: "copilot_vision" | "figma_api" | "copilot_llm" | "synthesizer";
+      sourceSummary: string;
+    }>("/api/sketch-to-ui", input),
   profileOptions: () => request<{ profiles: ProfileChoice[] }>("/api/profile-options"),
   selectProfile: (personaId: string | null) => request<{ personaId: string | null }>("/api/profile-session", { personaId }),
   bootstrap: (domainId: Conversation["domainId"] = "wealth") => request<Bootstrap>("/api/bootstrap?domain=" + domainId),

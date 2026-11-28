@@ -4,7 +4,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useAui } from "@assistant-ui/react";
-import { Mic, MicOff, Paperclip, Play, Square } from "lucide-react";
+import { Mic, MicOff, Paperclip, PenTool, Play, Square } from "lucide-react";
 import { MAX_MESSAGE_LENGTH } from "../../../packages/contracts/domain";
 import type { DomainPack } from "../../../packages/contracts/domain-packs";
 import { matchSlashCommands, SLASH_COMMANDS, SlashCommandMenu, type SlashCommand } from "../chat-rich-ux";
@@ -33,11 +33,12 @@ export interface ComposerProps {
   onOpenFutures?: () => void;
   onOpenWatch?: () => void;
   onOpenDelegate?: () => void;
+  onOpenSketch?: () => void;
 }
 
 export function Composer({
   draft, onDraft, running, pending, disabled, adminChat, notice, input, showStarters, hero,
-  nextSuggestions, domainPack, onOpenAdvisor, onOpenMemory, onOpenFutures, onOpenWatch, onOpenDelegate,
+  nextSuggestions, domainPack, onOpenAdvisor, onOpenMemory, onOpenFutures, onOpenWatch, onOpenDelegate, onOpenSketch,
 }: ComposerProps) {
   const aui = useAui();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -252,6 +253,18 @@ export function Composer({
                   >
                     Upload file from computer…
                   </button>
+                  {!adminChat && onOpenSketch && (
+                    <button
+                      type="button"
+                      className="composer-sample-item"
+                      onClick={() => {
+                        setSampleMenuOpen(false);
+                        onOpenSketch();
+                      }}
+                    >
+                      Draw or upload picture → Live UI…
+                    </button>
+                  )}
                   <div className="composer-sample-divider">Or attach sample document:</div>
                   {SAMPLE_UPLOAD_DOCUMENTS.map((doc) => (
                     <button
@@ -270,6 +283,18 @@ export function Composer({
                 </div>
               )}
             </div>
+            {!adminChat && onOpenSketch && (
+              <button
+                type="button"
+                className="composer-tool-btn"
+                aria-label="Sketch or upload picture to generate dashboard"
+                title="Draw a wireframe or upload a picture to generate a live dashboard"
+                disabled={disabled || pending}
+                onClick={onOpenSketch}
+              >
+                <PenTool size={15} aria-hidden="true" />
+              </button>
+            )}
             <button
               type="button"
               className={"composer-tool-btn" + (voice.listening ? " is-listening" : "")}

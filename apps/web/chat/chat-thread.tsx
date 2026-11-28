@@ -74,6 +74,7 @@ export type ChatProps = {
   onRefreshPinnedCard?: (card: PinnedLiveCard) => void;
   onUnpinCard?: (card: PinnedLiveCard) => void;
   onClosePinnedCard?: () => void;
+  onOpenSketch?: () => void;
 };
 
 const noTurns: TurnView[] = [];
@@ -83,7 +84,7 @@ export function Chat({
   onBranch, onFollowUp, onFeedback, notice, section, pins, progressHistory, domainPack, onSelect, onPreviewFunding,
   onRestore, onWriteBack, activeHandoff, onStartHandoff, onDismissHandoff, onOpenMemory, expertiseMode, futuresOpen,
   onToggleFutures, watchcards, onWatchcardsChange, watchCreatorOpen, onToggleWatchCreator, onOpenDelegate,
-  pinnedCards = [], activePinnedCard, refreshingCardId, onClipToMenu, onOpenPinnedCard, onRefreshPinnedCard, onUnpinCard, onClosePinnedCard,
+  pinnedCards = [], activePinnedCard, refreshingCardId, onClipToMenu, onOpenPinnedCard, onRefreshPinnedCard, onUnpinCard, onClosePinnedCard, onOpenSketch,
 }: ChatProps) {
   const turns = conversation?.turns ?? noTurns;
   const latest = turns.at(-1);
@@ -242,7 +243,8 @@ export function Chat({
     notice={notice} showStarters={turns.length === 0 && domainPack.id === "wealth"} hero={useHeroComposer}
     nextSuggestions={nextSuggestions} domainPack={domainPack}
     onOpenAdvisor={() => onStartHandoff()} onOpenMemory={onOpenMemory}
-    onOpenFutures={() => onToggleFutures(true)} onOpenWatch={() => onToggleWatchCreator(true)} onOpenDelegate={onOpenDelegate} />;
+    onOpenFutures={() => onToggleFutures(true)} onOpenWatch={() => onToggleWatchCreator(true)} onOpenDelegate={onOpenDelegate}
+    onOpenSketch={onOpenSketch} />;
 
   return <AssistantRuntimeProvider runtime={runtime}>
     <ExperienceControls.Provider value={{

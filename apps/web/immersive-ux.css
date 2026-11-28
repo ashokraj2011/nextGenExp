@@ -836,3 +836,216 @@
 .portfolio-slice-clickable.is-selected {
   background: var(--teal-pale, #eff7ed);
 }
+
+/* Sketch / Picture-to-UI Modal */
+.sketch-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.sketch-modal {
+  width: min(640px, 96vw);
+  max-height: 92vh;
+  overflow-y: auto;
+  border-radius: 16px;
+  border: 1px solid var(--line-strong, #d9d8d5);
+  background: var(--surface, #ffffff);
+  color: var(--ink, #141414);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+  padding: 18px 20px;
+  display: grid;
+  gap: 14px;
+}
+
+.sketch-modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.sketch-modal-head h2 {
+  margin: 0 0 4px;
+  font-size: 1.1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.sketch-modal-head p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted, #525150);
+}
+
+.sketch-modal-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.sketch-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong, #d9d8d5);
+  background: var(--paper, #f9f7f5);
+  color: var(--ink, #141414);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sketch-tab-btn.is-active {
+  background: var(--teal, #368727);
+  border-color: var(--teal, #368727);
+  color: #ffffff;
+}
+
+.sketch-board-wrap {
+  display: grid;
+  gap: 8px;
+}
+
+.sketch-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.sketch-colors,
+.sketch-stamps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--muted, #525150);
+}
+
+.sketch-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+
+.sketch-swatch.is-active {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--teal, #368727);
+}
+
+.sketch-mini-btn {
+  padding: 4px 8px;
+  font-size: 0.74rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sketch-mini-btn.is-active {
+  border-color: var(--teal, #368727);
+  background: var(--teal-pale, #eff7ed);
+  color: var(--teal-dark, #1e6f1d);
+}
+
+.sketch-canvas {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 560 / 310;
+  border-radius: 12px;
+  border: 1.5px solid var(--line-strong, #cbd5e1);
+  background: #ffffff;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.sketch-upload-zone {
+  border: 1.5px dashed var(--line-strong, #cbd5e1);
+  border-radius: 12px;
+  padding: 18px;
+  background: var(--paper, #f9f7f5);
+  display: grid;
+  place-items: center;
+  min-height: 220px;
+}
+
+.sketch-upload-trigger {
+  border: 0;
+  background: transparent;
+  color: var(--ink, #141414);
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  cursor: pointer;
+  text-align: center;
+  font: inherit;
+}
+
+.sketch-upload-trigger span {
+  font-size: 0.8rem;
+  color: var(--muted, #525150);
+}
+
+.sketch-upload-preview {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+}
+
+.sketch-upload-preview img {
+  width: 100%;
+  max-height: 280px;
+  object-fit: contain;
+  border-radius: 9px;
+  background: #ffffff;
+  border: 1px solid var(--line, #e6e4e1);
+}
+
+.sketch-upload-preview-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  color: var(--muted, #525150);
+}
+
+.sketch-prompt-row {
+  display: grid;
+  gap: 5px;
+}
+
+.sketch-prompt-row label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted, #525150);
+}
+
+.sketch-prompt-row input {
+  width: 100%;
+  padding: 8px 11px;
+  border-radius: 9px;
+  border: 1px solid var(--line-strong, #d9d8d5);
+  background: var(--paper, #f9f7f5);
+  color: var(--ink, #141414);
+  font: inherit;
+  font-size: 0.84rem;
+}
+
+.sketch-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line, #e6e4e1);
+}

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { domainPackIds, type DomainPackId } from "../../packages/contracts/domain-packs";
 import { createPinnedCardSchema, type PinnedLiveCard } from "../../packages/contracts/pinned-cards";
 import { inferPinnedCardToolRefs, refreshPinnedCardLive } from "./pinned-cards-live";
+import { runSketchToUi, sketchToUiRequestSchema } from "./sketch-to-ui";
 import { createStudioHandler } from "@sfield/studio";
 import { handleAdminStudioRoutes, isExperienceRegistryEndpoint } from "./routes/admin-studio";
 import { handleCollaborationAndProtocolRoutes } from "./routes/collaboration";
@@ -1301,6 +1302,65 @@ export async function startApp(options: Options) {
         if (!deleted) throw new ApiError(404, "pinned_card_not_found", "Pinned card not found.");
         return json(res, { deleted: true, cards: store.listPinnedCards(ownerKey, input.domainId) });
       }
+    }
+    if (resource === "sketch-to-ui" && !id && method === "POST") {
+      const input = await body(req, sketchToUiRequestSchema, 5_500_000);
+      const personaId = input.personaId ?? demo.defaultPersonaId;
+      const result = await runSketchToUi(
+        { ...input, personaId },
+        {
+          gateway: options.gateway ?? null,
+          dataDir: options.dataDir,
+          portfolioSnapshots,
+          goalProgressProvider,
+          opsStore,
+          salesStore,
+          now,
+        },
+      );
+      let conv = input.conversationId
+        ? (() => {
+            try { return store.conversation(input.conversationId, principalId, viewer); } catch { return undefined; }
+          })()
+        : undefined;
+      if (!conv) {
+        const userId = input.domainId === "wealth" ? personaId : (operator ?? principalId);
+        conv = store.createConversation(
+          principalId,
+          personaId,
+          demo.defaultScenarioId,
+          now(),
+          undefined,
+          input.domainId,
+          userId,
+        );
+      }
+      const userMessage = input.prompt?.trim()
+        ? `Sketch to Dashboard (${input.imageName || "drawing.png"}): ${input.prompt.trim()}`
+        : `Sketch to Dashboard (${input.imageName || "drawing.png"})`;
+      const accepted = store.accept({
+        conversation: conv,
+        message: userMessage,
+        requestId: "sketch_" + randomUUID().replace(/-/g, "").slice(0, 16),
+        origin: "message",
+        selectionMode: "semantic_rerank",
+        now: now(),
+      });
+      store.update(accepted.turn.public.id, (row) => {
+        row.public.actionMode = "dynamic_ui";
+        row.trace.components = result.compiled.display.blocks.map(({ component }) => component);
+      });
+      const finished = store.finish(accepted.turn.public.id, { type: "completed", result: result.compiled }, now());
+      const freshConv = store.conversation(conv.id, conv.principalId);
+      const turns = await experience.conversationTurns(freshConv);
+      return json(res, {
+        conversation: { ...presentConversation(freshConv), turns: turns.map((turn) => visibleTurn(turn, operator)) },
+        turn: finished?.public ?? accepted.turn.public,
+        experience: result.compiled.display,
+        widget: result.widget,
+        source: result.source,
+        sourceSummary: result.sourceSummary,
+      }, 201);
     }
     if (resource === "admin" && id === "recent-turns" && !operation && method === "GET" && inspectorEnabled) {
       const recent = store.listAllCompletedTurns(25).map((turn) => {

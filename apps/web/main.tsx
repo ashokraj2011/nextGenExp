@@ -30,6 +30,7 @@ import { isHandoffPhrase, MemoryDrawer, type MemoryEntry } from "./chat-rich-ux"
 import type { ExpertiseMode, Watchcard } from "../../packages/contracts/nextgen-chat";
 import type { PinnedLiveCard } from "../../packages/contracts/pinned-cards";
 import { ChatToolsMenu, ConsumerA2aDrawer } from "./nextgen-chat-features";
+import { SketchToUiModal } from "./sketch-to-ui-modal";
 import { buildWealthDomContext, messageFor } from "./chat/chat-context";
 import { Chat } from "./chat/chat-thread";
 import "./customer-workbench.css";
@@ -115,6 +116,9 @@ function App() {
   const [pinnedCards, setPinnedCards] = useState<PinnedLiveCard[]>([]);
   const [activePinnedCardId, setActivePinnedCardId] = useState<string | undefined>(undefined);
   const [refreshingCardId, setRefreshingCardId] = useState<string | undefined>(undefined);
+  const [sketchOpen, setSketchOpen] = useState(false);
+  const [sketchGenerating, setSketchGenerating] = useState(false);
+  const [sketchError, setSketchError] = useState("");
   const inFlight = useRef(false);
   const previousAttempt = useRef<{ fingerprint: string; id: string } | null>(null);
   const profilesTrigger = useRef<HTMLButtonElement>(null);
@@ -811,6 +815,29 @@ function App() {
     }
   }, [domainPack.id, activeProfile?.personaId, activePinnedCardId]);
 
+  const generateFromSketch = useCallback(async (input: { imageDataUrl: string; imageName: string; prompt: string }) => {
+    setSketchGenerating(true);
+    setSketchError("");
+    try {
+      const res = await api.sketchToUi({
+        ...(chat?.id ? { conversationId: chat.id } : {}),
+        domainId: domainPack.id,
+        ...(activeProfile?.personaId ? { personaId: activeProfile.personaId } : {}),
+        imageDataUrl: input.imageDataUrl,
+        imageName: input.imageName,
+        ...(input.prompt ? { prompt: input.prompt } : {}),
+      });
+      remember(res.conversation);
+      revealChat(res.conversation);
+      setSketchOpen(false);
+      setNotice(`Generated "${res.widget.title}" from your sketch (${res.source === "copilot_vision" ? "Vision" : "synthesizer"}).`);
+    } catch (err) {
+      setSketchError(messageFor(err));
+    } finally {
+      setSketchGenerating(false);
+    }
+  }, [chat?.id, domainPack.id, activeProfile?.personaId]);
+
   const modelStatus = adminChat
     ? (configuration?.gatewayConfigured ? "Model connected" : "Model offline")
     : configuration?.gatewayConfigured ? (configuration.copilotModel || configuration.openAiModel
@@ -1160,8 +1187,17 @@ function App() {
         onOpenPinnedCard={openPinnedCard}
         onRefreshPinnedCard={(c) => void refreshPinnedCard(c)}
         onUnpinCard={(c) => void unpinCardFromMenu(c)}
-        onClosePinnedCard={() => setActivePinnedCardId(undefined)} />
+        onClosePinnedCard={() => setActivePinnedCardId(undefined)}
+        onOpenSketch={() => { setSketchError(""); setSketchOpen(true); }} />
     </main>
+    <SketchToUiModal
+      open={sketchOpen}
+      domainPack={domainPack}
+      generating={sketchGenerating}
+      error={sketchError}
+      onClose={() => { if (!sketchGenerating) setSketchOpen(false); }}
+      onGenerate={generateFromSketch}
+    />
     <ConsumerA2aDrawer
       open={delegateOpen}
       personaId={activeProfile?.personaId ?? configuration?.defaultPersonaId ?? "demo-learner"}
