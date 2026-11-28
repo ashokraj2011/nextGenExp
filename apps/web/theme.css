@@ -476,6 +476,7 @@
 
 :root[data-theme="dark"] .next-suggestion-pill,
 :root[data-theme="dark"] .starter,
+:root[data-theme="dark"] .composer-dock .starter-strip .starter,
 :root[data-theme="dark"] .editorial-hero-stage .composer-hero .starter {
   background: rgba(23, 30, 25, 0.96);
   border-color: var(--line-strong);
@@ -485,6 +486,7 @@
 
 :root[data-theme="dark"] .next-suggestion-pill:hover:not(:disabled),
 :root[data-theme="dark"] .starter:hover:not(:disabled),
+:root[data-theme="dark"] .composer-dock .starter-strip .starter:hover:not(:disabled),
 :root[data-theme="dark"] .starter.starter-personalized:hover:not(:disabled) {
   background: var(--teal-pale);
   border-color: var(--teal-border);

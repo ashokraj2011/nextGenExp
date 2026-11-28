@@ -33,16 +33,24 @@ export function StarterPrompts({ disabled, adminChat }: { disabled: boolean; adm
     { Icon: House, label: "Explore a savings plan", message: "I want to buy a house in two years. Show me how close I am and help me explore a savings plan." },
     { Icon: MapPin, label: "Update mailing address", message: "I need to update my mailing address." },
   ];
-  return <details className="starter-disclosure">
-    <summary>Explore suggested questions</summary>
-    <div className="composer-starters" role="group" aria-label="Suggested questions">
-      {starters.map(({ Icon, label, message }) => (
-        <button key={label} type="button" className="starter" disabled={disabled} onClick={() => aui.thread().append(message)}>
-          <Icon size={14} aria-hidden="true" />{label}
-        </button>
-      ))}
+  return (
+    <div className="starter-strip">
+      <div className="starter-strip-header">
+        <span className="starter-strip-label">
+          <Sparkles size={12} aria-hidden="true" />
+          Suggested questions
+        </span>
+      </div>
+      <div className="composer-starters" role="group" aria-label="Suggested questions">
+        {starters.map(({ Icon, label, message }) => (
+          <button key={label} type="button" className="starter" disabled={disabled} onClick={() => aui.thread().append(message)}>
+            <Icon size={14} aria-hidden="true" />
+            <span>{label}</span>
+          </button>
+        ))}
+      </div>
     </div>
-  </details>;
+  );
 }
 
 export function UserMessage() {
