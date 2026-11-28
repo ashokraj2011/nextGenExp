@@ -220,31 +220,48 @@ flowchart TB
 
 ---
 
-## 6. 5-Class UI Taxonomy & Experience Composer (`sphoton`) Across Subject Areas & Channels
+## 6. 3-Layer Product Boundary (`smass` + `sfield` + `sphoton`) & 5-Class Experience Composer
 
-To prevent channel teams and AI agents from reinventing ad-hoc layouts — or letting marketing NBAs crowd out a customer's primary task — every rendered surface is assembled by an **Experience Composer (`sphoton`)** from **five governed UI placement classes**:
+For the core platform products, responsibilities are strictly separated with **automated boundary tests** (`tests/smass.test.ts`, `tests/sphoton.test.ts`):
 
-| # | UI Class | What Belongs Here | Owner | Arbitration Rule |
+| Platform Layer | Package / Home | Owns | Boundary Guarantee |
+| :--- | :--- | :--- | :--- |
+| **1. Data & Canonical Bindings** | `packages/smass` (`bindings.ts`, `registry.ts`) | Closed-schema domain models (`wealth_customer_360`, `banking_account_360`, `retirement_plan_360`, IT Ops, Sales RevOps, custom runtime models), versioned snapshots, and canonical model field paths. | Zero UI, `sphoton`, `contracts`, or server imports. Legacy flat `packages/contracts/data-bindings.ts` retired. |
+| **2. Runtime, Workflows & Tools** | `vendor/sfield` | Governed tool execution, context hydration, HMAC-signed action tokens, HITL approvals, OTel telemetry, and immutable audit ledgers. | **PZN is purely one pluggable `sfield` tool** (`pzn.treatments.decide@1.0.0`), alongside domain tools like `lending.obligations.read@1.0.0` or `retirement.match.advise@1.0.0`. Zero UI code. |
+| **3. UI, Experiences & Surface Policies** | `packages/sphoton` (`experience-composer.ts`) | Shared UI Catalog (Registry + cross-domain Widget Library), **3 UI Resolution Modes**, **5-Class UI Taxonomy**, channel surface budgets, and `arbitrateExperienceSurface()` (`Main > Tasks > NBA` + auto-promotion). | Zero PZN, domain, or server coupling — works identically for Wealth, Banking, Retirement, IT Ops, and Sales RevOps with or without PZN installed. |
+
+### 3 UI Resolution Modes (`resolveExperienceUi`)
+1. **`pinned_widget` (Design-Time Binding):** Experience pins a specific UI Registry template or published Widget Library component.
+2. **`runtime_tool_selected` (Runtime Policy Selection):** Any `sfield` tool (e.g., `pzn.treatments.decide@1.0.0` or a domain policy tool) recommends a governed UI component at runtime.
+3. **`runtime_sphoton_generative` (Generative A2UI Synthesis):** `sphoton` synthesizes a channel-adapted A2UI tree directly from the verified `smass` snapshot when no fixed template is pinned.
+
+### 5-Class UI Taxonomy & Surface Arbitration (`arbitrateExperienceSurface`)
+
+| # | UI Class | What Belongs Here | Source | Arbitration Rule |
 | :--- | :--- | :--- | :--- | :--- |
-| **1** | **Main (Primary Experience)** | Directly fulfills user intent (*Portfolio Summary*, *Checking Liquidity*, *401(k) Readiness*, *Address Update*). | Channel / Experience Registry (`smass` facts) | **Non-negotiable #1.** Never displaced by Tasks or NBAs. |
-| **2** | **Tasks (Pending Obligations)** | Required or urgent account-health actions (*Unfunded Account*, *Missing Beneficiary*, *Mortgage Rate-Lock E-Sign*, *Rollover Election*). | PZN Shared Policy (CCRE) | **Outranks NBA** when companion budget is tight; clears live at `revision: 2` on domain confirmation. |
-| **3** | **NBA (Next Best Action)** | Ranked proactive opportunities (*"\$12.5k Idle Cash"*, *"High-Yield Auto-Sweep"*, *"+\$3,600/yr Employer Match"*). | PZN Treatment Selector + Ranking Model | Placed within channel budget; **auto-promotes** into a freed slot once an open Task completes; dismissals sync across all channels via `sfield` memory. |
+| **1** | **Main (Primary Experience)** | Directly fulfills user intent (*Portfolio Summary*, *Checking Liquidity*, *401(k) Readiness*, *P1 Incident*, *Deal Desk*). | `sphoton` UI Resolution + `smass` snapshot | **Non-negotiable #1.** Never displaced by Tasks or NBAs. |
+| **2** | **Tasks (Pending Obligations)** | Required or urgent obligations (*Unfunded Account*, *Missing Beneficiary*, *Mortgage Rate-Lock E-Sign*, *Rollover Election*). | Pluggable `sfield` policy/domain tool | **Outranks NBA** when companion budget is tight; clears live at `revision: 2` and updates Main highlights + `smass` source version (`chk_28` → `chk_29`). |
+| **3** | **NBA (Next Best Action)** | Ranked proactive opportunities (*"\$12.5k Idle Cash"*, *"High-Yield Auto-Sweep"*, *"+\$3,600/yr Employer Match"*). | Pluggable `sfield` tool (e.g., `pzn.treatments.decide@1.0.0`) | Placed within channel budget; **auto-promotes** into a freed slot once an open Task completes; dismissals persist in SQLite and sync across channels. |
 | **4** | **Actions / Workflows** | Interactive, HMAC-signed multi-step flows launched from Main, Tasks, or NBAs. | `sfield` Workflows | Deterministic 3-step tool execution linked to `decisionId`. |
-| **5** | **Supporting Chrome & Compliance** | Contextual follow-up chips, verified citations, and mandatory regulatory disclosures. | Experience Composer (`sphoton`) + Compliance | Follow-ups clamp per channel; disclosures are **immutable** and cannot be removed by LLMs. |
+| **5** | **Supporting Chrome & Compliance** | Contextual follow-up chips, verified citations, and mandatory regulatory disclosures. | `sphoton` + Compliance | Follow-ups clamp per channel; disclosures are **immutable** and cannot be removed by LLMs. |
 
-### Channel-Adaptive Surface Budgets (Same `smass` Snapshot, Tailored Layout)
+### Channel-Adaptive Surface Budgets & SQLite Persistence
 
 | Channel Surface | Main | Tasks Cap | NBA Cap | Combined Companion Cap | Follow-Ups |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **AI Chat Turn** | 1 | 1 | 1 | **1** *(Task outranks NBA)* | 3 |
+| **AI Chat Turn** *(also wired live in `/`)* | 1 | 1 | 1 | **1** *(Task outranks NBA)* | 3 |
 | **Web Portal Dashboard** | 1 | 3 | 1 | **4** *(Task + NBA side-by-side)* | 4 |
 | **Mobile App (Compact 375px)** | 1 | 1 | 1 | **1** *(Task outranks NBA)* | 1 |
 | **Advisor Co-Pilot Workstation** | 1 | 4 | 3 | **7** *(Full provenance + scores)* | 4 |
 
+- **SQLite Persistence (`<dataDir>/experience-composer.sqlite`):** Custom Subject Areas (with live-compiled `smass` models), Experiences, Channel Budgets, UI Bindings, revisions, and cross-channel NBA dismissals persist across server restarts.
+
 ---
 
-## 7. Try Both Live in This Workspace
+## 7. Unified Admin Studios & Live Workspace Verification
 
-- **Experience Composer Studio (Multi-Subject & Multi-Channel):** Open `/experience-composer` (`http://127.0.0.1:4180/experience-composer`) to switch across **Wealth Advisory**, **Banking & Lending**, and **Retirement & Benefits** and across **AI Chat**, **Web Portal**, **Mobile App**, and **Advisor Co-Pilot**, toggle the **Zone Anatomy Overlay**, execute signed `sfield` workflows, complete an open Task to watch the waiting NBA auto-promote live at `revision: 2`, and test cross-channel dismissal sync.
-- **PZN Decision Plane Trace Showcase:** Open `/pzn-architecture` (`http://127.0.0.1:4180/pzn-architecture`) to inspect the Alice & Marcus CCRE/Data Agg/Resolver/Ranking payloads and `smass` invalid-enum guard.
-- **Implementation:** `apps/server/experience-composer.ts`, `apps/server/pzn-decision-plane.ts`, `apps/web/experience-composer-studio.tsx`, `apps/web/pzn-architecture-demo.tsx`, `tests/experience-composer.test.ts`, and `tests/pzn-decision-plane.test.ts`.
+- **Live Customer Chat (`/`):** Every Wealth, IT Ops, and Sales RevOps turn runs through `packages/sphoton`'s `arbitrateExperienceSurface()` (`chat_turn` budget), surfacing an inline **`sphoton Surface Policy`** arbitration drawer (`sphoton · 1 Main …`) and interactive NBA dismissal with next-turn auto-promotion.
+- **`sphoton UI Studio` (`/admin/ui`):** Single unified authoring studio combining the Layout Editor, **4-Step Guided Interactive Experience Wizard** (with live card blueprint & 1-click Quick Test), embedded 5-Class Experience Composer, SurfaceBinder Lab, Shared Design Library, and cross-domain Widget Library, inside a collapsible Administration shell.
+- **`Policies & Rules` (`/admin/intents`):** Unified Policy Plane combining Intents & Catalog, PZN Rules & Treatments, and the embedded **PZN Tool Sandbox** (`pzn.treatments.decide@1.0.0`, also available standalone at `/pzn-architecture`).
+- **`sfield Studio` (`/admin/sfield-studio`):** Organized SDK runtime & governance console (`Core Runtime`, `Governance`, collapsible `Developer Labs`, collapsible rail, and `← Back to CEP Admin`).
+- **Key Implementation Files:** `packages/sphoton/experience-composer.ts`, `packages/smass/bindings.ts`, `apps/server/experience-composer.ts`, `apps/server/pzn-decision-plane.ts`, `apps/web/ui-builder.tsx`, `apps/web/interactive-experience-editor.tsx`, `apps/web/policy-studio.tsx`, `tests/sphoton.test.ts`, and `tests/experience-composer.test.ts`.
