@@ -21,6 +21,7 @@ import { conversationalTextAllowed } from "../../packages/experience/chat-policy
 import { contentCatalog, readDemoBalance } from "../../packages/experience/content";
 import { findEffectiveContentById, getEffectiveContentEntries } from "../../packages/experience-registry/registry";
 import { compileUiLayoutPreview } from "../../packages/experience/ui-layout";
+import { cepSphotonRegistry } from "../../packages/experience/sphoton-components";
 import {
   compileBoundCard,
   validateCardBinding,
@@ -107,7 +108,7 @@ export function collectDesignToolDependencies(
   const allowedActionIds = new Set<string>();
   for (const slot of design.slots) {
     if ((slot.kind === "block" || slot.kind === "widget") && slot.toolBinding) {
-      const checked = validateCardBinding(slot.toolBinding, catalog, { sfield });
+      const checked = validateCardBinding(slot.toolBinding, catalog, { sfield, registry: cepSphotonRegistry });
       Object.assign(toolContracts, checked.dependencies.toolContracts);
       for (const id of checked.dependencies.allowedFieldIds) allowedFieldIds.add(id);
       for (const id of checked.dependencies.allowedActionIds) allowedActionIds.add(id);
@@ -175,6 +176,7 @@ export function validateUiDesign(
         if (bindingCatalog) {
           const check = validateCardBinding(slot.toolBinding, bindingCatalog, {
             sfield: sfieldAdapter,
+            registry: cepSphotonRegistry,
             strictRequiredComponentFields: publishing && slot.kind === "block" && slot.component === "PznGoalProgress",
           });
           if (!check.valid) {
@@ -260,9 +262,10 @@ export async function previewUiLayout(
     for (const slot of design.slots) {
       if ((slot.kind === "block" || slot.kind === "widget") && slot.toolBinding) {
         const base = slot.kind === "block" ? baseBlocks.find((b) => b.component === slot.component) : undefined;
-        const compiled = await compileBoundCard({
+        const compiled = await compileBoundCard<DisplayBlock>({
           card: slot.toolBinding,
           catalog,
+          registry: cepSphotonRegistry,
           sfield,
           verifiedTurnResults,
           baseBlock: base,

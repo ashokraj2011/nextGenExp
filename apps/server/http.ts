@@ -1110,7 +1110,7 @@ export async function startApp(options: Options) {
       req, res, url, origin, resource, id, operation, method, principalId, operator, viewer,
       inspectorEnabled, streams, store, runtime, gateway: options.gateway ?? null, dataDir: options.dataDir,
       experience, profileStore, approvalStore, writeAudit, handoffStore, watchcardStore,
-      agentDelegation, knowledgeBase, integrationService, mcpExposure, now, json, body, requireOperator,
+      agentDelegation, knowledgeBase, integrationService, mcpExposure, sphotonCatalog, now, json, body, requireOperator,
     })) return;
     if (resource === "admin" && id === "gateway" && inspectorEnabled) {
       const actor = requireOperator();

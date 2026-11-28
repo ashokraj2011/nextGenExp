@@ -228,7 +228,7 @@
         <a href="#architecture">Architecture</a>
         <a href="#packages">9 Packages</a>
         <a href="#primitives">Enterprise Primitives</a>
-        <a href="#surfaces">SurfaceBinder</a>
+        <a href="#surfaces">sphoton UI Binding</a>
         <a href="#comparison">Comparison</a>
         <a href="#persistence">Postgres + JSON Fallback</a>
         <a href="#quickstart">Code &amp; CLI</a>
@@ -275,17 +275,17 @@
           <rect x="14" y="20" width="194" height="244" rx="12" fill="#e4f3ea" stroke="#1d6f42" stroke-width="1.5" />
           <text x="111" y="48" text-anchor="middle" font-size="14" font-weight="700" fill="#14261d">Host Applications</text>
           <text x="111" y="76" text-anchor="middle" font-size="11.5" fill="#355244">CEP (Wealth / Ops / Sales)</text>
-          <text x="111" y="98" text-anchor="middle" font-size="11.5" fill="#355244">Blind UI Pass-Through (/api/surfaces/*)</text>
+          <text x="111" y="98" text-anchor="middle" font-size="11.5" fill="#355244">sphoton UI Binding (packages/sphoton)</text>
           <text x="111" y="120" text-anchor="middle" font-size="11.5" fill="#355244">@sfield/studio Workbench</text>
           <text x="111" y="142" text-anchor="middle" font-size="11.5" fill="#355244">External MCP 2026 Clients</text>
           <text x="111" y="164" text-anchor="middle" font-size="11.5" fill="#355244">@sfield/cli (init · eval · studio)</text>
           <text x="111" y="200" text-anchor="middle" font-size="11" fill="#1d6f42" font-weight="600">Principal · Identifiers · OBO</text>
           <text x="111" y="222" text-anchor="middle" font-size="11" fill="#1d6f42" font-weight="600">streamRun() · SSE / AG-UI</text>
-          <text x="111" y="244" text-anchor="middle" font-size="11" fill="#1d6f42" font-weight="600">sf.surfaces.stitch / dispatch</text>
+          <text x="111" y="244" text-anchor="middle" font-size="11" fill="#1d6f42" font-weight="600">sphoton compileBoundCard / stitch</text>
 
           <!-- sfield core -->
           <rect x="256" y="14" width="430" height="256" rx="14" fill="#155331" stroke="#0f3c23" stroke-width="1.5" />
-          <text x="471" y="40" text-anchor="middle" font-size="15" font-weight="700" fill="#ffffff">@sfield/core Runtime Kernel</text>
+          <text x="471" y="40" text-anchor="middle" font-size="15" font-weight="700" fill="#ffffff">@sfield/core Headless Runtime Kernel</text>
 
           <rect x="276" y="54" width="185" height="44" rx="8" fill="#1d6f42" />
           <text x="368" y="74" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">Authorizer &amp; Policy Presets</text>
@@ -304,8 +304,8 @@
           <text x="572" y="144" text-anchor="middle" font-size="10.5" fill="#d8f2e2">Elicitation · Async Tasks · Delegation</text>
 
           <rect x="276" y="162" width="389" height="42" rx="8" fill="#1d6f42" />
-          <text x="471" y="180" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">SurfaceBinder (sf.surfaces) — Deterministic Data-to-UI Stitch</text>
-          <text x="471" y="196" text-anchor="middle" font-size="10.5" fill="#d8f2e2">$ref · $repeat · $input · Schema Validation · HMAC-SHA256 Sealed Actions</text>
+          <text x="471" y="180" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">Governed State Graphs (sf.graphs) &amp; Execution Scopes</text>
+          <text x="471" y="196" text-anchor="middle" font-size="10.5" fill="#d8f2e2">defineGraph · Parallel Fan-Out · Interrupts · Time-Travel · Zero UI Coupling</text>
 
           <rect x="276" y="214" width="389" height="44" rx="8" fill="#0f3c23" />
           <text x="471" y="232" text-anchor="middle" font-size="11.5" font-weight="700" fill="#ffffff">ModelGateway · AgenticHarness · Compactor · VectorMemoryIndex</text>
@@ -343,8 +343,8 @@
           <tbody>
             <tr>
               <td><code>@sfield/core</code></td>
-              <td>Core runtime kernel</td>
-              <td><code>SField</code>, <code>defineTool</code>, <code>defineGraph</code> (<code>sf.graphs</code>), <code>SurfaceBinderService</code> (<code>sf.surfaces</code>), <code>GeminiProvider</code>, <code>AnthropicProvider</code>, <code>OpenAICompatibleProvider</code>, <code>SFieldMcpServer</code> (MCP 2026), <code>McpClient</code>, <code>createMcpProxyTools</code>, <code>createPiiFirewallHook</code>, <code>createToolResilienceGuard</code>, <code>DelegationService</code>, <code>streamRun</code>, <code>FilesystemArtifactStore</code>, <code>VectorMemoryIndex</code></td>
+              <td>Headless core runtime kernel</td>
+              <td><code>SField</code>, <code>defineTool</code>, <code>defineGraph</code> (<code>sf.graphs</code>), <code>GeminiProvider</code>, <code>AnthropicProvider</code>, <code>OpenAICompatibleProvider</code>, <code>SFieldMcpServer</code> (MCP 2026), <code>McpClient</code>, <code>createMcpProxyTools</code>, <code>createPiiFirewallHook</code>, <code>createToolResilienceGuard</code>, <code>DelegationService</code>, <code>streamRun</code>, <code>FilesystemArtifactStore</code>, <code>VectorMemoryIndex</code></td>
             </tr>
             <tr>
               <td><code>@sfield/preset-memory</code></td>
@@ -424,8 +424,8 @@
           <p><code>runEvalSuite</code> persists signed <code>EvalReportRecord</code> evidence into <code>sf.lock.evalReports()</code>; <code>evaluateReleaseGate</code> and <code>sfield lock approve</code> gate <code>deployment: "service"</code> rollouts.</p>
         </article>
         <article class="card">
-          <h3>Deterministic SurfaceBinder <span class="pill">sf.surfaces</span></h3>
-          <p>Stitches live tool outputs into declarative <code>$ref</code> / <code>$repeat</code> / <code>$input</code> UI templates with strict JSON Schema validation and <strong>HMAC-SHA256 sealed actions</strong> so host servers blindly render &amp; dispatch without custom glue.</p>
+          <h3>Sibling <code>sphoton</code> UI Binder <span class="pill">packages/sphoton</span></h3>
+          <p>Keeps <code>sfield</code> 100% UI-free while layering domain-agnostic card bindings (<code>SphotonComponentRegistry</code>), <code>createSurfaceBinder(sf)</code> (<code>$ref</code> / <code>$repeat</code> / <code>$input</code>), and persistent <strong>HMAC-SHA256 sealed actions</strong> cleanly above it.</p>
         </article>
         <article class="card">
           <h3>Governed State Graphs &amp; Time-Travel <span class="pill">sf.graphs</span></h3>
@@ -435,20 +435,20 @@
     </section>
 
     <section id="surfaces">
-      <h2>Deterministic Data-to-UI Stitching (<code>sf.surfaces</code>)</h2>
-      <p class="section-desc">Instead of letting LLMs copy financial numbers into UI JSON or writing bespoke per-screen server glue, <code>sfield</code> executes read sources, resolves declarative bindings, and cryptographically seals every button action. Host apps like CEP expose thin blind pass-through routes (<code>GET /api/surfaces/schemas</code>, <code>POST /api/surfaces/stitch</code>, <code>POST /api/surfaces/action</code>).</p>
+      <h2><code>sphoton</code> — Deterministic Data-to-UI Binding over Headless <code>sfield</code></h2>
+      <p class="section-desc"><code>@sfield/core</code> stays strictly headless (zero UI). Sibling toolkit <strong><code>sphoton</code></strong> (<code>packages/sphoton/</code>) sits above it, validating bindings against closed <code>sfield</code> schemas, reusing verified turn results, and sealing every UI action with persistent HMAC-SHA256 keys (<code>GET /api/admin/ui-binding-catalog</code> and <code>/api/surfaces/*</code>).</p>
       <div class="grid">
         <article class="card">
-          <h3>1. Schema Auto-Discovery <span class="pill">inspectSchemas()</span></h3>
-          <p>Walks every registered tool’s closed JSON Schema to advertise exact bindable output/input paths to UI Builders and LLMs. With <code>strictSchemaValidation: true</code>, mistyped <code>$ref</code> paths are rejected before render.</p>
+          <h3>1. Schema Discovery &amp; Validation <span class="pill">SphotonComponentRegistry</span></h3>
+          <p>Walks every registered tool’s closed JSON Schema and validates against pluggable component destination schemas and domain allowlists, recording SHA-256 dependency fingerprints for Admin chat approval.</p>
         </article>
         <article class="card">
-          <h3>2. Declarative Stitch <span class="pill">$ref · $repeat · format</span></h3>
-          <p><code>sf.surfaces.stitch()</code> runs read sources through <code>ExecutionScope</code>, resolves <code>$ref</code> (including <code>principal.identifiers.*</code>), loops arrays via <code>$repeat</code> (<code>$item</code> / <code>$index</code>), and applies deterministic formatters (<code>usd_cents</code>, <code>percent</code>, <code>date</code>).</p>
+          <h3>2. Single Compiler &amp; SurfaceBinder <span class="pill">compileBoundCard · createSurfaceBinder</span></h3>
+          <p>Compiles draft preview, approval preview, and customer chat identically (<code>reuseVerifiedTurnResult</code> + approved unavailable states), or stitches <code>$ref</code> / <code>$repeat</code> / formatters via <code>createSurfaceBinder(sf)</code>.</p>
         </article>
         <article class="card">
-          <h3>3. Sealed Action Dispatch <span class="pill">HMAC-SHA256</span></h3>
-          <p>Every action carries an HMAC seal bound to <code>{ tenantId, subjectId, toolRef, resolvedInputs, inputSlots }</code>. <code>sf.surfaces.dispatchAction()</code> blocks argument tampering and cross-principal replay, merges only declared <code>$input</code> slots, and supports HITL &amp; MCP Elicitation.</p>
+          <h3>3. Sealed Action Dispatch <span class="pill">Persistent HMAC-SHA256</span></h3>
+          <p>Every action carries an HMAC seal bound to <code>{ tenantId, subjectId, toolRef, resolvedInputs }</code>. Tampered arguments and cross-principal replays are rejected with <code>INVALID_ACTION_SEAL</code>.</p>
         </article>
       </div>
     </section>
@@ -488,7 +488,7 @@
             </tr>
             <tr>
               <td><strong>Data-to-UI &amp; Sealed Actions</strong></td>
-              <td><strong>Pros:</strong> Built-in <code>sf.surfaces</code> (<code>$ref</code>/<code>$repeat</code>/<code>$input</code>) prevents LLMs from fabricating numbers and seals every button action with <strong>HMAC-SHA256</strong> bound to <code>Principal</code>.<br /><br /><strong>Cons:</strong> Backend declarative envelope only — you still bring your own frontend renderer (React, A2UI, or <code>assistant-ui</code>).</td>
+              <td><strong>Pros:</strong> Headless <code>sfield</code> pairs with sibling <code>sphoton</code> (<code>packages/sphoton</code>) for closed-schema tool bindings, <code>createSurfaceBinder(sf)</code>, verified-read reuse, and persistent <strong>HMAC-SHA256</strong> action sealing.<br /><br /><strong>Cons:</strong> Backend declarative binding layer — bring your own frontend renderer (React, A2UI, or <code>assistant-ui</code>).</td>
               <td><strong>Pros:</strong> Vercel AI SDK (<code>streamUI</code> / <code>useChat</code>) provides best-in-class React streaming hooks and instant generative UI components.<br /><br /><strong>Cons:</strong> No built-in cryptographic action sealing or closed-schema Data-to-UI stitcher; LLMs often serialize raw business figures into UI JSON.</td>
             </tr>
             <tr>
@@ -545,7 +545,7 @@
       <p class="section-desc">Copy-pasteable recipes verified against the live workspace.</p>
       <div class="tabs" role="tablist" aria-label="Code examples">
         <button class="tab-btn" role="tab" aria-selected="true" data-tab="hello">5-Line Quick Start</button>
-        <button class="tab-btn" role="tab" aria-selected="false" data-tab="surface">SurfaceBinder (Data → UI)</button>
+        <button class="tab-btn" role="tab" aria-selected="false" data-tab="surface">sphoton (Data → UI)</button>
         <button class="tab-btn" role="tab" aria-selected="false" data-tab="service">Postgres + JSON Fallback</button>
         <button class="tab-btn" role="tab" aria-selected="false" data-tab="mcp">MCP 2026 Federation</button>
         <button class="tab-btn" role="tab" aria-selected="false" data-tab="cli">sfield CLI</button>
@@ -578,8 +578,11 @@ await sf.close();</code></pre>
 
       <div id="tab-surface" class="tab-panel">
         <button class="copy-btn" type="button">Copy</button>
-        <pre><code>// 1. Stitch live tool data into a declarative UI template with sealed actions
-const envelope = await sf.surfaces.stitch({
+        <pre><code>import { createSurfaceBinder } from "./packages/sphoton";
+
+// 1. Layer sphoton cleanly over headless sfield with a persistent signing secret
+const binder = createSurfaceBinder(sf, { signingSecret: process.env.SPHOTON_SECRET });
+const envelope = await binder.stitch({
   principal,
   strictSchemaValidation: true,
   sources: { portfolio: { toolRef: "portfolio.read@1.0.0", inputs: { accountId: "acct-1" } } },
@@ -601,8 +604,8 @@ const envelope = await sf.surfaces.stitch({
   },
 });
 
-// 2. Host app server blindly forwards user clicks + formInputs back to sfield
-const result = await sf.surfaces.dispatchAction({
+// 2. Host app server verifies the HMAC-SHA256 seal via sphoton and executes through headless sfield
+const result = await binder.dispatchAction({
   principal,
   action: envelope.actions[0], // HMAC-SHA256 verified against principal &amp; toolRef
   formInputs: { amountCents: 25000 },

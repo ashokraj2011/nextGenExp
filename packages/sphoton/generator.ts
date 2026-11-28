@@ -4,6 +4,7 @@ import {
   type SphotonBindingCatalog,
   type SphotonCardBinding,
 } from "./contracts";
+import type { SphotonComponentRegistry } from "./registry";
 import { validateCardBinding } from "./validator";
 
 export type SphotonGeneratedDraft = {
@@ -18,45 +19,22 @@ function shortSlotName(toolRef: string): string {
   return base.replace(/[^a-zA-Z0-9_-]/g, "_") || "source";
 }
 
-function synthesizeFromCatalog(prompt: string, catalog: SphotonBindingCatalog): SphotonCardBinding {
-  const lower = prompt.toLowerCase();
-
-  // Wealth goal progress card when prompt asks about home/goal/down payment/savings and goal tool is exposed.
-  const goalTool = catalog.tools.find((t) => t.id === "goal.progress.read");
-  const goalTarget = catalog.fields.find((f) => f.toolRef === goalTool?.toolRef && f.outputPath === "targetCents");
-  const goalHistory = catalog.fields.find((f) => f.toolRef === goalTool?.toolRef && f.outputPath === "history");
-  if (goalTool && goalTarget && goalHistory && /\b(goal|down\s*payment|home|saving|chart|target)\b/i.test(lower)) {
-    const savingsAction = catalog.actions.find((a) => a.toolRef.startsWith("goal.savings.preview@"));
-    return {
-      component: "PznGoalProgress",
-      sources: {
-        goal: {
-          toolRef: goalTool.toolRef,
-          read: "reuseVerifiedTurnResult",
-        },
-      },
-      bindings: [
-        { field: "goal.targetCents", from: "goal.data.targetCents", format: "currency_cents", required: true },
-        { field: "goal.history", from: "goal.data.history", format: "series", required: true },
-      ],
-      ...(savingsAction ? {
-        actions: [{
-          id: "add-monthly-savings",
-          label: "Add $500 a month",
-          toolRef: savingsAction.toolRef,
-          fixedInputs: { extraMonthlyCents: 50_000 },
-          followUpInputs: ["startMonth"],
-          update: "originalCard",
-        }],
-      } : {}),
-      unavailableState: {
-        title: "Home-buying goal unavailable",
-        message: "We couldn’t read your current home-buying goal figures right now.",
-      },
-    };
+function synthesizeFromCatalog(
+  prompt: string,
+  catalog: SphotonBindingCatalog,
+  registry?: SphotonComponentRegistry,
+  defaultComponent = "PznBoundWidget",
+): SphotonCardBinding {
+  // Let registered specialized components opt in if they match the prompt and exposed catalog.
+  if (registry) {
+    for (const def of registry.list()) {
+      const specialized = def.synthesizeFromCatalog?.(prompt, catalog);
+      if (specialized) return specialized;
+    }
   }
 
-  // Generic catalog-driven card: score fields by prompt keyword overlap so ANY exposed field in ANY domain is bindable!
+  // Generic catalog-driven card: score fields by prompt keyword overlap so ANY exposed field in ANY domain is bindable.
+  const lower = prompt.toLowerCase();
   const promptTokens = new Set(lower.split(/[^a-z0-9]+/).filter((t) => t.length >= 3));
   const scored = catalog.fields.map((field, index) => {
     const haystack = `${field.label} ${field.outputPath} ${field.group} ${field.description ?? ""}`.toLowerCase();
@@ -94,7 +72,7 @@ function synthesizeFromCatalog(prompt: string, catalog: SphotonBindingCatalog): 
   }) ?? catalog.actions[0];
 
   return {
-    component: "PznBoundWidget",
+    component: defaultComponent,
     sources,
     bindings,
     ...(matchedAction ? {
@@ -121,9 +99,11 @@ function synthesizeFromCatalog(prompt: string, catalog: SphotonBindingCatalog): 
 export async function generateBoundCardDraft(input: {
   prompt: string;
   catalog: SphotonBindingCatalog;
+  registry?: SphotonComponentRegistry;
   llm?: SphotonLlmAdapter;
+  defaultComponent?: string;
 }): Promise<SphotonGeneratedDraft> {
-  const { prompt, catalog, llm } = input;
+  const { prompt, catalog, registry, llm, defaultComponent } = input;
 
   if (llm && catalog.fields.length > 0) {
     const fieldLines = catalog.fields.map((f) =>
@@ -145,7 +125,7 @@ export async function generateBoundCardDraft(input: {
       const raw = await llm.generateJson({ systemPrompt, userPrompt: prompt });
       const parsed = sphotonCardBindingSchema.safeParse(raw);
       if (parsed.success) {
-        const check = validateCardBinding(parsed.data, catalog);
+        const check = validateCardBinding(parsed.data, catalog, { registry });
         if (check.valid) {
           return {
             card: parsed.data,
@@ -160,7 +140,7 @@ export async function generateBoundCardDraft(input: {
     }
   }
 
-  const card = synthesizeFromCatalog(prompt, catalog);
+  const card = synthesizeFromCatalog(prompt, catalog, registry, defaultComponent);
   return {
     card,
     generatedBy: "catalog_synthesizer",

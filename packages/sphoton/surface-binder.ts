@@ -1,20 +1,27 @@
 /**
- * Deterministic Schema-Driven Data-to-UI Surface Stitcher for @sfield/core.
+ * Deterministic Schema-Driven Data-to-UI Surface Stitcher owned by sphoton.
  *
- * Moves UI-to-tool data binding, formatting, array iteration, and sealed action dispatch
- * into sfield's trusted governance boundary so host app servers (like CEP) can blindly
- * render stitched UI envelopes and blindly forward action clicks back to sfield.
+ * Consumes headless `@sfield/core` strictly through its public tool registry and
+ * execution scope APIs — keeping `sfield` 100% free of UI concepts.
  */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import type { JsonObject, JsonSchema, JsonValue, Principal } from "../types/common.js";
-import type { PolicyPreset } from "../policy/presets.js";
-import type { ToolDescription } from "../registry/registry.js";
-import type { ExecutionScope, ExecutionScopeOptions } from "../runtime/execution-scope.js";
-import { SFieldError } from "../errors.js";
-import { canonicalize } from "../util/jcs.js";
-import { newId, nowIso } from "../util/digest.js";
-import { principalToBindingRoot } from "../security/identity.js";
-import { parseElicitationToolError } from "../mcp/extensions.js";
+import {
+  SFieldError,
+  canonicalize,
+  newId,
+  nowIso,
+  parseElicitationToolError,
+  principalToBindingRoot,
+  type ExecutionScope,
+  type ExecutionScopeOptions,
+  type JsonObject,
+  type JsonSchema,
+  type JsonValue,
+  type PolicyPreset,
+  type Principal,
+  type SField,
+  type ToolDescription,
+} from "@sfield/core";
 
 export type SurfaceFormat =
   | "usd_cents"
@@ -224,7 +231,7 @@ export function formatSurfaceValue(value: unknown, format?: SurfaceFormat): unkn
   }
 }
 
-/** Flattens a closed JSON Schema into bindable dot-paths for UI Builder discovery & validation. */
+/** Flattens a closed JSON Schema into bindable dot-paths for UI discovery & validation. */
 export function extractSchemaFields(schema: JsonSchema | undefined, prefix = "", depth = 0): BindableFieldDescriptor[] {
   if (!schema || typeof schema !== "object" || depth > 5) return [];
   const out: BindableFieldDescriptor[] = [];
@@ -384,13 +391,15 @@ export class SurfaceBinderService {
   }
 
   /**
-   * Executes all declared read sources via sfield, validates `$ref` paths against closed tool
-   * output schemas, deterministically stitches the template, and cryptographically seals every action.
+   * Executes all declared read sources via sfield (or reuses precomputed verified results),
+   * validates `$ref` paths against closed tool output schemas, deterministically stitches the template,
+   * and cryptographically seals every action.
    */
   async stitch(input: {
     principal?: Principal;
     template: SurfaceTemplate;
     sources: Record<string, SurfaceSourceSpec>;
+    precomputedSources?: Record<string, JsonValue>;
     preset?: PolicyPreset;
     strictSchemaValidation?: boolean;
     signal?: AbortSignal;
@@ -414,6 +423,10 @@ export class SurfaceBinderService {
       for (const [slot, spec] of sourceEntries) {
         const desc = this.host.registry.describe(spec.toolRef);
         slotSchemas[slot] = desc.outputs;
+        if (input.precomputedSources && Object.prototype.hasOwnProperty.call(input.precomputedSources, slot)) {
+          dataModel[slot] = { toolRef: spec.toolRef, status: "succeeded", data: input.precomputedSources[slot] };
+          continue;
+        }
         const res = await scope.registry.execute(spec.toolRef, spec.inputs, {
           ...(input.signal ? { signal: input.signal } : {}),
         });
@@ -492,7 +505,7 @@ export class SurfaceBinderService {
   }
 
   /**
-   * Blindly dispatches a sealed UI action submitted from the client: verifies the HMAC seal
+   * Dispatches a sealed UI action submitted from the client: verifies the HMAC seal
    * and Principal match, merges declared `$input` form fields only, and executes via sfield.
    */
   async dispatchAction(input: {
@@ -590,4 +603,24 @@ export class SurfaceBinderService {
       }
     }
   }
+}
+
+/**
+ * Creates a sphoton SurfaceBinderService bound to a headless SField instance.
+ */
+export function createSurfaceBinder(
+  sf: SField,
+  options?: { signingSecret?: string; defaultPrincipal?: Principal },
+): SurfaceBinderService {
+  return new SurfaceBinderService(
+    { registry: sf.registry, executions: sf.executions },
+    (p) => {
+      const resolved = p ?? options?.defaultPrincipal;
+      if (!resolved) {
+        throw new SFieldError("INVALID_INPUT", "Principal is required for sphoton SurfaceBinder operations.");
+      }
+      return resolved;
+    },
+    options?.signingSecret,
+  );
 }

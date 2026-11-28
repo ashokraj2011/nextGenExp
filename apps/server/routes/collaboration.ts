@@ -24,6 +24,8 @@ import type { KnowledgeBaseStore } from "../knowledge-base";
 import type { McpExposureStore } from "../mcp-exposure-store";
 import { domainWriteToolRef, principalFor, type Runtime } from "../runtime";
 import { SlashCommandService } from "@sfield/core";
+import { createSurfaceBinder, type SealedSurfaceAction } from "../../../packages/sphoton";
+import type { SphotonCatalogService } from "../sphoton-catalog";
 import { hydrateTenantSlashCommands, persistTenantSlashCommands } from "../slash-commands";
 import { serverTenantId } from "../tenant";
 import type { ExperienceService } from "../service";
@@ -59,6 +61,7 @@ export interface CollaborationRouteDeps {
   knowledgeBase: KnowledgeBaseStore;
   integrationService: IntegrationTaskService;
   mcpExposure: McpExposureStore;
+  sphotonCatalog: SphotonCatalogService;
   now: () => number;
   json: (res: ServerResponse, data: unknown, status?: number) => void;
   body: <S extends z.ZodTypeAny>(req: IncomingMessage, schema: S, limit?: number) => Promise<z.output<S>>;
@@ -71,7 +74,7 @@ export async function handleCollaborationAndProtocolRoutes(deps: CollaborationRo
     req, res, url, origin, resource, id, operation, method, principalId, operator, viewer,
     inspectorEnabled, streams, store, runtime, gateway, dataDir, experience, profileStore,
     approvalStore, writeAudit, handoffStore, watchcardStore, agentDelegation, knowledgeBase,
-    integrationService, mcpExposure, now, json, body, requireOperator,
+    integrationService, mcpExposure, sphotonCatalog, now, json, body, requireOperator,
   } = deps;
 
   if (resource === "admin" && id === "handoffs" && inspectorEnabled) {
@@ -497,12 +500,12 @@ export async function handleCollaborationAndProtocolRoutes(deps: CollaborationRo
     }
   }
 
-  // Blind pass-through to @sfield/core SurfaceBinderService: CEP server does ZERO domain mapping.
+  // sphoton SurfaceBinder over headless @sfield/core: sfield owns tools & execution, sphoton owns UI stitching & HMAC action sealing.
   if (resource === "surfaces") {
-    if (!runtime) throw new ApiError(503, "sfield_runtime_required", "Connect a model gateway to enable sfield SurfaceBinder.");
-    const sf = runtime.sfieldInstance;
+    if (!runtime) throw new ApiError(503, "sfield_runtime_required", "Connect a model gateway to enable sphoton SurfaceBinder.");
+    const binder = createSurfaceBinder(runtime.sfieldInstance, { signingSecret: sphotonCatalog.signingSecret });
     if (id === "schemas" && !operation && method === "GET") {
-      json(res, { tools: sf.surfaces.inspectSchemas() });
+      json(res, { tools: binder.inspectSchemas() });
       return true;
     }
     if (id === "stitch" && !operation && method === "POST") {
@@ -525,7 +528,7 @@ export async function handleCollaborationAndProtocolRoutes(deps: CollaborationRo
         }).strict()),
         strictSchemaValidation: z.boolean().optional(),
       }).strict(), 64 * 1024);
-      const stitched = await sf.surfaces.stitch({
+      const stitched = await binder.stitch({
         principal: principalFor(principalId, input.personaId ? { personaId: input.personaId, domainId: "wealth" } : undefined),
         template: input.template,
         sources: input.sources as Record<string, { toolRef: string; inputs: import("@sfield/core").JsonObject }>,
@@ -549,9 +552,9 @@ export async function handleCollaborationAndProtocolRoutes(deps: CollaborationRo
         }).strict(),
         formInputs: z.record(z.string(), z.unknown()).optional(),
       }).strict(), 32 * 1024);
-      const outcome = await sf.surfaces.dispatchAction({
+      const outcome = await binder.dispatchAction({
         principal: principalFor(principalId, input.personaId ? { personaId: input.personaId, domainId: "wealth" } : undefined),
-        action: input.action as import("@sfield/core").SealedSurfaceAction,
+        action: input.action as SealedSurfaceAction,
         formInputs: input.formInputs as Record<string, import("@sfield/core").JsonValue> | undefined,
       });
       json(res, outcome, outcome.status === "denied" ? 403 : outcome.status === "pending_approval" ? 202 : 200);

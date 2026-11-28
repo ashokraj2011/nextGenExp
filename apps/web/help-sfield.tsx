@@ -86,15 +86,15 @@ const executionLanes = [
     lane: "sphoton UI Tool Bindings",
     preset: "read_only / host-scoped actions",
     caller: "packages/sphoton (/api/admin/ui-binding-catalog · UI Builder · Chat)",
-    allowed: "Domain-exposed sfield tool fields & actions validated against closed schemas",
-    guarantee: "Headless sfield stays UI-free; sphoton enforces type safety, SHA-256 review dependency fingerprints, verified-read reuse, unavailable states & persistent HMAC action refs",
+    allowed: "Domain-exposed sfield tool fields & actions validated via SphotonComponentRegistry",
+    guarantee: "sfield is 100% UI-free and sphoton is 100% domain-agnostic; enforces type safety, SHA-256 review dependency fingerprints, verified-read reuse, unavailable states & persistent HMAC action refs",
   },
   {
-    lane: "Legacy SurfaceBinder Lab",
+    lane: "sphoton SurfaceBinder Lab",
     preset: "read_only (stitch) / supervised (action)",
-    caller: "sf.surfaces (/api/surfaces/schemas · stitch · action)",
-    allowed: "Experimental $ref / $repeat / $input pass-through templates",
-    guarantee: "Closed schema path validation + HMAC-SHA256 principal-bound action seals",
+    caller: "packages/sphoton createSurfaceBinder(sf) (/api/surfaces/*)",
+    allowed: "Declarative $ref / $repeat / $input templates stitched over headless sfield",
+    guarantee: "Closed schema path validation + persistent HMAC-SHA256 principal-bound action seals",
   },
 ];
 
@@ -122,8 +122,8 @@ const deploymentModes = [
 const sdkPackages = [
   {
     pkg: "@sfield/core",
-    role: "Governed Agent Kernel",
-    highlights: "SField runtime, closed Ajv tool contracts, defineGraph / sf.graphs (parallel fan-out, interrupts, Time-Travel), SurfaceBinderService (sf.surfaces deterministic Data-to-UI stitch & HMAC-sealed actions), HITL approvals, Anthropic / Gemini / OpenAI-compatible providers, MCP 2026 SFieldMcpServer (Elicitation + Async Tasks) + McpClient, PiiFirewall, ToolResilienceGuard, DelegationService, streamRun, FilesystemArtifactStore & VectorMemoryIndex.",
+    role: "Headless Governed Agent Kernel",
+    highlights: "100% UI-free SField runtime: closed Ajv tool contracts, defineGraph / sf.graphs (parallel fan-out, interrupts, Time-Travel), HITL approvals, Anthropic / Gemini / OpenAI-compatible providers, MCP 2026 SFieldMcpServer (Elicitation + Async Tasks) + McpClient, PiiFirewall, ToolResilienceGuard, DelegationService, streamRun, FilesystemArtifactStore & VectorMemoryIndex.",
   },
   {
     pkg: "@sfield/preset-memory",
@@ -167,8 +167,8 @@ const sdkPackages = [
   },
   {
     pkg: "packages/sphoton",
-    role: "Singularity Photon — UI Tool-Binding Toolkit",
-    highlights: "Sits above headless sfield via SfieldAdapter: owns card binding contracts, component/tool schema validation, catalog-driven AI draft generation, single deterministic A2UI compilation (preview + approval + live chat), unavailable states, and persistent HMAC-SHA256 action references.",
+    role: "Singularity Photon — Domain-Agnostic UI Binding Toolkit",
+    highlights: "Zero CEP/domain imports, sits above headless sfield via SfieldAdapter & createSurfaceBinder(sf): pluggable SphotonComponentRegistry, card binding contracts, schema/type validation, catalog-driven AI drafts, single deterministic A2UI compilation, unavailable states, SurfaceBinder ($ref/$repeat/$input), and persistent HMAC-SHA256 action sealing.",
   },
 ];
 
@@ -203,8 +203,8 @@ const frameworkComparison = [
   },
   {
     dimension: "Data-to-UI & Sealed Actions",
-    sfieldPros: "Built-in sf.surfaces ($ref/$repeat/$input) prevents LLMs from fabricating numbers and seals every button action with HMAC-SHA256 bound to Principal.",
-    sfieldCons: "Backend declarative envelope only — you still bring your own frontend renderer (e.g. React, A2UI, or assistant-ui).",
+    sfieldPros: "Headless sfield pairs with sphoton (packages/sphoton) for schema-validated tool bindings, SurfaceBinder ($ref/$repeat/$input), verified-read reuse, unavailable states, and persistent HMAC-SHA256 action sealing.",
+    sfieldCons: "Backend declarative binding/compilation layer — you still bring your own frontend renderer (e.g. React, A2UI, or assistant-ui).",
     othersPros: "Vercel AI SDK (streamUI / useChat) provides best-in-class React streaming hooks and instant generative UI components.",
     othersCons: "No built-in cryptographic action sealing or closed-schema Data-to-UI stitcher; LLMs often serialize raw business numbers into UI JSON.",
   },
@@ -291,13 +291,13 @@ export function SfieldHelp({ selectContract }: { selectContract: (id: string) =>
           <li className="help-sfield-node">
             <span className="help-entity-icon"><Layers size={18} aria-hidden="true" /></span>
             <h3>sphoton (<code>packages/sphoton</code>)</h3>
-            <p>Consumes <code>sfield</code> via <code>SfieldAdapter</code>. Validates bindings &amp; types, generates AI drafts from the exposed catalog, compiles A2UI (reusing verified reads or rendering unavailable states), and seals persistent HMAC action refs.</p>
+            <p>100% domain-agnostic UI binder over headless <code>sfield</code> (<code>SfieldAdapter</code> + <code>createSurfaceBinder</code>). Uses pluggable <code>SphotonComponentRegistry</code>, validates types, compiles preview/approval/chat cards, and seals persistent HMAC action refs.</p>
             <ArrowRight className="help-proposal-arrow" size={22} aria-hidden="true" />
           </li>
           <li className="help-sfield-node">
             <span className="help-entity-icon"><Network size={18} aria-hidden="true" /></span>
             <h3>App &amp; Domains (CEP)</h3>
-            <p>Controls tenant/domain exposure &amp; friendly labels (<code>/api/admin/ui-binding-catalog</code>), runs UI Builder &amp; dependency-fingerprinted Admin chat approvals, renders A2UI in chat, and displays approved design revisions in Logs.</p>
+            <p>Registers A2UI components (<code>cepSphotonRegistry</code>), sets tenant/domain exposure &amp; friendly labels (<code>/api/admin/ui-binding-catalog</code>), runs UI Builder &amp; dependency-fingerprinted Admin chat approvals, renders A2UI, and logs approved revisions.</p>
           </li>
         </ol>
       </div>

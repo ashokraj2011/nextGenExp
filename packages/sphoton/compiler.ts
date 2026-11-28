@@ -1,25 +1,23 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import type { DisplayBlock } from "../contracts/surface";
-import { formatGoalMonth, goalProgressSchema, type GoalProgress } from "../contracts/goal-progress";
-import { formatPortfolioAmount, portfolioSnapshotSchema } from "../contracts/portfolio";
 import type { SfieldAdapter } from "./adapter";
 import {
   canonicalStableJson,
   parseBindingSourcePath,
   type SphotonBindingCatalog,
+  type SphotonBlock,
   type SphotonCardAction,
   type SphotonCardBinding,
   type SphotonExecutionScope,
-  type SphotonFormat,
   type SphotonSignedActionPayload,
   type SphotonSignedActionRef,
 } from "./contracts";
 import { fingerprintToolContract } from "./fingerprint";
+import { formatBoundValue, type SphotonComponentRegistry } from "./registry";
 
-export type SphotonCompileResult = {
+export type SphotonCompileResult<TBlock extends SphotonBlock = SphotonBlock> = {
   status: "compiled" | "unavailable" | "incompatible_contract";
   cardId: string;
-  block: DisplayBlock;
+  block: TBlock;
   signedActions: SphotonSignedActionRef[];
   reusedSources: string[];
   invokedSources: string[];
@@ -43,29 +41,10 @@ export function readPathValue(data: unknown, outputPath: string): unknown {
   return current;
 }
 
-export function formatBoundValue(value: unknown, format?: SphotonFormat): string {
-  if (value === null || value === undefined) return "—";
-  if (format === "currency_cents" && typeof value === "number") {
-    return formatPortfolioAmount(value);
-  }
-  if (format === "currency" && typeof value === "number") {
-    return "$" + value.toLocaleString("en-US", { maximumFractionDigits: 2 });
-  }
-  if (format === "percent" && typeof value === "number") {
-    return `${Math.round(value * 10) / 10}%`;
-  }
-  if (format === "month" && typeof value === "string" && /^\d{4}-\d{2}$/.test(value)) {
-    return formatGoalMonth(value);
-  }
-  if (format === "number" && typeof value === "number") {
-    return value.toLocaleString("en-US");
-  }
-  if (Array.isArray(value)) return `${value.length} items`;
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
-}
-
-function actionSealPayload(payload: SphotonSignedActionPayload, scope: Pick<SphotonExecutionScope, "tenantId" | "domainId" | "principalId" | "conversationId">): string {
+function actionSealPayload(
+  payload: SphotonSignedActionPayload,
+  scope: Pick<SphotonExecutionScope, "tenantId" | "domainId" | "principalId" | "conversationId">,
+): string {
   return canonicalStableJson({
     ...payload,
     tenantId: scope.tenantId,
@@ -111,7 +90,7 @@ export function verifyActionRef(
   }
 }
 
-function unavailableBlock(card: SphotonCardBinding, reason: string): DisplayBlock {
+function defaultUnavailableBlock(card: SphotonCardBinding, reason: string): SphotonBlock {
   const title = card.unavailableState?.title ?? "Information temporarily unavailable";
   const message = card.unavailableState?.message ?? reason;
   return {
@@ -124,30 +103,71 @@ function unavailableBlock(card: SphotonCardBinding, reason: string): DisplayBloc
   };
 }
 
+function defaultGenericCardBlock(input: {
+  card: SphotonCardBinding;
+  catalog: SphotonBindingCatalog;
+  resolvedRaw: Record<string, unknown>;
+  resolvedFormatted: Record<string, string>;
+  bindingLabels: Record<string, string>;
+  signedActions: SphotonSignedActionRef[];
+  design?: { id: string; revision: number; name?: string; title?: string; badge?: string; body?: string };
+}): SphotonBlock {
+  const { card, catalog, resolvedRaw, resolvedFormatted, bindingLabels, signedActions, design } = input;
+  const metrics = card.bindings
+    .filter((binding) => !["title", "badge", "body", "progress"].includes(binding.field) && resolvedFormatted[binding.field] !== undefined)
+    .slice(0, 6)
+    .map((binding, idx) => ({
+      id: `m_${idx + 1}`,
+      label: bindingLabels[binding.field] ?? binding.field,
+      value: resolvedFormatted[binding.field],
+      subtext: binding.from.split(".data.")[0],
+      tone: "default" as const,
+    }));
+
+  const progressRaw = typeof resolvedRaw.progress === "number"
+    ? Math.max(0, Math.min(100, Math.round(resolvedRaw.progress)))
+    : undefined;
+  const primaryAction = signedActions[0];
+
+  return {
+    component: card.component,
+    props: {
+      badge: resolvedFormatted.badge ?? design?.badge ?? `${catalog.domainId} · sfield`,
+      title: resolvedFormatted.title ?? design?.title ?? design?.name ?? "Bound Data Card",
+      body: resolvedFormatted.body ?? design?.body ?? "Live fields bound through sphoton from sfield.",
+      accentTop: true,
+      metrics,
+      ...(progressRaw !== undefined ? { progressLabel: bindingLabels.progress ?? "Progress", progressPercent: progressRaw, progressDisplay: `${progressRaw}%` } : {}),
+      ...(primaryAction ? { ctaLabel: primaryAction.label } : {}),
+    },
+  };
+}
+
 /**
  * Single deterministic compiler shared by draft preview, approval preview, and live customer chat.
- * Reuses verified turn tool results when present, invokes declared reads via the sfield adapter
- * on a miss, enforces approved unavailable states, and emits signed action references.
+ * Completely domain-agnostic: delegates specialized component compilation to `registry`.
  */
-export async function compileBoundCard(input: {
+export async function compileBoundCard<TBlock extends SphotonBlock = SphotonBlock>(input: {
   card: SphotonCardBinding;
   catalog: SphotonBindingCatalog;
   scope: SphotonExecutionScope;
+  registry?: SphotonComponentRegistry;
   sfield?: SfieldAdapter;
   verifiedTurnResults?: Record<string, unknown>;
   sampleResults?: Record<string, unknown>;
-  baseBlock?: DisplayBlock;
+  baseBlock?: SphotonBlock;
   design?: { id: string; revision: number; name?: string; title?: string; badge?: string; body?: string };
   expectedToolContracts?: Record<string, string>;
   signingSecret: string;
   now?: number;
   actionTtlMs?: number;
   signal?: AbortSignal;
-}): Promise<SphotonCompileResult> {
+}): Promise<SphotonCompileResult<TBlock>> {
   const {
     card,
     catalog,
     scope,
+    registry,
     sfield,
     verifiedTurnResults = {},
     sampleResults = {},
@@ -164,6 +184,7 @@ export async function compileBoundCard(input: {
   const toolsByRef = new Map(catalog.tools.map((tool) => [tool.toolRef, tool]));
   const fieldsByKey = new Map(catalog.fields.map((field) => [`${field.toolRef}::${field.outputPath}`, field]));
   const toolContracts: Record<string, string> = {};
+  const unavailableBlock = (reason: string) => defaultUnavailableBlock(card, reason);
 
   // 1. Check live tool contract compatibility against approved publication fingerprints.
   for (const source of Object.values(card.sources)) {
@@ -176,7 +197,7 @@ export async function compileBoundCard(input: {
       return {
         status: "incompatible_contract",
         cardId,
-        block: unavailableBlock(card, `Tool ${source.toolRef} is no longer available. Submit a revised design for approval.`),
+        block: unavailableBlock(`Tool ${source.toolRef} is no longer available. Submit a revised design for approval.`) as TBlock,
         signedActions: [],
         reusedSources: [],
         invokedSources: [],
@@ -190,7 +211,7 @@ export async function compileBoundCard(input: {
       return {
         status: "incompatible_contract",
         cardId,
-        block: unavailableBlock(card, `The tool contract for ${source.toolRef} changed. A revised publication must be approved.`),
+        block: unavailableBlock(`The tool contract for ${source.toolRef} changed. A revised publication must be approved.`) as TBlock,
         signedActions: [],
         reusedSources: [],
         invokedSources: [],
@@ -271,9 +292,8 @@ export async function compileBoundCard(input: {
       status: "unavailable",
       cardId,
       block: unavailableBlock(
-        card,
         card.unavailableState?.message ?? "Required customer data is currently unavailable for this card.",
-      ),
+      ) as TBlock,
       signedActions: [],
       reusedSources,
       invokedSources,
@@ -304,148 +324,58 @@ export async function compileBoundCard(input: {
     return signActionRef(payload, scope, signingSecret);
   });
 
-  // 5. Compile into target A2UI DisplayBlock.
-  if (card.component === "PznGoalProgress") {
-    const firstSlot = Object.values(slotData)[0] as Partial<GoalProgress> | undefined;
-    const baseGoal = baseBlock?.component === "PznGoalProgress" ? baseBlock.props.goal : undefined;
-    const mergedGoal = {
-      ...(baseGoal ?? {}),
-      ...(firstSlot ?? {}),
-      ...(resolvedRaw["goal.goalId"] !== undefined ? { goalId: resolvedRaw["goal.goalId"] } : {}),
-      ...(resolvedRaw["goal.title"] !== undefined ? { title: resolvedRaw["goal.title"] } : {}),
-      ...(resolvedRaw["goal.targetCents"] !== undefined ? { targetCents: resolvedRaw["goal.targetCents"] } : {}),
-      ...(resolvedRaw["goal.history"] !== undefined ? { history: resolvedRaw["goal.history"] } : {}),
-      ...(resolvedRaw["goal.monthlyContributionCents"] !== undefined ? { monthlyContributionCents: resolvedRaw["goal.monthlyContributionCents"] } : {}),
-      ...(resolvedRaw["goal.currency"] !== undefined ? { currency: resolvedRaw["goal.currency"] } : {}),
-      ...(resolvedRaw["goal.asOf"] !== undefined ? { asOf: resolvedRaw["goal.asOf"] } : {}),
-    };
-    const parsedGoal = goalProgressSchema.safeParse(mergedGoal);
-    if (!parsedGoal.success) {
-      return {
-        status: "unavailable",
-        cardId,
-        block: unavailableBlock(card, "Goal progress data is incomplete and cannot be charted."),
-        signedActions: [],
-        reusedSources,
-        invokedSources,
-        missingRequiredFields: ["goal"],
-        toolContracts,
-        reason: "Merged goal payload failed goalProgressSchema validation.",
-      };
-    }
-
-    const savingsAction = signedActions.find((act) =>
-      act.toolRef.startsWith("goal.savings.preview@") && typeof act.resolvedInputs.extraMonthlyCents === "number");
-    const extraMonthlyCents = savingsAction ? Number(savingsAction.resolvedInputs.extraMonthlyCents) : undefined;
-    const canOfferSavings = Boolean(
-      savingsAction
-      && extraMonthlyCents
-      && parsedGoal.data.monthlyContributionCents !== undefined
-      && parsedGoal.data.history.at(-1)!.savedCents < parsedGoal.data.targetCents,
-    );
-
-    const goalLabel = design?.title ?? "Home down payment";
-    const sharedBase = baseBlock?.component === "PznGoalProgress"
-      ? {
-        variant: baseBlock.props.variant,
-        title: baseBlock.props.title,
-        sources: baseBlock.props.sources,
-        disclosures: baseBlock.props.disclosures,
-      }
-      : {
-        variant: "expanded" as const,
-        title: goalLabel,
-        sources: [{ title: goalLabel, label: "sfield · goal.progress.read", version: "1.0.0", ref: "goal.progress.read@1.0.0" }],
-        disclosures: ["Goal progress is read from verified account records."],
-      };
-
-    return {
-      status: "compiled",
-      cardId,
-      block: {
-        component: "PznGoalProgress",
-        props: {
-          ...sharedBase,
-          goal: parsedGoal.data,
-          ...(canOfferSavings && savingsAction && extraMonthlyCents
-            ? { savingsOption: { actionId: savingsAction.actionRefId, extraMonthlyCents } }
-            : {}),
-        },
-      },
-      signedActions: canOfferSavings ? signedActions : [],
-      reusedSources,
-      invokedSources,
-      missingRequiredFields: [],
-      toolContracts,
-    };
-  }
-
-  if (card.component === "PznPortfolioSnapshot") {
-    const firstSlot = Object.values(slotData)[0] as Record<string, unknown> | undefined;
-    const merged = {
-      ...(baseBlock?.component === "PznPortfolioSnapshot" ? baseBlock.props : {}),
-      ...(firstSlot ?? {}),
-      ...(resolvedRaw["portfolio.totalCents"] !== undefined ? { totalCents: resolvedRaw["portfolio.totalCents"] } : {}),
-      ...(resolvedRaw["portfolio.cashCents"] !== undefined ? { cashCents: resolvedRaw["portfolio.cashCents"] } : {}),
-      ...(resolvedRaw["portfolio.equityCents"] !== undefined ? { equityCents: resolvedRaw["portfolio.equityCents"] } : {}),
-    };
-    const parsed = portfolioSnapshotSchema.safeParse(merged);
-    if (!parsed.success) {
-      return {
-        status: "unavailable",
-        cardId,
-        block: unavailableBlock(card, "Portfolio snapshot data is currently unavailable."),
-        signedActions: [],
-        reusedSources,
-        invokedSources,
-        missingRequiredFields: ["portfolio"],
-        toolContracts,
-      };
-    }
-    return {
-      status: "compiled",
-      cardId,
-      block: { component: "PznPortfolioSnapshot", props: parsed.data },
+  // 5. Compile via pluggable component registry (or generic fallback card).
+  const registered = registry?.get(card.component);
+  if (registered?.compile) {
+    const compiled = registered.compile({
+      card,
+      catalog,
+      slotData,
+      resolvedRaw,
+      resolvedFormatted,
+      bindingLabels,
       signedActions,
+      baseBlock,
+      design,
+      unavailableBlock,
+    });
+    if (compiled.status === "unavailable") {
+      return {
+        status: "unavailable",
+        cardId,
+        block: compiled.block as TBlock,
+        signedActions: [],
+        reusedSources,
+        invokedSources,
+        missingRequiredFields: compiled.missingRequiredFields ?? [],
+        toolContracts,
+        reason: compiled.reason,
+      };
+    }
+    return {
+      status: "compiled",
+      cardId,
+      block: compiled.block as TBlock,
+      signedActions: compiled.signedActions ?? signedActions,
       reusedSources,
       invokedSources,
       missingRequiredFields: [],
       toolContracts,
     };
   }
-
-  // Generic domain card compilation → PznBoundWidget (works for Wealth, IT Ops, Sales RevOps, and any future domain!)
-  const metrics = card.bindings
-    .filter((binding) => !["title", "badge", "body", "progress"].includes(binding.field) && resolvedFormatted[binding.field] !== undefined)
-    .slice(0, 6)
-    .map((binding, idx) => ({
-      id: `m_${idx + 1}`,
-      label: bindingLabels[binding.field] ?? binding.field,
-      value: resolvedFormatted[binding.field],
-      subtext: binding.from.split(".data.")[0],
-      tone: "default" as const,
-    }));
-
-  const progressRaw = typeof resolvedRaw.progress === "number"
-    ? Math.max(0, Math.min(100, Math.round(resolvedRaw.progress)))
-    : undefined;
-  const primaryAction = signedActions[0];
 
   return {
     status: "compiled",
     cardId,
-    block: {
-      component: "PznBoundWidget",
-      props: {
-        badge: resolvedFormatted.badge ?? design?.badge ?? `${catalog.domainId} · sfield`,
-        title: resolvedFormatted.title ?? design?.title ?? design?.name ?? "Bound Data Card",
-        body: resolvedFormatted.body ?? design?.body ?? "Live fields bound through sphoton from sfield.",
-        accentTop: true,
-        metrics,
-        ...(progressRaw !== undefined ? { progressLabel: bindingLabels.progress ?? "Progress", progressPercent: progressRaw, progressDisplay: `${progressRaw}%` } : {}),
-        ...(primaryAction ? { ctaLabel: primaryAction.label } : {}),
-      },
-    },
+    block: defaultGenericCardBlock({
+      card,
+      catalog,
+      resolvedRaw,
+      resolvedFormatted,
+      bindingLabels,
+      signedActions,
+      design,
+    }) as TBlock,
     signedActions,
     reusedSources,
     invokedSources,
@@ -457,14 +387,19 @@ export async function compileBoundCard(input: {
 /**
  * Applies an action execution result back onto an existing compiled card block in place.
  */
-export function applyActionResultToBlock(
-  block: DisplayBlock,
+export function applyActionResultToBlock<TBlock extends SphotonBlock>(
+  block: TBlock,
   action: Pick<SphotonSignedActionPayload, "resultBindings" | "label">,
   actionOutput: unknown,
-): DisplayBlock {
-  if (block.component !== "PznBoundWidget") return block;
+  registry?: SphotonComponentRegistry,
+): TBlock {
+  const registered = registry?.get(block.component);
+  if (registered?.applyActionResult) {
+    return registered.applyActionResult(block, action, actionOutput) as TBlock;
+  }
   if (!action.resultBindings?.length || !actionOutput || typeof actionOutput !== "object") return block;
   const nextProps = structuredClone(block.props);
+  const metrics = Array.isArray(nextProps.metrics) ? (nextProps.metrics as Array<Record<string, unknown>>) : undefined;
   for (const rb of action.resultBindings) {
     const raw = readPathValue(actionOutput, rb.from);
     if (raw === undefined || raw === null) continue;
@@ -473,15 +408,16 @@ export function applyActionResultToBlock(
     else if (rb.field === "badge") nextProps.badge = formatted;
     else if (rb.field === "body") nextProps.body = formatted;
     else if (rb.field === "progress" && typeof raw === "number") {
-      nextProps.progressPercent = Math.max(0, Math.min(100, Math.round(raw)));
-      nextProps.progressDisplay = `${nextProps.progressPercent}%`;
-    } else {
-      const existing = nextProps.metrics.find((metric) => metric.id === rb.field || metric.label === rb.field);
+      const pct = Math.max(0, Math.min(100, Math.round(raw)));
+      nextProps.progressPercent = pct;
+      nextProps.progressDisplay = `${pct}%`;
+    } else if (metrics) {
+      const existing = metrics.find((metric) => metric.id === rb.field || metric.label === rb.field);
       if (existing) {
         existing.value = formatted;
         existing.tone = "positive";
-      } else if (nextProps.metrics.length < 6) {
-        nextProps.metrics.push({
+      } else if (metrics.length < 6) {
+        metrics.push({
           id: rb.field.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 48) || "updated",
           label: rb.field,
           value: formatted,
@@ -491,5 +427,5 @@ export function applyActionResultToBlock(
       }
     }
   }
-  return { component: "PznBoundWidget", props: nextProps };
+  return { ...block, props: nextProps };
 }

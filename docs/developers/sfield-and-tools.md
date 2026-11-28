@@ -93,9 +93,7 @@ Every `tools/call` runs inside a real `sfield` `ExecutionScope` (`executions.ope
 
 `sfield` *(Singularity Field)* is a **headless** tool and agent runtime: it owns tool registration, closed Ajv input/output JSON Schemas, scoped execution, approvals, and immutable call logs — not UI components or layouts.
 
-UI data binding, component schema validation, AI draft binding, deterministic A2UI compilation, and persistent HMAC-SHA256 signed action references live in **`sphoton`** (`packages/sphoton/`), which talks to `sfield` strictly through a narrow `SfieldAdapter` (`apps/server/sphoton-catalog.ts`). See `docs/developers/sphoton.md` for the full 3-layer diagram (`sfield` → `sphoton` → App/Domains) and `/api/admin/ui-binding-catalog`.
-
-CEP also retains the experimental `/api/surfaces/*` pass-through routes in `apps/server/routes/collaboration.ts` for **SurfaceBinder Lab** (`sf.surfaces`).
+UI data binding, pluggable component schema validation (`SphotonComponentRegistry`), AI draft binding, deterministic A2UI compilation, `SurfaceBinderService` (`createSurfaceBinder(sf)`), and persistent HMAC-SHA256 signed action references live in **`sphoton`** (`packages/sphoton/`), which has zero CEP/domain imports and talks to `sfield` strictly through `SfieldAdapter` (`apps/server/sphoton-catalog.ts`) or `SField`'s public tool registry/execution APIs. See `docs/developers/sphoton.md` for the full 3-layer diagram (`sfield` → `sphoton` → App/Domains).
 
 ### Core `@sfield/*` SDK workspace packages & primitives
 

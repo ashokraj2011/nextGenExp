@@ -127,52 +127,60 @@ export async function runRedTeamProofSuite(): Promise<RedTeamSuiteResult> {
       }
     }
 
-    // Proof 2: Tampered UI action argument rejected by SurfaceBinder HMAC-SHA256 seal
+    // Proof 2: Closed JSON Schema rejects undeclared/injected arguments before handler execution
     {
       const t0 = Date.now();
-      const stitched = await sf.surfaces.stitch({
-        principal: alice,
-        sources: { acct: { toolRef: "proof.account.read@1.0.0", inputs: { accountId: "acct-1" } } },
-        template: {
-          component: "WireCard",
-          props: { balance: { $ref: "acct.balanceCents", format: "usd_cents" } },
-          actions: [{
-            id: "send_wire",
-            label: "Send $10",
-            toolRef: "proof.wire.send@1.0.0",
-            preset: "supervised",
-            inputs: { accountId: { $ref: "acct.accountId" }, amountCents: 1000 },
-          }],
-        },
-      });
-      const tampered = {
-        ...stitched.actions[0]!,
-        resolvedInputs: { ...stitched.actions[0]!.resolvedInputs, amountCents: 9_999_900 },
-      };
-      const res = await sf.surfaces.dispatchAction({ principal: alice, action: tampered });
-      const blocked = res.status === "denied" && res.error?.code === "INVALID_ACTION_SEAL" && !wireMutated;
-      proofs.push({
-        id: "tampered_surface_action_blocked",
-        title: "2. Tampered UI Action Payload (HMAC-SHA256 Seal)",
-        attack: "Malicious browser modifies sealed action amountCents from 1000 ($10) to 9,999,900 ($99,999) before POST.",
-        defense: "sf.surfaces.dispatchAction verifies HMAC-SHA256 seal over resolvedInputs & toolRef, rejecting tampering.",
-        passed: blocked,
-        durationMs: Math.max(0, Date.now() - t0),
-        evidence: { status: res.status, errorCode: res.error?.code ?? null, handlerExecuted: wireMutated },
-      });
+      const scope = await sf.executions.open({ principal: alice, preset: "read_only", purpose: "redteam-closed-schema" });
+      try {
+        let status = "succeeded";
+        let errorCode: string | null = null;
+        try {
+          const res = await scope.registry.execute("proof.account.read@1.0.0", {
+            accountId: "acct-1",
+            bypassPolicy: true,
+          });
+          status = res.status;
+          errorCode = res.error?.code ?? null;
+        } catch (err) {
+          status = "denied";
+          errorCode = (err as { code?: string })?.code ?? "THROWN_ERROR";
+        }
+        const blocked = status !== "succeeded" && errorCode === "INVALID_INPUT";
+        proofs.push({
+          id: "closed_schema_injection_blocked",
+          title: "2. Closed JSON Schema Argument Injection",
+          attack: "Caller injects undeclared argument bypassPolicy=true into proof.account.read@1.0.0.",
+          defense: "sfield Ajv closed schema validator (additionalProperties: false) rejects undeclared arguments before handler execution.",
+          passed: blocked,
+          durationMs: Math.max(0, Date.now() - t0),
+          evidence: { status, errorCode },
+        });
+      } finally {
+        await scope.close().catch(() => undefined);
+      }
+    }
 
-      // Proof 3: Cross-Principal / Cross-Tenant action replay
-      const t1 = Date.now();
-      const replayRes = await sf.surfaces.dispatchAction({ principal: bob, action: stitched.actions[0]! });
-      const replayBlocked = replayRes.status === "denied" && replayRes.error?.code === "INVALID_ACTION_SEAL" && !wireMutated;
+    // Proof 3: Cross-Tenant / Cross-Principal Memory Isolation
+    {
+      const t0 = Date.now();
+      const saved = await sf.memory.for(alice).put({
+        scope: { kind: "subject", tenantId: alice.tenantId, subjectId: alice.subjectId },
+        kind: "fact",
+        content: "Private wire limit: $50,000",
+        structured: { key: "wire_limit", value: { maxUsd: 50_000 } },
+        origin: "trusted_source",
+        provenance: [{ sourceType: "host", sourceId: "redteam-seed", observedAt: new Date().toISOString() }],
+      }, { idempotencyKey: "redteam-mem-alice" });
+      const bobRead = await sf.memory.for(bob).get(saved.id);
+      const isolated = bobRead === null;
       proofs.push({
-        id: "cross_principal_replay_blocked",
-        title: "3. Cross-Tenant / Cross-Principal Replay",
-        attack: "Bob (tenant-beta) replays Alice's (tenant-alpha) valid sealed action token.",
-        defense: "HMAC seal binds { tenantId, subjectId }; cross-principal replay fails verification immediately.",
-        passed: replayBlocked,
-        durationMs: Math.max(0, Date.now() - t1),
-        evidence: { status: replayRes.status, errorCode: replayRes.error?.code ?? null, attacker: `${bob.tenantId}/${bob.subjectId}` },
+        id: "cross_tenant_memory_isolated",
+        title: "3. Cross-Tenant Memory Isolation",
+        attack: "Bob (tenant-beta) reads Alice's (tenant-alpha) private memory item ID directly.",
+        defense: "sfield MemoryService partitions every read and write by tenantId; cross-tenant lookups return null.",
+        passed: isolated,
+        durationMs: Math.max(0, Date.now() - t0),
+        evidence: { attacker: `${bob.tenantId}/${bob.subjectId}`, targetId: saved.id, leakedRecord: Boolean(bobRead) },
       });
     }
 

@@ -191,17 +191,17 @@ export function SurfaceBinderLab() {
   const activeTool = schemas.find((t) => t.toolRef === selectedToolRef);
 
   return (
-    <section aria-label="sfield SurfaceBinder Lab" style={{ display: "grid", gap: "16px", padding: "4px 0 24px" }}>
+    <section aria-label="sphoton SurfaceBinder Lab" style={{ display: "grid", gap: "16px", padding: "4px 0 24px" }}>
       <div style={{
         display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px",
         padding: "14px 16px", borderRadius: "12px", border: "1px solid var(--border, #d4e2da)", background: "var(--surface, #fff)",
       }}>
         <div>
           <h2 style={{ margin: "0 0 4px", fontSize: "1.05rem", display: "flex", alignItems: "center", gap: "8px" }}>
-            <Sparkles size={16} aria-hidden="true" /> sfield SurfaceBinder Lab (<code>sf.surfaces</code>)
+            <Sparkles size={16} aria-hidden="true" /> sphoton SurfaceBinder Lab (<code>packages/sphoton</code> over headless <code>sfield</code>)
           </h2>
           <p style={{ margin: 0, fontSize: "0.86rem", color: "var(--muted, #4b6156)" }}>
-            Blind pass-through demo: discovers closed tool schemas via <code>GET /api/surfaces/schemas</code>, stitches <code>$ref</code> / <code>$repeat</code> / <code>$input</code> via <code>POST /api/surfaces/stitch</code>, and dispatches HMAC-SHA256 sealed actions via <code>POST /api/surfaces/action</code>.
+            Deterministic UI binding demo: discovers closed <code>sfield</code> tool schemas via <code>GET /api/surfaces/schemas</code>, stitches <code>$ref</code> / <code>$repeat</code> / <code>$input</code> via <code>POST /api/surfaces/stitch</code>, and dispatches persistent HMAC-SHA256 sealed actions via <code>POST /api/surfaces/action</code>.
           </p>
         </div>
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
@@ -209,7 +209,7 @@ export function SurfaceBinderLab() {
             <RefreshCw size={13} aria-hidden="true" /> Refresh schemas
           </button>
           <button type="button" className="ui-button ui-button-primary ui-compact-btn" onClick={() => void runStitch()} disabled={stitching}>
-            <Play size={13} aria-hidden="true" /> {stitching ? "Stitching…" : "Stitch via sf.surfaces"}
+            <Play size={13} aria-hidden="true" /> {stitching ? "Stitching…" : "Stitch via sphoton"}
           </button>
         </div>
       </div>
@@ -310,7 +310,7 @@ export function SurfaceBinderLab() {
           </strong>
           {!envelope ? (
             <p style={{ margin: 0, fontSize: "0.84rem", color: "var(--muted)" }}>
-              Click <strong>Stitch via sf.surfaces</strong> to execute the read sources through <code>sfield</code> and render the stitched envelope here.
+              Click <strong>Stitch via sphoton</strong> to execute the read sources through headless <code>sfield</code> and render the stitched envelope here.
             </p>
           ) : (
             <>

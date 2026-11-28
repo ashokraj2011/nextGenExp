@@ -1,5 +1,4 @@
 import { z } from "zod";
-import type { LayoutComponent } from "../contracts/ui-layout";
 
 export const sphotonFieldTypeSchema = z.enum(["string", "number", "integer", "boolean", "array", "object"]);
 export type SphotonFieldType = z.infer<typeof sphotonFieldTypeSchema>;
@@ -69,6 +68,11 @@ export const sphotonCardBindingSchema = z.object({
   unavailableState: sphotonUnavailableStateSchema.optional(),
 }).strict();
 export type SphotonCardBinding = z.infer<typeof sphotonCardBindingSchema>;
+
+export type SphotonBlock = {
+  component: string;
+  props: Record<string, unknown>;
+};
 
 export type SphotonCatalogTool = {
   toolRef: string;
@@ -152,61 +156,9 @@ export type SphotonComponentFieldRule = {
   required?: boolean;
 };
 
-/**
- * Component destination schemas validated by sphoton at design and publish time.
- * Keeps component field type expectations outside sfield.
- */
-export const SPHOTON_COMPONENT_SCHEMAS: Partial<Record<LayoutComponent | string, {
+export type SphotonComponentSchema = {
   allowDynamicFields?: boolean;
   fields: Record<string, SphotonComponentFieldRule>;
-}>> = {
-  PznGoalProgress: {
-    fields: {
-      "goal.title": { types: ["string"] },
-      "goal.targetCents": { types: ["integer", "number"], required: true },
-      "goal.history": { types: ["array"], required: true },
-      "goal.monthlyContributionCents": { types: ["integer", "number"] },
-      "goal.currency": { types: ["string"] },
-      "goal.asOf": { types: ["string"] },
-      "goal.goalId": { types: ["string"] },
-      "goal.targetMonth": { types: ["string"] },
-      "goal.projectedTargetMonth": { types: ["string"] },
-    },
-  },
-  PznPortfolioSnapshot: {
-    fields: {
-      "portfolio.totalCents": { types: ["integer", "number"], required: true },
-      "portfolio.cashCents": { types: ["integer", "number"] },
-      "portfolio.equityCents": { types: ["integer", "number"] },
-      "portfolio.asOf": { types: ["string"] },
-      "portfolio.currency": { types: ["string"] },
-      "portfolio.holdings": { types: ["array"] },
-    },
-  },
-  PznMetricSummary: {
-    allowDynamicFields: true,
-    fields: {
-      "balances.available": { types: ["integer", "number", "string"] },
-      "balances.current": { types: ["integer", "number", "string"] },
-      "balances.pending": { types: ["integer", "number", "string"] },
-    },
-  },
-  PznBoundWidget: {
-    allowDynamicFields: true,
-    fields: {
-      badge: { types: ["string", "number", "integer", "boolean"] },
-      title: { types: ["string", "number", "integer", "boolean"] },
-      body: { types: ["string", "number", "integer", "boolean"] },
-      progress: { types: ["number", "integer"] },
-    },
-  },
-  PznFactSummary: {
-    allowDynamicFields: true,
-    fields: {
-      title: { types: ["string"] },
-      body: { types: ["string"] },
-    },
-  },
 };
 
 export function canonicalStableJson(value: unknown): string {

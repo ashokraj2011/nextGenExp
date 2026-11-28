@@ -7,27 +7,29 @@
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
 │                        App & Domains (CEP)                                 │
+│  • Registers domain A2UI components (cepSphotonRegistry)                   │
 │  • UI Builder field picker & preview   • Tenant/domain exposure & labels   │
 │  • Admin chat publication approval     • Browser A2UI renderer & threads   │
 │  • GET / POST /api/admin/ui-binding-catalog?domain=<domain>                │
 └───────────────────────────────┬────────────────────────────────────────────┘
-                                │ SphotonBindingCatalog + customer/chat scope
+                                │ SphotonBindingCatalog + SphotonComponentRegistry
                                 ▼
 ┌────────────────────────────────────────────────────────────────────────────┐
-│                   sphoton (packages/sphoton/)                              │
-│  • Binding contract (sources, bindings, actions, unavailableState)         │
-│  • Schema & policy validator + SHA-256 dependency fingerprinting           │
+│              sphoton (packages/sphoton/ — 100% Domain-Agnostic)            │
+│  • Zero CEP/domain imports (depends only on zod, node:crypto, @sfield/core)│
+│  • Pluggable SphotonComponentRegistry (registerComponent)                  │
+│  • Binding contract, schema validator & SHA-256 dependency fingerprinting    │
 │  • Catalog-driven AI draft generator (injected SphotonLlmAdapter)          │
-│  • Single deterministic A2UI compiler (preview + approval + live chat)     │
-│  • Verified turn-result reuse, unavailable states & HMAC action refs       │
+│  • Single deterministic compiler + SurfaceBinder (createSurfaceBinder)     │
+│  • Verified turn-result reuse, unavailable states & persistent HMAC seals  │
 └───────────────────────────────┬────────────────────────────────────────────┘
-                                │ Narrow SfieldAdapter (list / describe / execute)
+                                │ Narrow SfieldAdapter / public SField API
                                 ▼
 ┌────────────────────────────────────────────────────────────────────────────┐
-│                    sfield (Headless Tool Runtime)                          │
+│                sfield (@sfield/core — 100% Headless Runtime)               │
 │  • Tool registry & versioned closed JSON Schemas                           │
-│  • Policy-enforced execution scopes, approvals & immutable call logs       │
-│  • Zero knowledge of UI components, layouts, cards, or A2UI                │
+│  • Policy-enforced execution scopes, HITL approvals & immutable call logs  │
+│  • Zero UI code (no SurfaceBinder, components, layouts, cards, or A2UI)    │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 

@@ -47,7 +47,8 @@ Edit the Markdown under `docs/developers/` to update both versions. Vite renders
 
 Requires **Node 22.13+** and **npm 10+**. The standalone **`sfield` Agent SDK** monorepo is vendored under `vendor/sfield/packages/` as local npm workspaces:
 
-- `@sfield/core` — Governed runtime, closed Ajv tool contracts, deterministic `SurfaceBinderService` (`sf.surfaces`), HITL approvals, `GeminiProvider` / `AnthropicProvider` / `OpenAICompatibleProvider`, MCP 2026 `SFieldMcpServer` (Elicitation + Async Tasks) + `McpClient`, `PiiFirewall`, `ToolResilienceGuard`, `DelegationService`, `streamRun`, `FilesystemArtifactStore`, `VectorMemoryIndex`
+- `@sfield/core` — 100% headless governed runtime, closed Ajv tool contracts, HITL approvals, `GeminiProvider` / `AnthropicProvider` / `OpenAICompatibleProvider`, MCP 2026 `SFieldMcpServer` (Elicitation + Async Tasks) + `McpClient`, `PiiFirewall`, `ToolResilienceGuard`, `DelegationService`, `streamRun`, `FilesystemArtifactStore`, `VectorMemoryIndex`
+- `packages/sphoton` — Domain-agnostic Singularity Photon UI tool-binding toolkit (`SphotonComponentRegistry`, `validateCardBinding`, `compileBoundCard`, `createSurfaceBinder`, persistent HMAC-SHA256 action sealing) sitting above headless `sfield`
 - `@sfield/preset-memory` — Zero-boilerplate ephemeral preset (`preset: "memory"`) for tests & scripts
 - `@sfield/preset-local` — Zero-boilerplate durable local preset (`preset: "local"`) backed by SQLite + disk artifacts
 - `@sfield/store-sqlite` — `durable_single` persistence over built-in `node:sqlite`

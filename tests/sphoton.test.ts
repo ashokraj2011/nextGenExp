@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 import type { ApprovalRecord, PublicationReview } from "../packages/contracts/approval";
 import type { ConversationView, TurnAccepted } from "../packages/contracts/api";
 import { firstGoalContributionMonth } from "../packages/contracts/goal-progress";
 import type { TurnPayloads } from "../packages/contracts/inspector";
-import type { DisplayExperience } from "../packages/contracts/surface";
+import type { DisplayBlock, DisplayExperience } from "../packages/contracts/surface";
 import type { UiDesign, UiLayoutCatalog, UiLayoutRecord } from "../packages/contracts/ui-layout";
+import { cepSphotonRegistry } from "../packages/experience/sphoton-components";
 import {
   applyActionResultToBlock,
   compileBoundCard,
@@ -54,6 +57,20 @@ const aliceGoalCardBinding: SphotonCardBinding = {
     message: "Your home-buying goal figures are temporarily unavailable.",
   },
 };
+
+test("architecture boundary: sfield has zero UI code and packages/sphoton has zero domain or server imports", () => {
+  assert.equal(existsSync(join(process.cwd(), "vendor/sfield/packages/core/src/ui")), false);
+  const sfieldCoreIndex = readFileSync(join(process.cwd(), "vendor/sfield/packages/core/src/index.ts"), "utf8");
+  assert.equal(sfieldCoreIndex.includes("SurfaceBinderService"), false);
+  const sphotonDir = join(process.cwd(), "packages/sphoton");
+  for (const file of readdirSync(sphotonDir).filter((name) => name.endsWith(".ts"))) {
+    const imports = readFileSync(join(sphotonDir, file), "utf8")
+      .split("\n")
+      .filter((line) => /^\s*(?:import|export)\b/.test(line))
+      .join("\n");
+    assert.equal(/\.\.\/contracts\/|\.\.\/experience\/|apps\/server/.test(imports), false, `Unexpected host/domain import in packages/sphoton/${file}`);
+  }
+});
 
 test("sphoton unit: validates types, reuses verified turn results, enforces unavailable state, detects contract drift, and verifies signed actions", async () => {
   const goalOutputSchema: Record<string, unknown> = {
@@ -173,8 +190,8 @@ test("sphoton unit: validates types, reuses verified turn results, enforces unav
     ],
   };
 
-  // 1. Valid card passes validation
-  const ok = validateCardBinding(aliceGoalCardBinding, catalog, { sfield, strictRequiredComponentFields: true });
+  // 1. Valid card passes validation against CEP's registered component schemas
+  const ok = validateCardBinding(aliceGoalCardBinding, catalog, { sfield, registry: cepSphotonRegistry, strictRequiredComponentFields: true });
   assert.equal(ok.valid, true);
   assert.ok(ok.dependencies.toolContracts["goal.progress.read@1.0.0"]);
 
@@ -185,7 +202,7 @@ test("sphoton unit: validates types, reuses verified turn results, enforces unav
       { field: "goal.targetCents", from: "goal.data.title", required: true },
       { field: "goal.history", from: "goal.data.history", required: true },
     ],
-  }, catalog, { sfield });
+  }, catalog, { sfield, registry: cepSphotonRegistry });
   assert.equal(badType.valid, false);
   assert.ok(badType.issues.some((i) => i.code === "type_mismatch"));
 
@@ -200,10 +217,11 @@ test("sphoton unit: validates types, reuses verified turn results, enforces unav
   const secret = "persistent-sphoton-signing-secret-for-tests-123456";
 
   // 3. Reuses verified turn result without calling sfield.executeRead
-  const reused = await compileBoundCard({
+  const reused = await compileBoundCard<DisplayBlock>({
     card: aliceGoalCardBinding,
     catalog,
     scope,
+    registry: cepSphotonRegistry,
     sfield,
     verifiedTurnResults: { "goal.progress.read@1.0.0": sampleGoal },
     design: { id: "ui_goal", revision: 3, name: "Home Goal Card" },
@@ -223,10 +241,11 @@ test("sphoton unit: validates types, reuses verified turn results, enforces unav
   assert.equal(verifyActionRef(actionRef, { ...scope, principalId: "bob" }, secret).valid, false);
 
   // 5. Missing verified turn result invokes declared read through sfield
-  const fetched = await compileBoundCard({
+  const fetched = await compileBoundCard<DisplayBlock>({
     card: aliceGoalCardBinding,
     catalog,
     scope,
+    registry: cepSphotonRegistry,
     sfield,
     verifiedTurnResults: {},
     signingSecret: secret,
@@ -236,10 +255,11 @@ test("sphoton unit: validates types, reuses verified turn results, enforces unav
   assert.deepEqual(fetched.invokedSources, ["goal.progress.read@1.0.0"]);
 
   // 6. Missing required value produces approved unavailable state
-  const missing = await compileBoundCard({
+  const missing = await compileBoundCard<DisplayBlock>({
     card: aliceGoalCardBinding,
     catalog,
     scope,
+    registry: cepSphotonRegistry,
     sfield,
     verifiedTurnResults: { "goal.progress.read@1.0.0": { ...sampleGoal, targetCents: undefined } },
     signingSecret: secret,
@@ -254,10 +274,11 @@ test("sphoton unit: validates types, reuses verified turn results, enforces unav
     ...goalOutputSchema,
     properties: { ...(goalOutputSchema.properties as Record<string, unknown>), targetCents: { type: "string" } },
   };
-  const drifted = await compileBoundCard({
+  const drifted = await compileBoundCard<DisplayBlock>({
     card: aliceGoalCardBinding,
     catalog,
     scope,
+    registry: cepSphotonRegistry,
     sfield,
     verifiedTurnResults: { "goal.progress.read@1.0.0": sampleGoal },
     expectedToolContracts: ok.dependencies.toolContracts,
@@ -267,7 +288,7 @@ test("sphoton unit: validates types, reuses verified turn results, enforces unav
   assert.equal(drifted.signedActions.length, 0);
 
   // 8. Generic in-place card update via applyActionResultToBlock
-  const updatedBlock = applyActionResultToBlock(
+  const updatedBlock = applyActionResultToBlock<DisplayBlock>(
     {
       component: "PznBoundWidget",
       props: {
@@ -283,12 +304,13 @@ test("sphoton unit: validates types, reuses verified turn results, enforces unav
       resultBindings: [{ field: "rollbackStatus", from: "rollbackStatus" }],
     },
     { rollbackStatus: "Ready to roll back to v2.4.0 (immediate)" },
+    cepSphotonRegistry,
   );
   assert.equal(updatedBlock.component, "PznBoundWidget");
   assert.equal(updatedBlock.props.metrics[0].value, "Ready to roll back to v2.4.0 (immediate)");
 
-  // 9. AI draft generator uses the same catalog
-  const draft = await generateBoundCardDraft({ prompt: "Show home down payment goal chart", catalog });
+  // 9. AI draft generator uses the same catalog + pluggable component registry
+  const draft = await generateBoundCardDraft({ prompt: "Show home down payment goal chart", catalog, registry: cepSphotonRegistry });
   assert.equal(draft.card.component, "PznGoalProgress");
   assert.ok(draft.boundFields.includes("goal.data.targetCents"));
 });

@@ -7,9 +7,10 @@ import {
   SField,
   type Principal,
 } from "@sfield/core";
+import { createSurfaceBinder } from "../packages/sphoton";
 import { startTestPreview } from "./preview";
 
-test("@sfield/core SurfaceBinder: auto-discovers tool schemas, stitches $ref + $repeat + formatters, enforces schema validation, and seals tamper-proof actions", async () => {
+test("sphoton SurfaceBinder over headless @sfield/core: auto-discovers tool schemas, stitches $ref + $repeat + formatters, enforces schema validation, and seals tamper-proof actions", async () => {
   const holdingsTool = defineTool({
     id: "wealth.holdings.read",
     version: "1.0.0",
@@ -139,8 +140,12 @@ test("@sfield/core SurfaceBinder: auto-discovers tool schemas, stitches $ref + $
   });
 
   try {
+    // 0. Headless sfield contains zero UI binder surface
+    assert.equal("surfaces" in sf, false);
+    const binder = createSurfaceBinder(sf, { signingSecret: "test-persistent-sphoton-secret" });
+
     // 1. Auto-discover bindable schema fields
-    const schemas = sf.surfaces.inspectSchemas();
+    const schemas = binder.inspectSchemas();
     const holdingsSchema = schemas.find((s) => s.toolRef === "wealth.holdings.read@1.0.0");
     assert.ok(holdingsSchema);
     const outPaths = holdingsSchema.outputFields.map((f) => f.path);
@@ -149,7 +154,7 @@ test("@sfield/core SurfaceBinder: auto-discovers tool schemas, stitches $ref + $
     assert.ok(outPaths.includes("positions[].gainPct"));
 
     // 2. Stitch surface declaratively with $ref, formatters, $repeat, principal.* & sealed actions
-    const stitched = await sf.surfaces.stitch({
+    const stitched = await binder.stitch({
       principal: alice,
       sources: {
         holdings: { toolRef: "wealth.holdings.read@1.0.0", inputs: {} },
@@ -209,7 +214,7 @@ test("@sfield/core SurfaceBinder: auto-discovers tool schemas, stitches $ref + $
 
     // 3. Strict schema validation catches typos in $ref paths
     await assert.rejects(
-      () => sf.surfaces.stitch({
+      () => binder.stitch({
         principal: alice,
         sources: { holdings: { toolRef: "wealth.holdings.read@1.0.0", inputs: {} } },
         template: { component: "BadCard", props: { broken: { $ref: "holdings.data.cashCentz" } } },
@@ -224,7 +229,7 @@ test("@sfield/core SurfaceBinder: auto-discovers tool schemas, stitches $ref + $
       ...saveGoalAction,
       resolvedInputs: { ...saveGoalAction.resolvedInputs, accountId: "MID-HACKED" },
     };
-    const tamperedRes = await sf.surfaces.dispatchAction({
+    const tamperedRes = await binder.dispatchAction({
       principal: alice,
       action: tampered,
       formInputs: { targetUsd: 75000 },
@@ -233,7 +238,7 @@ test("@sfield/core SurfaceBinder: auto-discovers tool schemas, stitches $ref + $
     assert.equal(tamperedRes.error?.code, "INVALID_ACTION_SEAL");
 
     // 5. Cross-principal replay of Alice's sealed action by Mallory is rejected
-    const hijackRes = await sf.surfaces.dispatchAction({
+    const hijackRes = await binder.dispatchAction({
       principal: mallory,
       action: saveGoalAction,
       formInputs: { targetUsd: 75000 },
@@ -242,7 +247,7 @@ test("@sfield/core SurfaceBinder: auto-discovers tool schemas, stitches $ref + $
     assert.equal(hijackRes.error?.code, "INVALID_ACTION_SEAL");
 
     // 6. Legitimate sealed action dispatch succeeds & runs under Alice's Principal
-    const okRes = await sf.surfaces.dispatchAction({
+    const okRes = await binder.dispatchAction({
       principal: alice,
       action: saveGoalAction,
       formInputs: { targetUsd: 85000 },
@@ -253,7 +258,7 @@ test("@sfield/core SurfaceBinder: auto-discovers tool schemas, stitches $ref + $
 
     // 7. Sealed action requiring HITL approval suspends cleanly as pending_approval
     const wireAction = stitched.actions[1]!;
-    const wireRes = await sf.surfaces.dispatchAction({
+    const wireRes = await binder.dispatchAction({
       principal: alice,
       action: wireAction,
       formInputs: { amountUsd: 25000 },

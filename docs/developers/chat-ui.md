@@ -101,9 +101,9 @@ To keep **`sfield`** completely headless (tools, closed schemas, execution, and 
 - **Validation & dependency-fingerprinted approval** — `validateCardBinding` validates `toolBinding` slots against component destination schemas, closed `sfield` schemas, and the domain's allowlist. Publishing records SHA-256 tool-contract fingerprints (`dependencyRevision` in `apps/server/publication-reviews.ts`); if a tool schema or domain exposure changes during Admin chat review, approval is blocked until a revised design is submitted.
 - **Single deterministic compiler & Logs** — `compileBoundCard` (`packages/sphoton/compiler.ts`) compiles draft preview, approval preview, and live customer chat identically, reusing verified turn results (`reuseVerifiedTurnResult`), rendering approved unavailable states on missing required fields, and emitting persistent HMAC-SHA256 signed action references. **Administration → Logs** displays the approved design revision, bound tool versions, and full `sfield` inputs/outputs for originating and follow-up turns. See `docs/developers/sphoton.md` and `tests/sphoton.test.ts`.
 
-### Legacy `sf.surfaces` Lab (`/api/surfaces/*`)
+### `sphoton` SurfaceBinder Lab (`/api/surfaces/*`)
 
-For low-level pass-through testing against `@sfield/core`’s `SurfaceBinderService`, CEP also exposes `/api/surfaces/schemas`, `/api/surfaces/stitch`, and `/api/surfaces/action` (`apps/server/routes/collaboration.ts`), accessible in **Administration → UI Builder → SurfaceBinder Lab** (`/admin/ui?view=surfaces`). Production chat card bindings use **`sphoton`** (`packages/sphoton/`) so `sfield` remains UI-agnostic.
+For declarative `$ref` / `$repeat` / `$input` template stitching over headless `sfield`, `packages/sphoton/surface-binder.ts` exports `createSurfaceBinder(sf, { signingSecret })`. CEP mounts `/api/surfaces/schemas`, `/api/surfaces/stitch`, and `/api/surfaces/action` (`apps/server/routes/collaboration.ts`), accessible in **Administration → UI Builder → SurfaceBinder Lab** (`/admin/ui?view=surfaces`). `@sfield/core` contains zero UI code.
 
 ### Add a new component type in code
 

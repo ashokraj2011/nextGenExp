@@ -1,13 +1,14 @@
 import type { SfieldAdapter } from "./adapter";
 import {
-  SPHOTON_COMPONENT_SCHEMAS,
   parseBindingSourcePath,
   sphotonCardBindingSchema,
   type SphotonBindingCatalog,
   type SphotonCardBinding,
+  type SphotonComponentSchema,
   type SphotonFieldType,
 } from "./contracts";
 import { fingerprintToolContract, sha256Hex } from "./fingerprint";
+import type { SphotonComponentRegistry } from "./registry";
 
 export type SphotonValidationIssue = {
   code:
@@ -40,6 +41,16 @@ export type SphotonValidationResult = {
   valid: boolean;
   issues: SphotonValidationIssue[];
   dependencies: SphotonDependencySnapshot;
+};
+
+const DEFAULT_DYNAMIC_COMPONENT_SCHEMA: SphotonComponentSchema = {
+  allowDynamicFields: true,
+  fields: {
+    badge: { types: ["string", "number", "integer", "boolean"] },
+    title: { types: ["string", "number", "integer", "boolean"] },
+    body: { types: ["string", "number", "integer", "boolean"] },
+    progress: { types: ["number", "integer"] },
+  },
 };
 
 function normalizeSchemaTypes(node: Record<string, unknown>): SphotonFieldType[] {
@@ -102,7 +113,11 @@ function typesCompatible(sourceTypes: readonly SphotonFieldType[], expectedTypes
 export function validateCardBinding(
   rawCard: SphotonCardBinding,
   catalog: SphotonBindingCatalog,
-  options?: { sfield?: SfieldAdapter; strictRequiredComponentFields?: boolean },
+  options?: {
+    sfield?: SfieldAdapter;
+    registry?: SphotonComponentRegistry;
+    strictRequiredComponentFields?: boolean;
+  },
 ): SphotonValidationResult {
   const issues: SphotonValidationIssue[] = [];
   const parsed = sphotonCardBindingSchema.safeParse(rawCard);
@@ -128,12 +143,16 @@ export function validateCardBinding(
   const toolsByRef = new Map(catalog.tools.map((tool) => [tool.toolRef, tool]));
   const fieldsByKey = new Map(catalog.fields.map((field) => [`${field.toolRef}::${field.outputPath}`, field]));
   const actionsByRef = new Map(catalog.actions.map((action) => [action.toolRef, action]));
-  const componentSchema = SPHOTON_COMPONENT_SCHEMAS[card.component];
+
+  const componentSchema: SphotonComponentSchema | undefined = options?.registry
+    ? options.registry.get(card.component)?.schema
+    : DEFAULT_DYNAMIC_COMPONENT_SCHEMA;
+
   if (!componentSchema) {
     issues.push({
       code: "unknown_component",
       path: "component",
-      message: `Component ${card.component} is not registered in sphoton component schemas.`,
+      message: `Component ${card.component} is not registered in the sphoton component registry.`,
     });
   }
 

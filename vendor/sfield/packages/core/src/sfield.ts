@@ -46,7 +46,6 @@ import { ExternalExecutionScope, type ExecutionScope, type ExecutionScopeOptions
 import { createSFieldMcpServer, type SFieldMcpServer, type SFieldMcpServerOptions } from "./mcp/server.js";
 import { DelegationService } from "./runtime/delegation.js";
 import { streamRun, type RunStreamChunk } from "./runtime/stream.js";
-import { SurfaceBinderService } from "./ui/surface-binder.js";
 import { GraphService } from "./graph/state-graph.js";
 import { SlashCommandService } from "./commands/slash-commands.js";
 import { approveLock, checkLockApproved, type ApproveLockInput } from "./governance/lock.js";
@@ -114,7 +113,6 @@ export class SField {
   readonly compactor: ConversationCompactor;
   readonly harness: AgenticHarness;
   readonly delegation: DelegationService;
-  readonly surfaces: SurfaceBinderService;
   readonly graphs: GraphService;
   readonly commands: SlashCommandService;
   private constructor(readonly i: Internals) {
@@ -130,10 +128,6 @@ export class SField {
       persistence: i.persistence,
       openSession: (opts) => this.sessions.open(opts),
     });
-    this.surfaces = new SurfaceBinderService(
-      { registry: this.registry, executions: this.executions },
-      (p) => i.runs.resolvePrincipal(p),
-    );
     this.graphs = new GraphService({ executions: this.executions });
     this.commands = new SlashCommandService();
   }
