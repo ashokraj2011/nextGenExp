@@ -22,6 +22,11 @@ import {
   validateToolBackedModel,
   type SmassModelValidationIssue,
 } from "./schema-compiler";
+import {
+  materializeVirtualSnapshot,
+  type SmassSnapshotRequest,
+  type SmassVirtualSnapshotResult,
+} from "./virtual-model";
 
 export type SmassProjectedField = {
   modelId: string;
@@ -129,6 +134,18 @@ export class SmassDomainRegistry {
       }
     }
     return { found: false };
+  }
+
+  /**
+   * Materializes a canonical, version-stamped virtual snapshot for a registered model
+   * with projection pushdown, computed fields, turn-scoped 1x caching, and minVersion guards.
+   */
+  async materializeSnapshot(req: SmassSnapshotRequest): Promise<SmassVirtualSnapshotResult> {
+    const model = this.models.get(req.modelId);
+    if (!model) {
+      throw new Error(`Unknown smass model "${req.modelId}".`);
+    }
+    return materializeVirtualSnapshot(model, req);
   }
 
   /** Validates every tool-backed model against live sfield tool descriptors and validates domain relations/lifecycles. */

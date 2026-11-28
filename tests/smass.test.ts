@@ -5,8 +5,11 @@ import test from "node:test";
 import { LOCAL_DEV_PRINCIPAL, SField } from "@sfield/core";
 import {
   createSmassRegistry,
+  createTurnSnapshotCache,
   defineStoreBackedModel,
   defineToolBackedModel,
+  evaluateSmassComputedExpression,
+  SmassSnapshotValidationError,
   type SmassModelSummary,
 } from "../packages/smass";
 import { testClient } from "./client";
@@ -239,4 +242,199 @@ test("CEP /api/admin/domain-models exposes tool-backed Wealth models, store-back
   assert.ok(dealModel.lifecycle && dealModel.lifecycle.stateField === "discountStatus");
   assert.ok(sales.dataModel.relations.some((r) => r.sourceModelId === "sales.account" && r.targetModelId === "sales.deal" && r.cardinality === "one_to_many"));
   assert.ok(sales.tools.some((tool) => tool.toolRef === "sales.deal.read@1.0.0" && tool.outputFields.length > 0));
+});
+
+test("smass Virtual Data Model runtime: projection pushdown, computed fields, 1x turn cache, PII redaction, and minVersions guard", async () => {
+  const customer360 = defineToolBackedModel({
+    id: "wealth.customer_360",
+    version: "1.0.0",
+    domain: "wealth",
+    label: "Customer 360 (Virtual)",
+    primaryKey: "mid",
+    sources: {
+      account: { toolRef: "account.summary.read@1.0.0" },
+      portfolio: { toolRef: "portfolio.summary.read@1.0.0" },
+      retirement: { toolRef: "retirement.plan.read@1.0.0" },
+    },
+    fields: {
+      mid: { type: "string", principalKey: "mid", primaryKey: true, label: "Member ID", required: true },
+      email: { type: "string", from: "account.email", label: "Email", classification: "pii", required: true },
+      fundingStatus: {
+        type: "string",
+        from: "account.fundingStatus",
+        label: "Funding status",
+        enumValues: ["unfunded", "pending", "funded"],
+        required: true,
+      },
+      portfolioCashCents: { type: "integer", from: "portfolio.cashCents", label: "Portfolio cash", required: true },
+      reserveTargetCents: { type: "integer", from: "portfolio.reserveTargetCents", label: "Reserve target", required: true },
+      excessCashCents: {
+        type: "integer",
+        label: "Excess investable cash",
+        computed: {
+          expression: "max(0, portfolioCashCents - reserveTargetCents)",
+          dependsOn: ["portfolioCashCents", "reserveTargetCents"],
+        },
+      },
+      matchGapCents: { type: "integer", from: "retirement.matchGapCents", label: "401(k) match gap" },
+    },
+  });
+
+  const salesDeal = defineStoreBackedModel({
+    id: "sales.deal_vdm",
+    version: "1.0.0",
+    domain: "sales_revops",
+    label: "Sales Deal",
+    primaryKey: "dealId",
+    fields: {
+      dealId: { type: "string", label: "Deal ID", primaryKey: true, required: true },
+      stage: { type: "string", label: "Stage", enumValues: ["discovery", "proposal", "closed_won"], required: true },
+      arrCents: { type: "integer", label: "Gross ARR", required: true },
+      discountPct: { type: "number", label: "Discount %", required: true },
+      netArrCents: {
+        type: "integer",
+        label: "Net ARR",
+        computed: {
+          expression: "arrCents * (1 - discountPct / 100)",
+          dependsOn: ["arrCents", "discountPct"],
+        },
+      },
+    },
+    source: {
+      read(inputs) {
+        if (inputs.badEnum) {
+          return { dealId: "DEAL-9", stage: "bogus_stage", arrCents: 10000, discountPct: 10, version: 1 };
+        }
+        return { dealId: "DEAL-1", stage: "proposal", arrCents: 25_000_000, discountPct: 15, dealVersion: 3 };
+      },
+    },
+  });
+
+  const registry = createSmassRegistry([customer360, salesDeal]);
+  const ctx = { tenantId: "t1", domainId: "wealth", principalId: "DEMO-MID-1003", customerId: "DEMO-MID-1003" };
+
+  let accountVersion = 41;
+  let fundingStatus = "unfunded";
+  const toolCalls: string[] = [];
+
+  const executeTool = async (toolRef: string): Promise<Record<string, unknown>> => {
+    toolCalls.push(toolRef);
+    if (toolRef === "account.summary.read@1.0.0") {
+      return { email: "marcus@example.com", fundingStatus, accountVersion };
+    }
+    if (toolRef === "portfolio.summary.read@1.0.0") {
+      return { cashCents: 1_250_000, reserveTargetCents: 250_000, balanceVersion: "bal_17" };
+    }
+    if (toolRef === "retirement.plan.read@1.0.0") {
+      return { matchGapCents: 360_000, retirementVersion: 5 };
+    }
+    throw new Error(`Unexpected tool ${toolRef}`);
+  };
+
+  // 1. Projection pushdown: requesting fundingStatus + excessCashCents skips retirement source completely
+  const projected = await registry.materializeSnapshot({
+    modelId: "wealth.customer_360",
+    ctx,
+    requestedFields: ["fundingStatus", "excessCashCents"],
+    executeTool,
+  });
+  assert.equal(projected.status, "ok");
+  assert.deepEqual(projected.sourcesQueried, ["account", "portfolio"]);
+  assert.deepEqual(projected.sourcesSkipped, ["retirement"]);
+  assert.equal(projected.sourceCalls, 2);
+  assert.equal(projected.data.fundingStatus, "unfunded");
+  assert.equal(projected.data.excessCashCents, 1_000_000);
+  assert.equal(projected.dataVersions.accountVersion, 41);
+  assert.equal(projected.dataVersions.balanceVersion, "bal_17");
+  assert.equal(toolCalls.includes("retirement.plan.read@1.0.0"), false);
+
+  // 2. 1x turn-scoped snapshot cache: CCRE + Treatment Resolver + PII-scrubbed LLM share 1 physical fetch
+  toolCalls.length = 0;
+  const turnCache = createTurnSnapshotCache();
+  const ccreSnap = await registry.materializeSnapshot({
+    modelId: "wealth.customer_360",
+    ctx,
+    cache: turnCache,
+    executeTool,
+  });
+  assert.equal(ccreSnap.status, "ok");
+  assert.equal(ccreSnap.sourceCalls, 3);
+  assert.equal(ccreSnap.cacheHit, false);
+
+  const resolverSnap = await registry.materializeSnapshot({
+    modelId: "wealth.customer_360",
+    ctx,
+    requestedFields: ["mid", "fundingStatus", "excessCashCents"],
+    cache: turnCache,
+    executeTool,
+  });
+  assert.equal(resolverSnap.status, "ok");
+  assert.equal(resolverSnap.cacheHit, true);
+  assert.equal(resolverSnap.sourceCalls, 0);
+  assert.equal(resolverSnap.snapshotId, ccreSnap.snapshotId);
+  assert.equal(toolCalls.length, 3); // Zero additional physical calls
+
+  const llmSnap = await registry.materializeSnapshot({
+    modelId: "wealth.customer_360",
+    ctx,
+    redactClassifications: ["pii"],
+    cache: turnCache,
+    executeTool,
+  });
+  assert.equal(llmSnap.status, "ok");
+  assert.equal(llmSnap.cacheHit, true);
+  assert.equal(llmSnap.sourceCalls, 0);
+  assert.equal("email" in llmSnap.data, false);
+  assert.deepEqual(llmSnap.redactedFields, ["email"]);
+
+  // 3. minVersions freshness guard: stale backend returns stale_version_retry; updated backend refreshes live
+  const stale = await registry.materializeSnapshot({
+    modelId: "wealth.customer_360",
+    ctx,
+    requestedFields: ["fundingStatus"],
+    minVersions: { accountVersion: 42 },
+    cache: turnCache,
+    executeTool,
+  });
+  assert.equal(stale.status, "stale_version_retry");
+  assert.equal(stale.observedVersions.accountVersion, 41);
+  assert.equal(stale.requiredVersions.accountVersion, 42);
+
+  accountVersion = 42;
+  fundingStatus = "funded";
+  const fresh = await registry.materializeSnapshot({
+    modelId: "wealth.customer_360",
+    ctx,
+    requestedFields: ["fundingStatus"],
+    minVersions: { accountVersion: 42 },
+    cache: turnCache,
+    executeTool,
+  });
+  assert.equal(fresh.status, "ok");
+  assert.equal(fresh.cacheHit, false);
+  assert.equal(fresh.data.fundingStatus, "funded");
+  assert.equal(fresh.dataVersions.accountVersion, 42);
+
+  // 4. Store-backed VDM computed expression & strict enum runtime validation
+  const dealSnap = await registry.materializeSnapshot({
+    modelId: "sales.deal_vdm",
+    ctx: { tenantId: "t1", domainId: "sales_revops", principalId: "rep_1" },
+  });
+  assert.equal(dealSnap.status, "ok");
+  assert.equal(dealSnap.data.netArrCents, 21_250_000);
+  assert.equal(dealSnap.dataVersions.dealVersion, 3);
+
+  await assert.rejects(
+    () =>
+      registry.materializeSnapshot({
+        modelId: "sales.deal_vdm",
+        ctx: { tenantId: "t1", domainId: "sales_revops", principalId: "rep_1" },
+        inputs: { badEnum: true },
+      }),
+    (err: unknown) => err instanceof SmassSnapshotValidationError && err.issues.some((i) => i.field === "stage"),
+  );
+
+  // Direct expression evaluator sanity check (zero eval, rejects unsupported chars)
+  assert.equal(evaluateSmassComputedExpression("a + b * (2 - 1)", { a: 10, b: 5 }), 15);
+  assert.throws(() => evaluateSmassComputedExpression("process.exit(1)", {}), /Unsupported function/);
 });
