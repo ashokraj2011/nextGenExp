@@ -154,20 +154,21 @@
 .topbar.unified-topbar {
   height: auto;
   min-height: 60px;
-  padding: 8px 22px;
-  gap: 12px;
+  padding: 8px 20px;
+  gap: 10px;
   background: #ffffff;
   border-bottom: 1px solid var(--line);
 }
 .topbar-left {
   gap: 8px;
-  flex: 1 1 200px;
+  flex: 1 1 220px;
   min-width: 0;
 }
 .topbar h1 {
-  font-size: .9rem;
+  font-size: .88rem;
   font-weight: 660;
   color: var(--ink);
+  letter-spacing: -.01em;
 }
 .topbar-center {
   display: flex;
@@ -181,22 +182,23 @@
   padding: 0;
   border-bottom: 0;
   background: transparent;
-  gap: 4px;
+  gap: 2px;
 }
 .topbar-center .workspace-menu nav {
   padding: 0;
-  gap: 4px;
+  gap: 2px;
 }
 .topbar-center .workspace-shortcut {
+  height: 34px;
   min-height: 34px;
-  padding: 5px 14px;
+  padding: 0 11px;
   border-radius: 999px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--soft-ink);
-  font-size: .82rem;
+  font-size: .8rem;
   font-weight: 600;
-  gap: 6px;
+  gap: 5px;
 }
 .topbar-center .workspace-shortcut svg {
   color: var(--muted);
@@ -209,19 +211,21 @@
   background: var(--teal);
   border-color: var(--teal);
   color: #ffffff;
-  font-weight: 700;
+  font-weight: 680;
 }
 .topbar-center .workspace-shortcut[aria-pressed="true"] svg {
   color: #ffffff;
 }
 .topbar-center .workspace-customize {
+  height: 34px;
   min-height: 34px;
   min-width: 34px;
-  padding: 6px;
+  padding: 0 10px;
   border-radius: 999px;
   border-color: transparent;
   background: transparent;
   color: var(--muted);
+  font-size: .8rem;
 }
 .topbar-center .workspace-customize svg {
   color: var(--muted);
@@ -473,7 +477,7 @@
   gap: 4px;
   max-width: 100%;
   width: fit-content;
-  margin: 0 0 10px;
+  margin: 0 0 12px;
   padding: 4px 5px;
   border-radius: 999px;
   border: 1px solid var(--line);
@@ -516,7 +520,7 @@
   align-items: center;
   gap: 6px;
   margin: 0;
-  padding: 1px;
+  padding: 1px 8px 1px 1px;
   overflow: visible;
   width: max-content;
 }
@@ -2326,8 +2330,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-top: 7px;
-  padding: 0 4px;
+  margin-top: 8px;
+  padding: 0 6px;
 }
 .composer-guardrail {
   font-size: .74rem;

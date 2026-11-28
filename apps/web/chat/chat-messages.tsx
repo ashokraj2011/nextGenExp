@@ -64,14 +64,7 @@ export function StarterPrompts({ disabled, adminChat }: { disabled: boolean; adm
 
   const expandBar = () => {
     setExpanded(true);
-    window.setTimeout(() => {
-      const el = viewportRef.current;
-      if (!el) return;
-      syncScrollState();
-      if (el.scrollWidth > el.clientWidth + 24) {
-        el.scrollBy({ left: 160, behavior: "smooth" });
-      }
-    }, 180);
+    window.setTimeout(syncScrollState, 390);
   };
 
   const collapseBar = () => {

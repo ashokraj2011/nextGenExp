@@ -201,6 +201,23 @@
   color: var(--muted);
 }
 
+:root[data-theme="dark"] .source-details summary,
+:root[data-theme="dark"] .inline-details summary {
+  color: var(--teal);
+}
+
+:root[data-theme="dark"] .source-details summary:hover,
+:root[data-theme="dark"] .inline-details summary:hover {
+  background: rgba(92, 200, 74, 0.12);
+  color: #a6f296;
+}
+
+:root[data-theme="dark"] .live-grounding-bar.is-done .grounding-pill.is-complete {
+  background: rgba(54, 135, 39, 0.12);
+  border-color: rgba(92, 200, 74, 0.28);
+  color: #8ce37d;
+}
+
 :root[data-theme="dark"] .profile-avatar {
   background: #1b3420;
   color: #82e373;

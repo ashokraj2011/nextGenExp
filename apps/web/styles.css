@@ -276,11 +276,14 @@ button { color: inherit; }
 .content-footer { display: grid; gap: 7px; margin-top: 15px; padding-top: 12px; border-top: 1px solid #e5ecee; }
 .disclosure { font-size: .8rem; color: #536774; line-height: 1.55; }
 .source-details summary, .inline-details summary {
-  display: inline-flex; align-items: center; gap: 5px; list-style: none; border-radius: 5px;
-  color: var(--link-blue); cursor: pointer; min-height: 30px; font-size: .84rem; font-weight: 600;
-  text-decoration: underline; text-underline-offset: 3px;
+  display: inline-flex; align-items: center; gap: 5px; list-style: none; border-radius: 8px;
+  padding: 3px 8px; margin-left: -8px;
+  color: var(--teal-dark); cursor: pointer; min-height: 28px; font-size: .8rem; font-weight: 620;
+  text-decoration: none; transition: background-color .15s ease, color .15s ease;
 }
-.source-details summary:hover, .inline-details summary:hover { color: var(--link-blue-hover); }
+.source-details summary:hover, .inline-details summary:hover {
+  background: var(--teal-pale); color: var(--teal-deep, var(--teal-dark));
+}
 :is(.source-details, .inline-details) summary::-webkit-details-marker { display: none; }
 .source-details ul { display: grid; gap: 7px; padding: 7px 0 0; margin: 0; list-style: none; }
 .source-details li { display: flex; flex-direction: column; color: var(--muted); font-size: .81rem; }
