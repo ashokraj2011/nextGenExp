@@ -130,3 +130,36 @@
 .flow-options details label { margin: 10px 0; }
 .flow-options textarea { width: 100%; font: inherit; font-weight: 400; resize: vertical; }
 .flow-reset { padding: 4px 0; margin-top: 4px; border: 0; background: none; text-decoration: underline; }
+.admin-domain-bar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 12px 16px; margin-bottom: 18px; padding: 12px 16px;
+  background: var(--white); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.admin-domain-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.admin-domain-tab {
+  display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--paper);
+  color: var(--ink); font: inherit; font-size: .86rem; font-weight: 600; cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.admin-domain-tab:hover { border-color: var(--teal); }
+.admin-domain-tab.active {
+  background: var(--teal); border-color: var(--teal); color: var(--white);
+}
+.admin-domain-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-size: .82rem; color: var(--muted); }
+.admin-domain-meta strong { color: var(--ink); }
+.admin-section-divider {
+  margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--line);
+}
+.admin-section-divider > h2 { font-size: 1.05rem; letter-spacing: -.015em; margin: 0 0 4px; }
+.admin-section-divider > p { margin: 0 0 14px; color: var(--muted); font-size: .85rem; }
+.admin-collapsible {
+  margin-top: 18px; padding: 14px 18px; background: var(--white);
+  border: 1px solid var(--line); border-radius: var(--radius);
+}
+.admin-collapsible > summary {
+  font-weight: 650; font-size: .95rem; cursor: pointer; color: var(--ink);
+  list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.admin-collapsible > summary::-webkit-details-marker { display: none; }
+.admin-collapsible-body { margin-top: 14px; display: grid; gap: 16px; }

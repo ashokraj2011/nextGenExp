@@ -1,9 +1,11 @@
 import { CapabilityStudio } from "./capability-studio";
+import { DomainToolsAndModelPanel } from "./domain-tools-model";
 import { McpDiscoveryCard } from "./mcp-discovery-card";
 import { McpServerPanel } from "./mcp-server-panel";
 import "./agentic.css";
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, FlaskConical, Layers, MessageSquare, Play, Plug, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, FlaskConical, Layers, MessageSquare, Play, Plug, Plus, Trash2 } from "lucide-react";
+import { DOMAIN_PACKS, getDomainPack, type DomainPackId } from "../../packages/contracts/domain-packs";
 import type { RecommendationProviderDescriptor } from "../../packages/contracts/recommendation-provider";
 import type { ConnectorEffect, ConnectorKind, ConnectorTestResult, ExternalConnector } from "../../packages/contracts/connector";
 import type { RecommendationDomain } from "../../packages/contracts/recommendation-provider";
@@ -343,8 +345,24 @@ function ToolSetupForm({ data, revision }: { data: ToolSetupView; revision?: str
   </form>;
 }
 
-function RecommendationProvidersCard() {
+function domainPackToRecommendationDomain(domainId: DomainPackId): RecommendationDomain {
+  if (domainId === "it_ops") return "operations";
+  if (domainId === "sales_revops") return "sales";
+  return "wealth";
+}
+
+function initialDomainFromUrl(): DomainPackId {
+  if (typeof window === "undefined") return "wealth";
+  const param = new URLSearchParams(window.location.search).get("domain");
+  if (param === "it_ops" || param === "sales_revops" || param === "wealth") return param;
+  return "wealth";
+}
+
+function RecommendationProvidersCard({ domainId }: { domainId: DomainPackId }) {
   const [info, setInfo] = useState<{ toolRef: string; providers: RecommendationProviderDescriptor[] } | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const pack = getDomainPack(domainId);
+  const targetDomain = domainPackToRecommendationDomain(domainId);
   useEffect(() => {
     let mounted = true;
     void api.recommendationProviders()
@@ -353,35 +371,55 @@ function RecommendationProvidersCard() {
     return () => { mounted = false; };
   }, []);
   if (!info || info.providers.length === 0) return null;
+  const scoped = info.providers.filter((p) => p.domains.includes(targetDomain) || p.domains.includes("general"));
+  const visible = showAll ? info.providers : scoped;
+  const hiddenCount = info.providers.length - scoped.length;
   return (
     <section className="admin-card" aria-labelledby="rec-providers-title" style={{ marginTop: "18px" }}>
-      <h2 id="rec-providers-title" style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
-        <Layers size={18} aria-hidden="true" />
-        Recommendation Providers (sfield)
-      </h2>
-      <p>
-        Pluggable domain engines registered behind the host-governed arbitrator tool <code>{info.toolRef}</code>.
-        Add new domain or vendor adapters via <code>RecommendationProvider</code> without modifying LLM prompts.
-      </p>
-      <ul className="admin-tools" style={{ marginTop: "12px" }}>
-        {info.providers.map((provider) => (
-          <li key={provider.id}>
-            <div className="admin-tool" style={{ cursor: "default" }}>
-              <span>
-                <strong>{provider.label}</strong>
-                <code>{provider.id} · domains: {provider.domains.join(", ")}</code>
-                <small>{provider.description}</small>
-              </span>
-            </div>
-          </li>
-        ))}
-      </ul>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px", flexWrap: "wrap" }}>
+        <div>
+          <h2 id="rec-providers-title" style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+            <Layers size={18} aria-hidden="true" />
+            {pack.shortLabel} Recommendation Providers (sfield)
+          </h2>
+          <p>
+            Domain engines registered behind <code>{info.toolRef}</code> for <strong>{pack.label}</strong> (<code>{targetDomain}</code>).
+          </p>
+        </div>
+        {hiddenCount > 0 && (
+          <button type="button" className="secondary-button" onClick={() => setShowAll((v) => !v)}>
+            {showAll ? `Show ${pack.shortLabel} only` : `Show all domains (+${hiddenCount})`}
+          </button>
+        )}
+      </div>
+      {visible.length === 0 ? (
+        <p className="admin-muted" style={{ marginTop: "10px" }}>
+          No recommendation providers scoped to {pack.shortLabel} yet.
+        </p>
+      ) : (
+        <ul className="admin-tools" style={{ marginTop: "12px" }}>
+          {visible.map((provider) => (
+            <li key={provider.id}>
+              <div className="admin-tool" style={{ cursor: "default" }}>
+                <span>
+                  <strong>{provider.label}</strong>
+                  <code>{provider.id} · domains: {provider.domains.join(", ")}</code>
+                  <small>{provider.description}</small>
+                </span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
 
-function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
+function ExternalConnectorsCard({ domainId, onUpdated }: { domainId: DomainPackId; onUpdated: () => void }) {
+  const pack = getDomainPack(domainId);
+  const targetDomain = domainPackToRecommendationDomain(domainId);
   const [connectors, setConnectors] = useState<ExternalConnector[]>([]);
+  const [showAll, setShowAll] = useState(false);
   const [draftOpen, setDraftOpen] = useState(false);
   const [name, setName] = useState("");
   const [kind, setKind] = useState<ConnectorKind>("rest_action");
@@ -390,12 +428,16 @@ function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
   const [authEnvVar, setAuthEnvVar] = useState("");
   const [requiresApproval, setRequiresApproval] = useState(true);
   const [dualControl, setDualControl] = useState(false);
-  const [domain, setDomain] = useState<RecommendationDomain>("operations");
+  const [domain, setDomain] = useState<RecommendationDomain>(targetDomain);
   const [description, setDescription] = useState("");
   const [testResults, setTestResults] = useState<Record<string, ConnectorTestResult>>({});
   const [invokeResults, setInvokeResults] = useState<Record<string, { ok: boolean; text: string; approvalId?: string }>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    setDomain(targetDomain);
+  }, [targetDomain]);
 
   useEffect(() => {
     let active = true;
@@ -518,31 +560,31 @@ function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
     }
   }
 
+  const scoped = connectors.filter((c) => c.domains.includes(targetDomain) || c.domains.includes("general"));
+  const visible = showAll ? connectors : scoped;
+  const hiddenCount = connectors.length - scoped.length;
+
   return (
     <section className="admin-card" aria-labelledby="ext-connectors-title" style={{ marginTop: "18px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
         <div>
           <h2 id="ext-connectors-title" style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
             <Plug size={18} aria-hidden="true" />
-            External REST &amp; MCP Connector Registry
+            {pack.shortLabel} External REST &amp; MCP Connectors
           </h2>
           <p>
-            Mount external decisioning engines into <code>cep.recommendations.arbitrate@1.0.0</code> or execute external REST/MCP actions via{" "}
-            <code>cep.connector.invoke@1.0.0</code> with server-side secret resolution, HITL approval gating, and immutable Write Audit logging.
+            Connectors scoped to <strong>{pack.label}</strong> (<code>{targetDomain}</code>). Executed via <code>cep.connector.invoke@1.0.0</code> with server-side secret resolution, HITL approval gating, and immutable Write Audit logging.
           </p>
         </div>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <button type="button" className="secondary-button" disabled={busyId === "migrate"} onClick={async () => {
-            setBusyId("migrate"); setError("");
-            try {
-              await api.migrateLegacyConnectors();
-            } catch (e) { setError(messageFor(e)); } finally { setBusyId(null); }
-          }}>
-            <Plug size={14} aria-hidden="true" />{busyId === "migrate" ? "Preparing…" : "Review task migration"}
-          </button>
+          {hiddenCount > 0 && (
+            <button type="button" className="secondary-button" onClick={() => setShowAll((v) => !v)}>
+              {showAll ? `Show ${pack.shortLabel} only` : `Show all domains (+${hiddenCount})`}
+            </button>
+          )}
           <a className="secondary-button" href="/integrations" style={{ textDecoration: "none" }}>Open /integrations</a>
           <button type="button" className="secondary-button" onClick={() => setDraftOpen((v) => !v)}>
-            <Plus size={15} aria-hidden="true" />{draftOpen ? "Cancel" : "Add connector"}
+            <Plus size={15} aria-hidden="true" />{draftOpen ? "Cancel" : `Add ${pack.shortLabel} connector`}
           </button>
         </div>
       </div>
@@ -616,68 +658,77 @@ function ExternalConnectorsCard({ onUpdated }: { onUpdated: () => void }) {
           </div>
         </form>
       )}
-      <ul className="admin-tools" style={{ marginTop: "12px" }}>
-        {connectors.map((conn) => {
-          const test = testResults[conn.id];
-          const invoke = invokeResults[conn.id];
-          return (
-            <li key={conn.id}>
-              <div className="admin-tool" style={{ cursor: "default", alignItems: "flex-start" }}>
-                <span>
-                  <strong>{conn.name}</strong>
-                  <code>
-                    {conn.kind} · {conn.effect} · {conn.method} {conn.url} · domains: {conn.domains.join(", ")}
-                    {conn.requiresApproval ? " · HITL approval" : ""}
-                    {conn.dualControl ? " · 4-eyes" : ""}
-                    {conn.authEnvVar ? ` · env:${conn.authEnvVar}` : ""}
-                  </code>
-                  <small>{conn.description}</small>
-                  {test && (
-                    <small style={{ color: test.ok ? "var(--teal-dark)" : "#b91c1c", fontWeight: 600 }}>
-                      Test ({test.elapsedMs}ms): {test.message}
-                    </small>
-                  )}
-                  {invoke && (
-                    <small style={{ color: invoke.ok ? "var(--teal-dark)" : "#b91c1c", fontWeight: 600 }}>
-                      {invoke.text}{" "}
-                      {invoke.approvalId && (
-                        <a href={`${adminPaths.logs}?source=approvals`} style={{ textDecoration: "underline" }}>Open Approval Queue</a>
-                      )}
-                    </small>
-                  )}
-                  <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
-                    <button type="button" className="secondary-button" disabled={busyId === conn.id} onClick={() => void testConn(conn.id)}>
-                      <FlaskConical size={13} aria-hidden="true" />Test connection
-                    </button>
-                    <button type="button" className="secondary-button" disabled={busyId === conn.id || !conn.enabled} onClick={() => void invokeConn(conn)}>
-                      <Play size={13} aria-hidden="true" />Invoke via sfield
-                    </button>
-                    <button type="button" className="secondary-button" disabled={busyId === conn.id} onClick={() => void removeConn(conn.id)}>
-                      <Trash2 size={13} aria-hidden="true" />Remove
-                    </button>
-                  </div>
-                </span>
-                <input
-                  type="checkbox"
-                  role="switch"
-                  aria-label={"Enable " + conn.name}
-                  checked={conn.enabled}
-                  disabled={busyId === conn.id}
-                  onChange={() => void toggleEnabled(conn)}
-                />
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+      {visible.length === 0 ? (
+        <p className="admin-muted" style={{ marginTop: "12px" }}>
+          No external connectors registered for {pack.shortLabel} yet. Click <strong>Add {pack.shortLabel} connector</strong> above to connect an external REST or MCP endpoint.
+        </p>
+      ) : (
+        <ul className="admin-tools" style={{ marginTop: "12px" }}>
+          {visible.map((conn) => {
+            const test = testResults[conn.id];
+            const invoke = invokeResults[conn.id];
+            return (
+              <li key={conn.id}>
+                <div className="admin-tool" style={{ cursor: "default", alignItems: "flex-start" }}>
+                  <span>
+                    <strong>{conn.name}</strong>
+                    <code>
+                      {conn.kind} · {conn.effect} · {conn.method} {conn.url} · domains: {conn.domains.join(", ")}
+                      {conn.requiresApproval ? " · HITL approval" : ""}
+                      {conn.dualControl ? " · 4-eyes" : ""}
+                      {conn.authEnvVar ? ` · env:${conn.authEnvVar}` : ""}
+                    </code>
+                    <small>{conn.description}</small>
+                    {test && (
+                      <small style={{ color: test.ok ? "var(--teal-dark)" : "#b91c1c", fontWeight: 600 }}>
+                        Test ({test.elapsedMs}ms): {test.message}
+                      </small>
+                    )}
+                    {invoke && (
+                      <small style={{ color: invoke.ok ? "var(--teal-dark)" : "#b91c1c", fontWeight: 600 }}>
+                        {invoke.text}{" "}
+                        {invoke.approvalId && (
+                          <a href={`${adminPaths.logs}?source=approvals`} style={{ textDecoration: "underline" }}>Open Approval Queue</a>
+                        )}
+                      </small>
+                    )}
+                    <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
+                      <button type="button" className="secondary-button" disabled={busyId === conn.id} onClick={() => void testConn(conn.id)}>
+                        <FlaskConical size={13} aria-hidden="true" />Test connection
+                      </button>
+                      <button type="button" className="secondary-button" disabled={busyId === conn.id || !conn.enabled} onClick={() => void invokeConn(conn)}>
+                        <Play size={13} aria-hidden="true" />Invoke via sfield
+                      </button>
+                      <button type="button" className="secondary-button" disabled={busyId === conn.id} onClick={() => void removeConn(conn.id)}>
+                        <Trash2 size={13} aria-hidden="true" />Remove
+                      </button>
+                    </div>
+                  </span>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    aria-label={"Enable " + conn.name}
+                    checked={conn.enabled}
+                    disabled={busyId === conn.id}
+                    onChange={() => void toggleEnabled(conn)}
+                  />
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </section>
   );
 }
 
 export function AdminPage() {
+  const [domainId, setDomainId] = useState<DomainPackId>(initialDomainFromUrl);
   const [loaded, setLoaded] = useState<Awaited<ReturnType<typeof api.toolSetup>>>();
   const [error, setError] = useState("");
   const [providerTick, setProviderTick] = useState(0);
+  const activePack = getDomainPack(domainId);
+
   useEffect(() => {
     let mounted = true;
     void api.toolSetup().then((setup) => { if (mounted) setLoaded(setup); })
@@ -685,18 +736,82 @@ export function AdminPage() {
     return () => { mounted = false; };
   }, []);
 
+  function selectDomain(next: DomainPackId) {
+    setDomainId(next);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("domain", next);
+      window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+    }
+  }
+
   return <div className="admin-page">
     <main className="admin-main">
-      <header className="admin-heading"><h1>Tool setup</h1></header>
-      <RoutingFlowSetup />
-      {loaded ? <ToolSetupForm {...loaded} /> : <div className="admin-heading">
-        {error ? <p role="status">{error}</p> : <p role="status">Loading Wealth tools…</p>}
-      </div>}
-      {loaded && <RecommendationProvidersCard key={`rp-${providerTick}`} />}
-      {loaded && <ExternalConnectorsCard key={`ec-${providerTick}`} onUpdated={() => setProviderTick((n) => n + 1)} />}
-      {loaded && <McpServerPanel />}
-      {loaded && <McpDiscoveryCard onImported={() => setProviderTick((n) => n + 1)} />}
-      {loaded && <CapabilityStudio />}
+      <header className="admin-heading">
+        <div>
+          <h1>Tool setup</h1>
+          <p>
+            Select a domain to connect <code>sfield</code> tools to closed JSON Schemas, evolve its <code>smass</code> data model, and configure domain connectors and workflows.
+          </p>
+        </div>
+      </header>
+
+      <nav className="admin-domain-bar" aria-label="Domain workspace">
+        <div className="admin-domain-tabs" role="tablist" aria-label="Domains">
+          {DOMAIN_PACKS.map((pack) => (
+            <button
+              key={pack.id}
+              type="button"
+              role="tab"
+              aria-selected={domainId === pack.id}
+              className={`admin-domain-tab${domainId === pack.id ? " active" : ""}`}
+              onClick={() => selectDomain(pack.id)}
+            >
+              {pack.shortLabel}
+            </button>
+          ))}
+        </div>
+        <div className="admin-domain-meta">
+          <span><strong>{activePack.label}</strong> · {activePack.subtitle}</span>
+          <span>Source: <code>{activePack.dataSourceLabel}</code></span>
+        </div>
+      </nav>
+
+      {/* 1. Core Domain-Specific Tools -> Closed Schemas -> Evolved smass Data Model -> sphoton UI Catalog */}
+      <DomainToolsAndModelPanel domainId={domainId} />
+
+      {/* 2. Wealth-specific workflows & Treatment Selector rules (only shown on Wealth domain) */}
+      {domainId === "wealth" && (
+        <div style={{ marginTop: "22px" }}>
+          {loaded ? <ToolSetupForm {...loaded} /> : <div className="admin-heading">
+            {error ? <p role="status">{error}</p> : <p role="status">Loading Wealth tools…</p>}
+          </div>}
+        </div>
+      )}
+
+      {/* 3. Domain-scoped Recommendation Providers & External Connectors */}
+      {loaded && <RecommendationProvidersCard key={`rp-${domainId}-${providerTick}`} domainId={domainId} />}
+      {loaded && <ExternalConnectorsCard key={`ec-${domainId}-${providerTick}`} domainId={domainId} onUpdated={() => setProviderTick((n) => n + 1)} />}
+
+      {/* 4. Platform-wide Routing, Capability Studio & MCP Protocol */}
+      <section className="admin-section-divider" aria-labelledby="platform-controls-title">
+        <h2 id="platform-controls-title">Routing, Capabilities &amp; MCP Protocol</h2>
+        <p>Tenant-level chat routing flows, capability governance, and MCP federation across all domains.</p>
+        <RoutingFlowSetup />
+        {loaded && domainId === "wealth" && <CapabilityStudio />}
+        {loaded && (
+          <details className="admin-collapsible">
+            <summary>
+              <span>MCP Server &amp; External MCP Discovery (Protocol Plumbing)</span>
+              <ChevronDown size={16} aria-hidden="true" />
+            </summary>
+            <div className="admin-collapsible-body">
+              <McpServerPanel />
+              <McpDiscoveryCard onImported={() => setProviderTick((n) => n + 1)} />
+            </div>
+          </details>
+        )}
+      </section>
     </main>
   </div>;
 }

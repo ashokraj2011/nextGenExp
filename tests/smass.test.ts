@@ -121,12 +121,27 @@ test("smass compiles store-backed models into live closed-schema @sfield/core to
   assert.equal(issues[0].field, "missingPath");
 });
 
-test("CEP /api/admin/domain-models exposes tool-backed Wealth models and store-backed IT Ops & Sales models", async (t) => {
+test("CEP /api/admin/domain-models exposes tool-backed Wealth models, store-backed IT Ops & Sales models, and live schema evolution", async (t) => {
   const app = await startTestPreview();
   t.after(() => app.close());
   const client = await testClient(app.url);
 
-  const wealth = await client.request<{ domainId: string; models: SmassModelSummary[] }>("/api/admin/domain-models?domain=wealth");
+  interface DomainWorkbenchResponse {
+    domainId: string;
+    models: SmassModelSummary[];
+    tools: {
+      toolRef: string;
+      role: "read" | "action";
+      contractFingerprint: string;
+      outputFields: { path: string; type: string; exposed: boolean; label: string }[];
+    }[];
+    catalog: {
+      catalogFingerprint: string;
+      fields: { toolRef: string; outputPath: string; label: string }[];
+    };
+  }
+
+  const wealth = await client.request<DomainWorkbenchResponse>("/api/admin/domain-models?domain=wealth");
   assert.equal(wealth.domainId, "wealth");
   const goalModel = wealth.models.find((m) => m.id === "wealth.home_goal");
   assert.ok(goalModel);
@@ -135,15 +150,38 @@ test("CEP /api/admin/domain-models exposes tool-backed Wealth models and store-b
   assert.ok(goalModel.toolRefs.includes("goal.savings.preview@1.0.0"));
   assert.ok(goalModel.fields.some((f) => f.outputPath === "targetCents" && f.type === "integer"));
 
-  const ops = await client.request<{ domainId: string; models: SmassModelSummary[] }>("/api/admin/domain-models?domain=it_ops");
+  // Tool workbench exposes closed output schema fields including unexposed ones
+  const goalTool = wealth.tools.find((tool) => tool.toolRef === "goal.progress.read@1.0.0");
+  assert.ok(goalTool);
+  const currencyBefore = goalTool.outputFields.find((f) => f.path === "currency");
+  assert.ok(currencyBefore);
+  assert.equal(currencyBefore.exposed, false);
+
+  // Evolving an unexposed schema field immediately updates both tools and the smass model + sphoton catalog
+  await client.request("/api/admin/ui-binding-catalog?domain=wealth", {
+    toolRef: "goal.progress.read@1.0.0",
+    outputPath: "currency",
+    label: "Goal currency",
+    exposed: true,
+  });
+  const wealthAfter = await client.request<DomainWorkbenchResponse>("/api/admin/domain-models?domain=wealth");
+  const goalToolAfter = wealthAfter.tools.find((tool) => tool.toolRef === "goal.progress.read@1.0.0");
+  assert.equal(goalToolAfter?.outputFields.find((f) => f.path === "currency")?.exposed, true);
+  const goalModelAfter = wealthAfter.models.find((m) => m.id === "wealth.home_goal");
+  assert.ok(goalModelAfter?.fields.some((f) => f.outputPath === "currency" && f.exposed && f.label === "Goal currency"));
+  assert.ok(wealthAfter.catalog.fields.some((f) => f.toolRef === "goal.progress.read@1.0.0" && f.outputPath === "currency"));
+
+  const ops = await client.request<DomainWorkbenchResponse>("/api/admin/domain-models?domain=it_ops");
   assert.equal(ops.domainId, "it_ops");
   const incidentModel = ops.models.find((m) => m.id === "ops.incident");
   assert.ok(incidentModel);
   assert.equal(incidentModel.mode, "store_backed");
   assert.ok(incidentModel.toolRefs.includes("ops.incident.read@1.0.0"));
   assert.ok(incidentModel.toolRefs.includes("ops.incident.rollback.preview@1.0.0"));
+  assert.ok(ops.tools.some((tool) => tool.toolRef === "ops.incident.read@1.0.0" && tool.outputFields.length > 0));
 
-  const sales = await client.request<{ domainId: string; models: SmassModelSummary[] }>("/api/admin/domain-models?domain=sales_revops");
+  const sales = await client.request<DomainWorkbenchResponse>("/api/admin/domain-models?domain=sales_revops");
   assert.equal(sales.domainId, "sales_revops");
   assert.ok(sales.models.some((m) => m.id === "sales.deal" && m.mode === "store_backed"));
+  assert.ok(sales.tools.some((tool) => tool.toolRef === "sales.deal.read@1.0.0" && tool.outputFields.length > 0));
 });

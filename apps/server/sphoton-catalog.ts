@@ -20,6 +20,7 @@ import { findProfileById } from "../../packages/customer-profiles";
 import { readDemoBalance } from "../../packages/experience/content";
 import type { SmassDomainRegistry, SmassModelSummary } from "../../packages/smass";
 import {
+  extractSchemaFields,
   fingerprintToolContract,
   resolveJsonSchemaPath,
   sha256Hex,
@@ -240,7 +241,85 @@ export class SphotonCatalogService {
 
   summarizeDomainModels(domainId?: DomainPackId): SmassModelSummary[] {
     const descriptors = new Map(this.allToolDescriptors().map((desc) => [desc.ref, desc]));
-    return this.smass.summarize(domainId, descriptors);
+    const summaries = this.smass.summarize(domainId, descriptors);
+    if (!domainId) return summaries;
+    const overrides = this.overrides[domainId] ?? [];
+    if (!overrides.length) return summaries;
+
+    // Reflect live domain owner field exposures/hides inside the evolved smass model summary.
+    for (const override of overrides) {
+      const targetModel = summaries.find((m) => m.toolRefs.includes(override.toolRef));
+      if (!targetModel) continue;
+      const existing = targetModel.fields.find((f) => f.toolRef === override.toolRef && f.outputPath === override.outputPath);
+      if (existing) {
+        existing.exposed = override.exposed;
+        existing.label = override.label;
+        if (override.defaultFormat) existing.format = override.defaultFormat;
+      } else if (override.exposed) {
+        const desc = descriptors.get(override.toolRef);
+        const resolved = resolveJsonSchemaPath(desc?.outputs, override.outputPath);
+        targetModel.fields.push({
+          key: override.outputPath.replace(/[^a-zA-Z0-9_]/g, "_"),
+          toolRef: override.toolRef,
+          outputPath: override.outputPath,
+          label: override.label,
+          ...(resolved.types[0] ? { type: resolved.types[0] } : {}),
+          ...(override.defaultFormat ? { format: override.defaultFormat } : {}),
+          classification: "internal",
+          writable: false,
+          exposed: true,
+        });
+      }
+    }
+    return summaries;
+  }
+
+  domainWorkbenchView(domainId: DomainPackId) {
+    const descriptors = new Map(this.allToolDescriptors().map((desc) => [desc.ref, desc]));
+    const models = this.summarizeDomainModels(domainId);
+    const catalog = this.catalogForDomain(domainId);
+    const exposedByKey = new Map(catalog.fields.map((f) => [`${f.toolRef}::${f.outputPath}`, f]));
+    const actionRefs = new Set(models.flatMap((m) => m.actions.map((a) => a.toolRef)));
+    const domainToolRefs = new Set<string>(models.flatMap((m) => m.toolRefs));
+    for (const t of catalog.tools) domainToolRefs.add(t.toolRef);
+
+    const tools = [...domainToolRefs]
+      .sort()
+      .map((ref) => descriptors.get(ref))
+      .filter((desc): desc is SfieldToolDescriptor => Boolean(desc))
+      .map((desc) => {
+        const modelIds = models.filter((m) => m.toolRefs.includes(desc.ref)).map((m) => m.id);
+        const rawOutputs = extractSchemaFields(desc.outputs as import("@sfield/core").JsonSchema);
+        const rawInputs = extractSchemaFields(desc.inputs as import("@sfield/core").JsonSchema);
+        return {
+          toolRef: desc.ref,
+          id: desc.id,
+          version: desc.version,
+          role: actionRefs.has(desc.ref) ? ("action" as const) : ("read" as const),
+          description: desc.description ?? "",
+          contractFingerprint: fingerprintToolContract(desc.ref, desc.inputs, desc.outputs),
+          modelIds,
+          inputFields: rawInputs.map((f) => ({ path: f.path, type: f.type })),
+          outputFields: rawOutputs.map((f) => {
+            const exposed = exposedByKey.get(`${desc.ref}::${f.path}`);
+            return {
+              path: f.path,
+              type: f.type,
+              exposed: Boolean(exposed),
+              label: exposed?.label ?? f.path,
+              format: exposed?.defaultFormat,
+            };
+          }),
+        };
+      });
+
+    return {
+      tenantId: this.deps.tenantId,
+      domainId,
+      models,
+      tools,
+      catalog,
+    };
   }
 
   sfieldAdapter(): SfieldAdapter {

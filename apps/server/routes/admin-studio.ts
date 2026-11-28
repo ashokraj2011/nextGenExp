@@ -219,11 +219,7 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
   }
   if (id === "domain-models" && method === "GET") {
     const domainId = authoringDomain();
-    json(res, {
-      tenantId: serverTenantId,
-      domainId,
-      models: sphotonCatalog.summarizeDomainModels(domainId),
-    });
+    json(res, sphotonCatalog.domainWorkbenchView(domainId));
     return true;
   }
   if (id === "ui-binding-catalog" && method === "GET") {

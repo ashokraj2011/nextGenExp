@@ -1,6 +1,7 @@
 import type { AppliedUiLayout, UiDesign, UiLayoutCatalog, UiLayoutChange, UiLayoutRecord } from "../../packages/contracts/ui-layout";
 import type { DomainPackId } from "../../packages/contracts/domain-packs";
-import type { SphotonBindingCatalog } from "../../packages/sphoton/contracts";
+import type { SmassModelSummary } from "../../packages/smass/contracts";
+import type { SphotonBindingCatalog, SphotonFormat } from "../../packages/sphoton/contracts";
 import type { SavedWidget, WidgetDraft, WidgetLibraryChange } from "../../packages/contracts/widget";
 import type { IncidentDecisionInput, IncidentRecord, IncidentUpsertInput, OpsIncidentsView } from "../../packages/contracts/ops";
 import type { DealDecisionInput, DealRecord, DealUpsertInput, SalesDealsView } from "../../packages/contracts/sales";
@@ -172,6 +173,28 @@ export const api = {
   uiLayouts: () => request<UiLayoutCatalog>("/api/admin/ui-layouts"),
   uiBindingCatalog: (domainId: DomainPackId) =>
     request<SphotonBindingCatalog>("/api/admin/ui-binding-catalog?domain=" + domainId),
+  domainModels: (domainId: DomainPackId) =>
+    request<{
+      tenantId: string;
+      domainId: DomainPackId;
+      models: SmassModelSummary[];
+      tools: Array<{
+        toolRef: string;
+        id: string;
+        version: string;
+        role: "read" | "action";
+        description: string;
+        contractFingerprint: string;
+        modelIds: string[];
+        inputFields: Array<{ path: string; type: string }>;
+        outputFields: Array<{ path: string; type: string; exposed: boolean; label: string; format?: SphotonFormat }>;
+      }>;
+      catalog: SphotonBindingCatalog;
+    }>("/api/admin/domain-models?domain=" + domainId),
+  setBindingFieldExposure: (
+    domainId: DomainPackId,
+    input: { toolRef: string; outputPath: string; label: string; exposed: boolean; defaultFormat?: SphotonFormat },
+  ) => request<SphotonBindingCatalog>("/api/admin/ui-binding-catalog?domain=" + domainId, input),
   testUiLayout: (domain: Conversation["domainId"], design: UiDesign, message: string, personaId?: string) =>
     request<TurnAccepted & { layoutId: string }>("/api/admin/ui-layout-test?domain=" + domain, { design, message, personaId }),
   saveUiLayout: (change: UiLayoutChange) => request<Reviewable<UiLayoutRecord>>("/api/admin/ui-layouts", change),
