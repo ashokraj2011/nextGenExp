@@ -3,30 +3,65 @@ import type {
   SmassActionParamSpec,
   SmassActionSpec,
   SmassClassification,
+  SmassDataModelRelationEdge,
+  SmassDomainModel,
   SmassFieldSpec,
   SmassFieldType,
+  SmassItemFieldSpec,
+  SmassModelSummary,
+  SmassRelationCardinality,
   SmassStoreBackedModel,
   SmassToolBackedModel,
   SmassToolDescriptorLike,
 } from "./contracts";
 
-function toJsonSchemaNode(type: SmassFieldType, description?: string): JsonSchema {
-  if (type === "array") {
-    return { type: "array", items: { type: "object" }, ...(description ? { description } : {}) };
+type SchemaFieldInput = {
+  type: SmassFieldType;
+  required?: boolean;
+  nullable?: boolean;
+  description?: string;
+  enumValues?: string[];
+  items?: Record<string, SmassItemFieldSpec>;
+  computed?: { expression: string; dependsOn: string[] };
+};
+
+function toJsonSchemaNode(spec: SchemaFieldInput): JsonSchema {
+  const baseType: JsonSchema["type"] = spec.nullable ? [spec.type, "null"] : spec.type;
+  if (spec.type === "array") {
+    const itemSchema: Record<string, unknown> = spec.items
+      ? buildClosedObjectSchema(spec.items)
+      : { type: "object" };
+    return {
+      type: baseType,
+      items: itemSchema as JsonSchema,
+      ...(spec.description ? { description: spec.description } : {}),
+    };
   }
-  if (type === "object") {
-    return { type: "object", ...(description ? { description } : {}) };
+  if (spec.type === "object") {
+    if (spec.items) {
+      return {
+        ...buildClosedObjectSchema(spec.items),
+        ...(spec.nullable ? { type: ["object", "null"] } : {}),
+        ...(spec.description ? { description: spec.description } : {}),
+      } as JsonSchema;
+    }
+    return { type: baseType, ...(spec.description ? { description: spec.description } : {}) };
   }
-  return { type, ...(description ? { description } : {}) };
+  return {
+    type: baseType,
+    ...(spec.enumValues?.length ? { enum: spec.enumValues } : {}),
+    ...(spec.description ? { description: spec.description } : {}),
+  };
 }
 
 export function buildClosedObjectSchema(
-  fields: Record<string, { type: SmassFieldType; required?: boolean; description?: string }>,
+  fields: Record<string, SchemaFieldInput>,
 ): Record<string, unknown> {
   const properties: Record<string, unknown> = {};
   const required: string[] = [];
   for (const [key, spec] of Object.entries(fields)) {
-    properties[key] = toJsonSchemaNode(spec.type, spec.description);
+    if (spec.computed) continue;
+    properties[key] = toJsonSchemaNode(spec);
     if (spec.required) required.push(key);
   }
   return {
@@ -196,12 +231,25 @@ export function validateToolBackedModel(
     }
   }
   for (const [fieldKey, field] of Object.entries(model.fields)) {
+    if (field.principalKey) continue;
+    if (field.computed) {
+      for (const dep of field.computed.dependsOn) {
+        if (!Object.prototype.hasOwnProperty.call(model.fields, dep)) {
+          issues.push({
+            modelId: model.id,
+            field: fieldKey,
+            message: `Computed field "${fieldKey}" depends on undeclared field "${dep}".`,
+          });
+        }
+      }
+      continue;
+    }
     const from = field.from;
     if (!from || !from.includes(".")) {
       issues.push({
         modelId: model.id,
         field: fieldKey,
-        message: `Tool-backed field "${fieldKey}" must specify from: "<sourceSlot>.<outputPath>".`,
+        message: `Tool-backed field "${fieldKey}" must specify from: "<sourceSlot>.<outputPath>", principalKey, or computed.`,
       });
       continue;
     }
@@ -239,4 +287,187 @@ export function validateToolBackedModel(
     }
   }
   return issues;
+}
+
+/**
+ * Validates referential integrity across entity relationships, foreign keys, computed dependencies,
+ * and lifecycle state machines within a registry of smass domain models.
+ */
+export function validateDomainGraph(models: readonly SmassDomainModel[]): SmassModelValidationIssue[] {
+  const issues: SmassModelValidationIssue[] = [];
+  const byId = new Map(models.map((m) => [m.id, m]));
+
+  for (const model of models) {
+    for (const rel of model.relations ?? []) {
+      const target = byId.get(rel.targetModelId);
+      if (!target) {
+        issues.push({
+          modelId: model.id,
+          message: `Relation "${rel.name}" references unknown target model "${rel.targetModelId}".`,
+        });
+      }
+    }
+    for (const [fieldKey, field] of Object.entries(model.fields)) {
+      if (field.foreignKey && !byId.has(field.foreignKey.modelId)) {
+        issues.push({
+          modelId: model.id,
+          field: fieldKey,
+          message: `Foreign key on "${fieldKey}" references unknown model "${field.foreignKey.modelId}".`,
+        });
+      }
+      if (field.computed) {
+        for (const dep of field.computed.dependsOn) {
+          if (!Object.prototype.hasOwnProperty.call(model.fields, dep)) {
+            issues.push({
+              modelId: model.id,
+              field: fieldKey,
+              message: `Computed field "${fieldKey}" depends on undeclared field "${dep}".`,
+            });
+          }
+        }
+      }
+    }
+    if (model.lifecycle) {
+      const { stateField, states, transitions } = model.lifecycle;
+      if (!Object.prototype.hasOwnProperty.call(model.fields, stateField)) {
+        issues.push({
+          modelId: model.id,
+          field: stateField,
+          message: `Lifecycle stateField "${stateField}" is not declared on model "${model.id}".`,
+        });
+      }
+      const stateSet = new Set(states);
+      const actionIds = new Set((model.actions ?? []).map((a) => a.id));
+      for (const tr of transitions) {
+        if (!stateSet.has(tr.from) || !stateSet.has(tr.to)) {
+          issues.push({
+            modelId: model.id,
+            field: stateField,
+            message: `Lifecycle transition "${tr.from} -> ${tr.to}" references an undeclared state.`,
+          });
+        }
+        if (tr.actionId && !actionIds.has(tr.actionId)) {
+          issues.push({
+            modelId: model.id,
+            message: `Lifecycle transition "${tr.from} -> ${tr.to}" references unknown action "${tr.actionId}".`,
+          });
+        }
+      }
+    }
+  }
+  return issues;
+}
+
+function mermaidEntityName(modelId: string): string {
+  return modelId.replace(/[^A-Za-z0-9]/g, "_").toUpperCase();
+}
+
+function mermaidCardinality(cardinality: SmassRelationCardinality): string {
+  switch (cardinality) {
+    case "one_to_one":
+      return "||--||";
+    case "one_to_many":
+      return "||--o{";
+    case "many_to_one":
+      return "}o--||";
+    case "many_to_many":
+      return "}o--o{";
+  }
+}
+
+/**
+ * Compiles a smass domain model graph into a standard Mermaid ER diagram.
+ */
+export function compileMermaidErDiagram(
+  entities: readonly SmassModelSummary[],
+  relations: readonly SmassDataModelRelationEdge[],
+): string {
+  const lines: string[] = ["erDiagram"];
+  for (const entity of entities) {
+    const name = mermaidEntityName(entity.id);
+    lines.push(`  ${name} {`);
+    for (const field of entity.fields) {
+      const typeToken = field.type ?? "string";
+      const keyTags = [
+        ...(field.primaryKey ? ["PK"] : []),
+        ...(field.foreignKey ? ["FK"] : []),
+      ].join(",");
+      const notes: string[] = [];
+      if (field.format) notes.push(field.format);
+      if (field.computed) notes.push(`computed: ${field.computed.expression}`);
+      if (field.enumValues?.length) notes.push(`enum: ${field.enumValues.join("|")}`);
+      if (field.principalKey) notes.push(`principal.${field.principalKey}`);
+      const suffix = notes.length ? ` "${notes.join(" · ")}"` : "";
+      lines.push(`    ${typeToken} ${field.key}${keyTags ? ` ${keyTags}` : ""}${suffix}`);
+    }
+    lines.push("  }");
+  }
+
+  const seenEdges = new Set<string>();
+  for (const rel of relations) {
+    const dedupeKey = `${rel.sourceModelId}:${rel.targetModelId}:${rel.name}`;
+    if (seenEdges.has(dedupeKey)) continue;
+    seenEdges.add(dedupeKey);
+    lines.push(
+      `  ${mermaidEntityName(rel.sourceModelId)} ${mermaidCardinality(rel.cardinality)} ${mermaidEntityName(rel.targetModelId)} : "${rel.name}"`,
+    );
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Compiles a smass domain model graph into a self-describing JSON Schema (Draft 2020-12) $defs document.
+ */
+export function compileDomainJsonSchema(
+  domain: string,
+  entities: readonly SmassModelSummary[],
+): Record<string, unknown> {
+  const defs: Record<string, unknown> = {};
+  for (const entity of entities) {
+    const properties: Record<string, unknown> = {};
+    const required: string[] = [];
+    for (const field of entity.fields) {
+      const node: Record<string, unknown> = {
+        type: field.nullable && field.type ? [field.type, "null"] : (field.type ?? "string"),
+        title: field.label,
+      };
+      if (field.format) node["x-smass-format"] = field.format;
+      if (field.enumValues?.length) node.enum = field.enumValues;
+      if (field.items) {
+        if (field.type === "array") {
+          node.items = buildClosedObjectSchema(field.items);
+        } else {
+          node.properties = (buildClosedObjectSchema(field.items) as { properties: unknown }).properties;
+        }
+      }
+      if (field.primaryKey) node["x-smass-primary-key"] = true;
+      if (field.foreignKey) node["x-smass-foreign-key"] = field.foreignKey;
+      if (field.principalKey) node["x-smass-principal-key"] = field.principalKey;
+      if (field.computed) node["x-smass-computed"] = field.computed;
+      if (field.toolRef) node["x-sfield-source"] = `${field.toolRef}#${field.outputPath}`;
+      node["x-smass-classification"] = field.classification;
+      node["x-smass-exposed"] = field.exposed;
+      properties[field.key] = node;
+      if (field.required) required.push(field.key);
+    }
+    defs[entity.id] = {
+      type: "object",
+      title: entity.label,
+      ...(entity.description ? { description: entity.description } : {}),
+      additionalProperties: false,
+      properties,
+      ...(required.length ? { required } : {}),
+      "x-smass-mode": entity.mode,
+      ...(entity.primaryKey ? { "x-smass-primary-key": entity.primaryKey } : {}),
+      "x-smass-tools": entity.toolRefs,
+      ...(entity.relations.length ? { "x-smass-relations": entity.relations } : {}),
+      ...(entity.lifecycle ? { "x-smass-lifecycle": entity.lifecycle } : {}),
+    };
+  }
+  return {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    $id: `urn:smass:domain:${domain}`,
+    title: `${domain} domain data model`,
+    $defs: defs,
+  };
 }

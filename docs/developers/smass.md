@@ -61,8 +61,21 @@ Define an entity's fields, classifications, actions, and `DataSource` **once** (
 - **Executable `@sfield/core` tools** (`smass.toSfieldTools()` → `ops.incident.read@1.0.0`, `ops.incident.rollback.preview@1.0.0`)
 - **`sphoton` binding catalog entries** (`smass.projectBindingsForDomain(domain)`)
 
-### Inspect Registered Domain Models
+### Canonical Data Model Representation (`toDataModelGraph`)
 
-`GET /api/admin/domain-models?domain=<domain>` returns the tenant and domain's registered `smass` models, their mode (`tool_backed` or `store_backed`), versioned `sfield` tool references, field types, classifications, and actions.
+Beyond field bindings, `smass` represents the full relational data model for every domain:
 
-See `apps/server/domain-models.ts`, `apps/server/sphoton-catalog.ts`, and `tests/smass.test.ts`.
+- **Keys & Federation**: `primaryKey`, `foreignKey` (`{ modelId, field }`), and `principalKey` (e.g. `principal.identifiers.mid`) linking federated `tool_backed` entities across separate microservices.
+- **Entity Relationships (`relations`)**: Directed edges (`one_to_one`, `one_to_many`, `many_to_one`, `many_to_many`) with join keys (`localField`, `foreignField`) and referential integrity validation via `validateDomainGraph()`.
+- **Rich Field Semantics**: `enumValues`, `nullable`, typed nested `items` schemas (e.g., `history: [{ month, savedCents }]`), and `computed` derived fields (`{ expression, dependsOn }`).
+- **Entity Lifecycles (`lifecycle`)**: Valid state sets and transitions tied to `smass` actions (e.g. `ops.incident.rollbackStatus` and `sales.deal.discountStatus`).
+- **Standard Exports**: `registry.toDataModelGraph(domain)` compiles the live domain model into:
+  - **`entities` & `relations`** — structured Entity-Relationship graph
+  - **`mermaidEr`** — canonical Mermaid `erDiagram` source
+  - **`jsonSchema`** — Draft 2020-12 JSON Schema `$defs` bundle
+
+### Inspect & Evolve Domain Models
+
+`GET /api/admin/domain-models?domain=<domain>` returns the domain's registered `sfield` tools + closed output schemas, `models`, canonical `dataModel` (`entities`, `relations`, `mermaidEr`, `jsonSchema`), and `sphoton` `catalog`. Evolving a tool schema field in **Tool setup** (`/admin`) immediately updates the `smass` data model, JSON Schema, Mermaid ER diagram, and `sphoton` UI Builder catalog.
+
+See `apps/server/domain-models.ts`, `apps/server/sphoton-catalog.ts`, `apps/web/domain-tools-model.tsx`, and `tests/smass.test.ts`.

@@ -178,6 +178,7 @@ export const api = {
       tenantId: string;
       domainId: DomainPackId;
       models: SmassModelSummary[];
+      dataModel: import("../../packages/smass").SmassDataModelGraph;
       tools: Array<{
         toolRef: string;
         id: string;

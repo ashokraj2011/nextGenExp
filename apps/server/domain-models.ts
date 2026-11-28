@@ -12,20 +12,96 @@ import type { SalesDealStore } from "./sales-store";
  * Wealth Domain Models (Mode 1 — Tool-backed / Federated).
  * Composed directly from tools already registered in sfield, with zero schema duplication.
  */
+export const wealthCustomerModel = defineToolBackedModel({
+  id: "wealth.customer",
+  version: toolVersion,
+  domain: "wealth",
+  label: "Wealth Customer",
+  description: "Federated root entity anchored on principal.identifiers.mid linking portfolio, goals, and balances.",
+  primaryKey: "customerId",
+  sources: {
+    portfolio: { toolRef: `${sfieldTools.portfolio.id}@${toolVersion}`, description: "Latest verified portfolio observation." },
+  },
+  fields: {
+    customerId: {
+      type: "string",
+      principalKey: "mid",
+      primaryKey: true,
+      required: true,
+      label: "Customer MID",
+      description: "Principal-anchored customer identifier shared across federated Wealth sfield tools.",
+      classification: "pii",
+      exposed: false,
+    },
+    asOf: {
+      from: "portfolio.asOf",
+      label: "Snapshot date",
+      format: "date",
+      classification: "internal",
+      exposed: false,
+    },
+  },
+  relations: [
+    {
+      name: "holds_portfolio",
+      targetModelId: "wealth.portfolio",
+      cardinality: "one_to_one",
+      localField: "customerId",
+      foreignField: "customerId",
+      description: "Each customer holds one consolidated portfolio snapshot.",
+    },
+    {
+      name: "tracks_goals",
+      targetModelId: "wealth.home_goal",
+      cardinality: "one_to_many",
+      localField: "customerId",
+      foreignField: "customerId",
+      description: "A customer tracks one or more savings goals.",
+    },
+    {
+      name: "owns_balances",
+      targetModelId: "wealth.balances",
+      cardinality: "one_to_one",
+      localField: "customerId",
+      foreignField: "customerId",
+      description: "A customer owns live account balance summaries.",
+    },
+  ],
+});
+
 export const wealthHomeGoalModel = defineToolBackedModel({
   id: "wealth.home_goal",
   version: toolVersion,
   domain: "wealth",
   label: "Goal Progress",
   description: "Home down-payment goal progress composed from goal.progress.read@1.0.0 and goal.savings.preview@1.0.0.",
+  primaryKey: "goalId",
   sources: {
     goal: { toolRef: `${sfieldTools.goal.id}@${toolVersion}`, description: "Verified customer goal progress read." },
   },
   fields: {
+    goalId: {
+      from: "goal.goalId",
+      primaryKey: true,
+      required: true,
+      label: "Goal ID",
+      classification: "internal",
+      exposed: false,
+    },
+    customerId: {
+      type: "string",
+      principalKey: "mid",
+      required: true,
+      foreignKey: { modelId: "wealth.customer", field: "customerId" },
+      label: "Customer MID",
+      classification: "pii",
+      exposed: false,
+    },
     targetCents: {
       from: "goal.targetCents",
       label: "Down payment target",
       description: "Target home down payment amount in cents.",
+      required: true,
       format: "currency_cents",
       supportedFormats: ["currency_cents", "number"],
       classification: "confidential",
@@ -35,8 +111,13 @@ export const wealthHomeGoalModel = defineToolBackedModel({
       from: "goal.history",
       label: "Savings history",
       description: "Monthly savings progress history series.",
+      required: true,
       format: "series",
       supportedFormats: ["series"],
+      items: {
+        month: { type: "string", required: true, description: "YYYY-MM month bucket" },
+        savedCents: { type: "integer", required: true, description: "Cumulative savings in cents" },
+      },
       classification: "confidential",
     },
     monthlyContributionCents: {
@@ -48,6 +129,15 @@ export const wealthHomeGoalModel = defineToolBackedModel({
       classification: "confidential",
     },
   },
+  relations: [
+    {
+      name: "belongs_to_customer",
+      targetModelId: "wealth.customer",
+      cardinality: "many_to_one",
+      localField: "customerId",
+      foreignField: "customerId",
+    },
+  ],
   actions: [
     {
       id: "add-monthly-savings",
@@ -68,10 +158,21 @@ export const wealthPortfolioModel = defineToolBackedModel({
   domain: "wealth",
   label: "Portfolio Snapshot",
   description: "Portfolio valuation composed from portfolio.snapshot.read@1.0.0.",
+  primaryKey: "customerId",
   sources: {
     portfolio: { toolRef: `${sfieldTools.portfolio.id}@${toolVersion}` },
   },
   fields: {
+    customerId: {
+      type: "string",
+      principalKey: "mid",
+      primaryKey: true,
+      required: true,
+      foreignKey: { modelId: "wealth.customer", field: "customerId" },
+      label: "Customer MID",
+      classification: "pii",
+      exposed: false,
+    },
     totalCents: {
       from: "portfolio.totalCents",
       label: "Total portfolio value",
@@ -83,6 +184,7 @@ export const wealthPortfolioModel = defineToolBackedModel({
     cashCents: {
       from: "portfolio.cashCents",
       label: "Portfolio cash",
+      required: true,
       format: "currency_cents",
       supportedFormats: ["currency_cents", "number"],
       classification: "confidential",
@@ -91,12 +193,42 @@ export const wealthPortfolioModel = defineToolBackedModel({
     equityCents: {
       from: "portfolio.equityCents",
       label: "Portfolio equities",
+      required: true,
       format: "currency_cents",
       supportedFormats: ["currency_cents", "number"],
       classification: "confidential",
       legacyBindingKey: "portfolio.equities",
     },
+    fixedIncomeCents: {
+      from: "portfolio.fixedIncomeCents",
+      label: "Fixed income",
+      required: true,
+      format: "currency_cents",
+      supportedFormats: ["currency_cents", "number"],
+      classification: "confidential",
+      exposed: false,
+    },
+    totalAssetsCents: {
+      type: "integer",
+      label: "Derived total assets",
+      format: "currency_cents",
+      computed: {
+        expression: "cashCents + equityCents + fixedIncomeCents",
+        dependsOn: ["cashCents", "equityCents", "fixedIncomeCents"],
+      },
+      classification: "confidential",
+      exposed: false,
+    },
   },
+  relations: [
+    {
+      name: "belongs_to_customer",
+      targetModelId: "wealth.customer",
+      cardinality: "one_to_one",
+      localField: "customerId",
+      foreignField: "customerId",
+    },
+  ],
 });
 
 export const wealthBalancesModel = defineToolBackedModel({
@@ -105,10 +237,21 @@ export const wealthBalancesModel = defineToolBackedModel({
   domain: "wealth",
   label: "Balances",
   description: "Account balance summary composed from demo.balance.read@1.0.0.",
+  primaryKey: "customerId",
   sources: {
     balances: { toolRef: `${sfieldTools.balances.id}@${toolVersion}` },
   },
   fields: {
+    customerId: {
+      type: "string",
+      principalKey: "mid",
+      primaryKey: true,
+      required: true,
+      foreignKey: { modelId: "wealth.customer", field: "customerId" },
+      label: "Customer MID",
+      classification: "pii",
+      exposed: false,
+    },
     available: {
       from: "balances.values.available",
       label: "Available balance",
@@ -126,12 +269,66 @@ export const wealthBalancesModel = defineToolBackedModel({
       legacyBindingKey: "balances.current",
     },
   },
+  relations: [
+    {
+      name: "belongs_to_customer",
+      targetModelId: "wealth.customer",
+      cardinality: "one_to_one",
+      localField: "customerId",
+      foreignField: "customerId",
+    },
+  ],
 });
 
 /**
- * IT Ops Domain Model (Mode 2 — Store-backed).
- * Defined once here; smass automatically compiles its closed JSON Schemas, sfield tools, and sphoton catalog fields.
+ * IT Ops Domain Models (Mode 2 — Store-backed).
+ * Defined once here; smass automatically compiles closed JSON Schemas, sfield tools, ER graph, and sphoton catalog fields.
  */
+export function createOpsServiceModel(opsStore?: OpsIncidentStore) {
+  return defineStoreBackedModel({
+    id: "ops.service",
+    version: "1.0.0",
+    domain: "it_ops",
+    label: "Production Service",
+    description: "Catalog of production services linked to active SRE incidents and release versions.",
+    primaryKey: "service",
+    readToolRef: "ops.service.read@1.0.0",
+    readInputs: { service: { type: "string", description: "Optional service name." } },
+    classification: "internal",
+    fields: {
+      service: { type: "string", label: "Service name", primaryKey: true, required: true },
+      environment: { type: "string", label: "Environment", required: true, enumValues: ["production", "staging", "canary"] },
+      activeRelease: { type: "string", label: "Active release", required: true },
+      activeIncidentCount: { type: "integer", label: "Active incidents", format: "number", required: true },
+    },
+    relations: [
+      {
+        name: "has_incidents",
+        targetModelId: "ops.incident",
+        cardinality: "one_to_many",
+        localField: "service",
+        foreignField: "service",
+        description: "Production service owns zero or more operational incidents.",
+      },
+    ],
+    source: {
+      read(inputs) {
+        const incidents = opsStore?.list() ?? [];
+        const requested = typeof inputs.service === "string" ? inputs.service : undefined;
+        const match = (requested ? incidents.find((i) => i.service === requested) : incidents[0]) ?? opsStore?.primaryIncident();
+        if (!match) return null;
+        const count = incidents.filter((i) => i.service === match.service && i.status !== "resolved").length || 1;
+        return {
+          service: match.service,
+          environment: match.environment,
+          activeRelease: match.currentRelease,
+          activeIncidentCount: count,
+        };
+      },
+    },
+  });
+}
+
 export function createOpsIncidentModel(opsStore?: OpsIncidentStore) {
   return defineStoreBackedModel({
     id: "ops.incident",
@@ -144,15 +341,27 @@ export function createOpsIncidentModel(opsStore?: OpsIncidentStore) {
     readInputs: { incidentId: { type: "string", description: "Optional incident ID (defaults to primary active incident)." } },
     classification: "internal",
     fields: {
-      id: { type: "string", label: "Incident ID", required: true, legacyBindingKey: "incident.id" },
+      id: { type: "string", label: "Incident ID", primaryKey: true, required: true, legacyBindingKey: "incident.id" },
       title: { type: "string", label: "Incident title", required: true, legacyBindingKey: "incident.title" },
-      severity: { type: "string", label: "Severity", required: true, legacyBindingKey: "incident.severity" },
-      status: { type: "string", label: "Incident status", required: true, legacyBindingKey: "incident.status" },
-      service: { type: "string", label: "Affected service", required: true, legacyBindingKey: "incident.service" },
+      severity: { type: "string", label: "Severity", required: true, enumValues: ["P1", "P2", "P3"], legacyBindingKey: "incident.severity" },
+      status: { type: "string", label: "Incident status", required: true, enumValues: ["investigating", "mitigated", "resolved"], legacyBindingKey: "incident.status" },
+      service: {
+        type: "string",
+        label: "Affected service",
+        required: true,
+        foreignKey: { modelId: "ops.service", field: "service" },
+        legacyBindingKey: "incident.service",
+      },
       environment: { type: "string", label: "Environment", exposed: false },
       currentRelease: { type: "string", label: "Current release", legacyBindingKey: "incident.currentRelease" },
       previousRelease: { type: "string", label: "Previous release", exposed: false },
-      rollbackStatus: { type: "string", label: "Rollback status", writable: true, legacyBindingKey: "incident.rollbackStatus" },
+      rollbackStatus: {
+        type: "string",
+        label: "Rollback status",
+        writable: true,
+        enumValues: ["not_started", "pending_approval", "previewed", "approved", "rolled_back"],
+        legacyBindingKey: "incident.rollbackStatus",
+      },
       errorRatePct: {
         type: "number",
         label: "Edge error rate",
@@ -167,6 +376,25 @@ export function createOpsIncidentModel(opsStore?: OpsIncidentStore) {
         supportedFormats: ["number"],
         legacyBindingKey: "incident.p95Latency",
       },
+    },
+    relations: [
+      {
+        name: "impacts_service",
+        targetModelId: "ops.service",
+        cardinality: "many_to_one",
+        localField: "service",
+        foreignField: "service",
+      },
+    ],
+    lifecycle: {
+      stateField: "rollbackStatus",
+      states: ["not_started", "previewed", "pending_approval", "approved", "rolled_back"],
+      transitions: [
+        { from: "not_started", to: "previewed", actionId: "preview-rollback", label: "Preview rollback impact" },
+        { from: "previewed", to: "pending_approval", label: "Submit HITL change ticket" },
+        { from: "pending_approval", to: "approved", label: "SRE commander approval" },
+        { from: "approved", to: "rolled_back", label: "Execute rollback" },
+      ],
     },
     source: {
       read(inputs) {
@@ -229,9 +457,61 @@ export function createOpsIncidentModel(opsStore?: OpsIncidentStore) {
 }
 
 /**
- * Sales RevOps Domain Model (Mode 2 — Store-backed).
- * Defined once here; smass automatically compiles its closed JSON Schemas, sfield tools, and sphoton catalog fields.
+ * Sales RevOps Domain Models (Mode 2 — Store-backed).
+ * Defined once here; smass automatically compiles closed JSON Schemas, sfield tools, ER graph, and sphoton catalog fields.
  */
+export function createSalesAccountModel(salesStore?: SalesDealStore) {
+  return defineStoreBackedModel({
+    id: "sales.account",
+    version: "1.0.0",
+    domain: "sales_revops",
+    label: "CRM Account",
+    description: "Enterprise customer account aggregating open pipeline deals and assigned owner.",
+    primaryKey: "accountName",
+    readToolRef: "sales.account.read@1.0.0",
+    readInputs: { accountName: { type: "string", description: "Optional enterprise account name." } },
+    classification: "confidential",
+    fields: {
+      accountName: { type: "string", label: "Account name", primaryKey: true, required: true },
+      owner: { type: "string", label: "Account owner", required: true },
+      openDealCount: { type: "integer", label: "Open deals", format: "number", required: true },
+      totalPipelineArrCents: {
+        type: "integer",
+        label: "Total pipeline ARR",
+        format: "currency_cents",
+        supportedFormats: ["currency_cents", "number"],
+        required: true,
+      },
+    },
+    relations: [
+      {
+        name: "has_deals",
+        targetModelId: "sales.deal",
+        cardinality: "one_to_many",
+        localField: "accountName",
+        foreignField: "accountName",
+        description: "An enterprise account has one or more active pipeline opportunities.",
+      },
+    ],
+    source: {
+      read(inputs) {
+        const deals = salesStore?.list() ?? [];
+        const requested = typeof inputs.accountName === "string" ? inputs.accountName : undefined;
+        const primary = (requested ? deals.find((d) => d.accountName === requested) : deals[0]) ?? salesStore?.primaryDeal();
+        if (!primary) return null;
+        const matching = deals.filter((d) => d.accountName === primary.accountName);
+        const totalPipelineArrCents = matching.reduce((sum, d) => sum + Math.round(d.arrUsd * 100), 0);
+        return {
+          accountName: primary.accountName,
+          owner: primary.owner,
+          openDealCount: matching.length || 1,
+          totalPipelineArrCents,
+        };
+      },
+    },
+  });
+}
+
 export function createSalesDealModel(salesStore?: SalesDealStore) {
   return defineStoreBackedModel({
     id: "sales.deal",
@@ -244,10 +524,22 @@ export function createSalesDealModel(salesStore?: SalesDealStore) {
     readInputs: { dealId: { type: "string", description: "Optional deal ID (defaults to primary active deal)." } },
     classification: "confidential",
     fields: {
-      id: { type: "string", label: "Deal ID", required: true, legacyBindingKey: "deal.id" },
-      accountName: { type: "string", label: "Account name", required: true, legacyBindingKey: "deal.accountName" },
+      id: { type: "string", label: "Deal ID", primaryKey: true, required: true, legacyBindingKey: "deal.id" },
+      accountName: {
+        type: "string",
+        label: "Account name",
+        required: true,
+        foreignKey: { modelId: "sales.account", field: "accountName" },
+        legacyBindingKey: "deal.accountName",
+      },
       title: { type: "string", label: "Deal title", legacyBindingKey: "deal.title" },
-      stage: { type: "string", label: "Pipeline stage", required: true, legacyBindingKey: "deal.stage" },
+      stage: {
+        type: "string",
+        label: "Pipeline stage",
+        required: true,
+        enumValues: ["Discovery", "Proposal", "Negotiation", "Closed Won", "Closed Lost"],
+        legacyBindingKey: "deal.stage",
+      },
       owner: { type: "string", label: "Deal owner", exposed: false },
       arrCents: {
         type: "integer",
@@ -265,6 +557,16 @@ export function createSalesDealModel(salesStore?: SalesDealStore) {
         writable: true,
         legacyBindingKey: "deal.discountPct",
       },
+      netArrCents: {
+        type: "integer",
+        label: "Net discounted ARR",
+        format: "currency_cents",
+        computed: {
+          expression: "arrCents * (1 - discountPct / 100)",
+          dependsOn: ["arrCents", "discountPct"],
+        },
+        exposed: false,
+      },
       winProbability: {
         type: "integer",
         label: "Win probability",
@@ -279,7 +581,30 @@ export function createSalesDealModel(salesStore?: SalesDealStore) {
         supportedFormats: ["date", "text"],
         legacyBindingKey: "deal.closeDate",
       },
-      discountStatus: { type: "string", label: "Discount status", exposed: false },
+      discountStatus: {
+        type: "string",
+        label: "Discount status",
+        enumValues: ["none", "pending_approval", "approved", "rejected"],
+        exposed: false,
+      },
+    },
+    relations: [
+      {
+        name: "belongs_to_account",
+        targetModelId: "sales.account",
+        cardinality: "many_to_one",
+        localField: "accountName",
+        foreignField: "accountName",
+      },
+    ],
+    lifecycle: {
+      stateField: "discountStatus",
+      states: ["none", "pending_approval", "approved", "rejected"],
+      transitions: [
+        { from: "none", to: "pending_approval", actionId: "preview-discount", label: "Request discount exception" },
+        { from: "pending_approval", to: "approved", label: "Approve discount (VP Finance)" },
+        { from: "pending_approval", to: "rejected", label: "Reject exception" },
+      ],
     },
     source: {
       read(inputs) {
@@ -347,10 +672,13 @@ export function createCepSmassRegistry(deps: {
   salesStore?: SalesDealStore;
 }): SmassDomainRegistry {
   return createSmassRegistry([
+    wealthCustomerModel,
     wealthHomeGoalModel,
     wealthPortfolioModel,
     wealthBalancesModel,
+    createOpsServiceModel(deps.opsStore),
     createOpsIncidentModel(deps.opsStore),
+    createSalesAccountModel(deps.salesStore),
     createSalesDealModel(deps.salesStore),
   ]);
 }

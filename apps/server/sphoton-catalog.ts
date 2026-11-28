@@ -265,6 +265,9 @@ export class SphotonCatalogService {
           label: override.label,
           ...(resolved.types[0] ? { type: resolved.types[0] } : {}),
           ...(override.defaultFormat ? { format: override.defaultFormat } : {}),
+          required: false,
+          nullable: false,
+          primaryKey: false,
           classification: "internal",
           writable: false,
           exposed: true,
@@ -277,6 +280,7 @@ export class SphotonCatalogService {
   domainWorkbenchView(domainId: DomainPackId) {
     const descriptors = new Map(this.allToolDescriptors().map((desc) => [desc.ref, desc]));
     const models = this.summarizeDomainModels(domainId);
+    const dataModel = this.smass.toDataModelGraph(domainId, descriptors, models);
     const catalog = this.catalogForDomain(domainId);
     const exposedByKey = new Map(catalog.fields.map((f) => [`${f.toolRef}::${f.outputPath}`, f]));
     const actionRefs = new Set(models.flatMap((m) => m.actions.map((a) => a.toolRef)));
@@ -317,6 +321,7 @@ export class SphotonCatalogService {
       tenantId: this.deps.tenantId,
       domainId,
       models,
+      dataModel,
       tools,
       catalog,
     };

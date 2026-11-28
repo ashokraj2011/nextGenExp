@@ -1,18 +1,24 @@
 import type { ToolDefinition } from "@sfield/core";
 import type {
   SmassActionSpec,
+  SmassDataModelGraph,
+  SmassDataModelRelationEdge,
   SmassDomainModel,
   SmassExecutionContext,
   SmassFieldFormat,
   SmassFieldType,
+  SmassModelFieldSummary,
   SmassModelSummary,
   SmassStoreBackedModel,
   SmassToolDescriptorLike,
 } from "./contracts";
 import {
+  compileDomainJsonSchema,
+  compileMermaidErDiagram,
   compileModelToSfieldTools,
   describeStoreBackedModelTools,
   resolveSchemaPath,
+  validateDomainGraph,
   validateToolBackedModel,
   type SmassModelValidationIssue,
 } from "./schema-compiler";
@@ -125,7 +131,7 @@ export class SmassDomainRegistry {
     return { found: false };
   }
 
-  /** Validates every tool-backed model against live sfield tool descriptors. */
+  /** Validates every tool-backed model against live sfield tool descriptors and validates domain relations/lifecycles. */
   validateAgainstTools(descriptors: ReadonlyMap<string, SmassToolDescriptorLike>): SmassModelValidationIssue[] {
     const issues: SmassModelValidationIssue[] = [];
     for (const model of this.models.values()) {
@@ -133,6 +139,7 @@ export class SmassDomainRegistry {
         issues.push(...validateToolBackedModel(model, descriptors));
       }
     }
+    issues.push(...validateDomainGraph([...this.models.values()]));
     return issues;
   }
 
@@ -151,6 +158,7 @@ export class SmassDomainRegistry {
       const group = `${model.label} (sfield)`;
       if (model.mode === "tool_backed") {
         for (const field of Object.values(model.fields)) {
+          if (field.principalKey || field.computed) continue;
           if (!field.from || !field.from.includes(".")) continue;
           const dot = field.from.indexOf(".");
           const slot = field.from.slice(0, dot);
@@ -173,6 +181,7 @@ export class SmassDomainRegistry {
       } else {
         const storeModel = model as SmassStoreBackedModel;
         for (const [key, field] of Object.entries(storeModel.fields)) {
+          if (field.computed) continue;
           fields.push({
             modelId: model.id,
             toolRef: storeModel.readToolRef,
@@ -209,25 +218,35 @@ export class SmassDomainRegistry {
   summarize(domain?: string, descriptors?: ReadonlyMap<string, SmassToolDescriptorLike>): SmassModelSummary[] {
     return this.list(domain).map((model) => {
       const toolRefs = new Set<string>();
-      const fields: SmassModelSummary["fields"] = [];
+      const fields: SmassModelFieldSummary[] = [];
 
       if (model.mode === "tool_backed") {
         for (const src of Object.values(model.sources)) toolRefs.add(src.toolRef);
         for (const [key, field] of Object.entries(model.fields)) {
+          const isPrincipal = Boolean(field.principalKey);
+          const isComputed = Boolean(field.computed);
           const dot = field.from?.indexOf(".") ?? -1;
           const slot = dot >= 0 ? field.from!.slice(0, dot) : "";
           const outputPath = dot >= 0 ? field.from!.slice(dot + 1) : key;
-          const toolRef = model.sources[slot]?.toolRef ?? "";
+          const toolRef = isPrincipal || isComputed ? "" : (model.sources[slot]?.toolRef ?? "");
           const inferredType = field.type ?? (toolRef && descriptors?.get(toolRef)
             ? resolveSchemaPath(descriptors.get(toolRef)!.outputs, outputPath).types[0]
             : undefined);
           fields.push({
             key,
             toolRef,
-            outputPath,
+            outputPath: isPrincipal || isComputed ? key : outputPath,
             label: field.label,
             ...(inferredType ? { type: inferredType } : {}),
             ...(field.format ? { format: field.format } : {}),
+            required: Boolean(field.required || field.primaryKey || model.primaryKey === key),
+            nullable: Boolean(field.nullable),
+            primaryKey: Boolean(field.primaryKey || model.primaryKey === key),
+            ...(field.foreignKey ? { foreignKey: field.foreignKey } : {}),
+            ...(field.principalKey ? { principalKey: field.principalKey } : {}),
+            ...(field.enumValues?.length ? { enumValues: field.enumValues } : {}),
+            ...(field.items ? { items: field.items } : {}),
+            ...(field.computed ? { computed: field.computed } : {}),
             classification: field.classification ?? "internal",
             writable: Boolean(field.writable),
             exposed: field.exposed !== false,
@@ -238,11 +257,18 @@ export class SmassDomainRegistry {
         for (const [key, field] of Object.entries(model.fields)) {
           fields.push({
             key,
-            toolRef: model.readToolRef,
+            toolRef: field.computed ? "" : model.readToolRef,
             outputPath: key,
             label: field.label,
             type: field.type,
             ...(field.format ? { format: field.format } : {}),
+            required: Boolean(field.required || field.primaryKey || model.primaryKey === key),
+            nullable: Boolean(field.nullable),
+            primaryKey: Boolean(field.primaryKey || model.primaryKey === key),
+            ...(field.foreignKey ? { foreignKey: field.foreignKey } : {}),
+            ...(field.enumValues?.length ? { enumValues: field.enumValues } : {}),
+            ...(field.items ? { items: field.items } : {}),
+            ...(field.computed ? { computed: field.computed } : {}),
             classification: field.classification ?? "internal",
             writable: Boolean(field.writable),
             exposed: field.exposed !== false,
@@ -259,8 +285,11 @@ export class SmassDomainRegistry {
         label: model.label,
         ...(model.description ? { description: model.description } : {}),
         mode: model.mode,
+        ...(model.primaryKey ? { primaryKey: model.primaryKey } : {}),
         toolRefs: [...toolRefs],
         fields,
+        relations: [...(model.relations ?? [])],
+        ...(model.lifecycle ? { lifecycle: model.lifecycle } : {}),
         actions: (model.actions ?? []).map((a) => ({
           id: a.id,
           toolRef: a.toolRef,
@@ -269,6 +298,31 @@ export class SmassDomainRegistry {
         })),
       };
     });
+  }
+
+  /**
+   * Produces a complete canonical Data Model Graph for a domain, including entities,
+   * relationships, lifecycle state machines, a Mermaid ER diagram, and a Draft 2020-12 JSON Schema.
+   */
+  toDataModelGraph(
+    domain: string,
+    descriptors?: ReadonlyMap<string, SmassToolDescriptorLike>,
+    entitiesOverride?: SmassModelSummary[],
+  ): SmassDataModelGraph {
+    const entities = entitiesOverride ?? this.summarize(domain, descriptors);
+    const relations: SmassDataModelRelationEdge[] = entities.flatMap((entity) =>
+      entity.relations.map((rel) => ({
+        ...rel,
+        sourceModelId: entity.id,
+      })),
+    );
+    return {
+      domain,
+      entities,
+      relations,
+      mermaidEr: compileMermaidErDiagram(entities, relations),
+      jsonSchema: compileDomainJsonSchema(domain, entities),
+    };
   }
 }
 

@@ -119,6 +119,37 @@ test("smass compiles store-backed models into live closed-schema @sfield/core to
   const issues = registry.validateAgainstTools(descriptors);
   assert.equal(issues.length, 1);
   assert.equal(issues[0].field, "missingPath");
+
+  // Data model graph compiles Mermaid ER + Draft 2020-12 JSON Schema and validates relations/lifecycles
+  const brokenRegistry = createSmassRegistry([
+    defineStoreBackedModel({
+      id: "broken.entity",
+      version: "1.0.0",
+      domain: "broken",
+      label: "Broken Entity",
+      primaryKey: "id",
+      fields: {
+        id: { type: "string", label: "ID", primaryKey: true, required: true },
+        parentId: { type: "string", label: "Parent", foreignKey: { modelId: "missing.parent", field: "id" } },
+        total: { type: "integer", label: "Total", computed: { expression: "a + b", dependsOn: ["missingField"] } },
+      },
+      relations: [
+        { name: "belongs_to", targetModelId: "missing.parent", cardinality: "many_to_one", localField: "parentId", foreignField: "id" },
+      ],
+      lifecycle: {
+        stateField: "missingState",
+        states: ["open", "closed"],
+        transitions: [{ from: "open", to: "invalid_state", actionId: "unknown_action" }],
+      },
+      source: { read: (): Record<string, unknown> | null => null },
+    }),
+  ]);
+  const graphIssues = brokenRegistry.validateAgainstTools(new Map());
+  assert.ok(graphIssues.some((i) => /unknown target model "missing\.parent"/.test(i.message)));
+  assert.ok(graphIssues.some((i) => /Foreign key on "parentId"/.test(i.message)));
+  assert.ok(graphIssues.some((i) => /undeclared field "missingField"/.test(i.message)));
+  assert.ok(graphIssues.some((i) => /Lifecycle stateField "missingState"/.test(i.message)));
+  assert.ok(graphIssues.some((i) => /unknown action "unknown_action"/.test(i.message)));
 });
 
 test("CEP /api/admin/domain-models exposes tool-backed Wealth models, store-backed IT Ops & Sales models, and live schema evolution", async (t) => {
@@ -129,6 +160,13 @@ test("CEP /api/admin/domain-models exposes tool-backed Wealth models, store-back
   interface DomainWorkbenchResponse {
     domainId: string;
     models: SmassModelSummary[];
+    dataModel: {
+      domain: string;
+      entities: SmassModelSummary[];
+      relations: Array<{ sourceModelId: string; targetModelId: string; name: string; cardinality: string; localField: string; foreignField: string }>;
+      mermaidEr: string;
+      jsonSchema: { $schema: string; $id: string; $defs: Record<string, Record<string, unknown>> };
+    };
     tools: {
       toolRef: string;
       role: "read" | "action";
@@ -146,9 +184,19 @@ test("CEP /api/admin/domain-models exposes tool-backed Wealth models, store-back
   const goalModel = wealth.models.find((m) => m.id === "wealth.home_goal");
   assert.ok(goalModel);
   assert.equal(goalModel.mode, "tool_backed");
+  assert.equal(goalModel.primaryKey, "goalId");
   assert.ok(goalModel.toolRefs.includes("goal.progress.read@1.0.0"));
   assert.ok(goalModel.toolRefs.includes("goal.savings.preview@1.0.0"));
   assert.ok(goalModel.fields.some((f) => f.outputPath === "targetCents" && f.type === "integer"));
+  assert.ok(goalModel.fields.some((f) => f.key === "history" && f.items?.month?.type === "string" && f.items?.savedCents?.type === "integer"));
+
+  // Canonical dataModel graph represents entities, PK/FK relations, Mermaid ER, and Draft 2020-12 JSON Schema
+  assert.ok(wealth.dataModel.entities.some((e) => e.id === "wealth.customer" && e.primaryKey === "customerId"));
+  assert.ok(wealth.dataModel.relations.some((r) => r.sourceModelId === "wealth.customer" && r.targetModelId === "wealth.home_goal" && r.cardinality === "one_to_many"));
+  assert.match(wealth.dataModel.mermaidEr, /erDiagram/);
+  assert.match(wealth.dataModel.mermaidEr, /WEALTH_CUSTOMER \|\|--o\{ WEALTH_HOME_GOAL/);
+  assert.equal(wealth.dataModel.jsonSchema.$schema, "https://json-schema.org/draft/2020-12/schema");
+  assert.ok(wealth.dataModel.jsonSchema.$defs["wealth.home_goal"]);
 
   // Tool workbench exposes closed output schema fields including unexposed ones
   const goalTool = wealth.tools.find((tool) => tool.toolRef === "goal.progress.read@1.0.0");
@@ -157,7 +205,7 @@ test("CEP /api/admin/domain-models exposes tool-backed Wealth models, store-back
   assert.ok(currencyBefore);
   assert.equal(currencyBefore.exposed, false);
 
-  // Evolving an unexposed schema field immediately updates both tools and the smass model + sphoton catalog
+  // Evolving an unexposed schema field immediately updates tools, smass dataModel (JSON Schema + ER), and sphoton catalog
   await client.request("/api/admin/ui-binding-catalog?domain=wealth", {
     toolRef: "goal.progress.read@1.0.0",
     outputPath: "currency",
@@ -170,18 +218,25 @@ test("CEP /api/admin/domain-models exposes tool-backed Wealth models, store-back
   const goalModelAfter = wealthAfter.models.find((m) => m.id === "wealth.home_goal");
   assert.ok(goalModelAfter?.fields.some((f) => f.outputPath === "currency" && f.exposed && f.label === "Goal currency"));
   assert.ok(wealthAfter.catalog.fields.some((f) => f.toolRef === "goal.progress.read@1.0.0" && f.outputPath === "currency"));
+  assert.match(wealthAfter.dataModel.mermaidEr, /string currency/);
 
   const ops = await client.request<DomainWorkbenchResponse>("/api/admin/domain-models?domain=it_ops");
   assert.equal(ops.domainId, "it_ops");
   const incidentModel = ops.models.find((m) => m.id === "ops.incident");
   assert.ok(incidentModel);
   assert.equal(incidentModel.mode, "store_backed");
+  assert.ok(incidentModel.lifecycle && incidentModel.lifecycle.stateField === "rollbackStatus");
+  assert.ok(ops.dataModel.relations.some((r) => r.sourceModelId === "ops.service" && r.targetModelId === "ops.incident" && r.cardinality === "one_to_many"));
   assert.ok(incidentModel.toolRefs.includes("ops.incident.read@1.0.0"));
   assert.ok(incidentModel.toolRefs.includes("ops.incident.rollback.preview@1.0.0"));
   assert.ok(ops.tools.some((tool) => tool.toolRef === "ops.incident.read@1.0.0" && tool.outputFields.length > 0));
 
   const sales = await client.request<DomainWorkbenchResponse>("/api/admin/domain-models?domain=sales_revops");
   assert.equal(sales.domainId, "sales_revops");
-  assert.ok(sales.models.some((m) => m.id === "sales.deal" && m.mode === "store_backed"));
+  const dealModel = sales.models.find((m) => m.id === "sales.deal");
+  assert.ok(dealModel && dealModel.mode === "store_backed");
+  assert.ok(dealModel.fields.some((f) => f.key === "netArrCents" && f.computed?.expression.includes("discountPct")));
+  assert.ok(dealModel.lifecycle && dealModel.lifecycle.stateField === "discountStatus");
+  assert.ok(sales.dataModel.relations.some((r) => r.sourceModelId === "sales.account" && r.targetModelId === "sales.deal" && r.cardinality === "one_to_many"));
   assert.ok(sales.tools.some((tool) => tool.toolRef === "sales.deal.read@1.0.0" && tool.outputFields.length > 0));
 });

@@ -37,11 +37,61 @@ export type SmassToolDescriptorLike = {
   outputs: Record<string, unknown>;
 };
 
+export const smassRelationCardinalitySchema = z.enum([
+  "one_to_one",
+  "one_to_many",
+  "many_to_one",
+  "many_to_many",
+]);
+export type SmassRelationCardinality = z.infer<typeof smassRelationCardinalitySchema>;
+
+export type SmassItemFieldSpec = {
+  type: SmassFieldType;
+  required?: boolean;
+  description?: string;
+};
+
+export type SmassForeignKeySpec = {
+  modelId: string;
+  field: string;
+};
+
+export type SmassComputedSpec = {
+  expression: string;
+  dependsOn: string[];
+};
+
+export type SmassRelationSpec = {
+  name: string;
+  targetModelId: string;
+  cardinality: SmassRelationCardinality;
+  localField: string;
+  foreignField: string;
+  description?: string;
+};
+
+export type SmassLifecycleTransition = {
+  from: string;
+  to: string;
+  actionId?: string;
+  label?: string;
+};
+
+export type SmassLifecycleSpec = {
+  stateField: string;
+  states: string[];
+  transitions: SmassLifecycleTransition[];
+};
+
 export type SmassFieldSpec = {
   /** Required for store-backed models; optional for tool-backed models (inferred from sfield tool output schema). */
   type?: SmassFieldType;
   /** For tool-backed models: `<sourceSlot>.<outputPath>` (e.g. `goal.targetCents`). Defaults to field key for store-backed models. */
   from?: string;
+  /** Binds a federated identity field to a principal identifier (e.g. `mid` or `subjectId`) across tool boundaries. */
+  principalKey?: string;
+  /** Declares a derived/computed domain field from other fields on this entity. */
+  computed?: SmassComputedSpec;
   label: string;
   group?: string;
   description?: string;
@@ -49,6 +99,12 @@ export type SmassFieldSpec = {
   supportedFormats?: SmassFieldFormat[];
   classification?: SmassClassification;
   required?: boolean;
+  nullable?: boolean;
+  primaryKey?: boolean;
+  foreignKey?: SmassForeignKeySpec;
+  enumValues?: string[];
+  /** Structured element schema when type is "array" or nested properties when type is "object". */
+  items?: Record<string, SmassItemFieldSpec>;
   writable?: boolean;
   exposed?: boolean;
   legacyBindingKey?: string;
@@ -94,8 +150,11 @@ export type SmassToolBackedModel = {
   domain: string;
   label: string;
   description?: string;
+  primaryKey?: string;
   sources: Record<string, { toolRef: string; description?: string }>;
   fields: Record<string, SmassFieldSpec>;
+  relations?: SmassRelationSpec[];
+  lifecycle?: SmassLifecycleSpec;
   actions?: SmassActionSpec[];
 };
 
@@ -116,6 +175,8 @@ export type SmassStoreBackedModel<TRecord = Record<string, unknown>> = {
   readInputs?: Record<string, SmassActionParamSpec>;
   classification?: SmassClassification;
   fields: Record<string, SmassFieldSpec & { type: SmassFieldType }>;
+  relations?: SmassRelationSpec[];
+  lifecycle?: SmassLifecycleSpec;
   actions?: SmassActionSpec[];
   source: SmassDataSource<TRecord>;
 };
@@ -138,6 +199,26 @@ export function defineStoreBackedModel<TRecord = Record<string, unknown>>(
   };
 }
 
+export type SmassModelFieldSummary = {
+  key: string;
+  toolRef: string;
+  outputPath: string;
+  label: string;
+  type?: SmassFieldType;
+  format?: SmassFieldFormat;
+  required: boolean;
+  nullable: boolean;
+  primaryKey: boolean;
+  foreignKey?: SmassForeignKeySpec;
+  principalKey?: string;
+  enumValues?: string[];
+  items?: Record<string, SmassItemFieldSpec>;
+  computed?: SmassComputedSpec;
+  classification: SmassClassification;
+  writable: boolean;
+  exposed: boolean;
+};
+
 export type SmassModelSummary = {
   id: string;
   version: string;
@@ -145,22 +226,27 @@ export type SmassModelSummary = {
   label: string;
   description?: string;
   mode: "tool_backed" | "store_backed";
+  primaryKey?: string;
   toolRefs: string[];
-  fields: Array<{
-    key: string;
-    toolRef: string;
-    outputPath: string;
-    label: string;
-    type?: SmassFieldType;
-    format?: SmassFieldFormat;
-    classification: SmassClassification;
-    writable: boolean;
-    exposed: boolean;
-  }>;
+  fields: SmassModelFieldSummary[];
+  relations: SmassRelationSpec[];
+  lifecycle?: SmassLifecycleSpec;
   actions: Array<{
     id: string;
     toolRef: string;
     label: string;
     effect: "read" | "write";
   }>;
+};
+
+export type SmassDataModelRelationEdge = SmassRelationSpec & {
+  sourceModelId: string;
+};
+
+export type SmassDataModelGraph = {
+  domain: string;
+  entities: SmassModelSummary[];
+  relations: SmassDataModelRelationEdge[];
+  mermaidEr: string;
+  jsonSchema: Record<string, unknown>;
 };
