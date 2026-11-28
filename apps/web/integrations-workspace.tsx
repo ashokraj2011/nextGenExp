@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { ArrowUp, ChevronDown, ChevronRight, Clock, Download, FileCode2, FilePlus2, PanelLeft, PanelLeftClose, Plug, Plus, Search, Settings2, ShieldCheck, Sparkles, Ticket, X } from "lucide-react";
+import { ArrowUp, ChevronDown, ChevronRight, Clock, Download, FileCode2, FilePlus2, PanelLeft, PanelLeftClose, Plug, Plus, Search, Settings2, ShieldCheck, Sparkles, Terminal, Ticket, X } from "lucide-react";
 import { adminPaths } from "../../packages/contracts/admin-paths";
 import type { ApprovalRecord } from "../../packages/contracts/approval";
 import type { IntegrationCopilotCard, IntegrationCopilotResponse, TaskRun } from "../../packages/contracts/integration-task";
@@ -7,7 +7,7 @@ import { api, toolSetupErrorMessage } from "./api";
 import { LabMark } from "./lab-mark";
 import { ApprovalRequestCard } from "./recommendation-approvals";
 import { CatalogCard, ContractCard, IntegrationApprovalsCard, RunsCard, TaskFormCard, TaskRunCard } from "./integrations-cards";
-import { DraftsCard, IntegrationFormCard, McpImportCard, PublishReviewCard, TaskDraftCard } from "./integrations-authoring-cards";
+import { CurlImportCard, DraftsCard, IntegrationFormCard, McpImportCard, PublishReviewCard, TaskDraftCard } from "./integrations-authoring-cards";
 import { ThemeToggle } from "./theme";
 import "./customer-workbench.css";
 import "./recommendation-studio.css";
@@ -31,24 +31,25 @@ const STORAGE_KEY = "cep-integrations-threads-v1";
 const time = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 
 const STARTERS = [
-  { Icon: Ticket, title: "Create a ticket", subtitle: "Draft from plain English, confirm, and run. P1 needs approval.", prompt: "Create a P1 ticket for checkout outage on payments" },
-  { Icon: FileCode2, title: "Generate a schema", subtitle: "Turn a JSON sample into a validated schema artifact.", prompt: "Generate a schema for Order from {\"id\": 42, \"items\": [{\"sku\": \"A1\", \"qty\": 2}], \"paid\": true}" },
-  { Icon: Download, title: "Connect an MCP server", subtitle: "Connect, import its tools as task drafts, review and publish.", prompt: "Connect an MCP server" },
+  { Icon: Terminal, title: "Import from cURL", subtitle: "Upload or paste a cURL + sample JSON response to auto-create an API & tool.", prompt: "Import an API from cURL" },
+  { Icon: Download, title: "Connect API / MCP", subtitle: "Connect an HTTP API or MCP server, then import or author tasks.", prompt: "Connect an MCP server" },
   { Icon: FilePlus2, title: "Create a task", subtitle: "Describe it in plain English; edit the drafted contract; publish.", prompt: "Create a task to look up an order by orderId" },
+  { Icon: Ticket, title: "Create a ticket", subtitle: "Draft from plain English, confirm, and run. P1 needs approval.", prompt: "Create a P1 ticket for checkout outage on payments" },
   { Icon: Plug, title: "Browse integrations", subtitle: "See every task, its effect, approval rule, and contract.", prompt: "Show integrations and tasks" },
   { Icon: ShieldCheck, title: "Pending approvals", subtitle: "Approve or deny calls that sfield is holding.", prompt: "Show pending approvals" },
 ];
 
 const QUICK = [
   { label: "Integrations & tasks", prompt: "Show integrations and tasks", Icon: Plug },
+  { label: "Import from cURL", prompt: "Import an API from cURL", Icon: Terminal },
+  { label: "Connect API / MCP", prompt: "Connect an MCP server", Icon: Download },
+  { label: "Create a task", prompt: "Create a new task", Icon: FilePlus2 },
+  { label: "Drafts", prompt: "Show drafts", Icon: FileCode2 },
   { label: "Create a ticket", prompt: "Create a P3 ticket for disk alert on database", Icon: Ticket },
-  { label: "Generate a schema", prompt: STARTERS[1].prompt, Icon: FileCode2 },
+  { label: "Generate a schema", prompt: "Generate a schema for Order from {\"id\": 42, \"items\": [{\"sku\": \"A1\", \"qty\": 2}], \"paid\": true}", Icon: FileCode2 },
   { label: "Recent runs", prompt: "Show recent task runs", Icon: Clock },
   { label: "Unknown outcomes", prompt: "Reconcile unknown outcomes", Icon: Search },
   { label: "Pending approvals", prompt: "Show pending approvals", Icon: ShieldCheck },
-  { label: "Create a task", prompt: "Create a new task", Icon: FilePlus2 },
-  { label: "Connect MCP server", prompt: "Connect an MCP server", Icon: Download },
-  { label: "Drafts", prompt: "Show drafts", Icon: FileCode2 },
 ];
 
 function load(): Thread[] {
@@ -172,6 +173,7 @@ export function IntegrationsWorkspace() {
       case "integration_form": return <IntegrationFormCard key={key} prefill={card.prefill} existing={card.existing} onPrompt={prompt} post={post} />;
       case "task_draft": return <TaskDraftCard key={key} draft={card.draft} check={card.check} origin={card.origin} note={card.note} onPrompt={prompt} post={post} />;
       case "mcp_import": return <McpImportCard key={key} integrationId={card.integrationId} candidates={card.candidates} error={card.error} onPrompt={prompt} post={post} />;
+      case "curl_import": return <CurlImportCard key={key} prefillCurl={card.prefillCurl} initialResult={card.result} initialError={card.error} onPrompt={prompt} post={post} />;
       case "publish_review": return <PublishReviewCard key={key} contract={card.contract} check={card.check} onPrompt={prompt} post={post} />;
       case "drafts": return <DraftsCard key={key} drafts={card.drafts} onPrompt={prompt} />;
       case "catalog": return <CatalogCard key={key} view={card.view} onPrompt={prompt} />;

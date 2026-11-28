@@ -14,17 +14,19 @@ import type {
 } from "../../packages/contracts/integration-task";
 import type { IntegrationTaskService } from "./integration-tasks";
 import { closeSchema, slugifyTaskId } from "./integration-mcp";
+import { looksLikeCurlCommand, parseCurlToIntegrationDraft } from "./integration-curl";
 
 export type AuthoringAction =
   | { type: "integration"; prefill?: Partial<Integration> }
   | { type: "mcp_import"; integrationId?: string }
+  | { type: "curl_import"; curl?: string }
   | { type: "draft_task"; draft?: Partial<TaskContractInput> }
   | { type: "new_version"; toolRef: string }
   | { type: "edit_draft"; toolRef: string }
   | { type: "publish"; toolRef?: string }
   | { type: "drafts" };
 
-export const AUTHORING_TYPES = new Set(["integration", "mcp_import", "draft_task", "new_version", "edit_draft", "publish", "drafts"]);
+export const AUTHORING_TYPES = new Set(["integration", "mcp_import", "curl_import", "draft_task", "new_version", "edit_draft", "publish", "drafts"]);
 
 /** Strips derived fields so a stored contract can be edited as a draft input. */
 export function toDraftInput(c: TaskContract | ViewContract): TaskContractInput {
@@ -55,6 +57,18 @@ function findIntegration(view: IntegrationTasksView, text: string) {
 /** Deterministic detection of authoring intents (used without a model and as a guard for model plans). */
 export function detectAuthoring(message: string, view: IntegrationTasksView): { reply: string; action: AuthoringAction } | null {
   const lower = message.toLowerCase();
+  if (looksLikeCurlCommand(message)) {
+    return {
+      reply: "I detected a cURL command and extracted the endpoint, HTTP method, auth header reference, and closed input schema. Optionally paste or upload a sample JSON response below, then click to create the integration & task draft.",
+      action: { type: "curl_import", curl: message },
+    };
+  }
+  if (/\bcurl\b/.test(lower) && /\b(import|upload|parse|paste|detect|from|add|create|connect)\b/.test(lower)) {
+    return {
+      reply: "Paste or upload a cURL command (plus an optional sample JSON response) and I'll auto-detect the API connection, method, path parameters, and closed JSON Schemas.",
+      action: { type: "curl_import" },
+    };
+  }
   const url = message.match(/https?:\/\/[^\s"'<>]+/)?.[0];
   if (/\bimport\b/.test(lower) && /\b(tools?|mcp|operations?)\b/.test(lower)) {
     const integration = findIntegration(view, message);
@@ -162,6 +176,31 @@ export async function runAuthoringAction(
     case "integration": {
       const existing = action.prefill?.id ? service.integration(action.prefill.id) : undefined;
       return { cards: [{ kind: "integration_form", prefill: { ...(existing ?? {}), ...(action.prefill ?? {}) }, existing: Boolean(existing) }], summary: existing ? `Editing ${existing.id}` : "New integration form" };
+    }
+    case "curl_import": {
+      if (!action.curl?.trim()) {
+        return {
+          cards: [{ kind: "curl_import" }],
+          summary: "Import API from cURL / sample JSON",
+        };
+      }
+      try {
+        const result = parseCurlToIntegrationDraft(
+          { curl: action.curl },
+          view.integrations,
+          (d) => service.validateDraft(d),
+        );
+        return {
+          cards: [{ kind: "curl_import", prefillCurl: action.curl, result }],
+          summary: `Detected ${result.detected.method} ${result.detected.pathTemplate} on ${result.integration.id}`,
+        };
+      } catch (err) {
+        return {
+          cards: [{ kind: "curl_import", prefillCurl: action.curl, error: err instanceof Error ? err.message : String(err) }],
+          summary: "Could not parse cURL command",
+          reply: "I couldn't parse that cURL snippet yet. Check the URL and flags below and click **Detect API & Schema**.",
+        };
+      }
     }
     case "mcp_import": {
       const mcp = view.integrations.filter((i) => i.transport === "mcp");

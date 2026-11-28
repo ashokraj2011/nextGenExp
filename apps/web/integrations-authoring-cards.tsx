@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Download, FilePlus2, Pencil, Plug, Plus, Rocket, Save, Trash2, Wand2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { AlertTriangle, CheckCircle2, Download, FilePlus2, Pencil, Plug, Plus, Rocket, Save, Terminal, Trash2, Upload, Wand2 } from "lucide-react";
 import type {
+  CurlImportResult,
   DraftCheck,
   DraftOrigin,
   Integration,
@@ -51,22 +52,145 @@ function schemaFromRows(rows: FieldRow[]): Json {
   return { type: "object", additionalProperties: false, required: rows.filter((r) => r.required && r.name.trim()).map((r) => r.name.trim()), properties };
 }
 
+function inferSchemaNodeClient(value: unknown, depth = 0): Json {
+  if (depth >= 6 || value === null || value === undefined) return { type: "string", maxLength: 200 };
+  if (typeof value === "boolean") return { type: "boolean" };
+  if (typeof value === "number") return Number.isInteger(value) ? { type: "integer" } : { type: "number" };
+  if (typeof value === "string") return { type: "string", maxLength: Math.max(120, Math.min(2000, value.length * 4)) };
+  if (Array.isArray(value)) {
+    if (value.length === 0) return { type: "array", maxItems: 100, items: { type: "string", maxLength: 200 } };
+    const allObjs = value.every((item) => item && typeof item === "object" && !Array.isArray(item));
+    if (allObjs) {
+      const properties: Record<string, Json> = {};
+      const counts = new Map<string, number>();
+      for (const item of value as Json[]) {
+        for (const [k, v] of Object.entries(item)) {
+          counts.set(k, (counts.get(k) ?? 0) + 1);
+          if (!properties[k] || v !== null) properties[k] = inferSchemaNodeClient(v, depth + 1);
+        }
+      }
+      return {
+        type: "array",
+        maxItems: 100,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: [...counts.entries()].filter(([, c]) => c === value.length).map(([k]) => k),
+          properties,
+        },
+      };
+    }
+    return { type: "array", maxItems: 100, items: inferSchemaNodeClient(value[0], depth + 1) };
+  }
+  const properties: Record<string, Json> = {};
+  const required: string[] = [];
+  for (const [k, v] of Object.entries(value as Json)) {
+    if (!k.trim()) continue;
+    properties[k] = inferSchemaNodeClient(v, depth + 1);
+    if (v !== null && v !== undefined) required.push(k);
+  }
+  return { type: "object", additionalProperties: false, required, properties };
+}
+
+function closeSchemaClient(node: unknown): unknown {
+  if (!node || typeof node !== "object" || Array.isArray(node)) return node;
+  const copy: Json = { ...(node as Json) };
+  if (copy.type === "object" || copy.properties) {
+    copy.type = "object";
+    copy.additionalProperties = false;
+    if (copy.properties && typeof copy.properties === "object") {
+      const nextProps: Json = {};
+      for (const [k, v] of Object.entries(copy.properties as Json)) nextProps[k] = closeSchemaClient(v);
+      copy.properties = nextProps;
+    }
+  }
+  if (copy.items) copy.items = closeSchemaClient(copy.items);
+  return copy;
+}
+
+function inferOrCloseFromJsonText(rawText: string): Json | null {
+  const parsed = safeParse(rawText);
+  if (!parsed || typeof parsed !== "object") return null;
+  if (!Array.isArray(parsed) && ("$schema" in (parsed as Json) || ((parsed as Json).type === "object" && (parsed as Json).properties))) {
+    return closeSchemaClient(parsed) as Json;
+  }
+  if (Array.isArray(parsed)) {
+    return { type: "object", additionalProperties: false, required: ["items"], properties: { items: inferSchemaNodeClient(parsed, 1) } };
+  }
+  return inferSchemaNodeClient(parsed, 0);
+}
+
 function FieldsEditor({ label, schema, onChange, disabled }: { label: string; schema: unknown; onChange: (s: Json) => void; disabled?: boolean }) {
   const rows = useMemo(() => rowsFromSchema(schema), [schema]);
   const [raw, setRaw] = useState(rows === null);
+  const [sampleOpen, setSampleOpen] = useState(false);
+  const [sampleText, setSampleText] = useState("");
+  const [sampleErr, setSampleErr] = useState("");
   const [text, setText] = useState(() => JSON.stringify(schema, null, 2));
   const [error, setError] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => { if (!raw) setText(JSON.stringify(schema, null, 2)); }, [schema, raw]);
   const update = (next: FieldRow[]) => onChange(schemaFromRows(next));
   const set = (i: number, patch: Partial<FieldRow>) => rows && update(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+
+  function applySampleOrSchema(rawJson: string) {
+    const inferred = inferOrCloseFromJsonText(rawJson);
+    if (!inferred) {
+      setSampleErr("Paste or upload valid JSON (either a sample response/request object or a JSON Schema).");
+      return;
+    }
+    setSampleErr("");
+    setError("");
+    onChange(inferred);
+    setText(JSON.stringify(inferred, null, 2));
+    setSampleOpen(false);
+    setSampleText("");
+  }
+
+  function handleFileUpload(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    void file.text().then((content) => applySampleOrSchema(content));
+  }
+
   return (
     <div className="int-auth-section">
       <div className="int-auth-section-head">
         <span className="pzn-stage-kicker">{label}</span>
-        <button type="button" className="pzn-btn pzn-btn-sm" disabled={disabled || (raw && rowsFromSchema(safeParse(text)) === null)} onClick={() => setRaw((r) => !r)}>
-          {raw ? "Field table" : "JSON"}
-        </button>
+        <div className="pzn-btn-row">
+          <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: "none" }} onChange={handleFileUpload} />
+          <button type="button" className="pzn-btn pzn-btn-sm" disabled={disabled} onClick={() => setSampleOpen((v) => !v)} title="Infer closed schema from sample JSON or upload a schema file">
+            <Wand2 size={11} /> {sampleOpen ? "Close sample" : "From sample"}
+          </button>
+          <button type="button" className="pzn-btn pzn-btn-sm" disabled={disabled} onClick={() => fileRef.current?.click()} title="Upload .json sample payload or JSON Schema file">
+            <Upload size={11} /> Upload JSON
+          </button>
+          <button type="button" className="pzn-btn pzn-btn-sm" disabled={disabled || (raw && rowsFromSchema(safeParse(text)) === null)} onClick={() => setRaw((r) => !r)}>
+            {raw ? "Field table" : "JSON"}
+          </button>
+        </div>
       </div>
+      {sampleOpen && (
+        <div style={{ display: "grid", gap: "6px", padding: "8px", borderRadius: "8px", border: "1px dashed var(--border, #cbd5e1)", background: "var(--paper, #f8faf9)" }}>
+          <span className="pzn-subtitle" style={{ fontSize: "0.74rem" }}>
+            Paste a sample JSON payload (or an existing JSON Schema) and click <strong>Infer closed schema</strong>:
+          </span>
+          <textarea
+            className="int-auth-json"
+            rows={5}
+            value={sampleText}
+            placeholder='{"accountId": "ACC-101", "balanceCents": 125000, "items": [{"month": "2026-11", "savedCents": 50000}]}'
+            onChange={(e) => setSampleText(e.target.value)}
+          />
+          {sampleErr && <span className="pzn-error" style={{ fontSize: "0.74rem" }}>{sampleErr}</span>}
+          <div className="pzn-btn-row">
+            <button type="button" className="pzn-btn pzn-btn-sm pzn-btn-primary" onClick={() => applySampleOrSchema(sampleText)}>
+              <Wand2 size={11} /> Infer closed schema
+            </button>
+          </div>
+        </div>
+      )}
       {raw || rows === null ? (
         <>
           <textarea
@@ -150,6 +274,7 @@ const ORIGIN_LABEL: Record<DraftOrigin, string> = {
   new_version: "New version",
   existing_draft: "Draft",
   mcp_import: "Imported from MCP",
+  curl_import: "Imported from cURL",
 };
 
 export function TaskDraftCard({
@@ -403,6 +528,7 @@ export function TaskDraftCard({
   );
 }
 
+
 /* ============================================================================ PUBLISH REVIEW */
 
 export function PublishReviewCard({ contract, check, onPrompt, post }: { contract: ViewContract; check: DraftCheck; onPrompt: (p: string) => void; post?: Post }) {
@@ -581,6 +707,7 @@ export function IntegrationFormCard({ prefill, existing, onPrompt, post }: { pre
   );
 }
 
+
 /* ============================================================================ MCP IMPORT */
 
 export function McpImportCard({ integrationId, candidates, error, onPrompt, post }: {
@@ -711,6 +838,255 @@ export function DraftsCard({ drafts: initialDrafts, onPrompt }: { drafts: ViewCo
           </div>
         ))}
       </div>
+    </section>
+  );
+}
+
+/* ============================================================================ cURL & SAMPLE JSON IMPORT */
+
+const SAMPLE_CURL_EXAMPLE = `curl -X GET "https://api.acme-wealth.example/v1/accounts/ACC-1001/holdings?includeCash=true" \\
+  -H "Authorization: Bearer $ACME_API_KEY" \\
+  -H "Accept: application/json"`;
+
+const SAMPLE_RESPONSE_EXAMPLE = `{
+  "accountId": "ACC-1001",
+  "currency": "USD",
+  "cashCents": 1250000,
+  "holdings": [
+    { "ticker": "VTI", "shares": 42, "marketValueCents": 1150000 }
+  ]
+}`;
+
+export function CurlImportCard({
+  prefillCurl,
+  initialResult,
+  initialError,
+  onPrompt,
+  post,
+}: {
+  prefillCurl?: string;
+  initialResult?: CurlImportResult;
+  initialError?: string;
+  onPrompt: (p: string) => void;
+  post?: Post;
+}) {
+  const [curlText, setCurlText] = useState(prefillCurl ?? "");
+  const [sampleOutput, setSampleOutput] = useState("");
+  const [result, setResult] = useState<CurlImportResult | null>(initialResult ?? null);
+  const [error, setError] = useState(initialError ?? "");
+  const [detecting, setDetecting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedRef, setSavedRef] = useState<string | null>(null);
+  const [editingDraft, setEditingDraft] = useState(false);
+  const curlFileRef = useRef<HTMLInputElement>(null);
+  const outputFileRef = useRef<HTMLInputElement>(null);
+
+  async function runDetect(nextCurl = curlText, nextSample = sampleOutput) {
+    if (!nextCurl.trim()) {
+      setError("Paste or upload a cURL command first.");
+      return;
+    }
+    setDetecting(true);
+    setError("");
+    setSavedRef(null);
+    try {
+      const detected = await api.importCurlIntegration({
+        curl: nextCurl.trim(),
+        ...(nextSample.trim() ? { sampleOutput: nextSample.trim() } : {}),
+      });
+      setResult(detected);
+    } catch (e) {
+      setError(toolSetupErrorMessage(e));
+    } finally {
+      setDetecting(false);
+    }
+  }
+
+  function handleCurlFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    void file.text().then((content) => {
+      setCurlText(content);
+      void runDetect(content, sampleOutput);
+    });
+  }
+
+  function handleOutputFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    void file.text().then((content) => {
+      setSampleOutput(content);
+      if (curlText.trim()) void runDetect(curlText, content);
+    });
+  }
+
+  async function saveDetectedIntegrationAndDraft() {
+    if (!result) return;
+    setSaving(true);
+    setError("");
+    try {
+      if (!result.existingIntegration) {
+        const savedInt = await api.saveIntegration(result.integration);
+        if (isPublicationReview(savedInt)) {
+          setError("Integration update requires approval before adding tasks.");
+          return;
+        }
+      }
+      const savedDraft = await api.saveIntegrationDraft(result.draft);
+      setSavedRef(savedDraft.contract.ref);
+      post?.(
+        `Imported **${savedDraft.contract.ref}** from cURL (${result.detected.method} \`${result.detected.pathTemplate}\` on \`${result.integration.id}\`). Review and publish to expose it in \`sfield\` and \`smass\` Data Model Studio.`,
+        { suggestions: [`Publish ${savedDraft.contract.ref}`, `Edit ${savedDraft.contract.ref}`, "Show drafts"] },
+      );
+    } catch (e) {
+      setError(toolSetupErrorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inputCount = Object.keys(((result?.draft.inputSchema as { properties?: Record<string, unknown> })?.properties) ?? {}).length;
+  const outputCount = Object.keys(((result?.draft.outputSchema as { properties?: Record<string, unknown> })?.properties) ?? {}).length;
+
+  return (
+    <section className="content-card pzn-widget-card int-auth-card" aria-label="Import API from cURL">
+      <div className="pzn-widget-head">
+        <div>
+          <span className="pzn-stage-kicker"><Terminal size={13} /> IMPORT API FROM cURL &amp; SAMPLE JSON</span>
+          <h3>Upload or paste a cURL command</h3>
+        </div>
+        <div className="pzn-btn-row">
+          <button
+            type="button"
+            className="pzn-btn pzn-btn-sm"
+            onClick={() => {
+              setCurlText(SAMPLE_CURL_EXAMPLE);
+              setSampleOutput(SAMPLE_RESPONSE_EXAMPLE);
+              void runDetect(SAMPLE_CURL_EXAMPLE, SAMPLE_RESPONSE_EXAMPLE);
+            }}
+          >
+            <Wand2 size={11} /> Load example
+          </button>
+        </div>
+      </div>
+
+      <div className="int-auth-section">
+        <div className="int-auth-section-head">
+          <span className="pzn-stage-kicker">1. cURL command (method, URL, headers, query &amp; request body)</span>
+          <div className="pzn-btn-row">
+            <input ref={curlFileRef} type="file" accept=".sh,.txt,.curl,text/plain" style={{ display: "none" }} onChange={handleCurlFile} />
+            <button type="button" className="pzn-btn pzn-btn-sm" onClick={() => curlFileRef.current?.click()}>
+              <Upload size={11} /> Upload .sh / .txt
+            </button>
+          </div>
+        </div>
+        <textarea
+          className="int-auth-json"
+          aria-label="cURL command"
+          rows={4}
+          value={curlText}
+          placeholder={'curl -X POST "https://api.example.com/v1/orders/ORD-123" -H "Authorization: Bearer $API_KEY" -d \'{"amount": 50}\''}
+          onChange={(e) => setCurlText(e.target.value)}
+        />
+      </div>
+
+      <div className="int-auth-section">
+        <div className="int-auth-section-head">
+          <span className="pzn-stage-kicker">2. Sample JSON response or JSON Schema (optional — infers closed output columns)</span>
+          <div className="pzn-btn-row">
+            <input ref={outputFileRef} type="file" accept=".json,application/json" style={{ display: "none" }} onChange={handleOutputFile} />
+            <button type="button" className="pzn-btn pzn-btn-sm" onClick={() => outputFileRef.current?.click()}>
+              <Upload size={11} /> Upload sample .json
+            </button>
+          </div>
+        </div>
+        <textarea
+          className="int-auth-json"
+          aria-label="Sample JSON response or schema"
+          rows={4}
+          value={sampleOutput}
+          placeholder='Paste a sample API JSON response (or JSON Schema) to auto-generate strict closed output columns…'
+          onChange={(e) => setSampleOutput(e.target.value)}
+        />
+      </div>
+
+      <div className="pzn-btn-row">
+        <button type="button" className="pzn-btn pzn-btn-primary" disabled={detecting || !curlText.trim()} onClick={() => void runDetect()}>
+          <Wand2 size={13} /> {detecting ? "Detecting…" : "Detect API & Schema"}
+        </button>
+      </div>
+
+      {error && <p className="pzn-error" role="alert">{error}</p>}
+
+      {result && (
+        <div className="pzn-attr-card" style={{ display: "grid", gap: "8px" }}>
+          <div className="pzn-btn-row" style={{ flexWrap: "wrap" }}>
+            <span className="pzn-badge is-pass">{result.detected.method}</span>
+            <code className="pzn-code">{result.detected.baseUrl}</code>
+            <code className="pzn-code">{result.detected.pathTemplate}</code>
+            <span className={"pzn-badge " + (result.draft.effect === "read" ? "" : result.draft.effect === "write" ? "is-warn" : "is-fail")}>
+              {result.draft.effect}
+            </span>
+            {result.detected.secretRef && (
+              <span className="pzn-badge">secretRef: {result.detected.secretRef}</span>
+            )}
+            <span className="pzn-badge">{inputCount} input field(s)</span>
+            <span className="pzn-badge">{outputCount} output field(s)</span>
+          </div>
+
+          <div className="pzn-subtitle" style={{ fontSize: "0.78rem" }}>
+            Integration: <strong>{result.integration.name}</strong> (<code>{result.integration.id}</code>
+            {result.existingIntegration ? " · existing" : " · new HTTP API"}) → Task: <code>int.{result.draft.integrationId}.{result.draft.taskId}@{result.draft.version}</code>
+          </div>
+
+          <ul className="int-auth-notes">
+            {result.notes.map((n, i) => <li key={i}>{n}</li>)}
+          </ul>
+
+          {!result.check.ok && (
+            <ul className="int-auth-issues is-fail">
+              {result.check.issues.map((i) => <li key={i}>{i}</li>)}
+            </ul>
+          )}
+
+          {savedRef ? (
+            <div className="pzn-btn-row">
+              <span className="pzn-badge is-pass"><CheckCircle2 size={11} /> Saved draft {savedRef}</span>
+              <button type="button" className="pzn-btn pzn-btn-sm pzn-btn-primary" onClick={() => onPrompt(`Publish ${savedRef}`)}>
+                <Rocket size={12} /> Review &amp; Publish
+              </button>
+              <button type="button" className="pzn-btn pzn-btn-sm" onClick={() => onPrompt(`Edit ${savedRef}`)}>
+                <Pencil size={12} /> Edit contract
+              </button>
+            </div>
+          ) : (
+            <div className="pzn-btn-row">
+              <button type="button" className="pzn-btn pzn-btn-primary" disabled={saving || !result.check.ok} onClick={() => void saveDetectedIntegrationAndDraft()}>
+                <Save size={13} /> {saving ? "Saving…" : result.existingIntegration ? "Save Task Draft" : "Create Integration & Save Draft"}
+              </button>
+              <button type="button" className="pzn-btn pzn-btn-sm" onClick={() => setEditingDraft((v) => !v)}>
+                <Pencil size={12} /> {editingDraft ? "Hide full contract editor" : "Customize draft before saving"}
+              </button>
+            </div>
+          )}
+
+          {editingDraft && !savedRef && (
+            <TaskDraftCard
+              compact
+              draft={result.draft}
+              check={result.check}
+              origin="curl_import"
+              onPrompt={onPrompt}
+              onSaved={(ref) => {
+                setSavedRef(ref);
+                setEditingDraft(false);
+              }}
+            />
+          )}
+        </div>
+      )}
     </section>
   );
 }

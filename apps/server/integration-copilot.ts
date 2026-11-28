@@ -142,9 +142,10 @@ function deterministicPlan(message: string, view: IntegrationTasksView): Plan {
 
 function authoringSuggestions(action: AuthoringAction): string[] {
   switch (action.type) {
-    case "integration": return ["Import tools from the MCP server", "Show integrations and tasks"];
+    case "integration": return ["Import from cURL", "Import tools from the MCP server", "Show integrations and tasks"];
+    case "curl_import": return ["Show drafts", "Show integrations and tasks"];
     case "mcp_import": return ["Show drafts", "Show integrations and tasks"];
-    case "drafts": return ["Create a task to look up an order by orderId", "Show integrations and tasks"];
+    case "drafts": return ["Import from cURL", "Create a task to look up an order by orderId", "Show integrations and tasks"];
     case "publish": return ["Show drafts", "Show integrations and tasks"];
     default: return ["Show drafts", "Show integrations and tasks", "Show pending approvals"];
   }

@@ -7,11 +7,13 @@ import { digestJson } from "@sfield/core";
 import { z } from "zod";
 import type { ApprovalRecord } from "../../../packages/contracts/approval";
 import {
+  curlImportRequestSchema,
   draftValidateRequestSchema,
   integrationCopilotRequestSchema,
   integrationMcpDiscoverRequestSchema,
   runTaskRequestSchema,
 } from "../../../packages/contracts/integration-task";
+import { parseCurlToIntegrationDraft } from "../integration-curl";
 import {
   pznAttributeInputSchema,
   pznContextInputSchema,
@@ -118,6 +120,24 @@ export async function handleIntegrationsAndPznRoutes(deps: IntegrationsPznRouteD
     if (id === "mcp" && operation === "discover" && method === "POST") {
       const { integrationId } = await body(req, integrationMcpDiscoverRequestSchema);
       json(res, await guard(() => integrationService.discoverMcp(integrationId)));
+      return true;
+    }
+    if (id === "import" && operation === "curl" && method === "POST") {
+      const input = await body(req, curlImportRequestSchema, 96 * 1024);
+      json(
+        res,
+        await guard(() => {
+          try {
+            return parseCurlToIntegrationDraft(
+              input,
+              integrationService.view().integrations,
+              (draft) => integrationTasks.validateDraft(draft),
+            );
+          } catch (err) {
+            throw new ApiError(400, "invalid_curl", err instanceof Error ? err.message : "Could not parse cURL command.");
+          }
+        }),
+      );
       return true;
     }
     if (id === "contracts" && operation === "delete" && method === "POST") {

@@ -387,3 +387,79 @@ test("operator sign-in can be switched off for local demos; it stays on by defau
     { toolRef: CREATE, input: { title: "Checkout outage", priority: "P1", service: "checkout" } }, 202);
   assert.equal(p1.approval.requester, "local-operator");
 });
+
+test("cURL + sample JSON import detects HTTP method, path/query params, auth secretRef (never raw token), and strict closed schemas", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "cep-curl-import-"));
+  const gateway = await startFixtureGateway();
+  const app = await startApp({ projectRoot: fileURLToPath(testProject), dataDir: join(dir, "app"), gateway: gateway.settings, inspectorEnabled: true, operatorAuth: "off" });
+  t.after(async () => { await app.close(); await gateway.close(); await rm(dir, { recursive: true, force: true }); });
+  const client = await testClient(app.url, undefined, "operator");
+
+  const sampleCurl = `curl -X POST "https://api.acme-bank.example/v1/accounts/ACC-1001/transfers?dryRun=true" \\
+    -H "Authorization: Bearer sk_live_super_secret_999" \\
+    -H "Content-Type: application/json" \\
+    -d '{"amountCents": 25000, "currency": "USD", "memo": "Monthly deposit"}'`;
+
+  const sampleResponse = JSON.stringify({
+    transferId: "TXN-881",
+    status: "scheduled",
+    amountCents: 25000,
+    legs: [
+      { accountId: "ACC-1001", direction: "credit", amountCents: 25000 },
+    ],
+  });
+
+  // 1. Direct API import (/api/integrations/import/curl)
+  const imported = await client.request<{
+    integration: { id: string; name: string; transport: string; baseUrl: string; secretRef?: string };
+    existingIntegration: boolean;
+    draft: {
+      integrationId: string;
+      taskId: string;
+      effect: string;
+      binding: { target: string; method: string };
+      inputSchema: { additionalProperties: boolean; properties: Record<string, { type: string }>; required: string[] };
+      outputSchema: { additionalProperties: boolean; properties: Record<string, { type: string; items?: { additionalProperties?: boolean; properties?: Record<string, unknown> } }> };
+    };
+    detected: { method: string; baseUrl: string; pathTemplate: string; pathParams: string[]; queryParams: string[]; secretRef?: string; hasBody: boolean; hasSampleOutput: boolean };
+    check: { ok: boolean; issues: string[] };
+  }>("/api/integrations/import/curl", { curl: sampleCurl, sampleOutput: sampleResponse });
+
+  assert.equal(imported.check.ok, true, imported.check.issues.join("; "));
+  assert.equal(imported.detected.method, "POST");
+  assert.equal(imported.detected.baseUrl, "https://api.acme-bank.example");
+  assert.equal(imported.detected.pathTemplate, "/v1/accounts/{accountId}/transfers");
+  assert.deepEqual(imported.detected.pathParams, ["accountId"]);
+  assert.deepEqual(imported.detected.queryParams, ["dryRun"]);
+  assert.equal(imported.detected.hasBody, true);
+  assert.equal(imported.detected.hasSampleOutput, true);
+  assert.equal(imported.draft.effect, "write");
+  assert.equal(imported.integration.transport, "http");
+  assert.ok(imported.integration.secretRef && !JSON.stringify(imported).includes("sk_live_super_secret_999"), "raw secret must never be stored");
+
+  // Input & output schemas are strictly closed recursively
+  assert.equal(imported.draft.inputSchema.additionalProperties, false);
+  assert.equal(imported.draft.inputSchema.properties.accountId?.type, "string");
+  assert.equal(imported.draft.inputSchema.properties.dryRun?.type, "boolean");
+  assert.equal(imported.draft.inputSchema.properties.amountCents?.type, "integer");
+  assert.equal(imported.draft.inputSchema.properties.idempotencyKey?.type, "string");
+  assert.equal(imported.draft.outputSchema.additionalProperties, false);
+  assert.equal(imported.draft.outputSchema.properties.transferId?.type, "string");
+  assert.equal(imported.draft.outputSchema.properties.legs?.type, "array");
+  assert.equal(imported.draft.outputSchema.properties.legs?.items?.additionalProperties, false);
+
+  // 2. Pasting a cURL directly into Integrations Copilot auto-detects and returns curl_import card
+  const copilot = await client.request<{ cards: Array<{ kind: string; result?: { detected: { pathTemplate: string } } }> }>(
+    "/api/integrations/copilot",
+    { message: sampleCurl },
+  );
+  const curlCard = copilot.cards.find((c) => c.kind === "curl_import");
+  assert.ok(curlCard?.result);
+  assert.equal(curlCard.result.detected.pathTemplate, "/v1/accounts/{accountId}/transfers");
+
+  // 3. Saving the detected integration + draft task succeeds cleanly
+  await client.request("/api/integrations/integrations", imported.integration);
+  const saved = await client.request<{ contract: { ref: string; status: string } }>("/api/integrations/contracts", imported.draft);
+  assert.equal(saved.contract.status, "draft");
+  assert.equal(saved.contract.ref, `int.${imported.draft.integrationId}.${imported.draft.taskId}@1.0.0`);
+});

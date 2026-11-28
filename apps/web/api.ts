@@ -734,6 +734,9 @@ export const api = {
     request<{ run: TaskRun; approval?: ApprovalRecord }>("/api/integrations/tasks/run", input)
   ),
   saveIntegration: (integration: Partial<Integration>) => request<Reviewable<{ integration: Integration; view: IntegrationTasksView }>>("/api/integrations/integrations", integration),
+  importCurlIntegration: (input: { curl: string; sampleOutput?: string; integrationId?: string; taskId?: string }) => (
+    request<import("../../packages/contracts/integration-task").CurlImportResult>("/api/integrations/import/curl", input)
+  ),
   validateIntegrationDraft: (draft: TaskContractInput) => request<DraftCheck>("/api/integrations/contracts/validate", { draft }),
   saveIntegrationDraft: (draft: TaskContractInput) => request<{ contract: TaskContract; view: IntegrationTasksView }>("/api/integrations/contracts", draft),
   publishIntegrationTask: (ref: string) => request<{ status?: "pending_approval"; approval?: ApprovalRecord; contract?: TaskContract; breaking?: string[]; sfieldRegistered?: boolean; sfieldRoute?: "dedicated" | "dispatcher" | "unavailable"; registrationNote?: string; view: IntegrationTasksView }>("/api/integrations/contracts/publish", { ref }),

@@ -270,6 +270,34 @@ export type IntegrationTasksView = {
 
 export const draftValidateRequestSchema = z.object({ draft: z.record(z.string(), z.unknown()) }).strict();
 export const integrationMcpDiscoverRequestSchema = z.object({ integrationId: slugSchema }).strict();
+export const curlImportRequestSchema = z.object({
+  curl: z.string().trim().min(4).max(16_000),
+  sampleOutput: z.string().max(64_000).optional(),
+  integrationId: slugSchema.optional(),
+  taskId: slugSchema.optional(),
+}).strict();
+export type CurlImportRequest = z.infer<typeof curlImportRequestSchema>;
+
+export type CurlImportResult = {
+  integration: Partial<Integration>;
+  existingIntegration: boolean;
+  draft: TaskContractInput;
+  detected: {
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+    url: string;
+    baseUrl: string;
+    pathTemplate: string;
+    pathParams: string[];
+    queryParams: string[];
+    headersCount: number;
+    authHeader?: string;
+    secretRef?: string;
+    hasBody: boolean;
+    hasSampleOutput: boolean;
+  };
+  notes: string[];
+  check: DraftCheck;
+};
 
 export const integrationCopilotRequestSchema = z.object({
   message: z.string().trim().min(1).max(4000),
@@ -289,11 +317,12 @@ export type IntegrationCopilotCard =
   | { kind: "integration_form"; prefill: Partial<Integration>; existing: boolean }
   | { kind: "task_draft"; draft: TaskContractInput; check: DraftCheck; origin: DraftOrigin; note?: string }
   | { kind: "mcp_import"; integrationId: string; candidates: McpImportCandidate[]; error?: string }
+  | { kind: "curl_import"; prefillCurl?: string; result?: CurlImportResult; error?: string }
   | { kind: "publish_review"; contract: ViewContract; check: DraftCheck }
   | { kind: "drafts"; drafts: ViewContract[] };
 
 /** Where an editable draft came from (shown to the author so model-written contracts get reviewed). */
-export type DraftOrigin = "assistant" | "template" | "new_version" | "existing_draft" | "mcp_import";
+export type DraftOrigin = "assistant" | "template" | "new_version" | "existing_draft" | "mcp_import" | "curl_import";
 
 /** Dry-run validation of a draft: the same guards as saving and publishing, without saving. */
 export type DraftCheck = {
