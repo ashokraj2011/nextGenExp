@@ -143,9 +143,12 @@ function arrange(
       continue;
     }
     if (slot.toolBinding && precompiledToolBlocks && precompiledToolBlocks[toolBlockCursor]) {
+      const index = original.findIndex((block, i) => block.component === slot.component && !positions.has(i));
+      if (index >= 0) positions.add(index);
       const savings = resolveToolBindingExtraMonthlyCents(slot);
       mapped.push({
         block: precompiledToolBlocks[toolBlockCursor++],
+        ...(index >= 0 ? { index } : {}),
         extraMonthlyCents: savings.extraMonthlyCents,
         actionLabel: savings.label,
       });
@@ -209,6 +212,7 @@ export function applyPublishedUi(
   targets: UiTarget[],
   bindings?: DataBindingValues,
   toolContractsByPublication?: ReadonlyMap<string, Record<string, string>>,
+  precompiledToolBlocksByPublication?: ReadonlyMap<string, DisplayBlock[]>,
 ) {
   const { display, issued } = result;
   if (!display.blocks.length) return;
@@ -216,9 +220,10 @@ export function applyPublishedUi(
     const publication = publications.find(({ design }) => design.targets.some((item) => targetKey(item) === targetKey(target)));
     if (!publication) continue;
     const { design, id, revision } = publication;
-    const { mapped, positions } = arrange(design, display.blocks, bindings);
+    const precompiled = precompiledToolBlocksByPublication?.get(id);
+    const { mapped, positions } = arrange(design, display.blocks, bindings, precompiled);
     const hasCustomBlock = mapped.some((entry) => entry.block.component === "PznCustomForm" || entry.block.component === "PznBoundWidget"
-      || entry.block.component === "PznWidgetWizard");
+      || entry.block.component === "PznWidgetWizard") || Boolean(precompiled?.length);
     if (!positions.size && !hasCustomBlock) continue;
     for (const [index, block] of display.blocks.entries()) {
       if (!positions.has(index)) mapped.push({ block, index });

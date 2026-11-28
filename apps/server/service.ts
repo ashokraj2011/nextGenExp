@@ -36,8 +36,10 @@ import { normalizedIdsSchema, treatmentOverride } from "../../packages/contracts
 import { overviewFundingOrigin, pendingActionsContext, pendingActionsFundingOrigin, workspaceFundingContext } from "../../packages/contracts/workspace";
 import { activeContextCatalog, fixtureRejections, tsFixtures } from "../../packages/ts-adapter";
 import { contentCatalog, lookupContent, modelBundle, resolveCandidates } from "../../packages/experience/content";
-import { compileChatReply, compileDynamicCanvas, compileExperience, compileFundingOptions, compileFundingPreview, compileRuleCreation, makeId } from "../../packages/experience/compile";
+import { compileChatReply, compileDynamicCanvas, compileExperience, compileFundingOptions, compileFundingPreview, compileRuleCreation, makeId, type CompiledExperience } from "../../packages/experience/compile";
 import { verifyContextProposal, verifyRoute, requireCheck, Rejected } from "../../packages/experience/verify";
+import { precompilePublishedLayoutToolBlocks } from "./ui-layouts";
+import type { SphotonCatalogService } from "./sphoton-catalog";
 import { ApiError, presentConversation, Store, type ConversationRecord, type Stage, type TurnRecord } from "./store";
 import type { IntegrationTaskService } from "./integration-tasks";
 import type { InteractiveCompletion, StoredWatch } from "./store";
@@ -175,12 +177,48 @@ export class ExperienceService {
       widgetLibraries?: Record<Conversation["domainId"], WidgetLibraryStore>;
       piiFirewall?: PiiFirewallStore;
       goalStore?: CustomerGoalStore;
+      sphotonCatalog?: SphotonCatalogService;
       onTradeSettle?: (principalId: string) => SettlementCallback;
     },
   ) {
     const chat = runtime?.chat ?? offlineHistory?.chat;
     if (!chat) throw new Error("sfield chat persistence is required.");
     this.history = new PznChatHistory(store, chat);
+  }
+
+  private async precompileTurnToolBindings(
+    id: string,
+    result: CompiledExperience,
+  ): Promise<Map<string, CompiledExperience["display"]["blocks"]> | undefined> {
+    const sphotonCatalog = this.dynamicUi?.sphotonCatalog;
+    if (!sphotonCatalog) return undefined;
+    const turn = this.store.turn(id);
+    if (!turn || turn.interactive || !turn.uiLayouts?.length) return undefined;
+    const hasBindings = turn.uiLayouts.some((pub) =>
+      pub.design.slots.some((slot) => (slot.kind === "block" || slot.kind === "widget") && slot.toolBinding),
+    );
+    if (!hasBindings) return undefined;
+    const domainId = turn.scope.domainId ?? "wealth";
+    const verifiedTurnResults: Record<string, unknown> = {
+      ...(turn.goalProgress ? { "goal.progress.read@1.0.0": turn.goalProgress } : {}),
+      ...(turn.portfolioSnapshot ? { "portfolio.snapshot.read@1.0.0": turn.portfolioSnapshot } : {}),
+      ...(turn.proof ? { "demo.balance.read@1.0.0": turn.proof } : {}),
+    };
+    try {
+      return await precompilePublishedLayoutToolBlocks({
+        publications: turn.uiLayouts,
+        baseBlocks: result.display.blocks,
+        domainId,
+        principalId: turn.scope.principalId,
+        customerId: domainId === "wealth" ? turn.scope.personaId : undefined,
+        conversationId: turn.scope.conversationId,
+        turnId: id,
+        verifiedTurnResults,
+        sphotonCatalog,
+      });
+    } catch {
+      return undefined;
+    }
   }
 
   createConversation(principalId: string, personaId: string, scenarioId: string, audience?: Conversation["audience"], domainId: Conversation["domainId"] = "wealth", operatorName?: string, preview?: ConversationRecord["preview"], folderId?: string) {
@@ -1696,7 +1734,17 @@ export class ExperienceService {
         row.trace.finalOrder = verified.contentOrder;
         row.trace.components = resultForDisplay.display.blocks.map((block) => block.component);
       });
-      this.store.finish(id, { type: "completed", result: resultForDisplay, verifiedContentIds: verified.contentOrder }, this.now());
+      const precompiledToolBlocks = await this.precompileTurnToolBindings(id, resultForDisplay);
+      this.store.finish(
+        id,
+        {
+          type: "completed",
+          result: resultForDisplay,
+          verifiedContentIds: verified.contentOrder,
+          ...(precompiledToolBlocks ? { precompiledToolBlocks } : {}),
+        },
+        this.now(),
+      );
     } catch (error) {
       if (this.closing || this.store.turn(id)?.public.status !== "working") return;
       const mapped = signal.reason instanceof TurnFailure ? signal.reason.code

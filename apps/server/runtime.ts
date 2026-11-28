@@ -123,6 +123,7 @@ import { nextStepContext, workspaceFundingContext, type WorkspaceNextStep } from
 import { beneficiaryReviewWorkflow, workflowDefinition } from "../../packages/contracts/customer-workflows";
 import { nextStepRecommendation, workflowOfferSource } from "./funding-offer";
 import { mockRuleGlossary } from "../../packages/rule-glossary";
+import type { RuleGlossary } from "../../packages/contracts/rule-glossary";
 import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import { fixtureGoalProgressProvider, type GoalProgressProvider } from "../../packages/goal-progress";
 import { contentCatalog, lookupContent, modelBundle, readDemoBalance, resolveCandidates } from "../../packages/experience/content";
@@ -299,6 +300,26 @@ export class Runtime implements IntegrationTaskRuntime {
     this.funding = new FundingAgent(store, () => this.sf, now);
     const execution = new AgenticExecution(store, () => this.sf, now, (turnId) => this.current(turnId), portfolioSnapshots, goalProgressProvider, goalBudget, recommendationRegistry);
     this.experiences = new ExperienceAgent(execution, () => this.sf);
+  }
+
+  private smassBridge?: {
+    effectiveRuleGlossary: (domainId?: "wealth") => RuleGlossary;
+    evaluateSmassCcreAttributes: (
+      domainId: "wealth",
+      customerId: string,
+      requestedKeys: readonly string[],
+    ) => Promise<Record<string, string | number | boolean>>;
+  };
+
+  setSmassBridge(bridge: {
+    effectiveRuleGlossary: (domainId?: "wealth") => RuleGlossary;
+    evaluateSmassCcreAttributes: (
+      domainId: "wealth",
+      customerId: string,
+      requestedKeys: readonly string[],
+    ) => Promise<Record<string, string | number | boolean>>;
+  }) {
+    this.smassBridge = bridge;
   }
 
   /** Exposes the underlying @sfield/core SField runtime (e.g., for mounting @sfield/studio). */
@@ -547,6 +568,12 @@ export class Runtime implements IntegrationTaskRuntime {
         ccreRules: setup?.ccreRules,
         portfolios,
         funding: this.store.axe.fundingFact(scope),
+        ...(this.smassBridge
+          ? {
+              extraAttributeResolver: (personaId: string, keys: readonly string[]) =>
+                this.smassBridge!.evaluateSmassCcreAttributes("wealth", personaId, keys),
+            }
+          : {}),
       },
     );
   }
@@ -1367,7 +1394,7 @@ export class Runtime implements IntegrationTaskRuntime {
         handler: ({ turnRef, routerRunId }, ctx) => {
           const { turn } = this.scopedRegistryTurn(turnRef, ctx, "glossary");
           requireCheck(this.inspection && turn.trace.routeOutcome === "create_rule" && turn.attempts.route?.runId === routerRunId, "RULE_INTENT_REQUIRED");
-          return mockRuleGlossary;
+          return this.smassBridge?.effectiveRuleGlossary("wealth") ?? mockRuleGlossary;
         },
       }),
       read("balances", {

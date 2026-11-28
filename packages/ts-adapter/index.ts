@@ -90,6 +90,10 @@ export type TsAdapterContext = {
   ccreRules?: readonly MockCcreRule[];
   portfolios?: PortfolioSnapshotProvider;
   funding?: FundingFact;
+  extraAttributeResolver?: (
+    personaId: string,
+    requestedKeys: readonly string[],
+  ) => Promise<Record<string, string | number | boolean>>;
 };
 
 /**
@@ -100,8 +104,8 @@ export type TsAdapterContext = {
 export type TsAdapterFactory = (ctx: TsAdapterContext) => TsAdapter;
 
 export function createFixtureTsAdapterFactory(): TsAdapterFactory {
-  return ({ state, overrides = [], ccreRules = [], portfolios = fixturePortfolioSnapshotProvider, funding }) =>
-    new FixtureTsAdapter(state, overrides, ccreRules, portfolios, funding);
+  return ({ state, overrides = [], ccreRules = [], portfolios = fixturePortfolioSnapshotProvider, funding, extraAttributeResolver }) =>
+    new FixtureTsAdapter(state, overrides, ccreRules, portfolios, funding, extraAttributeResolver);
 }
 
 export interface RemoteTsAdapterOptions {
@@ -244,6 +248,7 @@ function scopeToTsContext(scope: RecommendationEligibilityScope): TsAdapterConte
     ccreRules: scope.ccreRules as readonly MockCcreRule[] | undefined,
     portfolios: scope.portfolios as PortfolioSnapshotProvider | undefined,
     funding: scope.funding as FundingFact | undefined,
+    extraAttributeResolver: scope.extraAttributeResolver,
   };
 }
 
@@ -283,6 +288,7 @@ export function adapterFromRecommendationProvider(
     ccreRules: ctx.ccreRules,
     portfolios: ctx.portfolios,
     funding: ctx.funding,
+    extraAttributeResolver: ctx.extraAttributeResolver,
   };
   const emptySelection = (): TreatmentSelectionResult => ({
     contentIds: [],
@@ -361,6 +367,10 @@ export class FixtureTsAdapter implements TsAdapter {
     private readonly ccreRules: readonly MockCcreRule[] = [],
     private readonly portfolios: PortfolioSnapshotProvider = fixturePortfolioSnapshotProvider,
     funding?: FundingFact,
+    private readonly extraAttributeResolver?: (
+      personaId: string,
+      requestedKeys: readonly string[],
+    ) => Promise<Record<string, string | number | boolean>>,
   ) {
     if (typeof funding === "object") {
       this.confirmation = funding;
@@ -421,9 +431,21 @@ export class FixtureTsAdapter implements TsAdapter {
       signal?.throwIfAborted();
       const portfolio = reading ? portfolioSnapshotSchema.parse(reading) : null;
       const effectiveCashCents = overrideCashCents !== undefined ? overrideCashCents : portfolio?.cashCents;
+      const smassAttrKeys = [
+        ...new Set(
+          rules
+            .filter(({ contentId, condition }) => ids.includes(contentId) && condition.kind === "attribute" && condition.namespaceId.startsWith("smass_"))
+            .map(({ condition }) => (condition.kind === "attribute" ? `${condition.namespaceId}.${condition.attributeId}` : "")),
+        ),
+      ].filter(Boolean);
+      const extraAttributes =
+        smassAttrKeys.length > 0 && this.extraAttributeResolver
+          ? await this.extraAttributeResolver(persona.personaId, smassAttrKeys)
+          : undefined;
       const input = {
         ...this.state, contextId: context, personaId: persona.personaId, portfolioCashCents: effectiveCashCents, fundingStatus: this.fundingStatus,
         ...(account && { beneficiaryStatus: account.beneficiary === null ? "missing" as const : "on_file" as const }),
+        ...(extraAttributes && { extraAttributes }),
       };
       const result = applyMockCcreRules([...ids], rules, input);
       const fundingRule = rules.find((rule) => rule.contentId === "fund_account");

@@ -472,6 +472,7 @@ export async function startApp(options: Options) {
     opsStore,
     salesStore,
   });
+  runtime?.setSmassBridge(sphotonCatalog);
   const goalStore = new CustomerGoalStore(tenantDataDirectory(options.dataDir));
   workflowEngine.setIntegrationService(integrationService);
   const gatewayView = () => gatewayConfig.view(options.gateway, Boolean(options.onGatewayActivated), options.launchGatewaySource);
@@ -546,7 +547,7 @@ export async function startApp(options: Options) {
     isTenantAdmin: membership.isTenantAdmin,
     gateway: options.gateway, dataDir: options.dataDir, customer360, profileStore, portfolioSnapshots, goalProgressProvider,
     opsStore, salesStore, connectorStore, approvalStore, tradeStore, actionFlowStore, workflowEngine, knowledgeBase, widgetLibraries, piiFirewall,
-    goalStore, integrationService, onTradeSettle: makeTradeSettler,
+    goalStore, integrationService, sphotonCatalog, onTradeSettle: makeTradeSettler,
     mayReviewApproval: (actor, record) => publicationReviews.mayReview(actor, record),
   });
 
@@ -882,7 +883,7 @@ export async function startApp(options: Options) {
     };
     if (pathname === "/.well-known/agent.json" && req.method === "GET") {
       res.setHeader("Access-Control-Allow-Origin", "*");
-      return json(res, buildA2aAgentCard(origin, integrationService));
+      return json(res, buildA2aAgentCard(origin, integrationService, sphotonCatalog));
     }
     if (pathname === "/admin/sfield-studio" || pathname.startsWith("/admin/sfield-studio/")) {
       requireOperator();
@@ -981,7 +982,7 @@ export async function startApp(options: Options) {
     const createChat = async (audience?: "admin") => {
       const test = audience && url.searchParams.get("scope") === "preview" ? await body(req,
         z.object({ conversation: createBody, setup: toolSetupSchema }).strict(), 768 * 1024) : undefined;
-      if (test) validateToolSetup(test.setup);
+      if (test) validateToolSetup(test.setup, sphotonCatalog.effectiveRuleGlossary("wealth"));
       const input = test?.conversation ?? await body(req, createBody);
       const personaId = input.domainId === "wealth" ? input.personaId : requireOperator();
       requireChatDomain(input.domainId, personaId);

@@ -992,3 +992,161 @@ test("smass published virtual models compile into live sfield read tools, respec
   // Clean up
   await client.request("/api/admin/domain-models-delete?domain=wealth", { modelId: "wealth.executive_tier" });
 });
+
+test("full cross-layer cohesion: 0 Wealth drift, MCP/A2A live virtual tools, dynamic smass CCRE glossary & evaluation, and sphoton preview/chat binding", async (t) => {
+  const app = await startTestPreview();
+  t.after(() => app.close());
+  const client = await testClient(app.url);
+
+  // 1. Wealth canonical models start with ZERO schema drift (wealth.portfolio.totalCents is computed cleanly)
+  const initial = await client.request<{
+    driftIssues: Array<{ modelId: string; message: string }>;
+  }>("/api/admin/domain-models?domain=wealth");
+  assert.deepEqual(initial.driftIssues, []);
+
+  // 2. Publish a custom virtual model with an IF() derived column + WHERE-filtered aggregate
+  await client.request("/api/admin/domain-models?domain=wealth", {
+    id: "wealth.cohesion_vdm",
+    version: "1.0.0",
+    status: "published",
+    label: "Cohesion VDM",
+    principalKey: "mid",
+    primaryKey: "mid",
+    fields: [
+      { kind: "mapped", key: "cashCents", label: "Cash", toolRef: "portfolio.snapshot.read@1.0.0", outputPath: "cashCents", format: "currency_cents", required: true, exposed: true },
+      { kind: "mapped", key: "history", label: "History", toolRef: "goal.progress.read@1.0.0", outputPath: "history", format: "series", required: true, exposed: false },
+      { kind: "aggregate", key: "strongMonths", label: "Strong Months", op: "count", sourceField: "history", where: { field: "savedCents", op: ">=", value: 1_000_000 }, type: "integer", exposed: true },
+      { kind: "computed", key: "cashTier", label: "Cash Tier", expression: 'IF(cashCents >= 1000000, "high_cash", "standard")', dependsOn: ["cashCents"], type: "string", exposed: true },
+    ],
+  });
+
+  const vdmToolRef = "smass.wealth.cohesion_vdm.read@1.0.0";
+
+  // 3. Seam 3: CEP MCP Server (/api/mcp) exposes & executes smass.<id>.read@1.0.0 + cep://smass/models resource, and A2A Agent Card advertises it
+  const mcpList = await client.request<{
+    result: { tools: Array<{ name: string }> };
+  }>("/api/mcp", { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+  assert.ok(mcpList.result.tools.some((tool) => tool.name === vdmToolRef));
+
+  const mcpCall = await client.request<{
+    result: { structuredContent: Record<string, unknown>; isError?: boolean };
+  }>("/api/mcp", {
+    jsonrpc: "2.0",
+    id: 2,
+    method: "tools/call",
+    params: { name: vdmToolRef, arguments: { customerId: "demo-learner" } },
+  });
+  assert.equal(Boolean(mcpCall.result.isError), false);
+  assert.equal(mcpCall.result.structuredContent.cashTier, "high_cash");
+  assert.equal(typeof mcpCall.result.structuredContent.strongMonths, "number");
+
+  const mcpRes = await client.request<{
+    result: { contents: Array<{ uri: string; text: string }> };
+  }>("/api/mcp", {
+    jsonrpc: "2.0",
+    id: 3,
+    method: "resources/read",
+    params: { uri: "cep://smass/models" },
+  });
+  assert.match(mcpRes.result.contents[0]!.text, /wealth\.cohesion_vdm/);
+
+  const agentCard = await client.request<{ skills: Array<{ id: string }> }>("/.well-known/agent.json");
+  assert.ok(agentCard.skills.some((s) => s.id === vdmToolRef));
+
+  // 4. Seam 4: CCRE / PZN Rule Glossary projects smass_cohesion_vdm attributes & evaluates them live!
+  const toolSetup = await client.request<{
+    defaultScenarioId: string;
+    glossary: { version: string; namespaces: Array<{ id: string; attributes: Array<{ id: string; valueType: string }> }> };
+  }>("/api/admin/tools?domain=wealth");
+  const smassNs = toolSetup.glossary.namespaces.find((ns) => ns.id === "smass_cohesion_vdm");
+  assert.ok(smassNs, "Expected smass_cohesion_vdm namespace in CCRE rule glossary");
+  assert.ok(smassNs.attributes.some((a) => a.id === "cash_tier" && a.valueType === "string"));
+  assert.ok(smassNs.attributes.some((a) => a.id === "strong_months" && a.valueType === "integer"));
+
+  // Evaluate CCRE rule on smass_cohesion_vdm.cash_tier == "high_cash" across Alice (high cash) vs Marcus (zero cash)
+  const smassRule = {
+    scenarioId: toolSetup.defaultScenarioId,
+    contextId: "balance",
+    name: "High cash via smass VDM",
+    contentId: "balance_education",
+    condition: {
+      kind: "attribute",
+      glossaryVersion: toolSetup.glossary.version,
+      namespaceId: "smass_cohesion_vdm",
+      attributeId: "cash_tier",
+      operator: "eq",
+      value: "high_cash",
+    },
+  };
+  const alicePreview = await client.request<{
+    status: string;
+    contentIds: string[];
+    ccre?: { results: Array<{ name: string; outcome: string }> };
+  }>("/api/admin/treatment-preview", {
+    scenarioId: toolSetup.defaultScenarioId,
+    contextId: "balance",
+    personaId: "demo-learner",
+    ordinal: 1,
+    enabled: true,
+    output: null,
+    ccreRules: [smassRule],
+  });
+  assert.equal(alicePreview.status, "ranked");
+  assert.equal(alicePreview.ccre?.results.find((r) => r.name === "High cash via smass VDM")?.outcome, "matched");
+
+  const marcusPreview = await client.request<{
+    status: string;
+    contentIds: string[];
+    ccre?: { results: Array<{ name: string; outcome: string }> };
+  }>("/api/admin/treatment-preview", {
+    scenarioId: toolSetup.defaultScenarioId,
+    contextId: "balance",
+    personaId: "demo-new-account",
+    ordinal: 1,
+    enabled: true,
+    output: null,
+    ccreRules: [smassRule],
+  });
+  assert.equal(marcusPreview.ccre?.results.find((r) => r.name === "High cash via smass VDM")?.outcome, "excluded");
+
+  // 5. Seam 2: sphoton UI layout bound to smass.wealth.cohesion_vdm.read@1.0.0 previews live with derived value
+  const preview = await client.request<{
+    blocks: Array<{ component: string; props: Record<string, unknown> }>;
+  }>("/api/admin/ui-layout-preview?domain=wealth", {
+    personaId: "demo-learner",
+    design: {
+      name: "Cohesion VDM Card",
+      description: "Live widget bound to smass virtual read tool",
+      layout: "stack",
+      targets: [{ kind: "intent", id: "show_balance" }],
+      slots: [
+        {
+          kind: "widget",
+          id: "vdm-tier-widget",
+          title: "Cash Tier Status",
+          badge: "smass VDM",
+          body: "Derived via smass virtual data model",
+          accentTop: true,
+          metrics: [{ id: "m1", label: "Cash", binding: "portfolio.cash", staticValue: "", subtext: "live", tone: "default" }],
+          toolBinding: {
+            component: "PznBoundWidget",
+            sources: {
+              vdm: { toolRef: vdmToolRef, read: "alwaysInvoke" },
+            },
+            bindings: [
+              { field: "cashTier", from: "vdm.data.cashTier", format: "text", label: "Cash Tier" },
+              { field: "strongMonths", from: "vdm.data.strongMonths", format: "number", label: "Strong Months" },
+            ],
+          },
+        },
+      ],
+    },
+  });
+  const boundBlock = preview.blocks.find((b) => b.component === "PznBoundWidget");
+  assert.ok(boundBlock, "Expected PznBoundWidget block compiled from smass virtual read tool");
+  const serializedBlock = JSON.stringify(boundBlock.props);
+  assert.match(serializedBlock, /high_cash/);
+
+  // Clean up
+  await client.request("/api/admin/domain-models-delete?domain=wealth", { modelId: "wealth.cohesion_vdm" });
+});

@@ -572,15 +572,16 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
     const setup = store.toolSetup(domainId, preview ? principalId : undefined);
     const tag = toolSetupTag(setup);
     const draft = preview ? undefined : store.toolSetup(domainId, principalId);
+    const glossary = sphotonCatalog.effectiveRuleGlossary(domainId);
     res.setHeader("ETag", tag);
-    json(res, { ...toolSetupView(setup), ...(draft && toolSetupTag(draft) !== tag && { privateDraft: draft }) });
+    json(res, { ...toolSetupView(setup, glossary), ...(draft && toolSetupTag(draft) !== tag && { privateDraft: draft }) });
     return true;
   }
   if (id === "tools" && method === "POST") {
     const domainId = authoringDomain();
     const previewSession = url.searchParams.get("scope") === "preview" ? principalId : undefined;
     const setup = await body(req, toolSetupSchema, toolSetupLimit);
-    validateToolSetup(setup);
+    validateToolSetup(setup, sphotonCatalog.effectiveRuleGlossary(domainId));
     const tag = toolSetupTag(setup);
     const expected = req.headers["if-match"];
     if (expected !== undefined) {
@@ -599,14 +600,24 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
   if (id === "treatment-preview" && method === "POST") {
     const input = await body(req, treatmentPreviewSchema, toolSetupLimit);
     const funding = store.axe.fundingFact({ principalId, personaId: input.personaId });
-    json(res, await previewTreatmentSelector(input, portfolioSnapshots, funding, recommendationRegistry));
+    json(
+      res,
+      await previewTreatmentSelector(
+        input,
+        portfolioSnapshots,
+        funding,
+        recommendationRegistry,
+        sphotonCatalog.effectiveRuleGlossary("wealth"),
+        (personaId, keys) => sphotonCatalog.evaluateSmassCcreAttributes("wealth", personaId, keys),
+      ),
+    );
     return true;
   }
   if (id === "ccre-rules" && method === "POST") {
     const rule = await body(req, mockCcreRuleSchema, toolSetupLimit);
     const domainId = authoringDomain();
     const current = store.toolSetup(domainId);
-    const updated = addCcreRule(current, rule);
+    const updated = addCcreRule(current, rule, sphotonCatalog.effectiveRuleGlossary(domainId));
     if (updated === current) json(res, rule);
     else requestReview("tools", domainId, updated);
     return true;
@@ -662,6 +673,14 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
   if (id === "mcp-server" && method === "GET") {
     const config = mcpExposure.get();
     const publishedTasks = integrationService.view().contracts.filter((c) => c.status === "published" && c.sfieldRoute !== "unavailable");
+    const smassVirtualTools = sphotonCatalog.allPublishedVirtualTools().map((vt) => ({
+      ref: vt.ref,
+      domainId: vt.domainId,
+      modelId: vt.modelId,
+      label: vt.modelLabel,
+      description: vt.description ?? "",
+      enabled: true,
+    }));
     json(res, {
       endpoint: "/api/mcp",
       protocolVersion: "2025-03-26",
@@ -671,6 +690,7 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
         ...t,
         enabled: config.enabledToolRefs.includes(t.ref),
       })),
+      smassVirtualTools,
       publishedTaskCount: publishedTasks.length,
     });
     return true;
@@ -679,6 +699,14 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
     const input = await body(req, mcpExposureConfigSchema, 8 * 1024);
     const saved = mcpExposure.save(input);
     const publishedTasks = integrationService.view().contracts.filter((c) => c.status === "published" && c.sfieldRoute !== "unavailable");
+    const smassVirtualTools = sphotonCatalog.allPublishedVirtualTools().map((vt) => ({
+      ref: vt.ref,
+      domainId: vt.domainId,
+      modelId: vt.modelId,
+      label: vt.modelLabel,
+      description: vt.description ?? "",
+      enabled: true,
+    }));
     json(res, {
       endpoint: "/api/mcp",
       protocolVersion: "2025-03-26",
@@ -688,6 +716,7 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
         ...t,
         enabled: saved.enabledToolRefs.includes(t.ref),
       })),
+      smassVirtualTools,
       publishedTaskCount: publishedTasks.length,
     });
     return true;

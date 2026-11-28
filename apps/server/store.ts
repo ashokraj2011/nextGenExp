@@ -5,6 +5,7 @@ import { digestJson } from "@sfield/core";
 import { inheritedFlows, resolveTurnFlows, type FlowCatalogSetup, type FlowOverrides, type FlowScope, type TurnFlowCatalog } from "../../packages/contracts/routing-flows";
 import type { RuleWorkflowMatch } from "../../packages/contracts/customer-workflows";
 import type { DomainPackId } from "../../packages/contracts/domain-packs";
+import type { DisplayBlock } from "../../packages/contracts/surface";
 import { normalizedIntentPhrase, layoutTargetDomain, maxLayouts, targetKey, type LibraryDesign, type AppliedUiLayout, type UiLayoutChange, type UiLayoutRecord, type UiPublication, type UiTarget } from "../../packages/contracts/ui-layout";
 import { applyPublishedUi } from "../../packages/experience/ui-layout";
 import { resolveMultiDomainBindings } from "../../packages/customer-profiles/bindings";
@@ -1120,7 +1121,12 @@ export class Store {
       userMessage: turn.public.message, ordinal: turn.ordinal, emotionalState: turn.public.emotionalState }) : result;
   }
 
-  private applyUiLayout(turn: TurnRecord, result: CompiledExperience, verifiedContentIds: readonly string[] = []) {
+  private applyUiLayout(
+    turn: TurnRecord,
+    result: CompiledExperience,
+    verifiedContentIds: readonly string[] = [],
+    precompiledToolBlocks?: ReadonlyMap<string, DisplayBlock[]>,
+  ) {
     if (turn.interactive || !turn.uiLayouts?.length) return result;
     const targets: UiTarget[] = verifiedContentIds.map((id) => ({ kind: "content", id }));
     const capability = turn.public.semanticRoute?.capabilityId;
@@ -1146,7 +1152,7 @@ export class Store {
         incident: domain === "it_ops" ? extra?.incident : undefined,
         deal: domain === "sales_revops" ? extra?.deal : undefined,
       });
-      const applied = applyPublishedUi(result, turn.uiLayouts, targets, bindings);
+      const applied = applyPublishedUi(result, turn.uiLayouts, targets, bindings, undefined, precompiledToolBlocks);
       if (applied) {
         turn.trace.uiLayout = applied.attachment;
         turn.trace.components = applied.result.display.blocks.map(({ component }) => component);
@@ -1191,7 +1197,14 @@ export class Store {
 
   finish(
     id: string,
-    outcome: { type: "completed"; result: CompiledExperience; interactive?: InteractiveCompletion; goalScenario?: GoalScenarioUpdate; verifiedContentIds?: readonly string[] }
+    outcome: {
+      type: "completed";
+      result: CompiledExperience;
+      interactive?: InteractiveCompletion;
+      goalScenario?: GoalScenarioUpdate;
+      verifiedContentIds?: readonly string[];
+      precompiledToolBlocks?: ReadonlyMap<string, DisplayBlock[]>;
+    }
       | { type: "failed"; code: FailureCode }
       | { type: "cancelled" },
     now: number,
@@ -1205,7 +1218,12 @@ export class Store {
       }
       turn.trace.markers.terminal = now;
       if (outcome.type === "completed") {
-        const laidOut = this.applyUiLayout(turn, this.carryForwardOffers(turn, outcome.result, now), outcome.verifiedContentIds);
+        const laidOut = this.applyUiLayout(
+          turn,
+          this.carryForwardOffers(turn, outcome.result, now),
+          outcome.verifiedContentIds,
+          outcome.precompiledToolBlocks,
+        );
         const { display, issued } = this.personalize(turn, laidOut);
         delete turn.public.previewExperience;
         if (turn.agentLaunch && "capability" in turn.agentLaunch) delete turn.agentLaunch.values;

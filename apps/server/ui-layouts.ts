@@ -16,7 +16,7 @@ import type { SalesDealStore } from "./sales-store";
 import { allRoutingIntents, type IntentDefinition } from "../../packages/contracts/routing-intents";
 import type { DisplayBlock } from "../../packages/contracts/surface";
 import { CEP_CAPABILITIES } from "../../packages/contracts/capabilities-catalog";
-import { bindingDomain, layoutTargetDomain, layoutWidgets, widgetSequence, normalizedIntentPhrase, recordIntentOption, recordCapabilities, recordIntentId, recordLayoutCapabilities, recordViews, targetKey, type RecordDomain, type LayoutComponent, type UiDesign, type UiTargetOption } from "../../packages/contracts/ui-layout";
+import { bindingDomain, layoutTargetDomain, layoutWidgets, widgetSequence, normalizedIntentPhrase, recordIntentOption, recordCapabilities, recordIntentId, recordLayoutCapabilities, recordViews, targetKey, type RecordDomain, type LayoutComponent, type UiDesign, type UiPublication, type UiTargetOption } from "../../packages/contracts/ui-layout";
 import { conversationalTextAllowed } from "../../packages/experience/chat-policy";
 import { contentCatalog, readDemoBalance } from "../../packages/experience/content";
 import { findEffectiveContentById, getEffectiveContentEntries } from "../../packages/experience-registry/registry";
@@ -236,6 +236,68 @@ function sampleDetails(item: string | ReturnType<typeof content>) {
     disclosures: item.requiredDisclosures.map(({ text }) => text),
   };
   return { shared, body, description, steps };
+}
+
+export async function precompilePublishedLayoutToolBlocks(input: {
+  publications: readonly UiPublication[];
+  baseBlocks: DisplayBlock[];
+  domainId: DomainPackId;
+  principalId: string;
+  customerId?: string;
+  conversationId?: string;
+  turnId?: string;
+  verifiedTurnResults?: Record<string, unknown>;
+  sphotonCatalog: SphotonCatalogService;
+}): Promise<Map<string, DisplayBlock[]>> {
+  const byPub = new Map<string, DisplayBlock[]>();
+  const { publications, baseBlocks, domainId, principalId, customerId, conversationId, turnId, verifiedTurnResults, sphotonCatalog } = input;
+  const pubsWithBindings = publications.filter((pub) =>
+    pub.design.slots.some((slot) => (slot.kind === "block" || slot.kind === "widget") && slot.toolBinding),
+  );
+  if (pubsWithBindings.length === 0) return byPub;
+
+  const catalog = sphotonCatalog.catalogForDomain(domainId);
+  const sfield = sphotonCatalog.sfieldAdapter();
+  for (const pub of pubsWithBindings) {
+    const out: DisplayBlock[] = [];
+    for (const slot of pub.design.slots) {
+      if ((slot.kind === "block" || slot.kind === "widget") && slot.toolBinding) {
+        const base = slot.kind === "block" ? baseBlocks.find((b) => b.component === slot.component) : undefined;
+        const compiled = await compileBoundCard<DisplayBlock>({
+          card: slot.toolBinding,
+          catalog,
+          registry: cepSphotonRegistry,
+          sfield,
+          verifiedTurnResults,
+          baseBlock: base,
+          design: {
+            id: pub.id,
+            revision: pub.revision,
+            name: pub.design.name,
+            title: slot.kind === "widget" ? slot.title : undefined,
+            badge: slot.kind === "widget" ? slot.badge : undefined,
+            body: slot.kind === "widget" ? slot.body : undefined,
+          },
+          scope: {
+            tenantId: catalog.tenantId,
+            domainId,
+            principalId,
+            customerId,
+            conversationId,
+            turnId,
+            mode: "customer_chat",
+          },
+          signingSecret: sphotonCatalog.signingSecret,
+        });
+        out.push(compiled.block);
+      } else if (slot.kind === "block") {
+        const match = baseBlocks.find((b) => b.component === slot.component);
+        if (match) out.push(match);
+      }
+    }
+    byPub.set(pub.id, out);
+  }
+  return byPub;
 }
 
 export async function previewUiLayout(

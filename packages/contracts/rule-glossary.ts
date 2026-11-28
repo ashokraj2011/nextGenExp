@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const glossaryOperators = ["eq", "ne", "gt", "gte", "lte"] as const;
-export const glossaryValueTypes = ["enum", "boolean", "integer"] as const;
+export const glossaryValueTypes = ["enum", "boolean", "integer", "string"] as const;
 export const glossaryOperatorLabels = { eq: "Equals", ne: "Does not equal", gt: "Greater than", gte: "At least", lte: "At most" } as const;
 const operatorSymbols = { eq: "==", ne: "!=", gt: ">", gte: ">=", lte: "<=" } as const;
 
@@ -24,8 +24,8 @@ export const ruleGlossarySchema = z.object({
   namespaces: z.array(z.object({
     id: key,
     label,
-    attributes: z.array(attributeSchema).min(1).max(8),
-  }).strict()).min(1).max(8),
+    attributes: z.array(attributeSchema).min(1).max(24),
+  }).strict()).min(1).max(24),
 }).strict();
 export type RuleGlossary = z.infer<typeof ruleGlossarySchema>;
 export type GlossaryAttribute = z.infer<typeof attributeSchema>;
@@ -37,7 +37,7 @@ export const glossaryConditionSchema = z.object({
   namespaceId: key,
   attributeId: key,
   operator: z.enum(glossaryOperators),
-  value: z.union([key, integer, z.boolean()]),
+  value: z.union([z.string().min(1).max(64), integer, z.boolean()]),
 }).strict();
 export type GlossaryCondition = z.infer<typeof glossaryConditionSchema>;
 
@@ -50,6 +50,7 @@ export function glossaryAllowsCondition(glossary: RuleGlossary, condition: Gloss
     case "enum": return attribute.options.some((option) => option.value === value);
     case "boolean": return typeof value === "boolean";
     case "integer": return typeof value === "number" && Number.isSafeInteger(value) && (attribute.minimum === null || value >= attribute.minimum);
+    case "string": return typeof value === "string" && value.trim().length > 0 && value.length <= 64;
   }
 }
 

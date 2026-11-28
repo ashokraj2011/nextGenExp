@@ -160,6 +160,10 @@ export interface RecommendationEligibilityScope {
   ccreRules?: readonly unknown[];
   portfolios?: unknown;
   funding?: unknown;
+  extraAttributeResolver?: (
+    personaId: string,
+    requestedKeys: readonly string[],
+  ) => Promise<Record<string, string | number | boolean>>;
 }
 
 export interface RecommendationEligibilityRequest {

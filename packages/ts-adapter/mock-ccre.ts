@@ -1,7 +1,16 @@
 import type { MockCcreCondition, MockCcreEvaluation, MockCcreRule } from "../contracts/tool-setup";
 import { matchesGlossaryCondition } from "../rule-glossary";
 
-type RuleInput = { beneficiaryStatus?: "missing" | "on_file"; scenarioId: string; contextId: string; personaId: string; ordinal: number; portfolioCashCents?: number; fundingStatus?: "funded" | "unfunded" };
+type RuleInput = {
+  beneficiaryStatus?: "missing" | "on_file";
+  scenarioId: string;
+  contextId: string;
+  personaId: string;
+  ordinal: number;
+  portfolioCashCents?: number;
+  fundingStatus?: "funded" | "unfunded";
+  extraAttributes?: Readonly<Record<string, string | number | boolean>>;
+};
 
 export function matchesCondition(condition: MockCcreCondition, input: RuleInput): boolean {
   switch (condition.kind) {

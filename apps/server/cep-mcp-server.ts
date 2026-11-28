@@ -23,11 +23,13 @@ import type { IntegrationTaskService } from "./integration-tasks";
 import type { KnowledgeBaseStore } from "./knowledge-base";
 import type { McpExposureConfig } from "./mcp-exposure-store";
 import { principalFor, type Runtime } from "./runtime";
+import type { SphotonCatalogService } from "./sphoton-catalog";
 import { serverTenantId } from "./tenant";
 
 export interface CepMcpDeps {
   integrationService: IntegrationTaskService;
   knowledgeBase: KnowledgeBaseStore;
+  sphotonCatalog?: SphotonCatalogService;
   principalId: string;
   operatorName: string;
   runtime?: Runtime | null;
@@ -134,9 +136,55 @@ export async function handleCepMcpRequest(raw: unknown, deps: CepMcpDeps): Promi
         };
       },
     }] : []),
+    ...(deps.sphotonCatalog?.allPublishedVirtualTools().map((vt): McpExtraTool => ({
+      descriptor: {
+        name: vt.ref,
+        description: `[smass Virtual Data Model · ${vt.domainId}] ${vt.description ?? vt.modelLabel}`,
+        inputSchema: vt.inputs as import("@sfield/core").JsonObject,
+        outputSchema: vt.outputs as import("@sfield/core").JsonObject,
+        annotations: {
+          title: `smass VDM · ${vt.modelLabel}`,
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+        },
+      },
+      handler: async (args: Record<string, unknown>) => {
+        const customerId = typeof args.customerId === "string" && args.customerId.trim() ? args.customerId.trim() : undefined;
+        const exec = await deps.sphotonCatalog!.sfieldAdapter().executeRead({
+          toolRef: vt.ref,
+          inputs: args,
+          scope: {
+            tenantId: serverTenantId,
+            domainId: vt.domainId,
+            principalId: deps.principalId,
+            customerId,
+            mode: "customer_chat",
+          },
+        });
+        if (exec.status !== "succeeded") {
+          const payload = { status: exec.status, error: exec.error };
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(payload) }],
+            structuredContent: payload,
+            isError: true,
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(exec.output) }],
+          structuredContent: exec.output as Record<string, unknown>,
+        };
+      },
+    })) ?? []),
   ];
 
   const resources: McpResourceDefinition[] = [
+    ...(deps.sphotonCatalog ? [{
+      uri: "cep://smass/models",
+      name: "Canonical smass Virtual Data Models & ER Schemas",
+      mimeType: "application/json",
+      read: () => JSON.stringify(deps.sphotonCatalog!.allDomainDataModels(), null, 2),
+    }] : []),
     {
       uri: "cep://catalog/tasks",
       name: "Published CEP Integration Tasks",
@@ -188,8 +236,13 @@ export async function handleCepMcpRequest(raw: unknown, deps: CepMcpDeps): Promi
 }
 
 /** Builds a Google A2A (Agent-to-Agent) Agent Card for /.well-known/agent.json. */
-export function buildA2aAgentCard(origin: string, integrationService: IntegrationTaskService) {
+export function buildA2aAgentCard(
+  origin: string,
+  integrationService: IntegrationTaskService,
+  sphotonCatalog?: SphotonCatalogService,
+) {
   const published = integrationService.view().contracts.filter((c) => c.status === "published");
+  const smassVirtualTools = sphotonCatalog?.allPublishedVirtualTools() ?? [];
   return {
     name: "CEP — Customer Engagement Platform",
     description: "Governed Agentic Customer Engagement Platform combining Treatment Selector eligibility, A2UI v1.0 declarative surfaces, and sfield digest-bound HITL execution.",
@@ -241,6 +294,12 @@ export function buildA2aAgentCard(origin: string, integrationService: Integratio
         name: `${c.integrationId}.${c.taskId} v${c.version}`,
         description: c.description,
         tags: [c.integrationId, c.effect, c.approvalPolicy.mode === "none" ? "auto" : "hitl-approval"],
+      })),
+      ...smassVirtualTools.map((vt) => ({
+        id: vt.ref,
+        name: `smass · ${vt.modelLabel}`,
+        description: vt.description ?? `Virtual Data Model read tool for ${vt.modelId}.`,
+        tags: ["smass", "vdm", "read", vt.domainId],
       })),
     ],
   };

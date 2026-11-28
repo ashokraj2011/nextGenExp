@@ -174,10 +174,14 @@ export const wealthPortfolioModel = defineToolBackedModel({
       exposed: false,
     },
     totalCents: {
-      from: "portfolio.totalCents",
+      type: "integer",
       label: "Total portfolio value",
       format: "currency_cents",
       supportedFormats: ["currency_cents", "number"],
+      computed: {
+        expression: "cashCents + equityCents + fixedIncomeCents",
+        dependsOn: ["cashCents", "equityCents", "fixedIncomeCents"],
+      },
       classification: "confidential",
       legacyBindingKey: "portfolio.total",
     },
@@ -253,7 +257,7 @@ export const wealthBalancesModel = defineToolBackedModel({
       exposed: false,
     },
     available: {
-      from: "balances.values.available",
+      from: "balances.values[0].displayValue",
       label: "Available balance",
       format: "currency",
       supportedFormats: ["currency", "number", "text"],
@@ -261,7 +265,7 @@ export const wealthBalancesModel = defineToolBackedModel({
       legacyBindingKey: "balances.available",
     },
     current: {
-      from: "balances.values.current",
+      from: "balances.values[1].displayValue",
       label: "Current balance",
       format: "currency",
       supportedFormats: ["currency", "number", "text"],

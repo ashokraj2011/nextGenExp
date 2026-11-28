@@ -447,6 +447,7 @@ export async function handleCollaborationAndProtocolRoutes(deps: CollaborationRo
     const out = await handleCepMcpRequest(await body(req, z.unknown(), 64 * 1024), {
       integrationService,
       knowledgeBase,
+      sphotonCatalog,
       principalId,
       operatorName: actor,
       runtime,

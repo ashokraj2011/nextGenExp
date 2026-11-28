@@ -168,7 +168,7 @@ export function studioPublicationPlans(deps: {
     tools(candidate, context) {
       const input = toolSetupSchema.parse(candidate);
       const scope = domain(context);
-      validateToolSetup(input);
+      validateToolSetup(input, sphotonCatalog?.effectiveRuleGlossary(scope));
       return plan(scope, "Publish tool settings and eligibility rules", store.toolSetup(scope), () =>
         { store.saveToolSetup(scope, input); return input; }, "Published tool settings.");
     },

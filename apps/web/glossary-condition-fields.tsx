@@ -15,6 +15,7 @@ type Props = {
 function startingValue(attribute: GlossaryAttribute, defaultValue?: string) {
   if (attribute.valueType === "integer") return String(attribute.minimum ?? 0);
   if (attribute.valueType === "boolean") return "true";
+  if (attribute.valueType === "string") return defaultValue ?? "";
   const option = attribute.options.find(({ value }) => value === defaultValue) ?? attribute.options[0];
   return option?.value ?? "";
 }
@@ -83,10 +84,13 @@ export function GlossaryConditionFields({ glossary, initial, defaultValue, child
           {attribute.valueType === "integer"
             ? <input id={id + "-value"} type="number" min={attribute.minimum ?? undefined} step={1}
                 value={draft.value} onChange={(event) => setDraft({ ...draft, value: event.target.value })} />
-            : <select id={id + "-value"} value={draft.value} onChange={(event) => setDraft({ ...draft, value: event.target.value })}>
-                {attribute.valueType === "boolean" ? <><option value="true">True</option><option value="false">False</option></>
-                  : attribute.options.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
-              </select>}
+            : attribute.valueType === "string"
+              ? <input id={id + "-value"} type="text" placeholder="Enter value…"
+                  value={draft.value} onChange={(event) => setDraft({ ...draft, value: event.target.value })} />
+              : <select id={id + "-value"} value={draft.value} onChange={(event) => setDraft({ ...draft, value: event.target.value })}>
+                  {attribute.valueType === "boolean" ? <><option value="true">True</option><option value="false">False</option></>
+                    : attribute.options.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
+                </select>}
         </div>
       </>}
     </div>

@@ -4,7 +4,7 @@ import host from "../../fixtures/host.json";
 import { findProfileById, listAllProfiles } from "../../packages/customer-profiles";
 import { customerWorkflow } from "../../packages/contracts/customer-workflows";
 import { fundingWorkflowIssue } from "../../packages/contracts/funding-workflow";
-import { glossaryAllowsCondition } from "../../packages/contracts/rule-glossary";
+import { glossaryAllowsCondition, type RuleGlossary } from "../../packages/contracts/rule-glossary";
 import {
   MAX_CCRE_RULES, type MockCcreRule, type MockOutput, type ToolSetup, type ToolSetupView, type TreatmentPreview, type TreatmentPreviewInput,
 } from "../../packages/contracts/tool-setup";
@@ -30,9 +30,9 @@ export function toolSetupTag(setup: ToolSetup) {
   return '"' + createHash("sha256").update(JSON.stringify(setup)).digest("hex") + '"';
 }
 
-export function toolSetupView(setup: ToolSetup): ToolSetupView {
+export function toolSetupView(setup: ToolSetup, glossary: RuleGlossary = mockRuleGlossary): ToolSetupView {
   return {
-    setup, defaultCcreRules: tsFixtures.defaultCcreRules, content: availableToolContent(), contexts, glossary: mockRuleGlossary,
+    setup, defaultCcreRules: tsFixtures.defaultCcreRules, content: availableToolContent(), contexts, glossary,
     defaultPersonaId: host.defaultPersonaId,
     defaultScenarioId: host.defaultScenarioId,
     personas: listAllProfiles().map(({ personaId, displayName, allowedScenarios }) => ({ personaId, displayName, allowedScenarios })),
@@ -54,7 +54,7 @@ function validateMock(scenarioId: string, contextId: string, output: MockOutput 
   }
 }
 
-function validateCcreRule(rule: MockCcreRule) {
+function validateCcreRule(rule: MockCcreRule, glossary: RuleGlossary = mockRuleGlossary) {
   validateScope(rule.scenarioId, rule.contextId);
   const contentIds = new Set(availableToolContent().map(({ contentId }) => contentId));
   if (!contentIds.has(rule.contentId) || rule.workflowRequiresContentIds?.some((id) => !contentIds.has(id))) {
@@ -64,7 +64,7 @@ function validateCcreRule(rule: MockCcreRule) {
     throw new ApiError(400, "unknown_rule_workflow", "Choose a registered customer workflow and version.");
   }
   const { condition } = rule;
-  if (condition.kind === "attribute" && !glossaryAllowsCondition(mockRuleGlossary, condition)) {
+  if (condition.kind === "attribute" && !glossaryAllowsCondition(glossary, condition)) {
     throw new ApiError(400, "invalid_ccre_attribute", "Choose an attribute, operator and value from the current rule glossary.");
   }
   if (condition.kind === "persona_is" && !listAllProfiles().some((persona) => (
@@ -74,15 +74,15 @@ function validateCcreRule(rule: MockCcreRule) {
   }
 }
 
-export function validateToolSetup(setup: ToolSetup) {
+export function validateToolSetup(setup: ToolSetup, glossary: RuleGlossary = mockRuleGlossary) {
   const workflowIssue = setup.fundingWorkflow && fundingWorkflowIssue(setup.fundingWorkflow);
   if (workflowIssue) throw new ApiError(400, "invalid_funding_workflow", workflowIssue);
   for (const { scenarioId, contextId, output } of setup.treatmentOverrides) validateMock(scenarioId, contextId, output);
-  for (const rule of setup.ccreRules ?? []) validateCcreRule(rule);
+  for (const rule of setup.ccreRules ?? []) validateCcreRule(rule, glossary);
 }
 
-export function addCcreRule(setup: ToolSetup, rule: MockCcreRule): ToolSetup {
-  validateCcreRule(rule);
+export function addCcreRule(setup: ToolSetup, rule: MockCcreRule, glossary: RuleGlossary = mockRuleGlossary): ToolSetup {
+  validateCcreRule(rule, glossary);
   const rules = setup.ccreRules ?? [];
   const existing = rules.find(({ scenarioId, contextId, contentId }) => (
     scenarioId === rule.scenarioId && contextId === rule.contextId && contentId === rule.contentId
@@ -102,6 +102,8 @@ export async function previewTreatmentSelector(
   portfolios?: PortfolioSnapshotProvider,
   funding?: FundingFact,
   recommendationRegistry: RecommendationProviderRegistry = new RecommendationProviderRegistry([createTreatmentSelectorRecommendationProvider()]),
+  glossary: RuleGlossary = mockRuleGlossary,
+  extraAttributeResolver?: (personaId: string, requestedKeys: readonly string[]) => Promise<Record<string, string | number | boolean>>,
 ): Promise<TreatmentPreview> {
   const { scenarioId, contextId, personaId, ordinal, enabled, output, ccreRules = [] } = input;
   validateMock(scenarioId, contextId, output);
@@ -109,7 +111,7 @@ export async function previewTreatmentSelector(
     if (rule.scenarioId !== scenarioId || rule.contextId !== contextId) {
       throw new ApiError(400, "invalid_ccre_preview_scope", "Preview rules must belong to the selected scenario and context.");
     }
-    validateCcreRule(rule);
+    validateCcreRule(rule, glossary);
   }
   const persona = findProfileById(personaId);
   if (!persona || !persona.allowedScenarios.includes(scenarioId)) throw new ApiError(400, "invalid_mock_persona", "Choose a demo persona allowed for this scenario.");
@@ -123,6 +125,7 @@ export async function previewTreatmentSelector(
     ccreRules,
     portfolios,
     funding,
+    extraAttributeResolver,
   });
   try {
     const { contentIds, ccre, recommendations, actionMatches } = await adapter.selectEligibleContent({ mid: persona.syntheticMid, context: contextId });

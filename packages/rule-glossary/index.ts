@@ -1,8 +1,15 @@
 import host from "../../fixtures/host.json";
-import { glossaryAllowsCondition, ruleGlossarySchema, type GlossaryAttribute, type GlossaryCondition } from "../contracts/rule-glossary";
+import { glossaryAllowsCondition, ruleGlossarySchema, type GlossaryAttribute, type GlossaryCondition, type RuleGlossary } from "../contracts/rule-glossary";
 import { findProfileById } from "../customer-profiles/registry";
 
-type RuleInput = { personaId: string; ordinal: number; beneficiaryStatus?: "missing" | "on_file"; portfolioCashCents?: number; fundingStatus?: "funded" | "unfunded" };
+type RuleInput = {
+  personaId: string;
+  ordinal: number;
+  beneficiaryStatus?: "missing" | "on_file";
+  portfolioCashCents?: number;
+  fundingStatus?: "funded" | "unfunded";
+  extraAttributes?: Readonly<Record<string, string | number | boolean>>;
+};
 type AttributeDefinition = GlossaryAttribute & { read: (input: RuleInput) => GlossaryCondition["value"] | undefined };
 
 const namespaces = [
@@ -68,13 +75,48 @@ export const mockRuleGlossary = ruleGlossarySchema.parse({
   })),
 });
 
-export function matchesGlossaryCondition(condition: GlossaryCondition, input: RuleInput) {
-  if (!glossaryAllowsCondition(mockRuleGlossary, condition)) return false;
+export function buildDynamicRuleGlossary(extraNamespaces: RuleGlossary["namespaces"] = []): RuleGlossary {
+  if (extraNamespaces.length === 0) return mockRuleGlossary;
+  const seen = new Set(mockRuleGlossary.namespaces.map((n) => n.id));
+  const merged = [...mockRuleGlossary.namespaces];
+  for (const ns of extraNamespaces) {
+    if (seen.has(ns.id) || ns.attributes.length === 0) continue;
+    seen.add(ns.id);
+    merged.push(ns);
+  }
+  return ruleGlossarySchema.parse({
+    version: mockRuleGlossary.version,
+    namespaces: merged.slice(0, 24),
+  });
+}
+
+export function matchesGlossaryCondition(
+  condition: GlossaryCondition,
+  input: RuleInput,
+  glossary: RuleGlossary = mockRuleGlossary,
+) {
+  const effectiveGlossary = glossary;
   const { namespaceId, attributeId, operator, value } = condition;
-  const read = namespaces.find(({ id }) => id === namespaceId)?.attributes.find(({ id }) => id === attributeId)?.read;
-  if (!read) return false;
-  const actual = read(input);
+  const staticRead = namespaces.find(({ id }) => id === namespaceId)?.attributes.find(({ id }) => id === attributeId)?.read;
+  if (staticRead) {
+    if (!glossaryAllowsCondition(effectiveGlossary, condition)) return false;
+    const actual = staticRead(input);
+    if (actual === undefined) return false;
+    return compareGlossaryValues(actual, operator, value);
+  }
+  // Dynamic attribute (e.g. projected from a published smass virtual model)
+  const extraKey = `${namespaceId}.${attributeId}`;
+  const actual = input.extraAttributes?.[extraKey];
   if (actual === undefined) return false;
+  if (effectiveGlossary !== mockRuleGlossary && !glossaryAllowsCondition(effectiveGlossary, condition)) return false;
+  return compareGlossaryValues(actual, operator, value);
+}
+
+function compareGlossaryValues(
+  actual: string | number | boolean,
+  operator: GlossaryCondition["operator"],
+  value: GlossaryCondition["value"],
+): boolean {
   switch (operator) {
     case "eq": return actual === value;
     case "ne": return actual !== value;

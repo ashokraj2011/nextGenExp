@@ -2,7 +2,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
 import { z } from "zod";
-import type { DomainPackId } from "../../packages/contracts/domain-packs";
+import { DOMAIN_PACKS, type DomainPackId } from "../../packages/contracts/domain-packs";
+import type { RuleGlossary } from "../../packages/contracts/rule-glossary";
+import { buildDynamicRuleGlossary } from "../../packages/rule-glossary";
 import {
   balanceInputSchema,
   balanceResultSchema,
@@ -564,11 +566,12 @@ export class SphotonCatalogService {
     domainId: DomainPackId,
     req: CustomVirtualModelTestInput,
     principalId: string,
+    cache?: ReturnType<typeof createTurnSnapshotCache>,
   ): Promise<SmassVirtualSnapshotResult> {
     const parsed = customVirtualModelTestSchema.parse(req);
     const adapter = this.sfieldAdapter();
     const customerId = parsed.customerId || (domainId === "wealth" ? "demo-learner" : undefined);
-    const turnCache = createTurnSnapshotCache();
+    const turnCache = cache ?? createTurnSnapshotCache();
     return this.smass.materializeSnapshot({
       modelId: parsed.modelId,
       ctx: {
@@ -988,6 +991,215 @@ export class SphotonCatalogService {
     };
 
     return { listTools, describeTool, executeRead, executeAction };
+  }
+
+  allPublishedVirtualTools(): Array<
+    SfieldToolDescriptor & { domainId: DomainPackId; modelId: string; modelLabel: string }
+  > {
+    const descriptors = new Map(this.allToolDescriptors().map((desc) => [desc.ref, desc]));
+    const out: Array<SfieldToolDescriptor & { domainId: DomainPackId; modelId: string; modelLabel: string }> = [];
+    for (const pack of DOMAIN_PACKS) {
+      const models = this.smass.list(pack.id);
+      for (const desc of this.smass.describeVirtualModelTools(descriptors, pack.id, false)) {
+        const model = models.find((m) => m.mode === "tool_backed" && desc.ref === `smass.${m.id}.read@${m.version}`);
+        out.push({
+          ...desc,
+          domainId: pack.id,
+          modelId: model?.id ?? desc.id.replace(/^smass\./, "").replace(/\.read$/, ""),
+          modelLabel: model?.label ?? desc.id,
+        });
+      }
+    }
+    return out;
+  }
+
+  allDomainDataModels() {
+    const descriptors = new Map(this.allToolDescriptors().map((desc) => [desc.ref, desc]));
+    return DOMAIN_PACKS.map((pack) => {
+      const entities = this.summarizeDomainModels(pack.id);
+      const graph = this.smass.toDataModelGraph(pack.id, descriptors, entities);
+      return {
+        domainId: pack.id,
+        label: pack.label,
+        entities: graph.entities,
+        relations: graph.relations,
+        mermaidEr: graph.mermaidEr,
+      };
+    });
+  }
+
+  /**
+   * Projects every published custom smass Virtual Model's scalar columns (mapped, derived, aggregate)
+   * into CCRE / PZN Rule Glossary namespaces so personalization rules can condition directly on smass models.
+   */
+  projectCcreGlossaryNamespaces(domainId: DomainPackId = "wealth"): RuleGlossary["namespaces"] {
+    const summaries = this.summarizeDomainModels(domainId);
+    const customSet = new Set((this.customModels[domainId] ?? []).map((m) => m.id));
+    const namespaces: RuleGlossary["namespaces"] = [];
+
+    for (const model of summaries) {
+      if (!customSet.has(model.id)) continue;
+      if (model.status === "draft") continue;
+      if (model.unnest) continue;
+
+      const slug = model.id
+        .replace(/^[^.]+\./, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, "_")
+        .replace(/^[^a-z]+/, "")
+        .slice(0, 50);
+      if (!slug) continue;
+      const nsId = `smass_${slug}`;
+
+      const attributes: RuleGlossary["namespaces"][number]["attributes"] = [];
+      for (const field of model.fields) {
+        if (!field.exposed || field.principalKey) continue;
+        if (field.type === "array" || field.type === "object") continue;
+        const attrId = field.key
+          .replace(/([a-z])([A-Z])/g, "$1_$2")
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]+/g, "_")
+          .replace(/^[^a-z]+/, "")
+          .slice(0, 60);
+        if (!attrId || attributes.some((a) => a.id === attrId)) continue;
+
+        if (field.enumValues && field.enumValues.length > 0) {
+          const validOpts = field.enumValues
+            .filter((v) => /^[a-z][a-z0-9_-]*$/.test(v))
+            .slice(0, 16)
+            .map((v) => ({ value: v, label: v }));
+          if (validOpts.length > 0) {
+            attributes.push({
+              id: attrId,
+              label: field.label.slice(0, 100),
+              description: `smass ${model.id}.${field.key} (enum)`.slice(0, 240),
+              valueType: "enum",
+              operators: ["eq", "ne"],
+              options: validOpts,
+              minimum: null,
+            });
+            continue;
+          }
+        }
+        if (field.type === "boolean") {
+          attributes.push({
+            id: attrId,
+            label: field.label.slice(0, 100),
+            description: `smass ${model.id}.${field.key} (boolean)`.slice(0, 240),
+            valueType: "boolean",
+            operators: ["eq", "ne"],
+            options: [],
+            minimum: null,
+          });
+        } else if (field.type === "integer" || field.type === "number") {
+          attributes.push({
+            id: attrId,
+            label: field.label.slice(0, 100),
+            description: `smass ${model.id}.${field.key}${field.aggregate ? " (aggregate)" : field.computed ? " (derived)" : ""}`.slice(0, 240),
+            valueType: "integer",
+            operators: ["eq", "ne", "gt", "gte", "lte"],
+            options: [],
+            minimum: null,
+          });
+        } else {
+          attributes.push({
+            id: attrId,
+            label: field.label.slice(0, 100),
+            description: `smass ${model.id}.${field.key}${field.computed ? " (derived)" : ""}`.slice(0, 240),
+            valueType: "string",
+            operators: ["eq", "ne"],
+            options: [],
+            minimum: null,
+          });
+        }
+      }
+
+      if (attributes.length > 0) {
+        namespaces.push({
+          id: nsId,
+          label: `smass · ${model.label}`.slice(0, 100),
+          attributes: attributes.slice(0, 24),
+        });
+      }
+    }
+    return namespaces;
+  }
+
+  effectiveRuleGlossary(domainId: DomainPackId = "wealth"): RuleGlossary {
+    return buildDynamicRuleGlossary(this.projectCcreGlossaryNamespaces(domainId));
+  }
+
+  /**
+   * Evaluates live smass virtual model attributes requested by active CCRE rules for a customer,
+   * sharing a single 1x turn snapshot cache across all referenced virtual models.
+   */
+  async evaluateSmassCcreAttributes(
+    domainId: DomainPackId,
+    customerId: string,
+    requestedNamespaceAttrKeys: readonly string[],
+  ): Promise<Record<string, string | number | boolean>> {
+    const out: Record<string, string | number | boolean> = {};
+    if (requestedNamespaceAttrKeys.length === 0) return out;
+
+    const wantedByNs = new Map<string, Set<string>>();
+    for (const full of requestedNamespaceAttrKeys) {
+      const dot = full.indexOf(".");
+      if (dot <= 0) continue;
+      const ns = full.slice(0, dot);
+      const attr = full.slice(dot + 1);
+      if (!ns.startsWith("smass_")) continue;
+      const set = wantedByNs.get(ns) ?? new Set<string>();
+      set.add(attr);
+      wantedByNs.set(ns, set);
+    }
+    if (wantedByNs.size === 0) return out;
+
+    const summaries = this.summarizeDomainModels(domainId);
+    const customSet = new Set((this.customModels[domainId] ?? []).map((m) => m.id));
+    const cache = createTurnSnapshotCache();
+
+    for (const model of summaries) {
+      if (!customSet.has(model.id) || model.status === "draft" || model.unnest) continue;
+      const slug = model.id
+        .replace(/^[^.]+\./, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, "_")
+        .replace(/^[^a-z]+/, "")
+        .slice(0, 50);
+      const nsId = `smass_${slug}`;
+      const wantedAttrs = wantedByNs.get(nsId);
+      if (!wantedAttrs || wantedAttrs.size === 0) continue;
+
+      const attrToFieldKey = new Map<string, string>();
+      for (const f of model.fields) {
+        const attrId = f.key
+          .replace(/([a-z])([A-Z])/g, "$1_$2")
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]+/g, "_")
+          .replace(/^[^a-z]+/, "")
+          .slice(0, 60);
+        if (wantedAttrs.has(attrId)) attrToFieldKey.set(attrId, f.key);
+      }
+      if (attrToFieldKey.size === 0) continue;
+
+      const snap = await this.materializeVirtualModel(domainId, {
+        modelId: model.id,
+        customerId,
+        requestedFields: [...attrToFieldKey.values()],
+        redactPii: false,
+      }, customerId, cache);
+      if (snap.status !== "ok") continue;
+
+      for (const [attrId, fieldKey] of attrToFieldKey) {
+        const val = snap.data[fieldKey];
+        if (typeof val === "string" || typeof val === "boolean") {
+          out[`${nsId}.${attrId}`] = val;
+        } else if (typeof val === "number" && Number.isFinite(val)) {
+          out[`${nsId}.${attrId}`] = Math.round(val);
+        }
+      }
+    }
+    return out;
   }
 
   catalogForDomain(domainId: DomainPackId): SphotonBindingCatalog {
