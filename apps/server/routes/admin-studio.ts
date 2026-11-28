@@ -62,7 +62,13 @@ import { addCcreRule, previewTreatmentSelector, toolSetupTag, toolSetupView, val
 import type { TradeStore } from "../trade-store";
 import { generateBoundUiLayoutWithLlm } from "../ui-layout-generator";
 import { previewUiLayout, recordViewOptions, uiTargetOptions, validateUiDesign } from "../ui-layouts";
-import { domainFieldExposureSchema, type SphotonCatalogService } from "../sphoton-catalog";
+import {
+  customVirtualModelDeleteSchema,
+  customVirtualModelInputSchema,
+  customVirtualModelTestSchema,
+  domainFieldExposureSchema,
+  type SphotonCatalogService,
+} from "../sphoton-catalog";
 import type { UxEvolutionStore } from "../ux-evolution";
 import type { VerticalPackStore } from "../vertical-factory";
 import type { WidgetLibraryStore } from "../widget-library";
@@ -220,6 +226,37 @@ export async function handleAdminStudioRoutes(deps: AdminStudioRouteDeps): Promi
   if (id === "domain-models" && method === "GET") {
     const domainId = authoringDomain();
     json(res, sphotonCatalog.domainWorkbenchView(domainId));
+    return true;
+  }
+  if (id === "domain-models" && method === "POST") {
+    const domainId = authoringDomain();
+    const spec = await body(req, customVirtualModelInputSchema, 32 * 1024);
+    try {
+      json(res, sphotonCatalog.saveVirtualModel(domainId, spec));
+    } catch (err) {
+      throw new ApiError(400, "virtual_model_invalid", err instanceof Error ? err.message : "Could not save virtual model.");
+    }
+    return true;
+  }
+  if (id === "domain-models-delete" && method === "POST") {
+    const domainId = authoringDomain();
+    const payload = await body(req, customVirtualModelDeleteSchema, 4 * 1024);
+    try {
+      json(res, sphotonCatalog.deleteVirtualModel(domainId, payload.modelId));
+    } catch (err) {
+      throw new ApiError(404, "virtual_model_not_found", err instanceof Error ? err.message : "Virtual model not found.");
+    }
+    return true;
+  }
+  if (id === "domain-models-test" && method === "POST") {
+    const domainId = authoringDomain();
+    const payload = await body(req, customVirtualModelTestSchema, 8 * 1024);
+    try {
+      const snapshot = await sphotonCatalog.materializeVirtualModel(domainId, payload, principalId);
+      json(res, { snapshot });
+    } catch (err) {
+      throw new ApiError(400, "virtual_model_materialize_failed", err instanceof Error ? err.message : "Could not materialize virtual snapshot.");
+    }
     return true;
   }
   if (id === "ui-binding-catalog" && method === "GET") {

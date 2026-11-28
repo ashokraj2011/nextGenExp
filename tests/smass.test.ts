@@ -438,3 +438,133 @@ test("smass Virtual Data Model runtime: projection pushdown, computed fields, 1x
   assert.equal(evaluateSmassComputedExpression("a + b * (2 - 1)", { a: 10, b: 5 }), 15);
   assert.throws(() => evaluateSmassComputedExpression("process.exit(1)", {}), /Unsupported function/);
 });
+
+test("CEP /api/admin/domain-models supports creating, testing live 1x snapshots, and deleting custom virtual models from tool JSON Schemas", async (t) => {
+  const app = await startTestPreview();
+  t.after(() => app.close());
+  const client = await testClient(app.url);
+
+  // Create a federated virtual model spanning two Wealth read tools + a computed field
+  const created = await client.request<{
+    customModelIds: string[];
+    models: SmassModelSummary[];
+    dataModel: {
+      mermaidEr: string;
+      jsonSchema: { $defs: Record<string, Record<string, unknown>> };
+    };
+  }>("/api/admin/domain-models?domain=wealth", {
+    id: "wealth.advisor_brief",
+    version: "1.0.0",
+    label: "Advisor Brief",
+    description: "Federated cash view composed via drag-and-drop from tool JSON Schemas.",
+    principalKey: "mid",
+    primaryKey: "mid",
+    fields: [
+      {
+        kind: "mapped",
+        key: "targetCents",
+        label: "Down payment target",
+        toolRef: "goal.progress.read@1.0.0",
+        outputPath: "targetCents",
+        format: "currency_cents",
+        classification: "confidential",
+        required: true,
+        exposed: true,
+      },
+      {
+        kind: "mapped",
+        key: "cashCents",
+        label: "Portfolio cash",
+        toolRef: "portfolio.snapshot.read@1.0.0",
+        outputPath: "cashCents",
+        format: "currency_cents",
+        classification: "confidential",
+        required: true,
+        exposed: true,
+      },
+      {
+        kind: "computed",
+        key: "remainingGapCents",
+        label: "Remaining goal gap",
+        expression: "max(0, targetCents - cashCents)",
+        dependsOn: ["targetCents", "cashCents"],
+        type: "integer",
+        format: "currency_cents",
+        classification: "confidential",
+        exposed: true,
+      },
+    ],
+  });
+
+  assert.ok(created.customModelIds.includes("wealth.advisor_brief"));
+  assert.ok(created.models.some((m) => m.id === "wealth.advisor_brief" && m.mode === "tool_backed"));
+  assert.ok(created.dataModel.jsonSchema.$defs["wealth.advisor_brief"]);
+  assert.match(created.dataModel.mermaidEr, /WEALTH_ADVISOR_BRIEF/);
+
+  // Test live 1x virtual snapshot materialization across both real Wealth tools
+  const snapRes = await client.request<{
+    snapshot: {
+      status: string;
+      snapshotId: string;
+      sourceCalls: number;
+      sourcesQueried: string[];
+      sourcesSkipped: string[];
+      data: Record<string, unknown>;
+    };
+  }>("/api/admin/domain-models-test?domain=wealth", {
+    modelId: "wealth.advisor_brief",
+    customerId: "demo-learner",
+  });
+  assert.equal(snapRes.snapshot.status, "ok");
+  assert.equal(snapRes.snapshot.sourceCalls, 2);
+  assert.equal(snapRes.snapshot.sourcesQueried.length, 2);
+  const target = Number(snapRes.snapshot.data.targetCents);
+  const cash = Number(snapRes.snapshot.data.cashCents);
+  assert.ok(target > 0 && cash > 0);
+  assert.equal(snapRes.snapshot.data.remainingGapCents, Math.max(0, target - cash));
+
+  // Projection pushdown: requesting only targetCents skips portfolio.snapshot.read@1.0.0
+  const projectedRes = await client.request<{
+    snapshot: {
+      status: string;
+      sourceCalls: number;
+      sourcesQueried: string[];
+      sourcesSkipped: string[];
+      data: Record<string, unknown>;
+    };
+  }>("/api/admin/domain-models-test?domain=wealth", {
+    modelId: "wealth.advisor_brief",
+    customerId: "demo-learner",
+    requestedFields: ["targetCents"],
+  });
+  assert.equal(projectedRes.snapshot.status, "ok");
+  assert.equal(projectedRes.snapshot.sourceCalls, 1);
+  assert.equal(projectedRes.snapshot.sourcesSkipped.length, 1);
+
+  // Invalid tool schema path is rejected at save time
+  await assert.rejects(
+    () =>
+      client.request("/api/admin/domain-models?domain=wealth", {
+        id: "wealth.broken_vdm",
+        label: "Broken",
+        fields: [
+          {
+            kind: "mapped",
+            key: "bogus",
+            label: "Bogus",
+            toolRef: "goal.progress.read@1.0.0",
+            outputPath: "doesNotExist",
+          },
+        ],
+      }),
+    /doesNotExist|400|invalid/i,
+  );
+
+  // Delete custom virtual model cleanly
+  const afterDelete = await client.request<{ customModelIds: string[]; models: SmassModelSummary[] }>(
+    "/api/admin/domain-models-delete?domain=wealth",
+    { modelId: "wealth.advisor_brief" },
+  );
+  assert.equal(afterDelete.customModelIds.includes("wealth.advisor_brief"), false);
+  assert.equal(afterDelete.models.some((m) => m.id === "wealth.advisor_brief"), false);
+});

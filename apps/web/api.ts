@@ -213,6 +213,39 @@ export const api = {
       tenantId: string;
       domainId: DomainPackId;
       models: SmassModelSummary[];
+      customModelIds: string[];
+      customModels: Array<{
+        id: string;
+        version: string;
+        label: string;
+        description?: string;
+        primaryKey?: string;
+        principalKey?: string;
+        fields: Array<
+          | {
+              kind: "mapped";
+              key: string;
+              label: string;
+              toolRef: string;
+              outputPath: string;
+              format?: import("../../packages/smass").SmassFieldFormat;
+              classification: import("../../packages/smass").SmassClassification;
+              required: boolean;
+              exposed: boolean;
+            }
+          | {
+              kind: "computed";
+              key: string;
+              label: string;
+              expression: string;
+              dependsOn: string[];
+              type: import("../../packages/smass").SmassFieldType;
+              format?: import("../../packages/smass").SmassFieldFormat;
+              classification: import("../../packages/smass").SmassClassification;
+              exposed: boolean;
+            }
+        >;
+      }>;
       dataModel: import("../../packages/smass").SmassDataModelGraph;
       tools: Array<{
         toolRef: string;
@@ -227,6 +260,51 @@ export const api = {
       }>;
       catalog: SphotonBindingCatalog;
     }>("/api/admin/domain-models?domain=" + domainId),
+  saveDomainModel: (
+    domainId: DomainPackId,
+    input: {
+      id: string;
+      version?: string;
+      label: string;
+      description?: string;
+      primaryKey?: string;
+      principalKey?: string;
+      fields: Array<
+        | {
+            kind: "mapped";
+            key: string;
+            label: string;
+            toolRef: string;
+            outputPath: string;
+            format?: import("../../packages/smass").SmassFieldFormat;
+            classification?: import("../../packages/smass").SmassClassification;
+            required?: boolean;
+            exposed?: boolean;
+          }
+        | {
+            kind: "computed";
+            key: string;
+            label: string;
+            expression: string;
+            dependsOn: string[];
+            type?: import("../../packages/smass").SmassFieldType;
+            format?: import("../../packages/smass").SmassFieldFormat;
+            classification?: import("../../packages/smass").SmassClassification;
+            exposed?: boolean;
+          }
+      >;
+    },
+  ) => request<Awaited<ReturnType<typeof api.domainModels>>>("/api/admin/domain-models?domain=" + domainId, input),
+  deleteDomainModel: (domainId: DomainPackId, modelId: string) =>
+    request<Awaited<ReturnType<typeof api.domainModels>>>("/api/admin/domain-models-delete?domain=" + domainId, { modelId }),
+  testDomainModelSnapshot: (
+    domainId: DomainPackId,
+    input: { modelId: string; customerId?: string; requestedFields?: string[]; redactPii?: boolean },
+  ) =>
+    request<{ snapshot: import("../../packages/smass").SmassVirtualSnapshotResult }>(
+      "/api/admin/domain-models-test?domain=" + domainId,
+      input,
+    ),
   setBindingFieldExposure: (
     domainId: DomainPackId,
     input: { toolRef: string; outputPath: string; label: string; exposed: boolean; defaultFormat?: SphotonFormat },

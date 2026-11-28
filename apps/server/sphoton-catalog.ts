@@ -18,7 +18,22 @@ import { fixtureGoalProgressProvider, type GoalProgressProvider } from "../../pa
 import { fixturePortfolioSnapshotProvider, type PortfolioSnapshotProvider } from "../../packages/portfolio-snapshot";
 import { findProfileById } from "../../packages/customer-profiles";
 import { readDemoBalance } from "../../packages/experience/content";
-import type { SmassDomainRegistry, SmassModelSummary } from "../../packages/smass";
+import {
+  createTurnSnapshotCache,
+  defineToolBackedModel,
+  evaluateSmassComputedExpression,
+  smassClassificationSchema,
+  smassFieldFormatSchema,
+  smassFieldTypeSchema,
+  smassRelationCardinalitySchema,
+  validateToolBackedModel,
+  type SmassDomainRegistry,
+  type SmassFieldSpec,
+  type SmassModelSummary,
+  type SmassRelationSpec,
+  type SmassToolBackedModel,
+  type SmassVirtualSnapshotResult,
+} from "../../packages/smass";
 import {
   extractSchemaFields,
   fingerprintToolContract,
@@ -54,6 +69,68 @@ export const domainFieldExposureSchema = z.object({
   exposed: z.boolean().default(true),
 }).strict();
 export type DomainFieldExposure = z.infer<typeof domainFieldExposureSchema>;
+
+const virtualModelFieldIdPattern = /^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/;
+const virtualModelIdPattern = /^[a-z][a-z0-9._-]{1,60}$/;
+
+export const customVirtualModelMappedFieldSchema = z.object({
+  kind: z.literal("mapped").default("mapped"),
+  key: z.string().trim().regex(virtualModelFieldIdPattern, "Field key must be a valid identifier (letters, digits, underscore)."),
+  label: z.string().trim().min(1).max(80),
+  toolRef: toolRefSchema,
+  outputPath: z.string().trim().min(1).max(120),
+  format: smassFieldFormatSchema.optional(),
+  classification: smassClassificationSchema.default("internal"),
+  required: z.boolean().default(false),
+  exposed: z.boolean().default(true),
+}).strict();
+
+export const customVirtualModelComputedFieldSchema = z.object({
+  kind: z.literal("computed"),
+  key: z.string().trim().regex(virtualModelFieldIdPattern, "Field key must be a valid identifier."),
+  label: z.string().trim().min(1).max(80),
+  expression: z.string().trim().min(1).max(200),
+  dependsOn: z.array(z.string().trim().regex(virtualModelFieldIdPattern)).min(1).max(12),
+  type: smassFieldTypeSchema.default("number"),
+  format: smassFieldFormatSchema.optional(),
+  classification: smassClassificationSchema.default("internal"),
+  exposed: z.boolean().default(true),
+}).strict();
+
+export const customVirtualModelRelationSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+  targetModelId: z.string().trim().regex(virtualModelIdPattern),
+  cardinality: smassRelationCardinalitySchema,
+  localField: z.string().trim().regex(virtualModelFieldIdPattern),
+  foreignField: z.string().trim().regex(virtualModelFieldIdPattern),
+}).strict();
+
+export const customVirtualModelInputSchema = z.object({
+  id: z.string().trim().regex(virtualModelIdPattern, "Model ID must look like wealth.advisor_brief."),
+  version: z.string().trim().regex(/^\d+\.\d+\.\d+$/).default("1.0.0"),
+  label: z.string().trim().min(1).max(80),
+  description: z.string().trim().max(240).optional(),
+  primaryKey: z.string().trim().regex(virtualModelFieldIdPattern).optional(),
+  principalKey: z.string().trim().regex(virtualModelFieldIdPattern).optional(),
+  fields: z.array(z.union([customVirtualModelMappedFieldSchema, customVirtualModelComputedFieldSchema])).min(1).max(40),
+  relations: z.array(customVirtualModelRelationSchema).max(12).optional(),
+}).strict();
+export type CustomVirtualModelInput = z.infer<typeof customVirtualModelInputSchema>;
+
+export const customVirtualModelDeleteSchema = z.object({
+  modelId: z.string().trim().regex(virtualModelIdPattern),
+}).strict();
+
+export const customVirtualModelTestSchema = z.object({
+  modelId: z.string().trim().regex(virtualModelIdPattern),
+  customerId: z.string().trim().max(80).optional(),
+  requestedFields: z.array(z.string().trim().min(1).max(64)).max(40).optional(),
+  redactPii: z.boolean().default(false),
+  inputs: z.record(z.string(), z.unknown()).optional(),
+}).strict();
+export type CustomVirtualModelTestInput = z.infer<typeof customVirtualModelTestSchema>;
+
+type CustomVirtualModelFile = Partial<Record<DomainPackId, CustomVirtualModelInput[]>>;
 
 export function loadOrCreateSphotonSecret(dataDir: string): string {
   const keyPath = join(dataDir, "sphoton-signing.key");
@@ -104,7 +181,9 @@ export class SphotonCatalogService {
   readonly signingSecret: string;
   readonly smass: SmassDomainRegistry;
   private readonly exposureFile: string;
+  private readonly customModelsFile: string;
   private overrides: ExposureOverrideFile = {};
+  private customModels: CustomVirtualModelFile = {};
   private customToolSchemas = new Map<string, SfieldToolDescriptor>();
 
   constructor(private readonly deps: {
@@ -121,7 +200,9 @@ export class SphotonCatalogService {
     this.signingSecret = loadOrCreateSphotonSecret(deps.dataDir);
     this.smass = deps.smass ?? createCepSmassRegistry({ opsStore: deps.opsStore, salesStore: deps.salesStore });
     this.exposureFile = join(deps.dataDir, "sphoton-exposures.json");
+    this.customModelsFile = join(deps.dataDir, "smass-virtual-models.json");
     this.loadOverrides();
+    this.loadCustomModels();
   }
 
   private loadOverrides() {
@@ -137,6 +218,194 @@ export class SphotonCatalogService {
   private saveOverrides() {
     mkdirSync(dirname(this.exposureFile), { recursive: true });
     writeFileSync(this.exposureFile, JSON.stringify(this.overrides, null, 2));
+  }
+
+  private compileCustomVirtualModel(domainId: DomainPackId, spec: CustomVirtualModelInput): SmassToolBackedModel {
+    const sources: Record<string, { toolRef: string }> = {};
+    const toolToSlot = new Map<string, string>();
+    const ensureSlot = (toolRef: string): string => {
+      const existing = toolToSlot.get(toolRef);
+      if (existing) return existing;
+      const base = toolRef.split("@")[0]!.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "source";
+      let slot = base;
+      let idx = 2;
+      while (slot in sources) {
+        slot = `${base}_${idx++}`;
+      }
+      sources[slot] = { toolRef };
+      toolToSlot.set(toolRef, slot);
+      return slot;
+    };
+
+    const fields: Record<string, SmassFieldSpec> = {};
+    const primaryKey = spec.primaryKey ?? spec.principalKey ?? spec.fields[0]?.key;
+
+    if (spec.principalKey && !spec.fields.some((f) => f.key === spec.principalKey)) {
+      fields[spec.principalKey] = {
+        type: "string",
+        principalKey: spec.principalKey,
+        primaryKey: primaryKey === spec.principalKey,
+        label: spec.principalKey === "mid" ? "Member ID (MID)" : spec.principalKey,
+        required: true,
+        classification: "internal",
+        exposed: false,
+      };
+    }
+
+    for (const field of spec.fields) {
+      if (field.kind === "computed") {
+        fields[field.key] = {
+          type: field.type,
+          label: field.label,
+          ...(field.format ? { format: field.format } : {}),
+          classification: field.classification,
+          computed: {
+            expression: field.expression,
+            dependsOn: field.dependsOn,
+          },
+          primaryKey: primaryKey === field.key,
+          exposed: field.exposed,
+        };
+      } else {
+        const slot = ensureSlot(field.toolRef);
+        fields[field.key] = {
+          from: `${slot}.${field.outputPath}`,
+          label: field.label,
+          ...(field.format ? { format: field.format } : {}),
+          classification: field.classification,
+          required: field.required || primaryKey === field.key,
+          primaryKey: primaryKey === field.key,
+          exposed: field.exposed,
+        };
+      }
+    }
+
+    const relations: SmassRelationSpec[] | undefined = spec.relations?.length ? [...spec.relations] : undefined;
+
+    return defineToolBackedModel({
+      id: spec.id,
+      version: spec.version,
+      domain: domainId,
+      label: spec.label,
+      ...(spec.description ? { description: spec.description } : {}),
+      ...(primaryKey ? { primaryKey } : {}),
+      sources,
+      fields,
+      ...(relations ? { relations } : {}),
+    });
+  }
+
+  private loadCustomModels() {
+    try {
+      if (!existsSync(this.customModelsFile)) return;
+      const parsed = JSON.parse(readFileSync(this.customModelsFile, "utf8")) as CustomVirtualModelFile;
+      if (!parsed || typeof parsed !== "object") return;
+      this.customModels = parsed;
+      for (const [domain, list] of Object.entries(parsed)) {
+        for (const raw of list ?? []) {
+          const valid = customVirtualModelInputSchema.safeParse(raw);
+          if (valid.success) {
+            this.smass.register(this.compileCustomVirtualModel(domain as DomainPackId, valid.data));
+          }
+        }
+      }
+    } catch {
+      this.customModels = {};
+    }
+  }
+
+  private saveCustomModelsFile() {
+    mkdirSync(dirname(this.customModelsFile), { recursive: true });
+    writeFileSync(this.customModelsFile, JSON.stringify(this.customModels, null, 2));
+  }
+
+  saveVirtualModel(domainId: DomainPackId, input: CustomVirtualModelInput) {
+    const parsed = customVirtualModelInputSchema.parse(input);
+    const existing = this.smass.get(parsed.id);
+    const isCustomExisting = (this.customModels[domainId] ?? []).some((m) => m.id === parsed.id);
+    if (existing && !isCustomExisting) {
+      throw new Error(`Cannot overwrite built-in model "${parsed.id}". Choose a new virtual model ID.`);
+    }
+
+    const compiled = this.compileCustomVirtualModel(domainId, parsed);
+    const descriptors = new Map(this.allToolDescriptors().map((desc) => [desc.ref, desc]));
+    const issues = validateToolBackedModel(compiled, descriptors);
+    if (issues.length > 0) {
+      throw new Error(issues.map((i) => `${i.field ?? i.modelId}: ${i.message}`).join(" "));
+    }
+    // Validate computed field dependencies and expression syntax deterministically before saving
+    for (const [key, field] of Object.entries(compiled.fields)) {
+      if (!field.computed) continue;
+      const sampleScope: Record<string, number> = {};
+      for (const dep of field.computed.dependsOn) {
+        if (!(dep in compiled.fields)) {
+          throw new Error(`Computed field "${key}" depends on undeclared field "${dep}".`);
+        }
+        sampleScope[dep] = 100;
+      }
+      evaluateSmassComputedExpression(field.computed.expression, sampleScope);
+    }
+
+    this.smass.register(compiled);
+    const nextList = [...(this.customModels[domainId] ?? []).filter((m) => m.id !== parsed.id), parsed];
+    this.customModels[domainId] = nextList;
+    this.saveCustomModelsFile();
+    return this.domainWorkbenchView(domainId);
+  }
+
+  deleteVirtualModel(domainId: DomainPackId, modelId: string) {
+    const list = this.customModels[domainId] ?? [];
+    if (!list.some((m) => m.id === modelId)) {
+      throw new Error(`Custom virtual model "${modelId}" was not found in domain "${domainId}".`);
+    }
+    this.customModels[domainId] = list.filter((m) => m.id !== modelId);
+    this.smass.unregister(modelId);
+    this.saveCustomModelsFile();
+    return this.domainWorkbenchView(domainId);
+  }
+
+  async materializeVirtualModel(
+    domainId: DomainPackId,
+    req: CustomVirtualModelTestInput,
+    principalId: string,
+  ): Promise<SmassVirtualSnapshotResult> {
+    const parsed = customVirtualModelTestSchema.parse(req);
+    const adapter = this.sfieldAdapter();
+    const customerId = parsed.customerId || (domainId === "wealth" ? "demo-learner" : undefined);
+    const turnCache = createTurnSnapshotCache();
+    return this.smass.materializeSnapshot({
+      modelId: parsed.modelId,
+      ctx: {
+        tenantId: this.deps.tenantId,
+        domainId,
+        principalId,
+        ...(customerId ? { customerId } : {}),
+      },
+      ...(parsed.inputs ? { inputs: parsed.inputs } : {}),
+      ...(parsed.requestedFields?.length ? { requestedFields: parsed.requestedFields } : {}),
+      ...(parsed.redactPii ? { redactClassifications: ["pii"] } : {}),
+      cache: turnCache,
+      executeTool: async (toolRef, inputs, ctx) => {
+        const result = await adapter.executeRead({
+          toolRef,
+          inputs,
+          scope: {
+            tenantId: ctx.tenantId,
+            domainId: ctx.domainId as DomainPackId,
+            principalId: ctx.principalId,
+            mode: "draft_preview",
+            ...(ctx.customerId ? { customerId: ctx.customerId } : {}),
+          },
+          signal: ctx.signal,
+        });
+        if (result.status !== "succeeded") {
+          throw new Error(result.error?.message ?? `Tool ${toolRef} failed to execute.`);
+        }
+        return (result.output && typeof result.output === "object"
+          ? result.output
+          : { value: result.output }) as Record<string, unknown>;
+      },
+    });
   }
 
   registerToolDescriptor(descriptor: SfieldToolDescriptor) {
@@ -321,6 +590,8 @@ export class SphotonCatalogService {
       tenantId: this.deps.tenantId,
       domainId,
       models,
+      customModelIds: (this.customModels[domainId] ?? []).map((m) => m.id),
+      customModels: this.customModels[domainId] ?? [],
       dataModel,
       tools,
       catalog,

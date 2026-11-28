@@ -69,6 +69,10 @@ export class SmassDomainRegistry {
     return this;
   }
 
+  unregister(id: string): boolean {
+    return this.models.delete(id);
+  }
+
   get(id: string): SmassDomainModel | undefined {
     return this.models.get(id);
   }
